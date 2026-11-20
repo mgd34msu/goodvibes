@@ -306,6 +306,21 @@ export class HostedSessionStore {
     return { ...conversation, messages: kept };
   }
 
+  /**
+   * The conversation saved for one session, or null when its file is absent
+   * or unreadable. Read for an ended session's transcript, which is no longer
+   * held in memory.
+   */
+  async readConversation(sessionId: string): Promise<unknown> {
+    if (!SAFE_ID.test(sessionId)) return null;
+    try {
+      const parsed = JSON.parse(await fs.readFile(this.fileFor(sessionId), 'utf-8')) as unknown;
+      return isRecordObject(parsed) ? parsed['conversation'] ?? null : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Whether a session's file is on disk. A name that is not a plain session id is never present. */
   has(sessionId: string): boolean {
     if (sessionId === '' || sessionId !== basename(sessionId)) return false;

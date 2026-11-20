@@ -16,7 +16,10 @@
  *
  *   --host <name>   default: the control plane's configured host, which for a
  *                   default install is 127.0.0.1
- *   --port <n>      default: the control plane's configured port
+ *   --port <n>      default: the port in a --host URL, else that URL's scheme
+ *                   default (443 for https, 80 for http), as a browser reads
+ *                   it; with a bare --host or none, the control plane's
+ *                   configured port
  *   --token <t>     default: this machine's operator token, read from
  *                   <daemon home>/operator-tokens.json
  *
@@ -143,7 +146,7 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
       ok: false,
       code: 'invalid-host',
       error: `'${typed.host}' is another machine, and its connection type was not stated`,
-      fix: `say how to reach it: --host https://${typed.host} (encrypted), or --host http://${typed.host} to send the operator token unencrypted over the network`,
+      fix: `say how to reach it: --host https://${hostForUrl(typed.host)}:${port} (encrypted), or --host http://${hostForUrl(typed.host)}:${port} to send the operator token unencrypted over the network; a URL without a port means 443 for https and 80 for http`,
     };
   }
   const explicitToken = input.flags.token?.trim();
@@ -163,6 +166,16 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
   return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode, typed.scheme ?? connected?.scheme), token, isLocal } };
 }
 
+const SCHEME_DEFAULT_PORT = { http: 80, https: 443 } as const;
+
+/** The port written in a URL's authority, including one equal to its scheme's default; undefined when none is written. */
+function explicitUrlPort(typed: string): number | undefined {
+  const authority = typed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0] ?? '';
+  const afterHost = authority.startsWith('[') ? authority.slice(authority.indexOf(']') + 1) : authority.replace(/^[^@]*@/, '');
+  const match = /:(\d+)$/.exec(afterHost);
+  return match ? Number(match[1]) : undefined;
+}
+
 type ParsedHostFlag =
   | { readonly ok: true; readonly host: string; readonly scheme: 'http' | 'https' | undefined; readonly port: number | undefined }
   | DaemonFailure;
@@ -170,8 +183,9 @@ type ParsedHostFlag =
 /**
  * Read `--host`, which takes a host name, an IP address, or a base URL as
  * every other surface prints it (`https://10.0.0.7:3421`). A URL gives the
- * scheme and may give the port; a port stated both there and in `--port` must
- * agree. A bare value carrying a port or a path is refused with what the flag
+ * scheme and the port: the one written, else `--port`, else the scheme's
+ * default (443, 80), as a browser reads it; a port stated both there and in
+ * `--port` must agree. A bare value carrying a port or a path is refused with what the flag
  * expects, instead of becoming a host that cannot be reached.
  */
 function parseHostFlag(typed: string, flagPort: number | undefined): ParsedHostFlag {
@@ -180,12 +194,15 @@ function parseHostFlag(typed: string, flagPort: number | undefined): ParsedHostF
     ok: false,
     code: 'invalid-host',
     error: `'${typed}' is not a usable --host: ${why}`,
-    fix: '--host takes a host name or address (10.0.0.7, [::1]) or a base URL (https://10.0.0.7:3421); pass the port with --port',
+    fix: '--host takes a host name or address (10.0.0.7, [::1]) or a base URL (https://10.0.0.7:3421; without a port, 443 for https and 80 for http); with a bare name pass the port with --port',
   });
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(typed)) {
     // An IPv6 literal after the scheme without brackets (`http://fd00::5`) is not a URL, but its meaning is plain.
     const bare = /^(https?):\/\/([0-9a-f]*:[0-9a-f:.]*:[0-9a-f:.]*)\/?$/i.exec(typed);
-    if (bare) return { ok: true, host: bare[2] as string, scheme: (bare[1] as string).toLowerCase() as 'http' | 'https', port: undefined };
+    if (bare) {
+      const bareScheme = (bare[1] as string).toLowerCase() as 'http' | 'https';
+      return { ok: true, host: bare[2] as string, scheme: bareScheme, port: flagPort ?? SCHEME_DEFAULT_PORT[bareScheme] };
+    }
     let url: URL;
     try {
       url = new URL(typed);
@@ -196,10 +213,15 @@ function parseHostFlag(typed: string, flagPort: number | undefined): ParsedHostF
     if (!scheme) return refuse(`${url.protocol.replace(/:$/, '')} is not a daemon address; use http or https`);
     if (url.username || url.password) return refuse('it carries a user name or password; pass the operator token with --token');
     if ((url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) return refuse('a daemon address has no path');
-    const port = url.port ? Number(url.port) : undefined;
-    if (port !== undefined && flagPort !== undefined && port !== flagPort) {
-      return refuse(`it names port ${port} and --port says ${flagPort}`);
+    // The parser drops a port equal to the scheme's default (`https://x:443`
+    // reads as no port), so the port typed is read from the text itself.
+    const typedPort = explicitUrlPort(typed);
+    if (typedPort !== undefined && flagPort !== undefined && typedPort !== flagPort) {
+      return refuse(`it names port ${typedPort} and --port says ${flagPort}`);
     }
+    // A URL without a port means its scheme's port, as in a browser: a daemon
+    // behind a proxy on 443 is `--host https://name`.
+    const port = typedPort ?? flagPort ?? SCHEME_DEFAULT_PORT[scheme];
     // URL keeps an IPv6 literal bracketed; the base URL builder adds the brackets back.
     const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
     return { ok: true, host, scheme, port };
@@ -225,6 +247,10 @@ function parseHostFlag(typed: string, flagPort: number | undefined): ParsedHostF
  * Here the host the operator typed is the host, full stop. The scheme is the
  * one typed with it, or, for this machine's own daemon, the configured one.
  */
+function hostForUrl(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}
+
 function buildBaseUrl(host: string, port: number, tlsMode: string | undefined, stated: string | undefined): string {
   const scheme = stated ?? (tlsMode && tlsMode !== 'off' && tlsMode !== 'none' ? 'https' : 'http');
   // An IPv6 literal has to be bracketed or the port reads as part of the address.

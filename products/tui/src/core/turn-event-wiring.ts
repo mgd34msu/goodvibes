@@ -355,9 +355,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     }
   };
   unsubs.push(userTurn.onEnd(notifyTurnEnd));
-  // A failover retry continues the user turn: same start time, tally and name.
   unsubs.push(userTurn.onStart((start) => {
-    if (start.continued) return;
     turnStartTime = _clock();
     readTurnText = () => start.prompt;
     tally.reset();

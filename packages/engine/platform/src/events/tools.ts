@@ -22,18 +22,10 @@ export interface ToolResultSummary {
 export type ToolEvent =
   /** A tool call request was received from the LLM. */
   | { type: 'TOOL_RECEIVED'; callId: string; turnId: string; tool: string; args: Record<string, unknown> }
-  /** Tool call arguments passed schema validation. */
-  | { type: 'TOOL_VALIDATED'; callId: string; turnId: string; tool: string }
-  /** Pre-execution hooks have run for this tool call. */
-  | { type: 'TOOL_PREHOOKED'; callId: string; turnId: string; tool: string }
   /** Permission check completed; call may proceed. */
   | { type: 'TOOL_PERMISSIONED'; callId: string; turnId: string; tool: string; approved: boolean; readonly autonomousDecision?: JevDecision | undefined }
   /** Tool is actively executing. */
   | { type: 'TOOL_EXECUTING'; callId: string; turnId: string; tool: string; startedAt: number }
-  /** Tool result has been mapped/transformed for the provider. */
-  | { type: 'TOOL_MAPPED'; callId: string; turnId: string; tool: string }
-  /** Post-execution hooks have run for this tool call. */
-  | { type: 'TOOL_POSTHOOKED'; callId: string; turnId: string; tool: string }
   /** Tool call completed successfully. */
   | { type: 'TOOL_SUCCEEDED'; callId: string; turnId: string; tool: string; durationMs: number; result?: ToolResultSummary }
   /** Tool call failed with an error. */
@@ -58,11 +50,10 @@ export type ToolEvent =
    */
   | { type: 'TOOL_DISPATCH_ERROR'; ruleId: string; tool?: string | undefined; reason?: string | undefined; playbooks: readonly string[] }
   /**
-   * A runtime budget was exceeded and the phase pipeline was terminated.
-   * The `reason` discriminant distinguishes the type of budget breached:
-   *  - BUDGET_EXCEEDED_MS,    wall-clock execution time limit
-   *  - BUDGET_EXCEEDED_TOKENS, token consumption limit
-   *  - BUDGET_EXCEEDED_COST,  cost limit in USD
+   * A tool call went over its `runtime.toolBudget.*` limit (with
+   * `runtime.toolBudget.enforced` on). `phase` is `executing` when the time
+   * limit stopped the call, `completed` when the call finished over a limit
+   * (it still succeeded; the model is told which limit it went over).
    */
   | {
       type: 'BUDGET_EXCEEDED_MS';
@@ -73,7 +64,7 @@ export type ToolEvent =
       limitMs: number;
       elapsedMs: number;
     }
-  /** A tool call's token budget (`limitTokens`) was exceeded (`usedTokens`) in `phase`. Declared for subscribers and read by forensics; nothing in this release emits it. */
+  /** A tool call reported more tokens (`usedTokens`, its result's tokenCount) than `runtime.toolBudget.maxTokens` (`limitTokens`). */
   | {
       type: 'BUDGET_EXCEEDED_TOKENS';
       callId: string;
@@ -83,7 +74,7 @@ export type ToolEvent =
       limitTokens: number;
       usedTokens: number;
     }
-  /** A tool call's cost budget in US dollars (`limitCostUsd`) was exceeded (`usedCostUsd`) in `phase`. Declared for subscribers and read by forensics; nothing in this release emits it. */
+  /** A tool call reported a cost (`usedCostUsd`, its result's costUsd) over `runtime.toolBudget.maxCostUsd` (`limitCostUsd`). */
   | {
       type: 'BUDGET_EXCEEDED_COST';
       callId: string;

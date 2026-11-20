@@ -1,5 +1,6 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryUpdatePatch } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, temporalStatusLabel, type RecallFlagKind } from './recall-shared.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;
@@ -15,6 +16,8 @@ const SEARCH_FLAGS: Readonly<Record<string, RecallFlagKind>> = {
   '--vector': 'switch',
 };
 const LIST_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word' };
+/** What `edit` may change: the record's own words, tags and scope. Its class, provenance and review state stay. */
+const EDIT_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--summary': 'text', '--detail': 'text', '--tags': 'word', '--scope': 'word' };
 type Awaitable<T> = T | Promise<T>;
 export interface RecallQueryPort {
   list(filter: MemorySearchFilter): Promise<readonly MemoryRecord[]>;
@@ -23,6 +26,7 @@ export interface RecallQueryPort {
   linksFor(id: string): Awaitable<readonly MemoryLink[]>;
   link: MemoryApi['link'];
   delete(id: string): Awaitable<boolean>;
+  update(id: string, patch: MemoryUpdatePatch): Awaitable<MemoryRecord | null>;
 }
 /** Preserve synchronous local commands while awaiting daemon-owned wire operations. */
 export function afterMemory<T>(value: Awaitable<T>, consume: (value: T) => void | Promise<void>): void | Promise<void> {
@@ -279,7 +283,54 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       presentation.printDeleted(context, id);
     });
   }
-  return { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList };
+  /**
+   * `edit <id> [--summary <text>] [--detail <text>] [--tags <t1,t2>] [--scope <scope>]`:
+   * corrects a record in place. Each flag given replaces that field; a field not
+   * given is kept. The record's id, class,
+   * provenance and links stay, so a correction is not a new record.
+   */
+  function handleRecallEdit(args: string[], context: Context): void | Promise<void> {
+    const memory = getMemory(context);
+    if (!memory) return;
+    const usage = `${presentation.tag} Usage: /${presentation.command} edit <id> [--summary <text>] [--detail <text>] [--tags <t1,t2>] [--scope <${VALID_SCOPES.join('|')}>]`;
+    const flags = readRecallFlags(mutationArguments(args).rest, EDIT_FLAGS);
+    if ('refusal' in flags) {
+      context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
+      return;
+    }
+    const [id, ...extra] = flags.positional;
+    if (!id || extra.length > 0 || flags.values.size === 0) {
+      context.print(`${usage}\n${presentation.tag} Give the id and at least one field to change; /${presentation.command} get <id> shows the record first.`);
+      return;
+    }
+    const summary = flags.values.get('--summary');
+    if (summary !== undefined && summary.trim().length === 0) {
+      context.print(`${presentation.tag} A record needs a summary: --summary cannot be empty. Nothing was changed.`);
+      return;
+    }
+    const scope = flags.values.get('--scope');
+    if (scope !== undefined && !isValidScope(scope)) {
+      context.print(`${presentation.tag} Invalid scope: "${scope}". Valid: ${VALID_SCOPES.join(', ')}. Nothing was changed.`);
+      return;
+    }
+    const tags = flags.values.get('--tags');
+    const detail = flags.values.get('--detail');
+    const patch: MemoryUpdatePatch = {
+      ...(summary !== undefined ? { summary: summary.trim() } : {}),
+      ...(detail !== undefined ? { detail: detail.trim() } : {}),
+      ...(tags !== undefined ? { tags: tags.split(',').map((tag) => tag.trim()).filter((tag) => tag.length > 0) } : {}),
+      ...(scope !== undefined && isValidScope(scope) ? { scope } : {}),
+    };
+    return afterMemory(memory.update(id, patch), (record) => {
+      if (!record) {
+        context.print(`${presentation.tag} Record not found: ${id}. Nothing was changed.`);
+        return;
+      }
+      const changed = Object.keys(patch).join(', ');
+      context.print(`${presentation.tag} Edited ${record.id} (${changed}): ${record.summary}`);
+    });
+  }
+  return { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList, handleRecallEdit };
 }
 
 /**

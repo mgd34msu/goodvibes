@@ -84,6 +84,7 @@ export type CreateBootstrapCommandContextOptions = {
   remoteRuntime?: RemoteCommandService;
   planRuntime?: PlanRuntimeService;
   fileUndoManager: FileUndoManager;
+  workspaceCheckpointManager?: import('@goodvibes-jev/engine/platform/platform/workspace').WorkspaceCheckpointManager;
   processManager?: import('@goodvibes-jev/engine/platform/platform/tools').ProcessManager;
   /** The owner's trust of this workspace, which what a repository brings (its hooks file, its MCP files) waits on. */
   workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;

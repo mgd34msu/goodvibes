@@ -205,6 +205,8 @@ export type ApprovalRememberTier = 'session' | 'exact' | 'command-class' | 'path
 export const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
 
 export interface ApprovalBrokerLike {
+  /** One approval record, or null; read to tell an ask only the owner's own credential may answer. */
+  getApproval?(approvalId: string): unknown | null;
   claimApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
   cancelApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
   releaseApproval?(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }, holdId?: string): Promise<unknown | null>;
@@ -309,12 +311,32 @@ export interface CredentialStatusProviderLike {
   get(key: string): Promise<CredentialStatusRecord | null>;
 }
 
+/** A change put to the owner: what it does, the call as shown, who asked, and how it is applied once approved. */
+export interface OwnerActRequestLike {
+  readonly summary: string;
+  readonly reasons: readonly string[];
+  readonly tool: string;
+  readonly args: Record<string, unknown>;
+  readonly requestedBy: string;
+  readonly apply: () => unknown | Promise<unknown>;
+}
+
 export interface DaemonSystemRouteContext {
   /** Optional adopted lane; absent hosts fail closed without changing legacy writes. */
   readonly settingsPrecondition?: import('./settings-precondition.js').SettingsPreconditionHandler | undefined;
   readonly settingsImportPrecondition?: import('./settings-import-precondition.js').SettingsImportPreconditionHandler | undefined;
   readonly approvalBroker: ApprovalBrokerLike;
   readonly configManager: ConfigManagerLike;
+  /**
+   * What changing `key` to `value` (to its default with `toDefault`) would
+   * loosen, in words, or null. Absent hosts treat no change as loosening.
+   */
+  readonly configLoosening?: ((key: string, value: unknown, options?: { readonly toDefault?: boolean }) => string | null) | undefined;
+  /**
+   * Put a change only the owner makes to him as an approval; `apply` runs when
+   * he approves it. Absent hosts refuse such a change outright.
+   */
+  readonly putToOwner?: ((request: OwnerActRequestLike) => Promise<{ readonly approvalId: string }>) | undefined;
   /**
    * Secret-free credential-status source for `credentials.get`. Null when the
    * daemon host wires no shared secret store, the handler then reports an
@@ -352,7 +374,7 @@ export interface DaemonSystemRouteContext {
    * The principal the gate authenticated; approval decisions are attributed to
    * it, and an answer presented with the Agent's credential is refused.
    */
-  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined } | null) | undefined;
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined } | null) | undefined;
   readonly routeBindings: RouteBindingManagerLike;
   /** Manages runtime.workingDir swaps. Null when workspace swapping is not available. */
   readonly swapManager: WorkspaceSwapManagerLike | null;

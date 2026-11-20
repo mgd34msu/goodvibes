@@ -1,6 +1,13 @@
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 export { buildSyntheticChainEntries, formatSyntheticChainText } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { openAuthorityRecordFile } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { dirname, join } from 'node:path';
+import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/network/outbound';
+import { resolveRemoteDaemonTarget, type DaemonFailure, type RemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell/cluster-remote-daemon-target';
+import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell/raw-reply-route';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import 'node:fs';
 import 'node:path';
@@ -81,9 +88,63 @@ export {
  * @internal exported for unit testing
  */
 
-// This command runs in its own short-lived process. The running host (daemon or TUI) re-reads the user file at its next sign-in or session check, so a deleted user or changed password reaches its accounts, and ends that user's sessions, without a restart. Other sessions live in the host's memory and are never reachable from here.
+// This command runs in its own short-lived process. The running daemon re-reads the user file at its next sign-in or session check, so a deleted user or changed password reaches its accounts, and ends that user's sessions, without a restart. Sign-in sessions live in the daemon's memory, so listing and revoking them is asked of the daemon on this machine, with its operator token.
 const HOST_RESTART_NOTE = 'A running host picks this up at its next sign-in or session check (within a few seconds) and ends that user\'s sessions then; no restart is needed.';
-const SESSIONS_NOT_REACHABLE = 'Sessions are held in memory by the running host and this command cannot reach them. Restart the host to end all of its sessions.';
+
+interface DaemonAuthSession { readonly id: string; readonly username: string; readonly expiresAt: number }
+
+/**
+ * The daemon on this machine, the one serving sign-ins against this user store:
+ * its loopback address from the control-plane settings, never a connected
+ * remote daemon, and the operator token from this machine's daemon home.
+ */
+function localDaemonAuthTarget(runtime: CliCommandRuntime): { readonly ok: true; readonly target: RemoteDaemonTarget; readonly fetchImpl: typeof fetch } | DaemonFailure {
+  const read = (key: string): unknown => runtime.configManager.get(key as never);
+  const resolved = resolveRemoteDaemonTarget({
+    flags: { host: deriveControlPlaneBaseUrl(readControlPlaneBinding(read), 'loopback') },
+    configManager: runtime.configManager,
+    daemonHomeDir: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+  });
+  if (!resolved.ok) return resolved;
+  return { ok: true, target: resolved.target, fetchImpl: createNetworkFetch(globalThis.fetch, runtime.configManager) };
+}
+
+async function listDaemonAuthSessions(runtime: CliCommandRuntime): Promise<{ readonly ok: true; readonly sessions: readonly DaemonAuthSession[] } | DaemonFailure> {
+  const daemon = localDaemonAuthTarget(runtime);
+  if (!daemon.ok) return daemon;
+  const answer = await callDaemonRoute<{ readonly sessions?: readonly DaemonAuthSession[] }>(
+    daemon.target, '/api/local-auth', { method: 'GET', envelope: 'raw' }, daemon.fetchImpl,
+  );
+  return answer.ok ? { ok: true, sessions: answer.data.sessions ?? [] } : sessionCallFailure(daemon.target, answer);
+}
+
+async function revokeDaemonAuthSession(runtime: CliCommandRuntime, sessionIdOrToken: string): Promise<{ readonly ok: true } | DaemonFailure> {
+  const daemon = localDaemonAuthTarget(runtime);
+  if (!daemon.ok) return daemon;
+  const answer = await callDaemonMethod<{ readonly revoked?: boolean }>(
+    daemon.target, 'local_auth.sessions.delete', { input: { sessionId: sessionIdOrToken } }, daemon.fetchImpl,
+  );
+  return answer.ok ? { ok: true } : sessionCallFailure(daemon.target, answer);
+}
+
+/**
+ * A failed sign-in-session call in words that fit it: sessions live only in
+ * the running daemon, so an unanswered call means that daemon is not running
+ * or not reachable at its address, and nothing was changed. The shared
+ * reader's wording is for cluster verbs.
+ */
+function sessionCallFailure(target: RemoteDaemonTarget, failure: DaemonFailure): DaemonFailure {
+  if (failure.code !== 'unreachable') return failure;
+  return {
+    ...failure,
+    error: `the daemon on this machine is not running or not reachable at ${target.baseUrl}, so no sign-in session was read or ended (its sessions end with it)`,
+    fix: 'start it with goodvibes service start (or goodvibes-daemon serve), then run this again; goodvibes-daemon status shows the address it listens on',
+  };
+}
+
+function daemonFailureText(failure: DaemonFailure): string {
+  return `${failure.error}\n  ${failure.fix}`;
+}
 
 interface AuthCommandResult {
   readonly output: string;
@@ -91,18 +152,30 @@ interface AuthCommandResult {
 }
 
 async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
+  const pending: UserAuthManager[] = [];
+  try { return await renderAuthCommand(runtime, pending); }
+  // A user change is written to the authority record before the command exits.
+  finally { for (const manager of pending) await manager.settled(); }
+}
+
+async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthManager[]): Promise<AuthCommandResult> {
   const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
   const notFound = (output: string): AuthCommandResult => ({ output, exitCode: 1 });
   const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
   // The local user file and the setup credential are this user's own files: the
   // command opens them alone, not the whole runtime of the folder it was typed in.
   const authPaths = readAuthPaths(runtime);
+  // The authority record beside the user file: a user changed here is the
+  // daemon's and, in a group, every machine's (security/user-auth.ts).
+  const authorityPath = join(dirname(authPaths.userStorePath), 'control-plane', 'authority-record.json');
   const services = {
     localUserAuthManager: new UserAuthManager({
       bootstrapFilePath: authPaths.userStorePath,
       bootstrapCredentialPath: authPaths.bootstrapCredentialPath,
+      authority: openAuthorityRecordFile(authorityPath, () => runtime.configManager.getCategory('cluster')),
     }),
   };
+  pending.push(services.localUserAuthManager);
   {
     const [sub = 'status', ...rawRest] = runtime.cli.commandArgs;
     const rest = commandValues(rawRest);
@@ -131,13 +204,23 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
     if (sub === 'revoke-session') {
       const token = rest[0];
       if (!token) return usage('Usage: goodvibes auth revoke-session <session-id-or-token>');
-      return services.localUserAuthManager.revokeSession(token) ? ok('Auth session revoked.') : notFound(`No auth session found in this process. ${SESSIONS_NOT_REACHABLE}`);
+      const revoked = await revokeDaemonAuthSession(runtime, token);
+      return revoked.ok ? ok('Auth session revoked on the running daemon.') : notFound(daemonFailureText(revoked));
     }
     if (sub === 'revoke-sessions') {
       const username = rest[0];
       if (!username) return usage('Usage: goodvibes auth revoke-sessions <username>');
-      const count = services.localUserAuthManager.revokeSessionsForUser(username);
-      return count > 0 ? ok(`Auth sessions revoked for ${username}: ${count}`) : notFound(`No auth sessions revoked for ${username} in this process. ${SESSIONS_NOT_REACHABLE}`);
+      const listed = await listDaemonAuthSessions(runtime);
+      if (!listed.ok) return notFound(daemonFailureText(listed));
+      const owned = listed.sessions.filter((session) => session.username === username);
+      let count = 0;
+      for (const session of owned) {
+        const revoked = await revokeDaemonAuthSession(runtime, session.id);
+        // A session that ended between the list and the revoke is gone either way.
+        if (revoked.ok || revoked.code === 'refused') count += 1;
+        else return notFound(`Auth sessions revoked for ${username} before the daemon stopped answering: ${count} of ${owned.length}\n${daemonFailureText(revoked)}`);
+      }
+      return count > 0 ? ok(`Auth sessions revoked for ${username} on the running daemon: ${count}`) : notFound(`The running daemon holds no auth sessions for ${username}.`);
     }
     if (sub === 'clear-bootstrap') {
       return ok(services.localUserAuthManager.clearBootstrapCredentialFile()
@@ -149,10 +232,18 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
     }
     const snapshot = services.localUserAuthManager.inspect();
     const paths = readAuthPaths(runtime);
+    // The sessions are the running daemon's; one loopback request, and only for the forms that show them.
+    const daemonSessions = sub === 'users' ? null : await listDaemonAuthSessions(runtime);
+    const sessionLines = daemonSessions === null ? []
+      : daemonSessions.ok
+        ? daemonSessions.sessions.map((session) => `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`)
+        : [];
+    const sessionsUnavailable = daemonSessions !== null && !daemonSessions.ok ? `not read: ${daemonSessions.error}` : undefined;
     const value = {
       ...paths,
       users: snapshot.users.map((user) => ({ username: user.username, roles: user.roles })),
-      sessions: snapshot.sessions.length,
+      sessions: daemonSessions?.ok ? daemonSessions.sessions.length : null,
+      ...(sessionsUnavailable !== undefined ? { sessionsUnavailable } : {}),
       permissionMode: runtime.configManager.get('permissions.mode'),
     };
     if (sub === 'users') {
@@ -165,15 +256,10 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
       ));
     }
     if (sub === 'sessions') {
+      if (daemonSessions === null || !daemonSessions.ok) return notFound(daemonSessions === null ? '' : daemonFailureText(daemonSessions));
       return ok(formatJsonOrText(runtime.cli)(
-        snapshot.sessions,
-        [
-          `GoodVibes auth sessions in this process (${snapshot.sessions.length}); a running host's sessions are not listed`,
-          ...snapshot.sessions.map(
-            (session) =>
-              `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`,
-          ),
-        ].join('\n'),
+        daemonSessions.sessions,
+        [`GoodVibes auth sessions on the running daemon (${daemonSessions.sessions.length})`, ...sessionLines].join('\n'),
       ));
     }
     return ok(formatJsonOrText(runtime.cli)(
@@ -183,7 +269,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
         `  permission mode: ${String(value.permissionMode)}`,
         `  users: ${value.users.length}`,
         ...value.users.map((user) => `    ${user.username} (${user.roles.join(', ') || 'no roles'})`),
-        `  sessions in this process: ${value.sessions} (a running host's sessions are not listed)`,
+        `  sessions on the running daemon: ${value.sessions ?? sessionsUnavailable}`,
         `  user store: ${paths.userStorePresent ? 'present' : 'missing'} (${paths.userStorePath})`,
         `  bootstrap credential: ${paths.bootstrapCredentialPresent ? 'present' : 'missing'} (${paths.bootstrapCredentialPath})`,
         `  operator tokens: ${paths.operatorTokenPresent ? 'present' : 'missing'} (${paths.operatorTokenPath})`,

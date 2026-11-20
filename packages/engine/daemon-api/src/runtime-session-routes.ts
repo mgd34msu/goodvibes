@@ -9,6 +9,7 @@ import {
 import { withAdmin } from './auth-helpers.js';
 import { randomUUID } from 'node:crypto';
 import { jsonErrorResponse } from './error-response.js';
+import { agentRetrySpawnInput } from './tasks.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/contracts';
 import {
@@ -24,6 +25,7 @@ import {
   type SessionInputState,
   type SessionKind,
   type SharedSessionRoutingIntent,
+  type TrySpawnAgentInput,
 } from './runtime-route-types.js';
 
 function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
@@ -63,9 +65,43 @@ type SessionSubmission = SharedSessionSubmission | SharedSessionSteerSubmission 
 type RuntimeTaskBody = {
   readonly task: string;
   readonly model?: string | undefined;
+  readonly provider?: string | undefined;
   readonly tools?: string[] | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
 };
+
+/**
+ * The agent-start fields a request's model, provider, tools and routing ask
+ * for. A top-level `model`, `provider` or `tools` wins over the same choice in
+ * `routing`; routing's fallback models, provider selection, failure policy,
+ * execution limits and reasoning effort are carried as given.
+ */
+function spawnRoutingFields(input: {
+  readonly model?: string | undefined;
+  readonly provider?: string | undefined;
+  readonly tools?: readonly string[] | undefined;
+  readonly routing?: SharedSessionRoutingIntent | undefined;
+}): Omit<TrySpawnAgentInput, 'mode' | 'task'> {
+  const routing = input.routing;
+  const model = input.model ?? routing?.modelId;
+  const provider = input.provider ?? routing?.providerId;
+  const tools = input.tools ?? routing?.tools;
+  const policy = routing && (routing.providerSelection || routing.providerFailurePolicy || routing.fallbackModels)
+    ? {
+        ...(routing.providerSelection ? { providerSelection: routing.providerSelection } : {}),
+        ...(routing.providerFailurePolicy ? { providerFailurePolicy: routing.providerFailurePolicy } : {}),
+        ...(routing.fallbackModels ? { fallbackModels: [...routing.fallbackModels] } : {}),
+      }
+    : undefined;
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(provider !== undefined ? { provider } : {}),
+    ...(tools !== undefined ? { tools: [...tools].slice(0, MAX_SESSION_TOOL_NAMES) } : {}),
+    ...(policy ? { routing: policy } : {}),
+    ...(routing?.executionIntent ? { executionIntent: routing.executionIntent } : {}),
+    ...(routing?.reasoningEffort ? { reasoningEffort: routing.reasoningEffort } : {}),
+  };
+}
 type SharedSessionMessageInput = {
   readonly sessionId: string;
   readonly surfaceKind: AutomationSurfaceKind;
@@ -283,15 +319,17 @@ const runtimeSessionBodySchemas = createRouteBodySchemaRegistry({
   task: createRouteBodySchema<RuntimeTaskBody>('POST /task', (body) => {
     const task = readOptionalStringField(body, 'task');
     if (!task) {
-      return jsonErrorResponse({ error: 'Missing required field: task (non-empty string)' }, { status: 400 });
+      return jsonErrorResponse({ error: 'Missing required field: task (non-empty string)', code: 'INVALID_ARGUMENT', field: 'task' }, { status: 400 });
     }
     const routing = readSharedSessionRoutingIntent(body.routing);
     if (routing instanceof Response) return routing;
     const model = readOptionalStringField(body, 'model');
+    const provider = readOptionalStringField(body, 'provider');
     const tools = readStringArrayField(body, 'tools', MAX_SESSION_TOOL_NAMES);
     return {
       task,
       ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
       ...(tools ? { tools } : {}),
       ...(routing ? { routing } : {}),
     };
@@ -387,10 +425,7 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
     const sessionSpawn = context.trySpawnAgent({
       mode: 'spawn',
       task: submission.task!,
-      ...(input.model !== undefined || submission.input.routing?.modelId ? { model: input.model ?? submission.input.routing?.modelId } : {}),
-      ...(input.tools !== undefined || submission.input.routing?.tools ? { tools: input.tools ?? [...(submission.input.routing?.tools ?? []).slice(0, MAX_SESSION_TOOL_NAMES)] } : {}),
-      ...(submission.input.routing?.providerId ? { provider: submission.input.routing.providerId } : {}),
-      ...(submission.input.routing?.executionIntent ? { executionIntent: submission.input.routing.executionIntent } : {}),
+      ...spawnRoutingFields({ model: input.model, provider: input.provider, tools: input.tools, routing: submission.input.routing ?? input.routing }),
     }, 'DaemonServer.handlePostTask.sharedSession', submission.session.id);
     if (sessionSpawn instanceof Response) {
       await releaseUnstartedInput(context, submission.session.id, submission.input.id, sessionSpawn);
@@ -415,10 +450,8 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
   const spawnResult = context.trySpawnAgent({
     mode: 'spawn',
     task: input.task,
-    ...(input.model !== undefined && { model: input.model }),
-    ...(input.tools !== undefined && { tools: input.tools }),
-    ...(input.routing?.executionIntent ? { executionIntent: input.routing.executionIntent } : {}),
-  }, 'DaemonServer', typeof body.sessionId === 'string' ? body.sessionId : undefined);
+    ...spawnRoutingFields(input),
+  }, 'DaemonServer');
   if (spawnResult instanceof Response) return spawnResult;
   return context.recordApiResponse(req, '/task', Response.json({
     acknowledged: true,
@@ -818,7 +851,7 @@ async function handleCancelSharedSessionInput(context: DaemonRuntimeRouteContext
 function handleGetRuntimeTask(context: DaemonRuntimeRouteContext, taskId: string): Response {
   const task = context.runtimeStore?.getState().tasks.tasks.get(taskId);
   if (!task) {
-    return jsonErrorResponse({ error: 'Unknown runtime task' }, { status: 404 });
+    return jsonErrorResponse({ error: 'Unknown runtime task', code: 'TASK_NOT_FOUND' }, { status: 404 });
   }
   return Response.json({ task });
 }
@@ -986,12 +1019,8 @@ async function respondToSessionSubmission(
     mode: 'spawn',
     task: submission.task!,
     ...(spawnOptions.context ? { context: spawnOptions.context } : {}),
-    ...(spawnOptions.model ?? submission.input.routing?.modelId ? { model: spawnOptions.model ?? submission.input.routing?.modelId } : {}),
-    ...(spawnOptions.provider ?? submission.input.routing?.providerId ? { provider: spawnOptions.provider ?? submission.input.routing?.providerId } : {}),
-    ...(spawnOptions.tools ?? submission.input.routing?.tools ? { tools: [...(spawnOptions.tools ?? submission.input.routing?.tools ?? [])] } : {}),
-    ...(spawnOptions.executionIntent ?? submission.input.routing?.executionIntent
-      ? { executionIntent: spawnOptions.executionIntent ?? submission.input.routing?.executionIntent }
-      : {}),
+    ...spawnRoutingFields({ model: spawnOptions.model, provider: spawnOptions.provider, tools: spawnOptions.tools, routing: submission.input.routing }),
+    ...(spawnOptions.executionIntent ? { executionIntent: spawnOptions.executionIntent } : {}),
   }, logLabel, submission.session.id);
   if (spawnResult instanceof Response) {
     await releaseUnstartedInput(context, submission.session.id, submission.input.id, spawnResult);
@@ -1076,11 +1105,11 @@ async function releaseUnstartedInput(
 
 function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: string, action: 'cancel' | 'retry', _req: Request): Response {
   if (!context.runtimeStore || !context.runtimeDispatch) {
-    return jsonErrorResponse({ error: 'Runtime store unavailable' }, { status: 503 });
+    return jsonErrorResponse({ error: 'Runtime store unavailable', code: 'RUNTIME_STORE_UNAVAILABLE' }, { status: 503 });
   }
   const task = context.runtimeStore.getState().tasks.tasks.get(taskId);
   if (!task) {
-    return jsonErrorResponse({ error: 'Unknown runtime task' }, { status: 404 });
+    return jsonErrorResponse({ error: 'Unknown runtime task', code: 'TASK_NOT_FOUND' }, { status: 404 });
   }
   if (action === 'cancel') {
     if (task.kind === 'agent' && task.owner) {
@@ -1094,18 +1123,28 @@ function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: str
   }
   if (action === 'retry') {
     if (task.kind !== 'agent') {
-      return jsonErrorResponse({ error: 'Retry is only implemented for agent tasks' }, { status: 400 });
+      return jsonErrorResponse({ error: 'Retry is only implemented for agent tasks', code: 'TASK_NOT_RETRYABLE' }, { status: 400 });
     }
     // Decide eligibility BEFORE spawning: a spawn is paid work, and the store
     // refuses queued for anything but a retryable status (see canRetry in
     // runtime/tasks/lifecycle.ts, reached through the dispatch seam).
     if (context.runtimeDispatch.canRetryRuntimeTask?.(taskId) === false) {
-      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE }, { status: 400 });
+      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE, code: 'TASK_NOT_RETRYABLE' }, { status: 400 });
     }
-    const spawnResult = context.trySpawnAgent({
-      mode: 'spawn',
-      task: task.description ?? task.title ?? '',
-    }, 'DaemonServer.handleRuntimeTaskAction');
+    // The retry runs the same work the task was started with: its model,
+    // provider, tools, routing and execution limits, read from the agent that
+    // ran it, in the session that started it. When that agent's record is no
+    // longer held, nothing is started: work on the daemon's current defaults is
+    // not the task that failed.
+    const original = task.owner ? context.agentManager.getStatus(task.owner) : null;
+    if (!original) {
+      return jsonErrorResponse({
+        error: `Task ${taskId} cannot be retried: the record of the agent that ran it (${task.owner ?? 'none'}) is no longer held, so the model, tools and routing it ran with are unknown. Nothing was started.`,
+        code: 'TASK_SETTINGS_UNAVAILABLE',
+        next: ['Create the task again with tasks.create, naming its model, tools and routing.'],
+      }, { status: 409 });
+    }
+    const spawnResult = context.trySpawnAgent(agentRetrySpawnInput(original), 'DaemonServer.handleRuntimeTaskAction', original.sessionId);
     if (spawnResult instanceof Response) return spawnResult;
     context.runtimeDispatch.transitionRuntimeTask(taskId, 'queued', {
       // Ownership moves to the agent this retry spawned: cancel reads this field,
@@ -1121,7 +1160,7 @@ function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: str
     const after = context.runtimeStore.getState().tasks.tasks.get(taskId);
     if (after?.owner !== spawnResult.id) {
       context.agentManager.cancel(spawnResult.id);
-      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE }, { status: 400 });
+      return jsonErrorResponse({ error: RETRY_REFUSED_MESSAGE, code: 'TASK_NOT_RETRYABLE' }, { status: 400 });
     }
     return Response.json({
       retried: true,
@@ -1137,7 +1176,7 @@ function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: str
 function handleGetTaskStatus(context: DaemonRuntimeRouteContext, agentId: string): Response {
   const record = context.agentManager.getStatus(agentId);
   if (!record) {
-    return jsonErrorResponse({ error: `Agent not found: ${agentId}` }, { status: 404 });
+    return jsonErrorResponse({ error: `Agent not found: ${agentId}`, code: 'AGENT_NOT_FOUND' }, { status: 404 });
   }
   if (record.status === 'completed' || record.status === 'failed' || record.status === 'cancelled') {
     context.syncFinishedAgentTask(record);

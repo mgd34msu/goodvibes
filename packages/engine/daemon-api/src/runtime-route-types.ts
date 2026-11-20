@@ -96,7 +96,37 @@ export interface SessionParticipantInput {
   readonly routeId?: string | undefined;
   readonly lastSeenAt: number;
 }
-type AgentRecordLike = {
+/** Provider routing an agent was started with, as its record keeps it. */
+export interface AgentProviderRoutingLike {
+  readonly providerSelection?: 'inherit-current' | 'concrete' | 'synthetic' | undefined;
+  readonly providerFailurePolicy?: 'ordered-fallbacks' | 'fail' | undefined;
+  readonly fallbackModels?: readonly string[] | undefined;
+}
+
+/**
+ * How an agent was started, as its record keeps it: everything a retry needs
+ * to start the same work again on the same model, tools and routing.
+ */
+export interface AgentSpawnSettingsLike {
+  readonly template?: string | undefined;
+  readonly provider?: string | undefined;
+  readonly fallbackModels?: readonly string[] | undefined;
+  readonly routing?: AgentProviderRoutingLike | undefined;
+  readonly executionIntent?: ExecutionIntent | undefined;
+  readonly reasoningEffort?: string | undefined;
+  readonly context?: string | undefined;
+  readonly outsideContract?: boolean | undefined;
+  readonly executionProtocol?: 'direct' | 'gather-plan-apply' | undefined;
+  readonly reviewMode?: 'none' | 'contract' | undefined;
+  readonly communicationLane?: 'parent-only' | 'parent-and-children' | 'cohort' | 'direct' | undefined;
+  readonly successCriteria?: readonly string[] | undefined;
+  readonly requiredEvidence?: readonly string[] | undefined;
+  readonly writeScope?: readonly string[] | undefined;
+  /** The session that started the agent; a retry belongs to it too. */
+  readonly sessionId?: string | undefined;
+}
+
+export type AgentRecordLike = AgentSpawnSettingsLike & {
   readonly id: string;
   readonly status: string;
   readonly task: string;
@@ -108,6 +138,16 @@ type AgentRecordLike = {
   readonly progress?: string | null | undefined;
   readonly error?: string | null | undefined;
 };
+
+/** What the daemon starts an agent with. */
+export interface TrySpawnAgentInput extends AgentSpawnSettingsLike {
+  readonly mode: 'spawn';
+  readonly task: string;
+  readonly model?: string | undefined;
+  readonly tools?: string[] | readonly string[] | undefined;
+  /** With `tools`: the agent gets exactly that list, not the template's defaults added to it. */
+  readonly restrictTools?: boolean | undefined;
+}
 type AutomationJobLike = { readonly id: string };
 type AutomationRunLike = {
   readonly id: string;
@@ -288,19 +328,7 @@ export interface DaemonRuntimeRouteContext {
     start(): Promise<void>;
     getBinding(id: string): RouteBindingRecordLike | undefined;
   };
-  readonly trySpawnAgent: (input: {
-    mode: 'spawn';
-    task: string;
-    model?: string | undefined;
-    tools?: string[] | readonly string[] | undefined;
-    provider?: string | undefined;
-    context?: string | undefined;
-    executionIntent?: ExecutionIntent | undefined;
-    executionProtocol?: 'direct' | 'gather-plan-apply' | undefined;
-    reviewMode?: 'none' | 'contract' | undefined;
-    communicationLane?: 'parent-only' | 'parent-and-children' | 'cohort' | 'direct' | undefined;
-    outsideContract?: boolean | undefined;
-  }, logLabel: string, sessionId?: string) => AgentRecordLike | Response;
+  readonly trySpawnAgent: (input: TrySpawnAgentInput, logLabel: string, sessionId?: string) => AgentRecordLike | Response;
   readonly queueSurfaceReplyFromBinding: (
     binding: AutomationRouteBinding | undefined,
     input: { readonly agentId: string; readonly task: string; readonly sessionId?: string; },

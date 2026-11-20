@@ -855,8 +855,10 @@ export class TriggerManager {
       const prefix = action.prompt ?? '';
       return this.options.actions.runAgentTurn({
         triggerId: definition.id,
+        label: definition.label,
         prompt: prefix.length > 0 ? `${prefix}\n\n${prompt}` : prompt,
         ...(action.model !== undefined ? { model: action.model } : {}),
+        ...(action.deliverTo !== undefined ? { deliverTo: action.deliverTo } : {}),
       });
     }
     const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest, action.approvedAction);

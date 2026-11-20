@@ -89,6 +89,7 @@ export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'memory.consolidation.decide',
+    repeat: 'safe',
     title: 'Decide a Memory Consolidation Proposal',
     description:
       'Answer one pending consolidation proposal (memory.consolidation.receipts lists them with their `id`). The actions each kind accepts, `first`/`second` being the proposal\'s ids in order: contradiction keep-first | keep-second | both-stand; cross-scope-duplicate keep-first | keep-second | keep-both; stale-delete delete | keep. Keeping one record marks the other stale (recoverable); delete removes the record; both-stand and keep-both mark the records reviewed and record the decision, so the proposal is not raised again. Answers decided:true with the records changed and removed, or decided:false with a refusal (code, state, reason, next) and nothing changed. ws-only invoke verb.',
@@ -121,6 +122,7 @@ export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'memory.snapshots.restore',
+    repeat: 'safe',
     title: 'Restore Memory From a Copy',
     description: 'Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner\'s act only: requires confirm: true on an explicit request from the owner\'s own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.',
     category: 'memory',

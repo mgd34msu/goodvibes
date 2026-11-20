@@ -85,7 +85,7 @@ The model can inspect service posture with `host action:"services"`. That report
 | --- | --- | --- |
 | `controlPlane` | 3421 | The runtime connection, the daemon API root Agent connects to |
 | `httpListener` | 3422 | The daemon's inbound events endpoint |
-| `web` | 3423 | The browser companion route, the URL the connected browser cockpit opens |
+| `web` | 3423 | The web UI's development server only. The connected browser cockpit opens where the web UI is served: the daemon's control-plane address while it serves the bundle, else a set `web.publicBaseUrl`; with neither it reports `setup-needed` |
 
 The connected browser cockpit/PWA is the visible UI surface `connected-browser-cockpit`; `computer action:"browser"` inspects readiness and `computer action:"open_browser" confirm:true explicitUserRequest:"..."` opens the configured URL through the existing confirmed surface route. `ui_surface surfaceId:"connected-browser-cockpit"` remains available for detailed inspection and reports the web URL, whether the web endpoint is enabled, and whether Agent onboarding is complete. The web UI has its own views (chat, work, library, personal, phone and settings); it does not mirror the Agent workspace categories, so the cockpit claims no category coverage.
 

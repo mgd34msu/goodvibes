@@ -8,6 +8,7 @@ import type { DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import { VERSION } from '../version.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { parseDaemonCli } from './parser.js';
+import { applyDaemonHomeEnvironment } from './daemon-home-environment.js';
 import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, renderGoodVibesVersion, renderDaemonCliCatalog } from './help.js';
 import { daemonCommandFailureLines } from './command-failure.js';
 import { runCompletionCommand } from './completion.js';
@@ -68,6 +69,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         '', renderGoodVibesDaemonHelp()] });
     }
     for (const warning of cli.warnings) stderr(`[goodvibes-daemon] warning: ${warning}`);
+    // A moved daemon home is this daemon's whole tree, for every reader in this process.
+    if (env === process.env) applyDaemonHomeEnvironment(cli.flags, options.cwd ?? process.cwd());
     if (cli.flags.help || cli.command === 'help') {
       const topic = cli.command === 'help' ? cli.commandArgs[0] : cli.rawCommand;
       if (cli.flags.json) {
@@ -256,10 +259,19 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
         const { resolveServiceUnitHome } = await import('@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
-        const servicePlatform = config.get('service.platform');
+        // A daemon with a moved tree or daemon home needs a service manager whose
+        // definition carries GOODVIBES_HOME and --daemon-home: a systemd unit
+        // (Environment=) and a LaunchAgent (EnvironmentVariables) do. A Windows
+        // scheduled task created by schtasks has no environment of its own, and
+        // the manual platform has no service manager, so there it would start
+        // with the default home and serve the wrong tree.
+        const { detectPlatform } = await import('@goodvibes-jev/engine/platform/platform/daemon/service-manager');
+        const servicePlatform = detectPlatform(String(config.get('service.platform')));
         if (configuration.isOverridden && ['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)
-          && servicePlatform !== 'systemd' && !(servicePlatform === 'auto' && process.platform === 'linux')) {
-          return refuse('Service activation with selected tree or daemon homes currently requires systemd. No service was changed.');
+          && servicePlatform !== 'systemd' && servicePlatform !== 'launchd') {
+          return refuse(servicePlatform === 'windows'
+            ? 'A daemon with a moved home (GOODVIBES_HOME, GOODVIBES_DAEMON_HOME or --daemon-home) cannot run as a Windows scheduled task: a task created by schtasks carries no environment variables, so it would start with the default home. No service was changed. Start this daemon by hand instead: goodvibes-daemon serve'
+            : 'A daemon with a moved home (GOODVIBES_HOME, GOODVIBES_DAEMON_HOME or --daemon-home) cannot be installed on the manual service platform, which has no service manager to give it that home. No service was changed. Start this daemon by hand instead: goodvibes-daemon serve');
         }
         serviceExecutable?.assertCurrent();
         return result(await runDaemonServiceCli({ subcommand: cli.command,

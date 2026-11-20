@@ -7,7 +7,7 @@
  * ProductComposition; nothing here asks which product it is building for. A
  * product adds what only it has over the finished graph, in its own scope.
  */
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { parsePrivateDeliveryHosts, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
@@ -15,6 +15,7 @@ import { resolveSecretInput } from '../config/secret-refs.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
 import { AutomationDeliveryManager, AutomationManager, createAutomationAgentControls } from '../automation/index.js';
+import { UnattendedRuns } from '../automation/unattended-runs.js';
 import type { AutomationSurfaceKind } from '../automation/types.js';
 import { ChannelPolicyManager } from '../channels/index.js';
 import {
@@ -23,6 +24,8 @@ import {
   SharedSessionBroker,
   controlPlaneStorePath,
   registerFlagsStatusGatewayMethods,
+  registerAuthorityStatusGatewayMethods,
+  type AuthorityStatusPeers,
   registerGatewayVerbGroups,
   registerNativeAutomationGatewayMethods,
 } from '../control-plane/index.js';
@@ -55,6 +58,7 @@ import { MultimodalService } from '../multimodal/index.js';
 import { cancelAllAgentRuns } from '../tools/agent/index.js';
 import type { AgentOrchestrator } from '../agents/orchestrator.js';
 import { PersonalCaptureHolder } from '../personal-capture/index.js';
+import { ClusterRoles } from '../cluster/roles.js';
 import { ProcessManager } from '../tools/shared/process-manager.js';
 import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
@@ -62,6 +66,10 @@ import { WorkspaceCheckpointManager } from '../workspace/checkpoint/index.js';
 import { MemoryRegistry } from '../state/memory-registry.js';
 import { MemoryStore } from '../state/memory-store.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
+import { emitPlanStrategySelected } from './emitters/planner.js';
+import { emitAuthorityChanged } from './emitters/security.js';
+import { openAuthorityRecordFile } from '../cluster/authority-record-file.js';
+import { revocationRetentionFloorMinutes } from '../cluster/group-settings.js';
 import { registerRuntimePollers, createRuntimeStopRequests } from './disposal.js';
 import type { RuntimeAcquisitionScope } from './acquisition-scope.js';
 import { composeJudgment } from './judgment-services.js';
@@ -248,24 +256,52 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     surfaceRoot,
     providerRegistryFactory: seams.providerRegistryFactory,
     modelDiscovery: seams.modelDiscovery,
+    trustScannedServer: seams.trustScannedServer,
   });
   // Initial custom-provider loading and discovery are owned here too, so a
   // graph that fails before the host receives the registry still settles them.
   scope.registry.add('provider metadata startup', async () => { await Promise.all([providerRegistry.ready(), providerRegistry.modelDiscoverySettled(), benchmarkStore.benchmarksSettled()]); });
   ensureConfiguredModelIsRoutable(providerRegistry, configManager);
-  const stepUpService = new StepUpService({ secrets: secretsManager });
   // Per-pairing named revocable operator tokens. The cap is read per mint, so a
   // `device.nodes.maxPaired` change applies to the next pairing without a restart.
   // Opened at start, or on first read for a product that chose `on-demand`.
   // Wherever the store is opened (a daemon, or one hosted by a terminal app), managed
   // rotation is enforced where a device token authenticates, and the last-seen times
   // held between writes are written when the graph closes.
+  // The authority record: the one answer, on this machine and every machine of
+  // its group, to "is this device token, user, grant or peer token current".
+  // Beside the pairing file it replaces, so every process of this home reads
+  // the same one. Its changes are announced on the bus by kind and id only.
+  let authorityPeers: AuthorityStatusPeers | null = null;
+  const authorityRecordPath = roots.pairingTokenPath
+    ? join(dirname(roots.pairingTokenPath), 'authority-record.json')
+    : controlPlaneStorePath(shellPaths, surfaceRoot, 'authority-record.json');
+  const authorityRecord = openAuthorityRecordFile(authorityRecordPath, () => configManager.getCategory('cluster'));
+  // The retention also decides when a member counts as behind its group, so it
+  // must span several gossip rounds: the pair is checked whichever one changes.
+  const retentionRefusal = (retentionMinutes: unknown, gossipSeconds: unknown) => {
+    const floor = revocationRetentionFloorMinutes(gossipSeconds);
+    return typeof retentionMinutes === 'number' && retentionMinutes < floor
+      ? { reason: `cluster.revocationRetentionMinutes must be at least ${floor} with cluster.rosterGossipSeconds ${String(gossipSeconds)}: a member is counted behind its group once it has not heard it for that long, so it must span four gossip rounds.`,
+        next: [`Set cluster.revocationRetentionMinutes to ${floor} or more`, 'or lower cluster.rosterGossipSeconds first'] }
+      : null;
+  };
+  scope.registry.add('revocation retention rule', configManager.registerWriteAdmission('cluster.revocationRetentionMinutes',
+    (value) => retentionRefusal(value, configManager.get('cluster.rosterGossipSeconds'))));
+  scope.registry.add('gossip interval retention rule', configManager.registerWriteAdmission('cluster.rosterGossipSeconds',
+    (value) => retentionRefusal(configManager.get('cluster.revocationRetentionMinutes'), value)));
+  scope.registry.add('authority record events', authorityRecord.onChange((notice) => emitAuthorityChanged(runtimeBus,
+    { sessionId: 'system', traceId: `authority:${notice.rev}`, source: 'authority-record' },
+    { kinds: notice.keys.map((key) => key.slice(0, key.indexOf(':'))), ids: notice.keys.map((key) => key.slice(key.indexOf(':') + 1)),
+      change: notice.change, rev: notice.rev, origin: notice.origin, cascade: notice.cascade.map((key) => key.slice(key.indexOf(':') + 1)) })));
+  // Step-up passkeys are on the authority record: one registered or removed on any machine of the group is so on all.
+  const stepUpService = new StepUpService({ secrets: secretsManager, authority: authorityRecord });
   let pairingTokensOpened: PairingTokenManager | undefined;
   const pairingTokens = (): PairingTokenManager => {
     if (pairingTokensOpened) return pairingTokensOpened;
     const store = new PairingTokenManager(
       roots.pairingTokenPath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'),
-      { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter },
+      { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter, authority: authorityRecord },
     );
     pairingTokensOpened = store;
     scope.registry.add('pairing rotation limit', bindPairingRotationLimit(store, { configManager, featureFlags }));
@@ -277,6 +313,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const localUserAuthManager = seams.localUserAuthManager ?? new UserAuthManager({
     bootstrapFilePath: shellPaths.resolveUserPath(surfaceRoot, 'auth-users.json'),
     bootstrapCredentialPath: shellPaths.resolveUserPath(surfaceRoot, 'auth-bootstrap.txt'),
+    authority: authorityRecord,
   });
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(surfaceRoot, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(surfaceRoot, 'bookmarks'));
@@ -312,6 +349,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The late-binding holder for the personal-capture port: the gateway verb
   // groups fill it (they own the owner-profile store and the occasions service).
   const personalCapture = new PersonalCaptureHolder();
+  // Which group roles (cluster/roles.ts) this machine holds; the daemon binds it to its coordinator.
+  const clusterRoles = new ClusterRoles();
   const hookDispatcher = new HookDispatcher({
     // Withheld only when the product says so by name: an agent hook then spawns nothing.
     ...((product.hookAgentRuns ?? 'attach') === 'attach' ? { agentManager } : {}),
@@ -375,6 +414,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     artifactStore,
     featureFlags,
   });
+  // A run nobody watches (a scheduled run, a trigger's turn): its answer goes to
+  // the surface it names, else the owner inbox the host attaches; it gets the
+  // mail and calendar tools the host reads as connected.
+  const unattendedRuns = new UnattendedRuns(deliveryManager.getDeliveryRouter());
   const automationManager = new AutomationManager({
     configManager,
     defaultSurfaceKind: (product.automationSurfaceKind ?? surfaceRoot) as AutomationSurfaceKind,
@@ -385,10 +428,16 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     deliveryManager,
     providerRegistry,
     featureFlags,
+    unattendedRuns,
     // The run's agent is how a run ends: the manager reads its status to
     // settle the run and stops it to cancel the run or end it at its timeout.
-    ...createAutomationAgentControls(agentManager),
+    ...createAutomationAgentControls(agentManager, () => unattendedRuns.connectedTools()),
   });
+  // In a group, schedules, reminders and url watchers live on the group's
+  // record and run on the machine holding the automation role
+  // (cluster/group-work.ts); outside one, nothing changes.
+  automationManager.attachGroupWork({ file: authorityRecord, roles: clusterRoles });
+  watcherRegistry.attachGroupWork({ file: authorityRecord, roles: clusterRoles });
 
   // Knowledge: the project's store (the wiki, or for a product that chose
   // `agent` the agent's own knowledge, with no wiki), the agent's own knowledge
@@ -487,7 +536,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const channelPolicy = new ChannelPolicyManager({
     storePath: resolveStatePath('channels', 'policies.json'),
   });
-  const distributedRuntime = new DistributedRuntimeManager(shellPaths.resolveProjectPath(surfaceRoot, 'remote', 'distributed-runtime.json'));
+  // Peer tokens are on the authority record: a peer paired on one machine of the group works on all of them.
+  const distributedRuntime = new DistributedRuntimeManager(shellPaths.resolveProjectPath(surfaceRoot, 'remote', 'distributed-runtime.json'), { authority: authorityRecord });
   distributedRuntime.attachRuntime({
     sessionBridge: sessionBroker,
     approvalBridge: approvalBroker,
@@ -532,7 +582,14 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
   const planManager = new ExecutionPlanManager(workPlan);
-  const adaptivePlanner = new AdaptivePlanner();
+  // Each strategy decision /workstream's drafting asks for is published as PLAN_STRATEGY_SELECTED.
+  const adaptivePlanner = new AdaptivePlanner({
+    onDecision: (decision) => emitPlanStrategySelected(runtimeBus, {
+      sessionId: 'system',
+      traceId: `planner:select:${decision.timestamp}`,
+      source: 'adaptive-planner',
+    }, decision),
+  });
   const idempotencyStore = new IdempotencyStore();
   const overflowHandler = new OverflowHandler({
     baseDir: workingDirectory,
@@ -602,6 +659,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       resolveStorePath: (name) => shellPaths.resolveProjectPath(surfaceRoot, name),
       agents: agentManager,
       processManager,
+      unattendedRuns,
       sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
     })
     : undefined;
@@ -900,17 +958,19 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // flags.status is in every host's catalog and the gate manager is this graph's,
   // so every host serves it, whichever verb groups the product registers.
   registerFlagsStatusGatewayMethods(gatewayMethods, featureFlags);
+  registerAuthorityStatusGatewayMethods(gatewayMethods, authorityRecord, () => authorityPeers);
   if ((product.gatewayVerbs ?? 'platform') === 'platform') {
     registerGatewayVerbGroups(gatewayMethods, {
       triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager,
       approvalBroker, watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus, sessionPresence, configManager,
       runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker,
       channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry,
-      pairingTokens: pairingTokens(), acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
+      pairingTokens: pairingTokens(), authority: authorityRecord, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
-      personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
+      personalCapture, clusterRoles, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
       listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
       modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),
+      modeInForceReason: (chosen, explicitlyChosen) => permissionManager.describeModeInForce(chosen, explicitlyChosen).reason,
     });
     scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   }
@@ -943,6 +1003,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     surfaceRoot,
     surface,
     shellPaths,
+    clusterRoles,
+    authorityRecord,
+    setAuthorityPeers: (peers: AuthorityStatusPeers | null) => { authorityPeers = peers; },
     ...(workspaceTrustManager ? { workspaceTrustManager } : {}),
     repositoryTrust,
     permissionManager,
@@ -1051,6 +1114,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     agentMessageBus,
     agentOrchestrator,
     agentToolDependencies,
+    unattendedRuns,
     personalCapture,
     featureAnnouncementStore: announcementStore,
     fileCache,

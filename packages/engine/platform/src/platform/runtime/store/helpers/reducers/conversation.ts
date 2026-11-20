@@ -32,22 +32,18 @@ export function updateConversationState(
   const source = event.type;
   if ('callId' in event) {
     if (!isCurrentTurnEvent(domain, event.turnId)) return domain;
+    // A budget event changes no call state: a call over its limit that finished
+    // still succeeded, and one its time limit stopped is settled by TOOL_FAILED.
+    if (event.type === 'BUDGET_EXCEEDED_MS' || event.type === 'BUDGET_EXCEEDED_TOKENS' || event.type === 'BUDGET_EXCEEDED_COST') return domain;
     const activeToolCalls = new Map(domain.activeToolCalls);
     const existing = activeToolCalls.get(event.callId);
     const stateByEvent: Partial<Record<ToolEvent['type'], ToolExecutionState>> = {
       TOOL_RECEIVED: 'received',
-      TOOL_VALIDATED: 'validated',
-      TOOL_PREHOOKED: 'prehooked',
       TOOL_PERMISSIONED: 'permissioned',
       TOOL_EXECUTING: 'executing',
-      TOOL_MAPPED: 'mapped',
-      TOOL_POSTHOOKED: 'posthooked',
       TOOL_SUCCEEDED: 'succeeded',
       TOOL_FAILED: 'failed',
       TOOL_CANCELLED: 'cancelled',
-      BUDGET_EXCEEDED_MS: 'failed',
-      BUDGET_EXCEEDED_TOKENS: 'failed',
-      BUDGET_EXCEEDED_COST: 'failed',
     };
     const nextState = stateByEvent[event.type];
     // A tool still running when its turn was cancelled or errored reports its end
@@ -60,7 +56,7 @@ export function updateConversationState(
     // A call that has succeeded, failed or been cancelled is settled: a later event
     // for the same callId (a stale phase event, a cancel racing a failure) must not
     // rewrite what the UI already shows. The same terminal state may still refine its
-    // own detail, e.g. TOOL_FAILED's message after a BUDGET_EXCEEDED_* event.
+    // own detail.
     // Call ids are unique per call (the orchestrator emits TOOL_RECEIVED once per id),
     // so no re-run reuses one.
     if (existing && TERMINAL_TOOL_STATES.has(existing.state) && nextState !== existing.state) return domain;
@@ -78,13 +74,7 @@ export function updateConversationState(
       error:
         'error' in event
           ? event.error
-          : event.type === 'BUDGET_EXCEEDED_MS'
-            ? `${event.phase} exceeded ${event.limitMs}ms budget`
-            : event.type === 'BUDGET_EXCEEDED_TOKENS'
-              ? `${event.phase} exceeded ${event.limitTokens} token budget`
-              : event.type === 'BUDGET_EXCEEDED_COST'
-                ? `${event.phase} exceeded $${event.limitCostUsd} cost budget`
-                : existing?.error,
+          : existing?.error,
     };
     activeToolCalls.set(event.callId, nextRecord);
     return {

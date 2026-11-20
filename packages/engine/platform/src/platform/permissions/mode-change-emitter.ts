@@ -1,7 +1,8 @@
 /**
  * Publishes changes of the execution mode in force, the same one the gate
  * enforces: legacy auto-approve transitions and a decision model turning ready
- * or not ready under jev-decides included.
+ * or not ready under jev-decides included, a set model that stops or starts
+ * answering among them.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -11,6 +12,7 @@ import type { EmitterContext } from '../runtime/emitters/index.js';
 import { emitPresetChanged } from '../runtime/emitters/gate.js';
 import { effectivePermissionMode } from '../gate/presets.js';
 import { DECISION_MODEL_READINESS_KEYS, permissionDecisionModelReady } from './decision-model-readiness.js';
+import { onDecisionModelEpisode } from '../runtime/decision-policy.js';
 
 type ModeSource = Pick<ConfigManager, 'get' | 'subscribe'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
 
@@ -54,6 +56,9 @@ function subscribe(configManager: ModeSource, runtimeBus: RuntimeEventBus, sessi
     configManager.subscribe('permissions.mode', publish),
     configManager.subscribe('behavior.autoApprove', publish),
     ...DECISION_MODEL_READINESS_KEYS.map((key) => configManager.subscribe(key, publish)),
+    // A set model counts as working only while it answers: its first failure turns jev-decides
+    // into ask-me and its next answer turns it back. Told once per episode; costs nothing while it answers.
+    onDecisionModelEpisode(publish),
   ];
   return () => { for (const unsubscribe of unsubscribers) unsubscribe(); };
 }

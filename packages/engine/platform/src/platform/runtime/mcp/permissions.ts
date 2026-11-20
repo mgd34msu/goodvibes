@@ -74,8 +74,8 @@ function verdictForPosture(
 ): import('./types.js').McpCoherenceVerdict {
   if (schemaFreshness === 'quarantined' || trustMode === 'blocked') return 'deny';
   if (trustMode === 'allow-all') return 'allow';
-  // Enforcement never asks: a call inside the configured scope is allowed and one
-  // outside it is denied, in every mode except allow-all and blocked.
+  // A call inside the configured scope is allowed; one outside it is denied under
+  // constrained and put to the owner under ask-on-risk (evaluateToolCall).
   return 'allow';
 }
 
@@ -105,7 +105,7 @@ function reasonForPosture(
     return `server '${serverName}' is allowed inside its configured scope and still exposes broad scope`;
   }
   if (trustMode === 'ask-on-risk') {
-    return `server '${serverName}' is allowed inside its configured scope; calls outside it are denied`;
+    return `server '${serverName}' is allowed inside its configured scope; calls outside it are put to the owner`;
   }
   if (allowedPaths.length === 0 || allowedHosts.length === 0) {
     return `server '${serverName}' is constrained but still has an open scope boundary`;
@@ -372,11 +372,16 @@ export class McpPermissionManager {
       ...(outsidePath ? [`${describeScoped(outsidePath)} is outside allowedPaths (${profile.allowedPaths.join(', ')})`] : []),
       ...(outsideHost ? [`${describeScoped(outsideHost)} is not an allowed host (${profile.allowedHosts.join(', ')})`] : []),
     ];
+    // ask-on-risk: a call outside the scope is the owner's to allow, never refused unasked.
+    const asks = !allowed && profile.mode === 'ask-on-risk';
     return {
       allowed, verdict: allowed ? 'allow' : 'deny', profileMode: profile.mode, causes,
+      ...(asks ? { askOwner: `The MCP server '${serverName}' is trusted ask-on-risk and this call to '${toolName}' is outside its configured scope: ${details.join('; ')}.` } : {}),
       reason: allowed
         ? `server '${serverName}' permits this tool`
-        : `request exceeds configured scope for server '${serverName}': ${details.join('; ')}. Call it with values inside the scope, or ask the owner to widen the server's scope.`,
+        : asks
+          ? `request exceeds configured scope for server '${serverName}' (ask-on-risk), so the owner decides it: ${details.join('; ')}.`
+          : `request exceeds configured scope for server '${serverName}': ${details.join('; ')}. Call it with values inside the scope, or ask the owner to widen the server's scope.`,
     };
   }
 

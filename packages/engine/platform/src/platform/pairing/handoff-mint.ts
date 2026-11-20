@@ -29,7 +29,7 @@ import type { MintedPairingToken } from './pairing-token-store.js';
 
 /** The token-minting surface a handoff needs, satisfied by {@link PairingTokenManager}. */
 export interface PairingTokenMinter {
-  mint(input: { readonly name: string; readonly replacesOffer?: string | undefined }): MintedPairingToken;
+  mint(input: { readonly name: string; readonly replacesOffer?: string | undefined; readonly origin?: 'owner-pairing' | 'automation' | undefined }): MintedPairingToken;
 }
 
 export interface PairingHandoff {
@@ -77,7 +77,8 @@ export function defaultPairingTokenName(now: Date = new Date()): string {
 }
 
 export function mintPairingHandoff(input: MintPairingHandoffInput): PairingHandoff {
-  const token = input.pairingTokens.mint({ name: input.name, ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
+  // Minted in the owner's own process, from the pairing screen at his terminal: the owner's device.
+  const token = input.pairingTokens.mint({ name: input.name, origin: 'owner-pairing', ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
   const fragment = buildPairingHandoffFragment({ token: token.token, offers: input.offers });
   const deepLink = input.webOrigin
     ? buildPairingHandoffLink({ webOrigin: input.webOrigin, token: token.token, offers: input.offers })

@@ -87,11 +87,17 @@ The derived keys mix a static-ephemeral DH against that pinned key, so:
 ## Trust bootstrap: the pairing payload
 
 Trust starts with a **pairing payload**, a compact, QR-encodable string
-(`gvrelay1.…`) carrying the relay URL, the rendezvous id, and the daemon's
-pinned static public key. Deliver it out-of-band (scan a QR on the same LAN,
-copy the string). This is the same trust model as an SSH host-key fingerprint or
-pairing a phone by scanning a code. **Treat a valid pairing payload like a
-credential**: whoever holds one can reach the daemon through the relay.
+(`gvrelay1.…`) carrying the relay URL, the rendezvous id, the daemon's
+pinned static public key and a relay code issued for that one device. Deliver
+it out-of-band (scan a QR on the same LAN, copy the string). This is the same
+trust model as an SSH host-key fingerprint or pairing a phone by scanning a
+code. The relay client sends the code (`x-goodvibes-relay-code`, inside the
+encrypted channel) on every tunneled request; the daemon keeps only its hash and
+refuses a request whose code it did not issue or has revoked (401
+`relay-code-revoked`). `relay.codes.list` lists the codes and
+`relay.codes.revoke` revokes one, so one device loses relay access without any
+other. **Treat a valid pairing payload like a credential**: whoever holds one
+can reach the daemon through the relay until its code is revoked.
 
 ## What the relay can and cannot see
 

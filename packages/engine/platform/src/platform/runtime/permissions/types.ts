@@ -447,13 +447,33 @@ export interface ModeConstraintRule extends BaseRule {
   classifications?: CommandClassification[] | undefined;
 }
 
+/**
+ * NeverRunRule, the owner's "never run commands matching": every command a call
+ * would hand a shell, through any tool and in every permission mode (yolo
+ * included), is refused when it runs one of these. Enforced by the gate itself
+ * (gate/never-run.ts), never by the layered evaluator or the remembered-rule
+ * matcher. Written by the owner only (`/permissions add never ...`).
+ *
+ * Example: `{ commands: ['git push'] }` refuses `git push`, `sudo git -C x push`,
+ * `sh -c "git push"` and the base64 form of any of them.
+ */
+export interface NeverRunRule extends BaseRule {
+  type: 'never-run';
+  effect: 'deny';
+  /** Every tool: the rule follows the command, whatever tool carries it. */
+  toolPattern: '*';
+  /** Each entry a program followed by the words it must carry, e.g. `git push`. */
+  commands: string[];
+}
+
 /** Discriminated union of all policy rule types. */
 export type PolicyRule =
   | PrefixRule
   | ArgShapeRule
   | PathScopeRule
   | NetworkScopeRule
-  | ModeConstraintRule;
+  | ModeConstraintRule
+  | NeverRunRule;
 
 // ── Evaluator Configuration ────────────────────────────────────────────────────
 

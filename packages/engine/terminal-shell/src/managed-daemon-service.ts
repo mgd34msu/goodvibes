@@ -5,12 +5,12 @@
  * (daemon-service-default.ts), so every path installs, reports and starts the
  * identical unit.
  */
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
-import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
+import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and
@@ -18,23 +18,19 @@ import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/
  * by name, so we pull their shapes off the class itself rather than reaching
  * past the package's declared export map. */
 type ManagedServiceManagerOptions = ConstructorParameters<typeof PlatformServiceManager>[1];
-type ManagedServiceDefinition = NonNullable<ManagedServiceManagerOptions['definitionOverride']>;
 export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
 
 // The daemon's one unit name on this platform, owned by the platform
 // (daemon-service-default.ts). Any explicit stored name or invocation overlay
 // outranks this fallback.
 export const MANAGED_SERVICE_NAME = resolveDaemonServiceDefault();
-export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
-
-/** The description the daemon's own `--install-service` and service routes give the unit they write. */
-const DAEMON_ROUTE_SERVICE_DESCRIPTION = 'goodvibes omnichannel daemon host';
+/** The description every GoodVibes-written definition carries (platform managed-service-definition.ts owns it). */
+export const MANAGED_SERVICE_DESCRIPTION = PLATFORM_SERVICE_DESCRIPTION;
 
 /**
  * Who wrote the service definition at a path: `absent` (nothing there),
  * `product` (this product's own definition: it names
- * {@link MANAGED_SERVICE_DESCRIPTION} or the daemon routes' description; a
- * LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
+ * {@link MANAGED_SERVICE_DESCRIPTION}; a LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
  * else, a symlink included: a definition the owner keeps elsewhere is never
  * written through), or `unreadable`.
  */
@@ -63,7 +59,28 @@ function readDefinitionFile(path: string): DefinitionFile {
 export function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner {
   const file = readDefinitionFile(path);
   if ('state' in file) return file.state;
-  return [MANAGED_SERVICE_DESCRIPTION, DAEMON_ROUTE_SERVICE_DESCRIPTION].some((mark) => file.contents.includes(mark)) ? 'product' : 'other';
+  return file.contents.includes(MANAGED_SERVICE_DESCRIPTION) ? 'product' : 'other';
+}
+
+/**
+ * Every daemon service definition GoodVibes wrote for this user on `platform`
+ * (systemd units in `~/.config/systemd/user`, LaunchAgents in
+ * `~/Library/LaunchAgents`), by service name: the default one and any second
+ * daemon installed under its own `service.serviceName`. One directory read and
+ * one read of each candidate file; nothing asks the service manager.
+ */
+export function listProductServiceNames(platform: string, unitHomeDir: string): string[] {
+  const location = platform === 'systemd' ? { dir: join(unitHomeDir, '.config', 'systemd', 'user'), suffix: '.service' }
+    : platform === 'launchd' ? { dir: join(unitHomeDir, 'Library', 'LaunchAgents'), suffix: '.plist' }
+      : undefined;
+  if (!location) return [];
+  let entries: string[];
+  try { entries = readdirSync(location.dir); } catch { return []; }
+  return entries
+    .filter((entry) => entry.endsWith(location.suffix) && /^[A-Za-z0-9_.@-]+$/.test(entry))
+    .filter((entry) => readManagedDefinitionOwner(join(location.dir, entry)) === 'product')
+    .map((entry) => entry.slice(0, -location.suffix.length))
+    .sort();
 }
 
 /**
@@ -149,41 +166,17 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     surfaceRoot: params.surfaceRoot ?? 'tui',
     readOnly: true,
   });
-  // The unit's ExecStart deliberately carries NO endpoint flags
-  // (--hostname/--port): the daemon resolves controlPlane.hostMode/host/port
-  // from the user's settings at boot, so a later config change (or a host
-  // already configured for hostMode=network / a non-default port) keeps its
-  // endpoint without a unit rewrite. Baking endpoint values here is what
-  // silently re-pinned custom-configured hosts back to the values current at
-  // install time. scripts/install.sh writes no unit of its own: it runs
-  // `goodvibes-daemon install-service` and `refresh-service`, so this is the
-  // one definition on every path.
-  // `--daemon-home` names the daemon's own STATE directory (operator tokens,
-  // the daemon settings tier). The default one, `<home>/.goodvibes/daemon`, is
-  // what the daemon resolves with no flag, so the unit carries the flag only
-  // for a selected directory: any explicit daemon home marks the process as
-  // relocated, and a relocated daemon never updates itself.
-  const defaultDaemonHome = join(params.homeDir, '.goodvibes', 'daemon');
-  const daemonHome = params.daemonHomeDirectory ?? defaultDaemonHome;
-  const definition: ManagedServiceDefinition = {
-    name: resolveConfiguredServiceName(configManager),
-    description: MANAGED_SERVICE_DESCRIPTION,
-    workingDirectory,
-    command: params.binaryPath,
-    args: daemonHome === defaultDaemonHome ? [] : ['--daemon-home', daemonHome],
-    // Service managers do not inherit the invoking shell's relocated tree.
-    env: params.homeDir === params.unitHomeDir ? {} : { GOODVIBES_HOME: params.homeDir },
-    // The owner's restart policy, the same one every other path honours.
-    restartOnFailure: configManager.get('service.restartOnFailure') !== false,
-  };
+  // The definition (no endpoint flags, `--daemon-home` only for a selected
+  // daemon home, `GOODVIBES_HOME` only for a moved tree, never a token) is
+  // built by the platform's one builder, the same one the daemon uses for its
+  // own install, so every writer produces the same file.
   return new PlatformServiceManager(configManager, {
     workingDirectory,
     // Unit paths resolve from the LOGIN home, never the (possibly
     // GOODVIBES_HOME-relocated) tree home above, see `unitHomeDir`'s doc.
     homeDirectory: params.unitHomeDir,
-    definitionOverride: definition,
+    launch: { command: params.binaryPath, homeDirectory: params.homeDir, daemonHomeDirectory: params.daemonHomeDirectory },
     defaultServiceName: MANAGED_SERVICE_NAME,
-    defaultServiceDescription: MANAGED_SERVICE_DESCRIPTION,
     actionRunner: params.actionRunner,
     assertCurrent: params.assertCurrent,
     // No `featureFlags` passed: `isFeatureGateEnabled` treats a missing reader

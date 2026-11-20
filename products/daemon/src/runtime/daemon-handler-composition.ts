@@ -5,7 +5,7 @@ import type { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/ema
 import { registerOwnedMailInbox } from './owned-inbox-mail.js';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
+import { clusterRoleGate, type ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
 import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { DistributedRuntimeManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -15,6 +15,7 @@ import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daem
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { createPaymentsServices } from './payments-composition.js';
+import { recordGroupSpend } from '@goodvibes-jev/engine/platform/platform/payments';
 import { createOwnerMailRelay } from './owner-mail-relay.js';
 import { inboxPollerGate } from './cluster-composition.js';
 import type { ShellPathService } from './index.js';
@@ -83,6 +84,10 @@ export interface DaemonHandlerCompositionOptions {
   readonly mailboxReaders?: MailboxReaders | undefined;
   /** Its entries can name where an inbox provider's credential is stored. */
   readonly serviceRegistry?: { get(serviceName: string): object | null } | undefined;
+  /** The authority record; in a group the day's payment spend is counted on it. */
+  readonly authorityRecord?: import('@goodvibes-jev/engine/platform/platform/cluster').AuthorityRecordFile | undefined;
+  /** A group member's name from the roster, for referring the owner to the machine that runs a role. */
+  readonly clusterMemberName?: ((nodeId: string) => string | null) | undefined;
 }
 
 /** Return only after each real surface is ready; failed acquisition rolls back. */
@@ -134,20 +139,41 @@ export async function createDaemonHandlerComposition(
     }, { configManager: options.configManager, secretsManager: options.secretsManager,
       ...(options.serviceRegistry ? { serviceRegistry: options.serviceRegistry } : {}) }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,
-    registerPayments: () => createPaymentsServices({
-      paymentContinuationOwner: options.paymentContinuationOwner,
-      nativeDataWriter: options.nativeDataWriter,
-      gatewayMethods: options.gatewayMethods,
-      configManager: options.configManager,
-      secretsManager: options.secretsManager,
-      shellPaths: options.shellPaths,
-      // No payments election exists. Clustering off is the single-owner case;
-      // a clustered node cannot claim spending leadership from inbox ownership.
-      isPaymentsLeader: () => !options.clusterCoordinator.enabled,
-      checkoutSeam: options.checkoutSeam,
-      channelDeliveryRouter: options.channelDeliveryRouter,
-      ownerMail,
-      ownerInbox: options.ownerInbox,
-    }),
+    registerPayments: () => {
+      const coordinator = options.clusterCoordinator;
+      const services = createPaymentsServices({
+        paymentContinuationOwner: options.paymentContinuationOwner,
+        nativeDataWriter: options.nativeDataWriter,
+        gatewayMethods: options.gatewayMethods,
+        configManager: options.configManager,
+        secretsManager: options.secretsManager,
+        shellPaths: options.shellPaths,
+        // One machine in a group runs payments: the holder of the payments
+        // role, which the cluster election gives to exactly one machine at a
+        // time. Alone, this machine holds it.
+        isPaymentsLeader: () => coordinator.holdsRole('payments'),
+        // The day's spend is counted across the group: a role that moves mid-day
+        // leaves one daily budget, not one per machine that held it.
+        ...(coordinator.enabled && options.authorityRecord ? { groupSpend: recordGroupSpend(options.authorityRecord,
+          () => String(options.configManager.get('payments.currency' as ConfigKey) ?? '')) } : {}),
+        paymentsHolder: () => {
+          const holder = coordinator.roleHolder('payments');
+          return holder === null ? null : options.clusterMemberName?.(holder) ?? holder;
+        },
+        checkoutSeam: options.checkoutSeam,
+        channelDeliveryRouter: options.channelDeliveryRouter,
+        ownerMail,
+        ownerInbox: options.ownerInbox,
+      });
+      if (!coordinator.enabled) return services;
+      // Contest the role; a machine that takes it recovers the checkouts a
+      // previous holder left interrupted here before it buys anything new.
+      const withdraw = coordinator.registerOwned(clusterRoleGate('payments', () => services.recoverAsLeader()));
+      const close = (): Promise<void> => Promise.allSettled([withdraw(), services.close()]).then((results) => {
+        const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failed) throw failed.reason;
+      });
+      return { ...services, close, unregister: () => { void close().catch(() => {}); } };
+    },
   });
 }

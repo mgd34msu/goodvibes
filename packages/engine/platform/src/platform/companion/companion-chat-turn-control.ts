@@ -46,6 +46,8 @@ export interface CompanionProviderChunk {
   readonly result?: unknown | undefined;
   readonly isError?: boolean | undefined;
   readonly error?: string | undefined;
+  /** On an `error` chunk: the failure itself, so its kind (a provider failure) survives the stream. */
+  readonly failure?: unknown;
 }
 
 export interface CompanionLLMProvider {

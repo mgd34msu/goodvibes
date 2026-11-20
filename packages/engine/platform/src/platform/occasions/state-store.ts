@@ -48,6 +48,9 @@ import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { logger } from '../utils/logger.js';
 import { reconcileRaiseLedger } from './cadence.js';
+import { groupWorkShared, type GroupWorkLink } from '../cluster/group-work.js';
+import type { AuthorityChange } from '../cluster/authority-record-file.js';
+import { mergeOccasionSlices, occasionIdsOf, sliceIsEmpty, sliceJson, sliceOf, withSlice, type OccasionSlice } from './state-replica.js';
 import { addDays, isIsoDate, type IsoDate } from './dates.js';
 import {
   isOccasionAckSource,
@@ -364,9 +367,134 @@ export class OccasionStateStore {
   private reconciledOpenItems = 0;
   /** Whole-file writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
+  /** The group's record, once attached; it is used only while this machine is in a group. */
+  private group: GroupWorkLink | null = null;
+  /** Per occasion, the state this machine last wrote to or took from the group's record. */
+  private readonly groupKnown = new Map<string, string>();
+  /** Whether every occasion has been compared with the record once since this machine was in a group. */
+  private groupTaken = false;
 
   constructor(private readonly filePath: string) {
     this.store = new PersistentStore<OccasionStateSnapshot>(filePath);
+  }
+
+  /**
+   * Keep each occasion's state on the group's record (`occasion-state:<id>`,
+   * state-replica.ts). In a group, an answer, a gift or a raised nudge
+   * recorded on one machine is in every machine's state, so the machine that
+   * holds the occasions role next does not ask again what was answered
+   * elsewhere. Outside a group this changes nothing.
+   */
+  attachGroupWork(link: GroupWorkLink): () => void {
+    this.group = link;
+    return link.file.onChange((notice) => {
+      if (notice.local) return;
+      const ids = notice.keys.filter((key) => key.startsWith('occasion-state:')).map((key) => key.slice('occasion-state:'.length));
+      if (ids.length > 0) void this.takeFromGroup(ids).catch((error: unknown) => {
+        logger.warn('occasions: state from the group could not be taken in here', { error: String(error) });
+      });
+    });
+  }
+
+  /**
+   * Take in occasions' state from the group's record. An occasion this machine
+   * has not changed since it last wrote it takes the record's version whole
+   * (a resolution or removal elsewhere stands); one changed here meanwhile is
+   * merged record by record. With no `only`, every occasion, and state this
+   * machine had before it joined goes onto the record.
+   */
+  async takeFromGroup(only?: readonly string[]): Promise<void> {
+    const group = this.group;
+    if (!groupWorkShared(group ?? undefined)) return;
+    await this.state(true);
+    const view = group!.file.view();
+    if (!view) return;
+    // The first comparison in a group covers every occasion, so state this
+    // machine held before it joined goes onto the record.
+    const full = only === undefined || !this.groupTaken;
+    this.groupTaken = true;
+    await this.change(snapshot => {
+      const ids = !full && only ? only : [...new Set([...occasionIdsOf(snapshot), ...view.list('occasion-state').map((entry) => entry.id)])];
+      let changed = false;
+      for (const id of ids) {
+        const entry = view.entry('occasion-state', id);
+        if (!entry || entry.revoked) continue;
+        const remote = sliceOf(validateOccasionState(entry.public.state).snapshot, id);
+        const local = sliceOf(snapshot, id);
+        const remoteJson = sliceJson(remote), localJson = sliceJson(local);
+        if (remoteJson === localJson) { this.groupKnown.set(id, remoteJson); continue; }
+        const unpublishedHere = this.groupKnown.has(id) ? this.groupKnown.get(id) !== localJson : !sliceIsEmpty(local);
+        const next = unpublishedHere ? mergeOccasionSlices(local, remote) : remote;
+        // Known as the record's version, so a merged result is written back by the publish that follows.
+        this.groupKnown.set(id, remoteJson);
+        if (sliceJson(next) === localJson) continue;
+        Object.assign(snapshot, withSlice(snapshot, id, next));
+        changed = true;
+      }
+      return changed;
+    }, UNRESTRICTED_OPERATION, { publish: changed => changed });
+    this.publishToGroup();
+  }
+
+  /**
+   * Write every occasion whose state moved since this machine last wrote or
+   * took it. An occasion another machine changed meanwhile is merged with it
+   * under the record's lock, and the merged state is then taken in here too.
+   */
+  private publishToGroup(): void {
+    const group = this.group;
+    const snapshot = this.snapshot;
+    if (!snapshot || !groupWorkShared(group ?? undefined)) return;
+    if (!this.groupTaken) {
+      void this.takeFromGroup().catch((error: unknown) => {
+        logger.warn('occasions: state could not be compared with the group\'s record', { error: String(error) });
+      });
+      return;
+    }
+    const pending: Array<[string, OccasionSlice]> = [];
+    for (const id of new Set([...occasionIdsOf(snapshot), ...this.groupKnown.keys()])) {
+      const slice = sliceOf(snapshot, id);
+      const json = sliceJson(slice);
+      if (this.groupKnown.get(id) === json || (!this.groupKnown.has(id) && sliceIsEmpty(slice))) continue;
+      pending.push([id, slice]);
+    }
+    if (pending.length === 0) return;
+    const before = new Map(pending.map(([id]) => [id, this.groupKnown.get(id)]));
+    const merged: Array<[string, OccasionSlice]> = [];
+    void group!.file.write((view) => {
+      const changes: AuthorityChange<null>[] = [];
+      for (const [id, slice] of pending) {
+        const entry = view.entry('occasion-state', id);
+        let out = slice;
+        if (entry && !entry.revoked) {
+          const remote = sliceOf(validateOccasionState(entry.public.state).snapshot, id);
+          const remoteJson = sliceJson(remote);
+          // Changed elsewhere since this machine last saw it: keep both.
+          if (remoteJson !== this.groupKnown.get(id) && remoteJson !== sliceJson(slice)) {
+            out = mergeOccasionSlices(slice, remote);
+            if (sliceJson(out) !== sliceJson(slice)) merged.push([id, out]);
+          }
+          if (sliceJson(out) === remoteJson) { this.groupKnown.set(id, remoteJson); continue; }
+          changes.push({ kind: 'update', key: `occasion-state:${id}`, narrowsOrWidens: false, value: null, patch: { state: out } });
+        } else if (!entry) {
+          changes.push({ kind: 'issue', value: null, entries: [{ kind: 'occasion-state', id, public: { occasionId: id, state: out as unknown as Readonly<Record<string, unknown>> } }] });
+        } else continue;
+        this.groupKnown.set(id, sliceJson(out));
+      }
+      const decided: AuthorityChange<null> = changes.length > 0 ? { kind: 'many', changes, value: null } : { kind: 'none', value: null };
+      return decided;
+    }).then(async () => {
+      if (merged.length === 0) return;
+      await this.change(snapshot => {
+        for (const [id, slice] of merged) Object.assign(snapshot, withSlice(snapshot, id, slice));
+      });
+    }).catch((error: unknown) => {
+      for (const [id, known] of before) {
+        if (known === undefined) this.groupKnown.delete(id);
+        else this.groupKnown.set(id, known);
+      }
+      logger.warn('occasions: state could not be written to the group\'s record; the next change tries again', { error: String(error) });
+    });
   }
 
   get path(): string {
@@ -490,6 +618,7 @@ export class OccasionStateStore {
         receipts?.onStateEffect?.(published); physical?.onEffect(published);
       }, beforePublish: () => { assertCurrent(); physical?.assertCurrent(); }, afterPublish: () => {
         this.snapshot = snapshot; this.publication += 1; options.afterPublish?.();
+        this.publishToGroup();
       } });
       value = result;
     });

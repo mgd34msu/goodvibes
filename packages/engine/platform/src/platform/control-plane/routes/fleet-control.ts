@@ -36,6 +36,7 @@ const FLEET_CONTROL_OUTPUT_SCHEMA = objectSchema({
 export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'fleet.stop',
+    repeat: 'safe',
     title: 'Stop a Fleet Node',
     description: 'Hard-stop one fleet node through its owning manager (agent cancel, background process stop, watcher stop, workflow cancel, trigger or schedule remove, contract cancel, hosted ACP agent stop). `cascade: true` stops its descendants first. Answers the node ids actually acted on. A node whose capabilities do not include killable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',
@@ -47,6 +48,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'fleet.interrupt',
+    repeat: 'safe',
     title: 'Interrupt a Fleet Node',
     description: 'Gracefully interrupt one fleet node: an agent ends its current turn, a trigger or schedule is paused. Answers the node ids acted on. A node whose capabilities do not include interruptible is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',
@@ -58,6 +60,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'fleet.resume',
+    repeat: 'safe',
     title: 'Resume a Fleet Node',
     description: 'Re-arm one paused trigger or schedule (for a trigger with an open breaker, this is the reset the breaker waits for). Answers the node ids acted on. A node whose capabilities do not include resumable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',

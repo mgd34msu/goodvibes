@@ -8,8 +8,8 @@
  * folds them into the layered evaluator when the policy engine flag is on,
  * user rules are evaluated ahead of managed rules there.
  *
- * Storage: one JSON file per surface in the user's control-plane config dir
- * (shared by every project), atomic writes via PersistentStore; ':memory:' for
+ * Storage: one JSON file for the owner, shared by every program and every
+ * project (ownerPermissionRulesPath), atomic writes via PersistentStore; ':memory:' for
  * tests. A rule remembered from a prompt carries the project root it was made
  * in and matches only there; a rule with no project key (written by hand)
  * matches in every project.
@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
@@ -46,8 +46,12 @@ export interface CompiledProjectRules {
 export interface StoredUserPermissionRule {
   readonly rule: PolicyRule;
   readonly createdAt: number;
-  /** The remember tier that produced this rule. */
-  readonly tier: Exclude<RememberTier, 'session'>;
+  /**
+   * The remember tier that produced this rule, or the kind the owner added
+   * directly (`/permissions add`): one of those tiers, or `never-run` for a
+   * "never run commands matching" rule.
+   */
+  readonly tier: Exclude<RememberTier, 'session'> | 'never-run';
   /** The tool whose ask produced the rule (display context). */
   readonly tool: string;
   /** The project root the rule was remembered in; absent means it applies in every project. */
@@ -59,6 +63,19 @@ export interface StoredUserPermissionRule {
  * made reaches this one within this bound even if the directory watch goes quiet.
  */
 const USER_RULE_STALENESS_MS = 2_000;
+
+/**
+ * The one file the owner's permission rules live in: `~/.goodvibes/shared/permission-rules.json`
+ * under the home every program resolves (`GOODVIBES_HOME` moves it). The terminal app, the
+ * Agent and the daemon all read and write it, so a rule added, remembered or removed in one
+ * holds in the others without a restart; a rule remembered in a project keeps its project key
+ * and matches only there. A configuration with no home directory keeps its rules beside its
+ * own settings.
+ */
+export function ownerPermissionRulesPath(config: { getHomeDirectory(): string | null; getControlPlaneConfigDir(): string }): string {
+  const home = config.getHomeDirectory();
+  return home ? join(home, '.goodvibes', 'shared', 'permission-rules.json') : join(config.getControlPlaneConfigDir(), 'permission-rules.json');
+}
 
 /** The identity a rule's project key is compared by: the resolved project root path. */
 export function projectIdentity(root: string): string {
@@ -308,8 +325,12 @@ export class UserPermissionRuleStore {
   /** Every rule change as a revision source. Reading it takes in another process's write first (one stat). */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
 
-  /** All stored rules, including ones remembered during this process, newest first. */
+  /**
+   * All stored rules, including ones remembered during this process, newest
+   * first, after taking in another program's change (the one file is shared).
+   */
   list(): readonly StoredUserPermissionRule[] {
+    this.refreshFromDisk();
     return [...this.records, ...this.remembered].sort((a, b) => b.createdAt - a.createdAt);
   }
 

@@ -133,7 +133,7 @@ export type {
 // a graph builds each piece the one way rather than a fourth way.
 export { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
 export type { RuntimeFeatureFlagOptions } from './feature-flag-composition.js';
-export { createProviderStack } from './provider-stack.js';
+export { createProviderStack, isScannedServerOnThisComputer } from './provider-stack.js';
 export type { ProviderStack, ProviderStackOptions } from './provider-stack.js';
 export { createAgentGraph } from './agent-graph.js';
 export type { AgentGraph, AgentGraphOptions } from './agent-graph.js';

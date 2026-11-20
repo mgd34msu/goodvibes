@@ -17,7 +17,8 @@ Options:
   --workspace DIR       The project directory the daemon service works in (default: this checkout,
                         or the previous install's).
   --port PORT           The daemon and WebUI port on 127.0.0.1 (default: 3421, or the previous install's).
-  --no-service          Do not run the daemon as a systemd user service.
+  --no-service          Do not run the daemon as a systemd user service (recorded in
+                        service.enabled, so a daemon started by hand installs none).
   --service             Run the daemon as a systemd user service (the default).
   --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or
                         "No Decision Model" (sets judgment.policy).

@@ -141,3 +141,10 @@ export function parseChannelDeliveryTarget(channel: string): ChannelDeliveryTarg
     ...(address ? { address } : {}),
   };
 }
+
+/** Why a channel string names no surface a message can be delivered to; undefined when it does. */
+export function deliveryChannelProblem(channel: string): string | undefined {
+  const { surfaceKind } = parseChannelDeliveryTarget(channel);
+  if ((CHANNEL_DELIVERY_SURFACE_KINDS as readonly string[]).includes(surfaceKind ?? '')) return undefined;
+  return `"${channel}" names no delivery surface ("${surfaceKind ?? ''}" is not one of ${CHANNEL_DELIVERY_SURFACE_KINDS.join(', ')})`;
+}

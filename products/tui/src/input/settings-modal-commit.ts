@@ -16,8 +16,7 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { buildMcpEntries } from './settings-modal-data.ts';
-import { keepMcpToolRuleFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { parseListSettingEdit } from './settings-modal-lists.ts';
 import type { SettingsDaemonCredentialWriter } from './settings-modal-secrets.ts';
 import type { McpEntry, SettingEntry } from './settings-modal-types.ts';
@@ -71,8 +70,10 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
         ctx.rejectEdit?.(`Type exactly "${expected}" to allow all; the trust mode was not changed.`);
         return false;
       }
-      ctx.mcpRegistry.setServerTrustMode(entry.name, 'allow-all');
-      ctx.setMcpEntries(buildMcpEntries(ctx.mcpRegistry));
+      // Applied now and kept in the server's entry of the owner's global MCP config.
+      keepMcpTrustModeFromSettings(ctx.mcpRegistry, entry.name, 'allow-all', (message, entries) => {
+        if (ctx.reportMcpToolRule) ctx.reportMcpToolRule(message, entries); else ctx.setMcpEntries(entries);
+      });
       ctx.setEditingMode(false);
       ctx.setEditBuffer('');
       ctx.setMcpAllowAllConfirmationTarget(null);
@@ -107,8 +108,9 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
       ctx.setEditBuffer('');
       return false;
     }
-    ctx.mcpRegistry.setServerTrustMode(entry.name, nextMode);
-    ctx.setMcpEntries(buildMcpEntries(ctx.mcpRegistry));
+    keepMcpTrustModeFromSettings(ctx.mcpRegistry, entry.name, nextMode, (message, entries) => {
+      if (ctx.reportMcpToolRule) ctx.reportMcpToolRule(message, entries); else ctx.setMcpEntries(entries);
+    });
     ctx.setEditingMode(false);
     ctx.setEditBuffer('');
     ctx.setMcpAllowAllConfirmationTarget(null);

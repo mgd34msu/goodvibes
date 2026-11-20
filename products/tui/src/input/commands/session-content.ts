@@ -11,6 +11,7 @@ import { sessionCommand } from './session.ts';
 import { saveCommand } from './session-workflow.ts';
 import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
+import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.exportCommand);
@@ -39,8 +40,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'undo',
     aliases: [],
     description:
-      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts every file the last write/edit call changed. /undo alone removes the last conversation turn',
-    usage: '[rewind|file]',
+      'Undo last action. /undo rewind reverses the last /rewind. /undo file reverts every file the last write/edit call changed (/undo file drop sets aside an entry a later change blocks). /undo alone removes the last conversation turn',
+    usage: '[rewind|file [drop]]',
     argsHint: '[rewind|file]',
     async handler(args, ctx) {
       if (args[0] === 'rewind') {
@@ -49,20 +50,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         return;
       }
       if (args[0] === 'file') {
-        if (!ctx.workspace.fileUndoManager) {
-          ctx.print('File undo not available.');
-          return;
-        }
-        try {
-          const result = ctx.workspace.fileUndoManager.undo();
-          ctx.print(
-            result
-              ? `${result.paths.length === 1 ? 'File' : `${result.paths.length} files`} reverted (last ${result.tool} call):\n${result.paths.map((path) => `  ${path}`).join('\n')}\nUse /redo file to re-apply.`
-              : 'Nothing to undo. No file operations recorded.',
-          );
-        } catch (err) {
-          ctx.print(`File undo failed: ${summarizeError(err)}`);
-        }
+        if (args[1] === 'drop') dropFileChange(ctx.workspace.fileUndoManager, 'undo', (text) => ctx.print(text));
+        else undoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
         return;
       }
       if (ctx.isGenerating?.()) {
@@ -83,7 +72,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'redo',
     description:
       'Redo last undone action. /redo rewind re-applies the last undone /rewind. /redo file re-applies the last reverted file. /redo alone restores a conversation turn',
-    usage: '[rewind|file]',
+    usage: '[rewind|file [drop]]',
     argsHint: '[rewind|file]',
     async handler(args, ctx) {
       if (args[0] === 'rewind') {
@@ -92,18 +81,8 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         return;
       }
       if (args[0] === 'file') {
-        if (!ctx.workspace.fileUndoManager) {
-          ctx.print('File redo not available.');
-          return;
-        }
-        try {
-          const result = ctx.workspace.fileUndoManager.redo();
-          ctx.print(result
-            ? `${result.paths.length === 1 ? 'File' : `${result.paths.length} files`} re-applied (${result.tool} call):\n${result.paths.map((path) => `  ${path}`).join('\n')}`
-            : 'Nothing to redo.');
-        } catch (err) {
-          ctx.print(`File redo failed: ${summarizeError(err)}`);
-        }
+        if (args[1] === 'drop') dropFileChange(ctx.workspace.fileUndoManager, 'redo', (text) => ctx.print(text));
+        else redoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
         return;
       }
       if (ctx.isGenerating?.()) {

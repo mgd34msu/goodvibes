@@ -81,6 +81,7 @@ export const STEP_UP_CHALLENGE_MINT_OUTPUT_SCHEMA = objectSchema({
 export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'stepup.credentials.register',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Register Step-up Credential',
     description: 'Store a WebAuthn (passkey) credential for relay step-up, its credentialId, COSE public key, and starting signature counter, and set the deployment policy (relying-party id, allowed origins, user-verification requirement). Admin/local-only: registering a step-up credential is itself a sensitive act. Self-hosted deployments register the credential directly (\'none\' attestation).',
@@ -104,6 +105,7 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'stepup.credentials.remove',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Remove Step-up Credential',
     description: 'Remove a registered step-up passkey so it can no longer confirm anything (a lost device). Answers 404 when no credential has that id. Admin/local-only. Mutating, so a relay call needs a step-up assertion. Removing the last passkey leaves no credential to confirm relay actions until a new one is registered.',

@@ -7,7 +7,6 @@ import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
  * The broker callback remains for compatibility APIs outside autonomous calls.
  */
 
-import { join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ConfigManager } from '../../config/manager.js';
@@ -15,7 +14,7 @@ import type { PermissionPromptDecision, PermissionPromptRequest } from '../../pe
 import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
 import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
-import { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
+import { ownerPermissionRulesPath, UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
 import { isFeatureGateEnabled, type FeatureFlagManager } from '../feature-flags/index.js';
 import {
@@ -61,9 +60,9 @@ export type UserPermissionRuleAccess = Pick<UserPermissionRuleStore, 'rules' | '
  * non-fatal: asks then prompt instead of matching a remembered rule.
  */
 export function createUserPermissionRuleStore(
-  configManager: Pick<ConfigManager, 'getControlPlaneConfigDir'>,
+  configManager: Pick<ConfigManager, 'getControlPlaneConfigDir' | 'getHomeDirectory'>,
 ): UserPermissionRuleStore {
-  const store = new UserPermissionRuleStore(join(configManager.getControlPlaneConfigDir(), 'permission-rules.json'));
+  const store = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager));
   void store.init().catch((error) => logger.warn('user permission rule store init failed; asks will prompt', { error: summarizeError(error) }));
   return store;
 }

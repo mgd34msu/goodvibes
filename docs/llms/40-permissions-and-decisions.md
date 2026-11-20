@@ -14,7 +14,7 @@ How settings are written in this part: the examples use the terminal app's `/con
 | owner-only item | A call only the owner may decide. Jev never answers one. The full list is in "What always comes to the owner". |
 | judgment call | A call that is neither a fact nor an owner-only item. Only judgment calls are put to the decision model. |
 | decision model | The model that reads judgment calls and other decisions. Jev is the hosted decision model. |
-| working decision model | A decision model that is set (see "When a decision model counts as working") while `judgment.policy` is not `No Decision Model`. The gate does not test whether it answers; a model that fails is handled per call by `judgment.policy`. |
+| working decision model | A decision model that is set (see "When a decision model counts as working") while `judgment.policy` is not `No Decision Model`, and is answering: from its first failed request until it answers again it does not count as working. Nothing is sent to test it; the gate's own requests show it. |
 | stakes | The level the gate's reading gives a judgment call: `low`, `medium`, `high` or `critical`. Defined in "Stakes". Only a decision model's reading produces one. |
 | held call | A call `just-vibes` did not run because it needed the owner; it is listed at the end of the run and answered with `/held`. |
 | remembered rule | A saved answer ("always allow this command class in this project") that settles later calls. |
@@ -24,8 +24,10 @@ How settings are written in this part: the examples use the terminal app's `/con
 
 The gate applies these steps in order. The first step that settles the call decides it.
 
+Before them, in every mode (`yolo` included), the owner's never-run rules are checked: a call that would hand a shell a command a never-run rule names is refused (see "Never-run rules"). And a call the owner's `Pre:tool` hook answered `ask`, or a call to an MCP server trusted `ask-on-risk` outside its scope, is put to the owner in every mode, `yolo` included (held for him in `just-vibes`), unless a step below refuses it.
+
 1. An act only the owner performs himself is refused to the model in every mode, `yolo` included. These are: answering an approval or a purchase window, and granting or withdrawing access through an operator method the catalog declares owner-only. The refusal tells the model to tell the owner what is waiting.
-2. Where the instruction came from. A call that is not a read, asked for in a conversation on a chat channel the owner set up (Slack, Discord, Matrix and the other chat surfaces except Telegram), becomes the owner-only item `channel-request`. A call that is not a read, asked for on email, a generic webhook or ntfy, is refused outright: anyone can write to those, so no approval is raised. Telegram and the terminal carry command authority, so a request there is decided like one typed in the terminal app. Authority belongs to the surface, not the sender: any Telegram sender the surface's allowlist admits (the owner, and anyone the owner later admits) gets it. See "Who may talk to the assistant" in "Automation and services" for who is admitted.
+2. Where the instruction came from. A call that is not a read, asked for in a conversation on a chat channel the owner set up (Slack, Discord, Matrix and the other chat surfaces except Telegram), becomes the owner-only item `channel-request`. A call that is not a read, asked for on email, a generic webhook or ntfy, is refused outright: anyone can write to those, so no approval is raised. Telegram and the terminal carry command authority, so the owner's request there is decided like one typed in the terminal app. Authority belongs to the person, not the surface: a turn started by anyone else a channel admits (a guest) carries no authority on any surface, Telegram included. Its plain reads (files inside the allowed directories) run; every other call, a read that reaches the network or the app's own state or leaves the allowed directories included, becomes `channel-request`, put to the owner in every mode, `yolo` included, with or without a decision model (held for him in `just-vibes`). See "Who may talk to the assistant" in "Automation and services" for who is admitted.
 3. Plan mode. In `plan`, every call that is not a read is refused with "plan mode is on and <tool> would change something".
 4. `yolo`. In `yolo`, every call that passed steps 1 to 3 runs.
 5. A matching deny rule refuses the call. A matching "always ask me" rule makes it the owner-only item `standing-ask`.
@@ -108,11 +110,16 @@ A refusal by Jev is remembered for the rest of the operation. If the decision mo
 
 A decision model is set when any of these is true: `judgment.endpoint` is not empty, `TYPESAFE_BASE_URL` is set, `judgment.fallbacks` has a target, `judgment.keySource` is `secret` or `none`, the environment variable named by `judgment.keyName` (default `TYPESAFE_API_KEY`) holds a value, `judgment.model` is not empty, or `TYPESAFE_DEFAULT_MODEL` is set.
 
-The gate treats the decision model as working when it is set and `judgment.policy` is not `No Decision Model`.
+The gate treats the decision model as working when it is set, `judgment.policy` is not `No Decision Model`, and it is answering. The first request that fails (unreachable, refused key, no answer within `judgment.decisionDeadlineMs`, a malformed answer) starts a failure episode: from the next tool call, `jev-decides` runs as `ask-me`, the mode change is announced (`PRESET_CHANGED`, the mode chip, the web UI) and the conversation gets one notice naming the model, what failed and that permission decisions now ask you. The gate keeps reading calls with the model as before (no extra request is made to test it); the first answer ends the episode, `jev-decides` is in force again from the next call, and the conversation is told once. A call already being decided keeps the mode it started under. In `just-vibes` a failing model is still asked; a call it cannot decide is held.
 
 One extra rule applies to `jev-decides` while it is only the shipped default (the owner never chose a mode): Jev decides only when every place a decision can be answered matches the shipped calibration record. That record measured the hosted endpoint `https://api.typesafe.ai` with the model `jev-latest`, answered by `jev-1.14.0`; a `judgment.model` of either `jev-latest` or `jev-1.14.0` on that endpoint counts as measured. A custom endpoint, a different model, or a fallback target with another endpoint or model is not what was measured, so the default `jev-decides` then behaves as `ask-me`. The rule does not apply once the owner has chosen the mode: saved in settings, chosen with Shift+Tab, chosen for a hosted session or set in a channel profile. A chosen `jev-decides` lets Jev decide on any working decision model.
 
-What the reports show: `goodvibes status` (the `permissions:` line) and `/permissions` (the `session mode:` line) show the mode as set (saved, or overridden for this launch or session), with `behavior.autoApprove` read as `yolo`. They do not show the lowering above: with no working decision model, or with the unchosen default on an unmeasured model, `status` prints `permissions: Jev decides (jev-decides)` while the gate runs `ask-me`. To know the mode in force, read the `Decision model:` block of `goodvibes status` and apply the two rules above.
+What the reports show: every report shows the mode in force, read by the same rule the gate reads, and, when it is not the saved or chosen mode, which mode that is and why.
+
+- `goodvibes status` and `goodvibes-agent status`: `permissions: Ask me (ask-me) in force; set: jev-decides` (the saved mode, or the one `-c` sets for this launch), then `not jev-decides, because <reason>`. The reasons: `no decision model is set (judgment.model, judgment.endpoint or TYPESAFE_API_KEY), so every call Jev would decide asks you`; `judgment.policy is No Decision Model, so Jev cannot decide and every call it would decide asks you`; `jev-decides is only the shipped default here and the gate's decisions were not measured on this decision model; choose jev-decides yourself (/settings permissions.mode) to use it`; `the saved setting behavior.autoApprove is on, which selects yolo`. With `--json` the same is under `auth.permissionModeInForce` (`chosen`, `mode`, `reason`). `status` runs without the app, so a model that is failing in a running app is reported by that app, not by `status`.
+- `/permissions`: `mode in force: <mode> (<label>)`, then `not <mode>, because <reason>` when it differs, then `saved mode: <mode>`, or `chosen for this session: <mode>; saved default: <mode> (set in /settings)` after Shift+Tab. A running app also gives the reason `the decision model <model> is not answering (<what failed>, since <time>); calls Jev would decide ask you until it answers again`. In the Agent bound to a hosted session, the session's mode and reason come from the daemon.
+- The mode chip in either app shows the mode in force.
+- The web UI and the operator method `sessions.permissionMode.get`: `mode` is the mode in force; `chosenMode` is the session's chosen (or saved) mode and `reason` says why they differ. The session page shows `(in force; <chosen> chosen, but <reason>)`.
 
 ### Choosing the mode
 
@@ -211,7 +218,7 @@ The command is read through the wrappers `sudo`, `doas`, `env`, `nice`, `nohup`,
 | `grant-access` | `mcp` with mode `set-trust`, `set-role` or `approve-quarantine`; every hook change the model requests; a tool its registration declares dangerous (the channel provider actions `runtime-start`, `runtime-stop`, `register-command` and `poll`). |
 | `owner-act` | An operator method the catalog declares owner-only, called through `agent_operator_method` (answering an approval or purchase window, typing a card code, approving a purchase in advance, adding a standing authorisation, granting or withdrawing access) or an operator action declared owner-only. Refused, never asked. |
 | `change-contract`, `irreversible-operator` | Operator methods the catalog declares as changing a contract or irreversible, called through the operator-method and operator-action tools. |
-| `loosen-security` | A settings write (the `goodvibes_settings` tool or the Agent's settings tool) whose key's own loosening rule says the new value is looser: a higher spending limit, `sandbox.enabled` off, a looser `permissions.mode`, and the like. |
+| `loosen-security` | A settings write (the `goodvibes_settings` tool or the Agent's settings tool) whose key's own loosening rule says the new value is looser: a higher spending limit, `sandbox.enabled` off, a looser `permissions.mode`, any change to which decision model decides (`judgment.endpoint`, `judgment.model`, `judgment.backend`, `judgment.fallbacks`, `judgment.keySource`, `judgment.keyName`), and the like. The same rule holds for the operator API: such a write made with a token minted for automation (not a device the owner paired himself) is put to the owner as an approval only his own credential answers (see "A change only the owner makes" in "The operator HTTP API"). |
 | `new-recipient` | See "New recipients". |
 
 ### New recipients
@@ -299,12 +306,7 @@ Worked example: allow `bun test` in this project only.
 
 ### Where rules are kept
 
-| App | File |
-| --- | --- |
-| Terminal app, and the daemon (web UI) | `~/.goodvibes/tui/permission-rules.json` |
-| Agent | `~/.goodvibes/agent/permission-rules.json` |
-
-`GOODVIBES_HOME` moves both. The file is shared live between windows of the same app: a revoke in one takes effect in the others without a restart. Format:
+The owner's rules are one file, `~/.goodvibes/shared/permission-rules.json`, read and written by the terminal app, the Agent and the daemon (its hosted sessions, routines, channel turns and the web UI). `GOODVIBES_HOME` moves it. A rule added, remembered or revoked in any of them holds in the others at once, without a restart: each program notices the other's write before its next decision (a watch on the directory, or one look at the file at most every two seconds where the directory cannot be watched), and `/permissions rules` and the web UI list show the same set. A rule remembered in a project keeps that project and matches only there; a never-run rule, and a rule written by hand without `project`, applies in every project. Writes take a lock on the file, so two programs never lose each other's change. Format:
 
 ```json
 {
@@ -327,23 +329,53 @@ A record without `project` applies in every project. Rule types and fields are t
 ### Listing and revoking rules
 
 ```text
-/permissions            show every permission setting in effect and where each value came from
+/permissions            show the mode in force and every permission setting in effect and where each value came from
 /permissions rules      list remembered rules; in the terminal app a picker opens: Del revokes the selected rule
 /permissions revoke <rule-id>
+/permissions add never <command>                     never run commands matching, e.g. git push (every tool, every mode, every project)
+/permissions add <allow|deny|ask> command <command>  this exact exec command, in this project
+/permissions add <allow|deny|ask> class <word>       every exec command starting with <word>, in this project
+/permissions add <allow|deny|ask> path <directory>   write and edit under a directory, in this project
+/permissions add <allow|deny|ask> tool <tool>        every call of a tool, in this project
 ```
 
-`/perms` is an alias of `/permissions`. `/permissions forget <rule-id>` is the same as `revoke`. Each listed rule shows the tool, what it covers, `allow` or `deny`, the tier, the project and when it was remembered. The web UI lists and revokes the same rules under Settings, Permissions (operator methods `permissions.rules.list` and `permissions.rules.delete`); it cannot add one either.
+`/permissions add` writes the rule to the same store as a remembered answer, in both programs, into the one file every program reads (see "Where rules are kept"). It answers `Added rule owner-<kind>-<tool>-<time>-<random>: <description> (in <project>). Remove it with /permissions revoke <id>.`; without a working directory, `There is no working directory to scope the rule to; run this from a project. A never-run rule needs none.`; with words it cannot read, the usage above. `/permissions remove <id>` is the same as `revoke`.
+
+`/perms` is an alias of `/permissions`. `/permissions forget <rule-id>` is the same as `revoke`. Each listed rule shows the tool (`any tool` for a never-run rule), what it covers, `allow`, `deny` or `ask`, `remembered <tier>` for an answer, `added <tier>` for a rule added with `/permissions add`, or `never run, every mode`, the project (or `every project`) and when it was made. The web UI lists and revokes the same rules under Settings, Permissions (operator methods `permissions.rules.list` and `permissions.rules.delete`, tier `never-run` for a never-run rule); it does not add one.
 
 The shape of `/permissions rules` on a surface without a picker (rule ids are generated, `user-<tier>-<tool>-<time>-<random>`):
 
 ```text
-Remembered permission rules:
+Permission rules:
   user-exact-exec-mi4k2x1c-k3j9a2  exec: allow exactly: bun test  (allow · remembered exact · in /home/me/work/app · 11/18/2026, 10:02:11 AM)
+  owner-never-run-git-mi4k3a0d-q7w2e1  any tool: never run: git push  (deny · never run, every mode · every project · 11/18/2026, 10:05:40 AM)
 
 Revoke one with: /permissions revoke <rule-id>
 ```
 
-Outcomes: `Revoked remembered rule: <id>`; `No remembered rule with id: <id>`; `No remembered permission rules. Approving an ask with a remember tier stores one here.`; in the picker, `Revoked remembered rule: <label>` or `Rule already gone: <label>`; a failed delete, `Could not revoke the rule: <reason>`; `/permissions revoke` with no id, `Usage: /permissions revoke <rule-id>  (see /permissions rules for ids)`; on a surface without a rule store, `Remembered permission rules are not available on this surface.`
+Outcomes: `Revoked remembered rule: <id>`; `No remembered rule with id: <id>`; `No permission rules. Approving an ask with a remember tier stores one here; /permissions add writes one directly.`; in the picker, `Revoked remembered rule: <label>` or `Rule already gone: <label>`; a failed delete, `Could not revoke the rule: <reason>`; `/permissions revoke` with no id, `Usage: /permissions revoke <rule-id>  (see /permissions rules for ids)`; on a surface without a rule store, `Remembered permission rules are not available on this surface.`
+
+### Never-run rules
+
+A never-run rule is a guarantee, not a hook: the gate itself refuses, in every permission mode including `yolo`, every call that would run a command the rule names, whatever tool carries it.
+
+```text
+/permissions add never git push
+/permissions add never rm -rf /
+```
+
+A rule is a program followed by the words it must carry, in that order (`git push` matches `git push`, `git -C repo push origin main`, not `git status` or `git commit -m "push fix"`). What the gate reads:
+
+- every shell command a call carries: `exec` `commands[].cmd`, the decoded `cmd_base64`, a flat `command` or `cmd` (the Agent's `terminal`, `process` `start`, `agent_harness` processes), the same fields nested in a call's input (an `agent_operator_method` call that runs a command on a peer or backend), a `workflow` schedule's command and hook action, a `state` command hook (and a command hook a model asks to register), and a `trigger`'s `spec.command` with its `args`;
+- a tool run inside another tool, which goes through the gate too;
+- each command through `sudo`, `env`, `xargs`, `timeout` and the other wrappers, into `sh -c`, `bash -c` and `eval` strings, `$(...)` and backticks, `find -exec`, an `alias` definition, and a shell script it runs (`sh publish.sh`, `./publish.sh`, `source x.sh`), read from disk (a script over 256 KB is refused unread);
+- quoting the way the shell removes it (`g''it push`, `"git" push`).
+
+Refused as well, because code cannot rule out that they run the command: a command whose program is built when it runs (`$(printf git) push`), the rule's program with an argument built when it runs (`git $X`, a variable set in `exec`'s `env`), and the program fed arguments by `xargs` (`echo push | xargs git`); text a call writes to a running process (`process` `write`) that carries any word of the rule, since a shell can receive a command in pieces; code for an interpreter (`repl`, a script in another language) that names the program and then the words within twelve words.
+
+Not seen: what a program does on its own once started (a git alias defined earlier, a compiled program, a script in another language that builds the words), tools of MCP servers, and commands you type yourself (`!git push`).
+
+The refusal the model receives: `Your never-run rule "<rule>" refuses this call: <why> (<command>). It applies in every permission mode, yolo included; only you can remove it, with /permissions rules.` In the rules file a never-run rule is `{ "rule": { "type": "never-run", "id": "...", "origin": "user", "effect": "deny", "toolPattern": "*", "commands": ["git push"], "description": "never run: git push" }, "tier": "never-run", "tool": "*", "createdAt": ... }` with no `project` (it applies in every project). The rules file is read in every mode; while it cannot be read, every call is refused.
 
 ### Per-tool settings
 
@@ -359,7 +391,7 @@ Outcomes: `Revoked remembered rule: <id>`; `No remembered rule with id: <id>`; `
 
 ### `/permissions` output
 
-`/permissions` prints `session mode`, then each permission setting with its value and origin (`built-in default`, `global config file (<path>)`, `project config file (<path>)`, `shared config file (<path>)`, or `runtime override`), then the number of remembered rules. A value marked `*` was changed at runtime (for example with `-c`) and is not saved on disk. The `Permission evaluator` row shows `in force: <value> until restart` when `permissions.engine` was changed and the process has not restarted.
+`/permissions` prints `mode in force` (with `not <mode>, because <reason>` when it is not the chosen mode), then `saved mode`, or `chosen for this session` with the saved default, then each permission setting with its value and origin (`built-in default`, `global config file (<path>)`, `project config file (<path>)`, `shared config file (<path>)`, or `runtime override`), then the number of remembered rules. A value marked `*` was changed at runtime (for example with `-c`) and is not saved on disk. The `Permission evaluator` row shows `in force: <value> until restart` when `permissions.engine` was changed and the process has not restarted.
 
 ## Decisions Jev made: `/decisions`
 
@@ -368,6 +400,9 @@ Every call Jev decided at the gate (in `jev-decides` and `just-vibes`) is posted
 ```text
 /decisions                 list open decisions (newest first) and recently answered inbox items
 /decisions 50              list up to 50 of each
+/decisions today           only what was decided today (local time); also yesterday
+/decisions 2026-11-19      only what was decided on that day
+/decisions since 2h        only what was decided since then: 30m, 2h, 3d, 1w, or a day (2026-11-18)
 /decisions keep <id>       leave it as decided
 /decisions undo <id>       restore the files the call changed
 /decisions never <id>      save a deny rule for calls like it
@@ -386,7 +421,7 @@ What you can see, and for which period:
 
 | What | Where | Period |
 | --- | --- | --- |
-| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions <count>` takes a count only: there is no date or "today" filter. |
+| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions today`, `yesterday`, `<YYYY-MM-DD>` and `since <day or 30m/2h/3d/1w>` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the newest 500 of each list. |
 | Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | `/decisions` (the "Decided" list), `/questions all` | As long as the inbox keeps them. |
 | Calls `just-vibes` held | `/held` | Until answered; at most 64. |
 
@@ -462,7 +497,7 @@ goodvibes doctor explain read ./notes.txt --json
 
 A subject that is a tool name followed by a path is checked as that tool; any other text is checked as a shell command run through `exec`. The output shows the subject, the tool and category, the current mode, the platform analyzer's risk, and `Decision: ALLOW`, `ASK` or `DENY` with the layer that decided.
 
-What it does not include: `doctor explain` builds its own gate with no decision model, without the tool's declared effects and without the remembered-rule store, and it does not run the tool. So it reports the no-decision-model outcome, it reports `ASK` for a write or edit inside the working directory that the live gate runs without asking, it ignores remembered rules, and it reports `ALLOW` for `read /etc/hosts` although the `read` tool refuses a path outside the project in every mode but `yolo`. Treat `ASK` as "this reaches a judgment or an owner prompt". It exits `0`; with no subject it prints usage and exits `2`.
+It runs the gate the app runs: the mode in force (with the reason when it is not the saved mode), the feature flags and managed policy from settings, the remembered rules and never-run rules (`~/.goodvibes/shared/permission-rules.json`), and the decision model with its decision log in your home. A judgment call is a real request to the decision model, bounded by `judgment.decisionDeadlineMs` as every permission decision is. Nothing runs and nothing is remembered: an ask is answered "no" without a prompt and reported as `ASK`. After the gate allows a call it applies the tool's own path containment: `read`, `find`, `inspect`, `repo_map` and `analyze` refuse a path outside the project root in every mode but `yolo`, and `write` and `edit` refuse one in every mode, reported as `DENY` decided by `<tool> tool path containment`. The `decision model:` line says `consulted`, `not needed: a rule, a setting or the mode settled this call`, or `not consulted: <why> The verdict is the one the gate gives without a decision model.` (none set, `No Decision Model`, or the set model failing). A remembered-rules file that cannot be read is named on the `rules:` line (the running app refuses every call until it loads). It does not use the workspace trust of the directory. Treat `ASK` as "this reaches an owner prompt". It exits `0`; with no subject it prints usage and exits `2`. With `--json` the fields include `mode`, `savedMode`, `modeReason`, `decisionModel`, `decisionModelConsulted`, `containment` and `verdict`.
 
 ## The decision model
 
@@ -517,7 +552,7 @@ Prerequisite: a TypeSafe API key for the hosted endpoint.
 | `judgment.backend` | Optional `{ "adapter", "maxInputBytes", "maxQuestions", "responseModels" }` for the primary target. |
 | `judgment.fallbacks` | Ordered backup targets, each `{ "endpoint", "model", "keySource", "keyName" }` plus optional `"backend"`. In a fallback, `keySource` may be `env`, `secret` or `none`, and `none` requires `"keyName": ""`. The default is `[]` (no backups). |
 | `judgment.timeoutMs` | Timeout per target, default `30000`; `0` means the default. |
-| `judgment.decisionDeadlineMs` | How long a decision that a person or a tool call waits on may take, default `1500`, range 1 to 120000. Past it the decision takes its stated fallback. Gate decisions are not bounded by it (see "Timeouts and the decision deadline"). A target that misses the deadline three times in a row is skipped for a minute. |
+| `judgment.decisionDeadlineMs` | How long a decision that a person or a tool call waits on may take, default `1500`, range 1 to 120000, permission decisions at the gate included (one deadline for the whole decision). Past it the decision takes its stated fallback (see "Timeouts and the decision deadline"). A target that misses the deadline three times in a row is skipped for a minute. |
 
 #### The wire protocol ("System One")
 
@@ -581,7 +616,7 @@ Prerequisite: a server speaking the protocol above, for example Kev-9B listening
 
 Two limits apply, to different requests:
 
-- The gate's own requests (the reading of a judgment call, and Jev's decision in `jev-decides` and `just-vibes`) carry no decision deadline. Each target is given `judgment.timeoutMs` (default 30000) per attempt, a transient failure (no connection, timeout, HTTP 408, 429, 5xx) is retried once, and then the next `judgment.fallbacks` target is tried. When every target has failed, the request fails: under `Hybrid` the gate falls back to the no-model rule (asks you, or holds the call in `just-vibes`); under `Decision Model Only` the tool call fails with the model's error and nothing is asked. So a slow self-hosted model holds a gate call for up to `judgment.timeoutMs`, it does not hit the 1500 ms deadline.
+- A permission decision (the reading of a judgment call, the boundary readings and Jev's decision in `jev-decides` and `just-vibes`) has one deadline for the whole decision: `judgment.decisionDeadlineMs` (default 1500). Each request it makes gets what is left of it, across retries and `judgment.fallbacks` targets (each attempt is still bounded by `judgment.timeoutMs`). When the model has not answered in time, the request fails as a missed deadline and the decision takes its fallback, as every other decision does: under `Hybrid` the gate's no-model rule decides (asks you, or holds the call in `just-vibes`) and the conversation gets the one failure notice; under `Decision Model Only` the tool call stops with `The decision model did not answer within <n> ms.` and nothing is asked. The missed deadline also starts a failure episode (see "When a decision model counts as working"). A target that misses the deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once.
 - `judgment.decisionDeadlineMs` (default 1500) bounds the other decisions a person or a tool call waits on (for example reading an inbound channel message). When one is not answered in time, it takes its own stated fallback in every policy, `Decision Model Only` included; the deadline is not a model failure and does not stop work. A target that misses the deadline three times in a row is skipped for a minute, and while every target is skipped those decisions take their fallback at once.
 - Where the keys live: `judgment.*` is kept in the daemon's settings file (`~/.goodvibes/daemon/settings.json`), so one write from any app (or `goodvibes-daemon config set judgment.policy "Decision Model Only"`) sets it for every program and the daemon. `permissions.mode` is kept per program: the daemon has its own, so for daemon-run work (routines, triggers, channel turns) set it there too: `goodvibes-daemon config set permissions.mode jev-decides`.
 

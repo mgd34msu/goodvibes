@@ -9,8 +9,11 @@
  * a contract another process left on disk. Both terminal apps bind these to
  * their own surface root.
  */
-import { createProviderStack } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+// The provider stack and the decision model from their own modules: the
+// bootstrap and operations barrels load the whole runtime, which a one-shot
+// command (`status` among them) would pay for at every start.
+import { createProviderStack, type ProviderStackOptions } from '@goodvibes-jev/engine/platform/platform/runtime/provider-stack';
+import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/judgment-services';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createFeatureFlagManager } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/manager';
 import { deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
@@ -75,8 +78,17 @@ export interface OneShotServices {
   ): Promise<T>;
 }
 
-/** The one-shot service builders for the product whose files live under `surfaceRoot`. */
-export function createOneShotServices(surfaceRoot: string): OneShotServices {
+/**
+ * The one-shot service builders for the product whose files live under
+ * `surfaceRoot`. `trustScannedServer` is the product's rule for which saved
+ * scanned servers it registers (default: this computer's only), the same rule
+ * its interactive runtime uses, so a scanned model saved as the default
+ * resolves in `models`, `providers` and every other one-shot command.
+ */
+export function createOneShotServices(
+  surfaceRoot: string,
+  product: { readonly trustScannedServer?: ProviderStackOptions['trustScannedServer'] } = {},
+): OneShotServices {
   async function withProviderServices<T>(
     runtime: OneShotRuntime,
     fn: (services: OneShotProviderServices) => Promise<T> | T,
@@ -126,6 +138,7 @@ export function createOneShotServices(surfaceRoot: string): OneShotServices {
         surfaceRoot,
         // The command reads the stored catalog; a discovery pass would outlive it.
         modelDiscovery: 'skip',
+        trustScannedServer: product.trustScannedServer,
         registerDispose: (release) => { scope.registry.add('provider model configuration', release); },
       });
       if (options.modelData !== 'skip') {

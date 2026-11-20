@@ -10,7 +10,8 @@
  * returned are the ones in effect; timing.ts derives from them unchanged.
  */
 import { clusterConfigDefaults, type ClusterConfig } from '../config/schema-domain-cluster.js';
-import type { ClusterElectionTiming, ClusterSettingAdjustment, ClusterSettings } from './types.js';
+import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
+import type { ClusterElectionTiming, ClusterSecretSetting, ClusterSettingAdjustment, ClusterSettings } from './types.js';
 
 /**
  * Administratively-scoped multicast group (239.0.0.0/8, RFC 2365), never
@@ -59,10 +60,21 @@ export function resolveClusterSettings(config?: Readonly<Partial<ClusterConfig>>
     // The schema has no rule for these two: a blank group and blank peers mean
     // "not set", not an address.
     multicastGroup: source.multicastGroup.trim() || DEFAULT_CLUSTER_MULTICAST_GROUP,
-    secret: source.secret,
+    secret: clusterSecretSetting(source.secret),
     peers: source.peers.filter((entry) => typeof entry === 'string' && entry.trim().length > 0),
     adjustments,
   };
+}
+
+/**
+ * `cluster.secret` as set in config, before any secret-store read: empty is
+ * not set, a phrase is set, and a `goodvibes://secrets/` reference is
+ * unavailable until `readClusterSettings` reads it from the store.
+ */
+export function clusterSecretSetting(value: string): ClusterSecretSetting {
+  if (value.length === 0) return { state: 'none' };
+  if (isSecretReferenceValue(value)) return { state: 'unavailable', reason: 'cluster.secret names a stored secret that has not been read' };
+  return { state: 'set', value };
 }
 
 /** The election timing these settings put in force, for status. */

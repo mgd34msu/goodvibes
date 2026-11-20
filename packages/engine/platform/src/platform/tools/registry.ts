@@ -323,14 +323,23 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
     return { callId, success: false, error: `${name} was not run: the call asking for it was not admitted through a permission owner, so ${name} cannot be approved on its behalf. Nothing was done; call ${name} directly.` };
   }
   const signal = options?.signal;
-  const verdict = await owner.checkDetailed(name, args, undefined, { definition, ...(signal ? { signal } : {}) });
+  // The owner's Pre:tool hooks see a tool run on another's behalf as they see a model's own call.
+  const hooked = await owner.preToolHooks(callId, name, args, signal);
+  if (hooked.refusal !== undefined) return hookRefusal(callId, name, hooked.refusal);
+  const verdict = await owner.checkDetailed(name, hooked.args, undefined, { definition, ...(signal ? { signal } : {}), ...(hooked.ask !== undefined ? { ownerAsk: hooked.ask } : {}) });
   if (!verdict.approved) {
     const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail, decision: verdict.decision };
     return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false }, name) };
   }
   const admitted = toolDecisionOf({ reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason,
     detail: verdict.detail, decision: verdict.decision, approved: true }, name);
-  return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? args, signal ? { signal } : undefined));
+  return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? hooked.args, signal ? { signal } : undefined));
+}
+
+/** The result of a call the owner's Pre:tool hook refused (or that failed): not run, with the hook's reason. */
+function hookRefusal(callId: string, name: string, reason: string): ToolResult {
+  return { callId, success: false, error: reason,
+    decision: { state: 'refused', decidedBy: 'rule', reason, limit: `Pre:tool:${name} hook`, next: ['Do something else, or ask the owner to change the hook.'] } };
 }
 
 /** Consume the exact registered local effect. Neither options nor callbacks mint a grant. */
@@ -1278,6 +1287,12 @@ export class ToolRegistry {
     const sourceOf = () => { assertParent(); return source; };
     const sourceId = randomUUID();
     const signal = combineProjectionSignals(opts.signal, restrictionSignal);
+    // The owner's Pre:tool hooks see a tool run inside another as they see a model's own call, in every mode.
+    const hooked = await manager.preToolHooks(callId, name, args, signal);
+    assertParent();
+    if (hooked.refusal !== undefined) return hookRefusal(callId, name, hooked.refusal);
+    args = hooked.args;
+    const ownerAsk = hooked.ask;
     const projections = new Set<ProjectedToolCall>();
     let choiceProjection: AutonomousChoiceProjection | undefined;
     try {
@@ -1301,7 +1316,7 @@ export class ToolRegistry {
       while (true) {
         const current = call;
         const admission = await manager.admitAutonomous(sourceId, current.name, current.args, {
-          sourceOf, decoratePort, signal, choiceProjection,
+          sourceOf, decoratePort, signal, choiceProjection, ...(ownerAsk !== undefined ? { ownerAsk } : {}),
           consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}),
           schemaRevision: current.schemaRevision, preparationDecisionIds: current.judgmentDecisionIds,
           preparedCall: { registry: this, call: current }, assertPrepared: () => { assertParent(); this.assertPrepared(current); },

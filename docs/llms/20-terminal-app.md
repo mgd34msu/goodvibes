@@ -65,7 +65,7 @@ How each option behaves:
 
 | Option | Behavior |
 | --- | --- |
-| `-m, --model <registryKey>` | Uses this model for this launch. The text before the first colon names the provider only when it is exactly (case-sensitive) a built-in provider id (`openai:gpt-5.4`) or one of `ollama`, `lmstudio`, `lm-studio`, `llamacpp`, `llama-cpp`, `litellm`, `vllm`, `copilot-proxy`; that provider is then selected unless `--provider` is also given. Otherwise the whole value is the model id under the configured provider: with the default `openrouter`, `-m Ollama:llama3:8b` silently becomes `openrouter:Ollama:llama3:8b`. A provider of any other id (a server found by `/scan`, such as `Ollama`, or a custom provider) is named with `--provider`: `goodvibes --provider Ollama -m llama3:8b` (see "Local model servers" for where that works). |
+| `-m, --model <registryKey>` | Uses this model for this launch. The text before the first colon names the provider (`openai:gpt-5.4`, `Ollama:llama3:8b`), which is then selected unless `--provider` is also given. The provider is any registered one (built-in, custom, or a server found by `/scan`), named by its id or display name without regard to case, so `-m ollama:llama3:8b` is the scanned `Ollama` server's model. A name no registered provider has is an error listing the registered providers when the model is used (`models current`, `run`, the interactive app). A value with no colon, or with a slash before its first colon (`meta-llama/llama-3.3-70b-instruct:free`), is a model id under the configured provider. A model id that itself holds a colon needs its provider: `-m ollama:llama3:8b`, or `--provider Ollama -m llama3:8b`. |
 | `--provider <id>` | Uses this provider for this launch. |
 | `-C, --cd <dir>`, `--working-dir <dir>` | Sets the working directory for this launch. Sessions and project settings are read from that directory. |
 | `--daemon-home <dir>` | Uses this daemon home (default `~/.goodvibes/daemon`) for every command that reads the operator token or daemon settings. It wins over the `GOODVIBES_DAEMON_HOME` environment variable. |
@@ -75,7 +75,7 @@ How each option behaves:
 | `--print` | Selects non-interactive run mode (the same as `run`) when no command is given. |
 | `-o, --output <format>` | Output format for `run` and for commands that print data: `text`, `json` or `stream-json`. Another value is refused with `-o must be one of: text, json, stream-json.` and exit `2`. `--json` means `--output json`. `--output-format <format>` is accepted as the same option and prints `[goodvibes] warning: --output-format is deprecated; use --output (or -o) instead.` on standard error; standard output is unchanged. When two of these are given, the last one wins. |
 | `--just-vibes` | Sets the permission mode to `just-vibes` for this launch only: work continues without asking, and anything that needs the owner is held and listed at the end. It is the same as `--config permissions.mode=just-vibes`. |
-| `--yolo` | Sets the permission mode to `yolo` for this launch only: every action runs without safety denials, and `Pre:tool:*` hooks do not run. Containment, secret storage and payment limits still apply. `--no-worries-just-vibes` is an unlisted spelling of the same option. It may come before or after the command word (`goodvibes --yolo run ...` or `goodvibes run --yolo ...`). |
+| `--yolo` | Sets the permission mode to `yolo` for this launch only: every action runs without safety denials; `Pre:tool:*` hooks and never-run rules still apply. Containment, secret storage and payment limits still apply. `--no-worries-just-vibes` is an unlisted spelling of the same option. It may come before or after the command word (`goodvibes --yolo run ...` or `goodvibes run --yolo ...`). |
 | `--no-alt-screen` | Keeps the interface in the normal scrollback instead of the alternate screen. |
 | `--port <port>`, `--hostname <host>` (`--host`) | Port and bind address for `web` and `surfaces enable`. The port must be 1 to 65535. |
 | `--open` | Opens a browser where the command supports it (`web`, `subscription login <provider> start`). |
@@ -159,6 +159,7 @@ The exit code is `2`.
 ### `goodvibes status`
 
 `status` prints the configuration posture: working directory, home directory, provider and model, reasoning effort, sign-in, decision model, permission mode, local auth files, daemon service, surfaces, onboarding, crashes, workspace trust and the exec sandbox.
+The `provider` and `model` lines name what a turn started now would use: the saved model, or this launch's `-m`/`--provider`, resolved against the registered providers (custom ones and the servers the last `/scan` saved) the same way a run resolves it, so `-m ollama:llama3:8b` shows `provider: Ollama`. When no registered provider has the name, a `problem:` line says so, lists the registered providers and says how to choose another. The Agent's `status` does the same.
 It always exits `0`.
 
 ```text
@@ -171,7 +172,7 @@ Provider:
   provider: openrouter
   model: openrouter:openrouter/free
   reasoning: medium
-  sign-in: none found in the subscription store or the environment (a key stored with /secrets is read by the app, not by this report)
+  sign-in: no subscription and no OPENROUTER_API_KEY in the environment. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with: export OPENROUTER_API_KEY=<key>, or /secrets in the app
   ...
 Decision model:
   policy: Hybrid (default) (judgment.policy)
@@ -201,7 +202,7 @@ Its three sub-reports explain one decision each:
 
 | Command | What it prints |
 | --- | --- |
-| `goodvibes doctor explain <tool\|command>` | How the permission gate would decide one tool call or shell command under the current permission mode, without running it. |
+| `goodvibes doctor explain <tool\|command>` | How the permission gate would decide one tool call or shell command under the mode in force, with the decision model, the remembered and never-run rules and the tool's path containment, without running it (see "Explaining a decision: `goodvibes doctor explain`" in the permissions part). |
 | `goodvibes doctor routing` | Which provider and model serve each role (main chat, helper, tool model, TTS model, embeddings). |
 | `goodvibes doctor hooks [--json]` | Every registered hook, where it came from and whether it validates. |
 
@@ -216,6 +217,12 @@ GoodVibes doctor: explain permission decision
 ...
 Analysis (from the platform analyzer):
   risk        : HIGH (shell)
+Current settings:
+  mode        : ask-me (Ask me) in force; set: jev-decides
+                not jev-decides, because no decision model is set (judgment.model, judgment.endpoint or TYPESAFE_API_KEY), so every call Jev would decide asks you
+...
+  rules       : the remembered rules of this project were read
+  decision model: not consulted: No decision model is in use: none is set, so decisions take their fallbacks. Next: to use one, set judgment.model, judgment.endpoint or TYPESAFE_API_KEY. The verdict is the one the gate gives without a decision model.
 ...
 Decision: ASK
   decided by : user_prompt (user_denied)
@@ -446,12 +453,12 @@ Changes are written to the user store; a running daemon reads the user file agai
 | --- | --- |
 | `goodvibes auth` or `auth status` | Auth posture. |
 | `goodvibes auth users` | Local users. |
-| `goodvibes auth sessions` | Sessions held by this process (normally none). |
+| `goodvibes auth sessions` | The sign-in sessions the daemon on this machine holds: `<username> expires=<time> id=<session id>` per session. It asks the running daemon at its loopback address with this machine's operator token; with no daemon answering it prints why and exits `1`. |
 | `goodvibes auth add-user <username> [--password <value>\|--password-stdin] [--role <role>]` | Adds a user. Without a password flag it reads `GOODVIBES_AUTH_PASSWORD`. `--role` may be repeated; the default role is `user`. |
 | `goodvibes auth delete-user <username>` | Deletes a user. A running daemon (or terminal app) re-reads the user file at its next sign-in or session check, within a few seconds, and ends that user's sessions then; no restart is needed. Prints `Auth user deleted: <username>` and that note; an unknown user prints `No auth user found: <username>` (exit `1`). |
 | `goodvibes auth rotate-password <username> [--password <value>\|--password-stdin]` | Sets a new password. A running daemon ends that user's sessions at its next sign-in or session check, within a few seconds, without a restart. Prints `Auth password rotated: <username>` and that note. |
-| `goodvibes auth revoke-session <session-id-or-token>` | Ends one session held by this short-lived process, which normally holds none, so it prints `No auth session found in this process. Sessions are held in memory by the running host and this command cannot reach them. Restart the host to end all of its sessions.` (exit `1`). To end a session on a running daemon, restart it, or use `delete-user` / `rotate-password` to end every session of one user. |
-| `goodvibes auth revoke-sessions <username>` | The same for every session of one user: normally `No auth sessions revoked for <username> in this process.` followed by the same restart sentence (exit `1`). |
+| `goodvibes auth revoke-session <session-id-or-token>` | Ends that session on the running daemon at once (through `local_auth.sessions.delete`): `Auth session revoked on the running daemon.` An unknown session, or no daemon answering, prints the daemon's reason and exits `1`. Take the id from `goodvibes auth sessions`. |
+| `goodvibes auth revoke-sessions <username>` | Ends every session of that user on the running daemon: `Auth sessions revoked for <username> on the running daemon: <n>`; `The running daemon holds no auth sessions for <username>.` (exit `1`) when it holds none. |
 | `goodvibes auth clear-bootstrap` | Deletes the bootstrap credential file. |
 
 ```sh
@@ -497,7 +504,7 @@ These commands report and change the daemon's network surfaces and service. They
 
 | Command | Usage | Effect |
 | --- | --- | --- |
-| `web` | `goodvibes web [--open] [--hostname <h>] [--port <p>]` | Prints the web settings: `web.enabled`, the declared web endpoint `web.host:web.port`, and a URL (`web.publicBaseUrl` when set, else that endpoint); `--open` opens the URL. It does not check that anything answers there (see below). |
+| `web` | `goodvibes web [--open] [--hostname <h>] [--port <p>]` | Prints where the web UI is served (see below); `--open` opens that address. `--hostname`/`--port` name a development server's endpoint instead for this one command. |
 | `surfaces` (alias `surface`) | `surfaces [list]`, `surfaces check [<web\|listener\|control-plane\|surfaceId>]`, `surfaces show <...>`, `surfaces enable <...>`, `surfaces disable <...>` | Inspects and turns on or off the web UI, the control plane, the HTTP listener and each channel surface (for example `slack`). |
 | `listener test [--json]` (aliases `http-listener`, `webhook`) | | Checks HTTP listener and webhook readiness. |
 | `control-plane status [--json]` (aliases `controlplane`, `cp`) | | Daemon bind posture, reachability, local auth, bootstrap credential and operator tokens. |
@@ -508,8 +515,9 @@ These commands report and change the daemon's network surfaces and service. They
 $ goodvibes web
 GoodVibes web
   enabled: yes
-  bind: local 127.0.0.1:3423
-  url: http://127.0.0.1:3423
+  served by: the daemon, on its control-plane listener
+  url: http://127.0.0.1:3421
+  development endpoint (web.host/web.port): local 127.0.0.1:3423
 
 $ goodvibes remote
 GoodVibes remote status
@@ -519,7 +527,7 @@ GoodVibes remote status
   private-host remote fetch: no
 ```
 
-`goodvibes web` prints `http://127.0.0.1:3423` on a fresh install (`web.enabled` defaults to on, `web.publicBaseUrl` to empty), but nothing listens on port 3423: `web.port` is only a declared endpoint used for links. The daemon serves the web UI from its control-plane listener, on the same address as its API, by default `http://127.0.0.1:3421`, and only after `goodvibes-daemon webui enable` (see "Serving the web UI" in the daemon part). Open that address, not the one `goodvibes web` prints. `goodvibes web --open` opens the printed URL, so it opens a page that does not load unless `web.publicBaseUrl` is set to the address that answers.
+The `url:` line has one owner, the same one pairing links, notification links and `tailscale.serve.run` use: the daemon's control-plane address while it serves the bundle (after `goodvibes-daemon webui enable`, see "Serving the web UI" in the daemon part), otherwise a set `web.publicBaseUrl` naming where a web UI runs, otherwise `none: no web UI is served; serve the bundle with goodvibes-daemon webui enable --bundle-dir <dir>` (and `--open` prints `nothing to open`). When `web.publicBaseUrl` names a different address for other devices (a tunnel), a `public url (links for other devices):` line shows it. `web.host`/`web.port` (3423) are only where the web UI's development server listens; nothing else binds them. `--json` gives `url` (null when none is served), `servedByDaemon` and, when set, `publicUrl`.
 
 ### `goodvibes support-bundle` (aliases `bundle`, `bundles`)
 
@@ -567,8 +575,8 @@ With no hooks file it prints `no hooks file present: nothing to validate.` and e
 
 | Form | Effect |
 | --- | --- |
-| `goodvibes plugin init <name> [directory]` | Writes a minimal plugin (`manifest.json` and `index.js`) and validates it. |
-| `goodvibes plugin validate <path>` | Runs the plugin loader's checks on a plugin directory. |
+| `goodvibes plugin init <name> [directory]` | Writes a minimal plugin (`manifest.json` and `index.js`), validates it, and says whether the apps load plugins from that directory. |
+| `goodvibes plugin validate <path>` | Runs the plugin loader's checks on a plugin directory and says whether the apps load plugins from it. |
 | `goodvibes plugin trust <name> <untrusted\|limited\|trusted> [note]` | Sets the plugin's trust tier for every GoodVibes program on this machine. Marking a plugin `trusted` whose signature does not verify needs `--yes`. |
 | `goodvibes plugin verify <name>` | Checks the plugin's signature against its saved publisher key. |
 | `goodvibes plugin capabilities <name>` | Prints what the plugin declares and what its tier grants. |
@@ -583,12 +591,19 @@ Worked example:
 $ goodvibes plugin init my-plugin
 Scaffolded plugin "my-plugin" at /home/me/work/project/.goodvibes/plugins/my-plugin
   created: manifest.json, index.js
-  validation: PASS; the plugin loader accepts this directory.
-  next: run "goodvibes plugin validate /home/me/work/project/.goodvibes/plugins/my-plugin" or restart the TUI to load it.
+  validation: PASS; the plugin loader accepts this manifest and entry.
+  next: a plugin starts disabled. In the terminal app or the Agent run /plugin enable my-plugin (no restart needed).
 ```
 
-Without a directory, `plugin init <name>` writes `<project>/.goodvibes/plugins/<name>/`, where the loader looks. With a directory it writes there. The `validation: PASS` line checks only that the files are a valid plugin; it does not check that the directory is one the loader searches. A plugin written anywhere other than `<project>/.goodvibes/plugins/<name>/` or `~/.goodvibes/plugins/<name>/` is never loaded, even after a restart.
-A scaffolded plugin is not running yet: it must also be enabled (`/plugin enable my-plugin`), as described under "Plugins".
+Without a directory, `plugin init <name>` writes `<project>/.goodvibes/plugins/<name>/`, where the loader looks. With a directory it writes there. The apps load a plugin only from a folder directly inside `<project>/.goodvibes/plugins/` (when the app runs in that project) or `~/.goodvibes/plugins/`. For any other directory, `plugin init` and `plugin validate` say so after the `PASS` line:
+
+```text
+  NOT LOADED  no app loads a plugin from this folder: plugins are read only from folders directly inside /home/me/work/project/.goodvibes/plugins or /home/me/.goodvibes/plugins.
+  Move the folder into one of them, then enable it.
+```
+
+With `--output json` both add `loadedFromHere` (true or false) and `searchDirectories`.
+A scaffolded plugin is not running yet: it must also be enabled (`/plugin enable my-plugin`, in the terminal app or the Agent), as described under "Plugins".
 Refusals: `A plugin already exists at <dir> (manifest.json present). Choose another name or directory.` (exit `1`); `Cannot create the plugin: manifest.name must be lowercase letters, digits and hyphens, starting with a letter or digit (got 'Bad Name'); for example 'my-plugin'.` (exit `2`).
 
 The heading "Plugins" below explains manifests, trust tiers and capability bundles.
@@ -632,7 +647,7 @@ While more than one session exists (a helper agent or background process is runn
 | `!# <text>` | `<text>` is pinned to session memory and also sent as the prompt. `[Memory] Pinned: "<text>" (<id>)` confirms it. |
 | A single line `# <text>` (hash and space) | `<text>` is saved as a session-memory note and nothing is sent. `✓ Note saved → session memory: "<text>" (<id>)` confirms it. `#482 is failing`, `## heading` and text of more than one line are sent as prompts. |
 | `@model:<id>` as the first or last word | The model switches exactly as `/model <id>` would, then the rest is sent. Only a whole word at either end counts. When the switch does not happen, the text stays in the composer. |
-| `!@<path>` | The file's text replaces the reference before sending. A file that cannot be read stops the send with the reason. |
+| `!@<path>` | The file's text replaces the reference before sending. An image file (PNG, JPEG, WebP or GIF, judged by its bytes) is attached as an image instead. Any other file that is not UTF-8 text, or that cannot be read, stops the send with the reason (`a binary file is not sent as text; ...`). |
 
 Text that was not typed into the composer (a skill body, `/retry`, a template, `/image`, a form, speech) is sent as written and never read for these markers.
 In the terminal app, `@<path>` is plain text that names the file; the model reads it with its tools. (The Agent expands `@<path>` itself; see "Composer differences" in the Agent part.)
@@ -644,7 +659,7 @@ Images in the terminal app:
 - Pasting the path of an image file (ending in `.png`, `.jpg`, `.jpeg`, `.webp` or `.gif`) that exists and is at most 20 MB attaches the file the same way: `[IMAGE: img2, photo.png, <size>]`. A larger file stays a plain pasted path.
 - `/image <path> [prompt text]` sends the image with the prompt at once. A file over 20 MB is refused with its size. When the current model does not accept images, it prints `Warning: <model> does not support image input. The image will be stripped when sending.` and the image is not sent to that model.
 - Deleting a marker with `Backspace` removes that image.
-- `@photo.png` typed in the composer is plain text, and `!@photo.png` reads the file as UTF-8 text, so neither sends an image.
+- `@photo.png` typed in the composer is plain text (the model can read the file with its tools); `!@photo.png` attaches the image, at most 20 MB, as a pasted path does.
 
 ### Fixed keys
 
@@ -956,7 +971,7 @@ With nothing attached: `[hosted] no hosted session is attached; /hosted attach <
 
 The terminal app records a checkpoint of the workspace files at each turn and each helper-agent run, in any workspace.
 `/checkpoint [label]` creates a manual checkpoint kept for forensic retention: `Checkpoint created: <id> "<label>" (forensic retention).` With no file changes since the last one: `No changes since the last checkpoint; nothing to save.`
-`/checkpoints` (alias `/ckpts`) lists checkpoints, newest first. With none: `No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.`
+`/checkpoints` (alias `/ckpts`) lists checkpoints, newest first, numbered from 1. With none: `No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.`
 
 `/rewind` with no argument lists the turns completed in this run of the app (a resumed session restores its turn list: `Rewind: restored N turn anchor(s)`).
 `/rewind <n|turnId> [files|conversation|both]` rewinds to the end of that turn. `files` restores workspace files, `conversation` removes the later messages, `both` (the default) does both.
@@ -968,7 +983,12 @@ A wrong scope prints `Unknown scope "<word>". Use one of: files | conversation |
 
 ### Restoring a checkpoint
 
-A checkpoint is restored with `/rewind` only when no turn has completed in this run of the app. Then `/rewind` lists the workspace checkpoints instead of turns:
+`/checkpoints restore <n|id>` restores the files of one checkpoint at any time: `<n>` is its number in `/checkpoints`, or give its id or an unambiguous id prefix.
+It previews the files the restore would change in Changes; `Enter` or `y` restores, `n` or `Esc` cancels (`Restore cancelled: nothing changed.`). `--yes` typed by you skips the question; from the model it is ignored, so a model-run restore is always put to you.
+Only files are restored; the conversation is unchanged. The current files are first kept in a safety checkpoint (`pre-restore safety (before <id>)`), which `/checkpoints restore` can bring back. The receipt is `[Checkpoint] Restored files from checkpoint <id> ("<label>"). Files only: the conversation is unchanged.`
+Refusals: `No checkpoint #9. Run /checkpoints to list checkpoints (1–N).`, `Checkpoint ref "8e" is ambiguous (2 matches). Use the list number instead.`, `Unknown checkpoint ref "x". Run /checkpoints to list checkpoints.`, and the busy refusal while a turn runs; a partial restore names the paths that failed.
+
+When no turn has completed in this run of the app, `/rewind` also lists the workspace checkpoints instead of turns, and `/rewind <n|id>` restores one the same way:
 
 ```text
 /rewind
@@ -979,13 +999,6 @@ Restore one: /rewind <n|id>; files only; conversation history is untouched.
 ```
 
 The kind column is `turn`, `agent-run` or `manual`; the ids and labels above are examples.
-`/rewind 2`, or `/rewind 8e01d4aa` (an id or an unambiguous id prefix), previews the files the restore would change in Changes; `Enter` or `y` restores, `n` or `Esc` cancels (`Restore cancelled: nothing changed.`). Only files are restored.
-Refusals: `No checkpoint #9. Run /rewind to list checkpoints (1–N).`, `Checkpoint ref "8e" is ambiguous (2 matches). Use the list number instead.`, `Unknown checkpoint ref "x". Run /rewind to list checkpoints.`; a partial restore names the paths that failed.
-
-Once a turn has completed in this run, `/rewind` works on turns and no slash command restores a checkpoint by id. To restore one then, in order:
-
-1. Quit (`/quit`) and start the app again in the same directory with a new conversation (`goodvibes`, not `--continue` or `--resume`, which bring their turn list back).
-2. Before sending any prompt, run `/rewind` to list the checkpoints and `/rewind <n|id>` to restore one.
 
 (The daemon's operator API also has `checkpoints.restorePreview` and `checkpoints.restore`; the API part describes them.)
 
@@ -1004,7 +1017,8 @@ Once a turn has completed in this run, `/rewind` works on turns and no slash com
 
 `/undo file` and `/redo file` work on a stack of tool calls kept in memory for this run of the app (up to 50 entries; changes from earlier runs cannot be undone this way, and changes made by `exec` commands are not recorded).
 Each `/undo file` steps one call further back: to undo the last three edit calls, run `/undo file` three times.
-When a file was changed after that call (by you, another tool or another program), nothing is changed, that entry is dropped, and the next `/undo file` acts on the call before it: `File undo failed: Cannot undo the change to <path>: the file was changed after that operation (by you, another tool or another program). No file was changed and that history entry was dropped; the next undo acts on the one before it.`
+The Agent has the same `/undo file` and `/redo file` (and `/checkpoints restore`), with the same lines.
+When a file was changed after that call (by you, another tool or another program), nothing is changed and the entry is kept: `File undo failed: Cannot undo the change to <path>: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and undo again, or drop the entry (/undo file drop) to reach the one before it.` `/undo file drop` (and `/redo file drop`) sets the newest entry aside without changing any file: `Dropped the newest undo entry (<tool> call) without changing any file:` with its paths, then `The next /undo file acts on the one before it.`; with none, `Nothing to drop: no undo entries are recorded.`
 `/undo file`, `/redo file`, `/undo rewind` and `/redo rewind` do not wait for a running turn; use them between turns.
 
 ### Models, providers and sign-in
@@ -1094,13 +1108,13 @@ An existing target is not overwritten without `--overwrite`.
 An untrusted workspace does not load its hooks file or its project MCP servers.
 `/sandbox [open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <disabled|contained>]` reviews the command sandbox; `/sandbox set-mcp contained` runs MCP servers inside it. The sandbox is described under "The exec sandbox" in the permissions part.
 
-`/permissions [rules | revoke <rule-id>]` (alias `/perms`), `/plan [on|off|toggle]`, `/questions` (alias `/inbox`), `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security [review|attack-paths|tokens]` and `/policy <subcommand>` (alias `/pol`) belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
+`/permissions [rules | revoke <rule-id> | add never <command> | add <allow|deny|ask> <command|class|path|tool> <target>]` (alias `/perms`), `/plan [on|off|toggle]`, `/questions` (alias `/inbox`), `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security [review|attack-paths|tokens]` and `/policy <subcommand>` (alias `/pol`) belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
 
 - `/plan on` prints `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).`; `/plan off` restores the previous mode.
 - `/questions` lists what waits on the owner; `/questions answer <id> <choice|text> [note]` answers one.
-- `/decisions` lists what was decided for the owner; `/decisions undo <id>` reverses one.
+- `/decisions` lists what was decided for the owner (`/decisions today`, `yesterday`, `<YYYY-MM-DD>` or `since <30m|2h|3d|1w|day>` for one period); `/decisions undo <id>` reverses one.
 - `/held` lists calls `just-vibes` held; `/held approve <id...|all>` runs them; `/held dismiss <id...|all>` sets them aside.
-- `/permissions rules` lists remembered approval rules; `/permissions revoke <rule-id>` removes one.
+- `/permissions` shows the mode in force and why it differs from the saved or chosen one; `/permissions rules` lists the permission rules; `/permissions revoke <rule-id>` removes one; `/permissions add` adds one directly (a never-run rule, or an allow, deny or ask rule).
 
 ### Code work
 
@@ -1227,7 +1241,7 @@ With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs
 `/devices [list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|nodes|grants|revoke-grant <grant-id>|captures|delete-capture <capture-id>]` (alias `/device`) manages paired devices.
 `/qrcode [regenerate]` (aliases `/qr`, `/pair`) opens the device-pairing view; `r` there mints a new device token.
 `/host` inspects, pairs or unpairs this terminal with its host; only the owner typing it can pair or unpair (`Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair`).
-`/relay [status|pair]` shows outbound relay status or mints a relay pairing payload; with `relay.enabled` off: `Relay is disabled: turn on relay.enabled in /config relay first.`
+`/relay [status|pair [name]|codes|revoke <id>]` shows outbound relay status, mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name), lists the devices' relay codes, or revokes one (that device is refused through the relay from its next request; every other keeps working); with `relay.enabled` off, `pair` answers `Relay is disabled: turn on relay.enabled in /config relay first.`
 `/cluster [status|create|join|key|nodes|forget|rotate|leave|rename|groups|publish|accept]` shares inbound channel work with other machines; add `--host`, `--port`, `--token` to reach another machine's daemon.
 `/cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]` (alias `/cf`) manages the optional Cloudflare integration: `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]`.
 `/voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]` manages always-speak mode and installs the managed local voice runtime and wake-word models.
@@ -1375,18 +1389,12 @@ The scan checks well-known ports (11434 Ollama, 1234 LM Studio, 8080 llama.cpp, 
 | Aphrodite | Port 2242 | Generic |
 
 Each server found becomes a provider whose id is the server's name: `Ollama`, `LM Studio`, `vLLM`, `llama.cpp`, `LocalAI`, `TGI`, `Jan`, `GPT4All`, `KoboldCPP` or `Aphrodite` for a server on this machine (`127.0.0.1` or `localhost`), the same name followed by ` (<host>)` for one elsewhere on the network (for example `Ollama (192.168.1.50)`), and `local-<host>:<port>` for an unidentified server. Its models are `<provider id>:<model id>`, for example `Ollama:llama3:8b`. A name a configured provider already uses is skipped.
-To use a scanned model, in the interactive app only:
+The servers the last `/scan` found are saved (`~/.goodvibes/tui/discovered-providers.json`) and registered, without probing, by every command of the program: the interactive app, `goodvibes run`, `models`, `models current`, `models use`, `providers` and the rest. A scanned model is used like any other:
 
-- for one launch, `goodvibes --provider Ollama -m llama3:8b` (interactive start loads the servers the last `/scan` found, without probing; it scans only when you run `/scan`). This leaves the saved default alone; or
-- `/model` and pick it. This also saves it as the default (`provider.model`), with the fault below.
+- for one launch, `goodvibes -m Ollama:llama3:8b` (the provider half is matched by id or display name without regard to case, so `-m ollama:llama3:8b` is the same model; `--provider Ollama -m llama3:8b` also works). This leaves the saved default alone; or
+- `/model` and pick it, or `goodvibes models use Ollama:llama3:8b`. This saves it as the default (`provider.model`).
 
-Known fault (a product defect): a scanned model saved as the default breaks the command-line model commands. `goodvibes models use Ollama:llama3:8b` saves it (printing `Model selected: Ollama:llama3:8b` and a warning that the catalog entry was not available locally), and so does picking it with `/model` or `/provider`. The command-line commands do not load the scan cache, so afterwards `goodvibes models`, `models current`, `providers` and even `models use <other>` all exit `1` with `Current model 'Ollama:llama3:8b' not in registry.` (`goodvibes --provider Ollama -m llama3:8b models current` fails the same way). The interactive app still starts and restores the selection. The way back is to override the setting for the command that changes it:
-
-```sh
-goodvibes -c provider.model=openrouter:openrouter/free models use openrouter:openrouter/free
-```
-
-`-c provider.model=<key>` also works for one command at a time, for example `goodvibes -c provider.model=openai:gpt-5.4 models current`. `-m ollama:llama3:8b` names the provider id `ollama`, which is not the scanned `Ollama` provider (ids are case-sensitive).
+When a saved model's provider is no longer registered (the server was scanned away, or `discovered-providers.json` was removed), nothing stops working: `goodvibes models current` exits `1` with `The model '<key>' cannot be used: no registered provider is named '<provider>'.`, the registered providers and how to choose another, `goodvibes models` and `goodvibes providers` list as usual with that line at the top, `goodvibes models use <key>` changes it, and a turn fails with the same message. An unknown provider in `-m <provider>:<model>` or `models use <provider>:<model>` is refused the same way, listing the registered providers; it never becomes a model of another provider.
 A dedicated adapter knows the server's tool calling and streaming; Ollama, LM Studio and llama.cpp also get the `instant`, `low`, `medium`, `high` reasoning levels.
 An Ollama server that answers only `/api/tags` and not `/v1/models` cannot be used as an OpenAI-compatible provider and is reported as skipped.
 To add one server by hand, run `/provider add <name> <baseURL>`, for example `/provider add box http://192.168.1.50:11434/v1`; it probes `<baseURL>/models`.
@@ -1483,31 +1491,23 @@ The level saved is a preference: on a model that does not offer it, a level that
 
 ### Failover
 
-A failed request never moves to a model the owner did not choose. Three kinds of retry exist, and they do not all work everywhere:
-
-| Retry | Terminal app, interactive | `goodvibes run` | Agent, interactive and `run` |
-| --- | --- | --- | --- |
-| Same model, another sign-in of the same provider | Yes | Yes | Yes |
-| Another backend of the same `synthetic` model | Yes | Yes | Yes |
-| The next model of `provider.fallbackModels` | Yes | No | No |
+A failed request never moves to a model the owner did not choose. The same rule holds everywhere a turn runs: the terminal app (interactive and `goodvibes run`), the Agent (interactive and `run`), the daemon's hosted sessions and its agents. The engine's turn loop applies it, in this order:
 
 1. **Another sign-in.** Inside the request, a provider with two sign-ins tries the second when the first fails. Only `openai` has two built in: a request the ChatGPT subscription fails is sent again to the same model with the API key, and the turn says once which sign-in answered and why (in a headless run, one line on standard error and `signIn.movedFrom` in `USAGE`).
-2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover"). When all are exhausted the turn ends with `provider_exhausted`.
-3. **The fallback order.** Only the terminal app's interactive session reads `provider.fallbackModels`, a list of registry keys such as `["anthropic:claude-sonnet-5"]`. When every sign-in of the provider has failed, it switches to the first entry not yet tried this turn whose provider is signed in, and sends the turn again. With no order set, or every entry tried, the turn stops with `[Failover] Stopped:` and the reason and next step; the model selection returns to the configured one for the next turn.
+2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover").
+3. **Retries.** A failure that a wait can clear (a rate limit with a short `Retry-After`, a network error, a 5xx) is retried on the same model, and the stream shows `STREAM_RETRY`.
+4. **The fallback order.** When the model still fails (every sign-in, every synthetic backend and every retry), the turn moves to the first entry of `provider.fallbackModels` not yet tried this turn whose provider is signed in, and sends the failed request again to it; the rest of the turn, tool calls already made included, continues on that model. Entries are registry keys such as `["anthropic:claude-sonnet-5"]`; the provider half is matched by id or display name without regard to case. A worker agent given its own `fallbackModels` uses that order instead, and one whose routing says `providerFailurePolicy: "fail"` uses none.
+5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model) after a line `[Failover] Stopped:` with the reason and the next step.
 
-In `goodvibes run` and in the Agent, a failed provider ends the turn (`provider_error`) and nothing switches. In every program, when `behavior.suggestAlternativeOnProviderFail` is on (default off) and the failure is not transient, the session's conversation gets a suggestion and nothing more: `[Provider] <model> failed on <provider>. Next in your fallback order: <model> (<provider>). Use /model to switch.` (a headless run does not print it). To get a fallback in a script, run again with `-m <registry key>` when the exit code is `1` and `stopReason` is `provider_error`.
-
-In the terminal app's interactive session, a turn that failed for another reason (for example a hook refused a call), or in which a tool had already started, is not sent again, because a second run would repeat the tool's side effects.
-A switch prints a notice naming both models, the position in the fallback order and the error, with the price difference when both prices are known:
+Each move prints a line naming both models, the position in the fallback order, the error and the price difference when both prices are known, and says which model answers:
 
 ```text
-[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]
+[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]. claude-sonnet-5 answers the rest of this turn; the next turn starts on openai:gpt-6.1-sol again.
 ```
 
-When prices are unknown the notice says `[cost data unavailable]`.
-A second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`.
+When prices are unknown the line says `[cost data unavailable]`. In the terminal app a second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`, and while the move is in force the header and footer name the model answering, with `failover from <selected model>`. In a headless run (`goodvibes run`, `goodvibes-agent run`) the move is one line on standard error, `[Failover] <from> -> <to>, <position>; <to> answers the rest of this turn.`, and the result's `model` and `provider` name the model that answered. Text the failed attempt had already streamed is withdrawn (`DRAFT_WITHDRAWN`) before the next model streams its answer. A companion chat (`companion.chat.*`) moves the same way: the reply's `metadata.failover` holds the moves (`from`, `to`, `because`), `answeredBy` and the `[Failover]` lines, and the `turn.completed` envelope carries the same `metadata`; when nothing is left to try, the `turn.error` text ends with the `[Failover] Stopped:` line. The selection itself never changes: the next turn starts on the selected model again.
 
-Set a fallback order for the terminal app:
+Set a fallback order (it applies from the next failure, in every program that reads the same settings):
 
 ```text
 /config set provider.fallbackModels ["anthropic:claude-sonnet-5","groq:llama-3.3-70b-versatile"]
@@ -1529,7 +1529,7 @@ Each backend gets one attempt; a failed backend goes on cooldown and the next is
 When every backend is cooling down and the shortest cooldown is 120 s or less, the turn waits it out and retries once; a longer cooldown ends the turn with the error.
 Each rotation and wait is reported as a retry naming the provider and the reason.
 For a free synthetic model only, when every backend is exhausted the turn moves to the next-best free model by benchmark score and says so; free, paid and subscription models never mix.
-A paid or subscription synthetic model that is exhausted stops the turn with recovery options instead.
+A paid or subscription synthetic model that is exhausted moves to your `provider.fallbackModels` (see "Failover"); with none left, it stops the turn with recovery options.
 A provider can move a model from free to paid; a session running longer than 24 hours without a model refresh cannot know. Run `/refresh-models` daily in long sessions.
 `goodvibes models chain [filter] [--json]` prints each synthetic model's backend order.
 
@@ -1809,6 +1809,7 @@ Records that match a turn can be added to the model's context; `/recall explain 
 | `search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]` | Full-text search, or vector search with `--semantic`. |
 | `vector [status\|doctor\|rebuild]` | Inspect or rebuild the vector index. |
 | `get <id>` | One record with provenance and links. |
+| `edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <session\|project\|team>]` | Correct a record in place: each option given replaces that field, the rest (class, provenance, links, review state) stay. `[recall] Edited <id> (summary, tags): <summary>`; an unknown id: `[recall] Record not found: <id>. Nothing was changed.` |
 | `link <fromId> <toId> <relation>` | Link two records. |
 | `queue [limit]` | The review queue. |
 | `review <id> <fresh\|reviewed\|stale\|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]` | Review a record. |
@@ -1921,9 +1922,9 @@ Every MCP call first passes the permission gate like any other tool call: the pe
 1. A quarantined server's tools, or a server with `trustMode` `blocked`, are refused.
 2. A tool in the session denials or in `deniedTools` is refused; a tool in `allowedTools` is allowed.
 3. With `allow-all`, every other call is allowed.
-4. With `constrained` or `ask-on-risk`, a call whose path arguments are inside `allowedPaths` and whose URL arguments use `allowedHosts` is allowed, and one outside them is refused: `request exceeds configured scope for server '<name>': ... Call it with values inside the scope, or ask the owner to widen the server's scope.`
+4. With `constrained` or `ask-on-risk`, a call whose path arguments are inside `allowedPaths` and whose URL arguments use `allowedHosts` is allowed. One outside them is refused under `constrained`: `request exceeds configured scope for server '<name>': ... Call it with values inside the scope, or ask the owner to widen the server's scope.` Under `ask-on-risk` it is put to you on an approval card, in every permission mode (`yolo` included; held for you in `just-vibes`), with the reason `The MCP server '<name>' is trusted ask-on-risk and this call to '<tool>' is outside its configured scope: <which argument>.`; it is sent only if you allow it, otherwise the model gets `MCP call '<qualified name>' was not allowed: <reason>`. Where nobody can be asked (a host with no permission owner), it is refused: `... Nobody can be asked from here, so it was not sent.`
 
-`constrained` and `ask-on-risk` enforce the same way; `ask-on-risk` does not ask. They differ only in the risk level `/mcp review` reports for the server: `constrained` is `low` (`medium` when either scope list is empty), `ask-on-risk` is `medium` (`high`), `allow-all` is `high` (`critical`), and `blocked` or a quarantined server is `critical`.
+Besides that, they differ in the risk level `/mcp review` reports for the server: `constrained` is `low` (`medium` when either scope list is empty), `ask-on-risk` is `medium` (`high`), `allow-all` is `high` (`critical`), and `blocked` or a quarantined server is `critical`.
 
 There is no allow-list of tools. `allowedTools` does not limit a server to those tools: it only lets them past the path and host scope. To let the model use only some of a server's tools, deny each of the others:
 
@@ -1944,7 +1945,7 @@ A tool the server adds later is allowed until it is denied. To refuse every tool
 
 ### Where each rule is kept
 
-- `/mcp trust` and `/mcp role` change the running session only; on restart the file's value applies again. To keep a trust mode, write `trustMode` in the server's entry, or add the server with `/mcp add --trust <mode>`. In the terminal app `/mcp add ... --trust allow-all --scope global` keeps `allow-all`; with `--scope project` it is written but ignored when the file is read. The Agent's `/mcp add` refuses `allow-all` (`Use /settings -> MCP to explicitly enable allow-all.`). `allow-all` cannot be given to `/mcp trust` in either program: in Settings → MCP, type `allow-all` on the server's row, then type exactly `ALLOW ALL <server>` to confirm; it too lasts for the session, and to keep it write `"trustMode": "allow-all"` in `~/.config/mcp/mcp.json`.
+- `/mcp trust` and `/mcp role` write `trustMode` or `role` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`) and apply it at once; it holds after a restart: `Set the MCP trust mode of <server> to <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.` A server that comes only from a read-only file gets the value for this session only, and the line says why: `Updated MCP trust mode for <server> to <mode> for this session only (<reason>): ...`. `/mcp trust <server> config` ends a value set for this session only. Settings → MCP keeps a trust mode the same way (`<server> trust mode is <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.`). In the terminal app `/mcp add ... --trust allow-all --scope global` keeps `allow-all`; with `--scope project` it is written but ignored when the file is read. The Agent's `/mcp add` refuses `allow-all` (`Use /settings -> MCP to explicitly enable allow-all.`). `allow-all` cannot be given to `/mcp trust` in either program: in Settings → MCP, type `allow-all` on the server's row, then type exactly `ALLOW ALL <server>` to confirm; it is kept in `~/.config/mcp/mcp.json` (a server whose entry is in a project file keeps it for this session only, since a project file's `allow-all` is ignored).
 - `/mcp deny <server> <tool>` lasts for the session. With `--keep` it is written as `deniedTools` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`).
 - `/mcp allow` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused.
 - A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp deny for this session.`
@@ -1964,8 +1965,8 @@ A tool the server adds later is allowed until it is denied. To refuse every tool
 | `/mcp reload` | Reconnect every server. |
 | `/mcp review`, `/mcp auth-review` | Trust, quarantine and auth posture. |
 | `/mcp repair [server]` | Suggested repairs. |
-| `/mcp trust <server> <constrained\|ask-on-risk\|blocked\|config>` | Set a server's trust mode for this session (`config` returns to the file's value). |
-| `/mcp role <server> <general\|docs\|filesystem\|git\|database\|browser\|automation\|ops\|remote\|config>` | Set a server's role label for this session. |
+| `/mcp trust <server> <constrained\|ask-on-risk\|blocked\|config>` | Set a server's trust mode, kept in its MCP config (`config` ends a value set for this session only). |
+| `/mcp role <server> <general\|docs\|filesystem\|git\|database\|browser\|automation\|ops\|remote\|config>` | Set a server's role label, kept in its MCP config. |
 | `/mcp deny <server> <tool> [--keep]` | Refuse one tool for this session; `--keep` stores the denial in the server's entry as `deniedTools`. |
 | `/mcp allow <server> <tool>` | Let one tool past the server's path and host scope; stored as `allowedTools` in the global file; asks once; refused when the model runs it. |
 | `/mcp clear <server> <tool>` | Remove the tool's session denial and stored rule; asks once. |
@@ -2195,7 +2196,7 @@ A hook is listed under an event path `Phase:Category:Specific`; `*` matches any 
 
 | Phase | When | Authority |
 | --- | --- | --- |
-| `Pre` | Before the operation | Can refuse it (`decision: "deny"`), rewrite its input (`updatedInput`) or add a note the model reads (`additionalContext`). A `Pre:tool:*` hook that fails refuses the call. `Pre:tool:*` hooks do not run in `yolo` mode. |
+| `Pre` | Before the operation | Can refuse it (`decision: "deny"`), put a tool call to you (`decision: "ask"`), rewrite its input (`updatedInput`) or add a note the model reads (`additionalContext`). A `Pre:tool:*` hook that fails refuses the call. `Pre:tool:*` hooks run in every permission mode, `yolo` included, and for a tool run inside another tool. |
 | `Post` | After it succeeds | Observes only. |
 | `Fail` | When it fails | Observes only. |
 | `Change` | When tracked state changes | Observes only. |
@@ -2240,7 +2241,7 @@ The payloads of the tool and file events:
 | --- | --- |
 | `Pre:tool:<tool>` | `callId`, `tool`, `args` (the call's arguments exactly as the model sent them; for `exec`, `args.commands[].cmd` holds each shell command; for `edit`, `args.edits[].path`; for `write`, `args.files[].path`). |
 | `Post:tool:<tool>` | `callId`, `tool`, `result` (the tool's result object). Fired only when the call succeeded. It has no `args`. |
-| `Post:file:write`, `Post:file:edit`, `Fail:file:write`, `Fail:file:edit` | `tool`, `callId`, `path`, and `error` on `Fail`. For `write`, `path` is the call's `files` argument encoded as a JSON string (contents included); for `edit`, `path` is an empty string, because `edit` names its files inside `edits`. |
+| `Post:file:write`, `Post:file:edit`, `Fail:file:write`, `Fail:file:edit` | `tool`, `callId`, `paths` (every file the call wrote or tried to, as the call named them: `files[].path` of a `write`, `edits[].path` and a notebook operation's `path` of an `edit`), `path` (the first of them), and `error` on `Fail`. File contents are never in the payload. |
 | `Change:file:external` | `filePath` (absolute) and `change` (`changed` or `deleted`): a watched file changed outside GoodVibes. |
 
 The other categories carry their own payloads; `/hooks contracts` lists each point, and `/hooks simulate <eventPath>` shows what fires.
@@ -2255,18 +2256,20 @@ How a `Pre:tool:*` result is used:
 
 - `"decision": "deny"` refuses the call before the permission gate sees it; the model receives `reason` (or `Tool '<tool>' was refused by its Pre hook.`). The first deny of several hooks wins.
 - `updatedInput` is what the gate checks and what runs; when several hooks return one, the last wins.
-- `"decision": "ask"` and `"decision": "allow"` change nothing for a tool call: the permission gate still decides.
+- `"decision": "ask"` puts the call to you, in every mode (`yolo` included; held for you in `just-vibes`), with the hook's `reason` on the card: `Your Pre:tool:<tool> hook asks you about this call: <reason>`. A rule that refuses the call still refuses it. `"decision": "allow"` changes nothing: the permission gate still decides.
 - A hook that fails without a decision refuses the call: `Hook '<name>' at Pre:tool:<tool> failed (<error>), so the call was refused. Fix or remove the hook, then retry.`
 
 `Pre:tool:*` hooks finish before the call runs. `Post:*`, `Fail:*` and file hooks run beside the turn: the next call does not wait for them, and their failure is only logged.
 
-### What `yolo` does to hooks
+### Hooks in every mode and inside other tools
 
-In the `yolo` permission mode (`--yolo`, Shift+Tab, or `permissions.mode` `yolo`), `Pre:tool:*` hooks are not run at all, so a hook that blocks a command has no effect in a `yolo` session or a `goodvibes --yolo run`. `Post:*`, `Fail:*` and file hooks still run.
+`Pre:tool:*` hooks run in every permission mode, `yolo` included (`--yolo`, Shift+Tab, `permissions.mode` `yolo`, `goodvibes --yolo run`): a deny refuses the call and an ask puts it to you. They also fire for a tool that one tool runs inside another (for example `agent_harness` calling `agent_operator_method`, or `inspect` writing a scaffold with `write`): the inner call's payload carries `nested: true`, and a deny, an ask or a rewrite applies to it as to a call the model made itself.
 
 ### Example: refuse every `git push` the model runs
 
-A hook fires only for the tool the model calls directly; a tool that one tool runs inside another (for example `agent_harness` starting a process) does not fire the inner tool's hook. So the hook must be registered under every tool the model can call that runs a command, now or later. In the two programs' tool registries these are:
+To make sure a command never runs, use a never-run rule instead of a hook: `/permissions add never git push`. The gate itself refuses it, in every mode, through every tool that can reach a shell, in the base64 form, through wrappers, `sh -c`, scripts and quoting (see "Never-run rules" in "Permissions and decisions"). The hook below is for a check of your own that a rule cannot express.
+
+A hook fires for the tool called, whether the model called it or another tool ran it. So it must be registered under every tool that runs a command, now or later. In the two programs' tool registries these are:
 
 | Tool | Program | How it runs a command |
 | --- | --- | --- |
@@ -2330,7 +2333,6 @@ It also refuses harmless commands that contain the two words in that order, for 
 
 What it does not stop:
 
-- Any call in the `yolo` permission mode, where `Pre:tool:*` hooks do not run.
 - A command whose words are not in that order or are built when it runs: `echo push | xargs git`, `g''it push`, `$(printf git) push`, a variable holding `push` (including one set in `exec`'s `env`), a script file the model wrote earlier and then runs (`sh publish.sh`), a git alias (`git config alias.p push` followed by `git p`), or text sent to a running shell in pieces (`process` `write` of `git ` and then `push`).
 - Tools of MCP servers (a git MCP server's push tool is the call `mcp` with `mode: "call"`); add a `Pre:tool:mcp` entry with a script that inspects `.payload.args.qualifiedName` to cover a specific server tool.
 - Agents hosted with `/agents host` and runners started with `/remote dispatch`, which run their own tools in their own process.
@@ -2339,7 +2341,7 @@ What it does not stop:
 
 ### Example: format files after every edit
 
-Because `Post:tool:edit` carries no arguments and `Post:file:edit` carries no path, this hook formats every file git reports as changed or new (it needs a git repository and the project's own `prettier`; `--no-install` keeps `npx` from downloading one). Save as `<project>/.goodvibes/hooks/format-changed.sh` (executable):
+`Post:file:edit` and `Post:file:write` carry the paths written (`.payload.paths`); this hook formats every file git reports as changed or new instead, which also covers files a command changed (it needs a git repository and the project's own `prettier`; `--no-install` keeps `npx` from downloading one). Save as `<project>/.goodvibes/hooks/format-changed.sh` (executable):
 
 ```sh
 #!/bin/sh
@@ -2571,8 +2573,8 @@ For each tool call the gate decides first, so `PERMISSION_REQUESTED` and `PERMIS
 | `awaiting-owner` | 1 | Delegated work stopped for an owner decision; open the session interactively and answer it. |
 | `agent-failed` | 1 | A helper agent started outside a contract ended without a completed report. |
 | (`preflight_failed`, `context_overflow`) | 3 | Never reported by a headless run. When the turn fails its preflight check or its context does not fit, the run sees no completion, error or cancellation event and reports `turn-unsettled` (exit `3`) instead. |
-| `provider_error` | 1 | The provider failed (after any sign-in move inside the provider). |
-| `provider_exhausted` | 1 | Every backend of the selected `synthetic` model is exhausted (rate limits and cooldowns): `All providers for the selected synthetic model are exhausted`. |
+| `provider_error` | 1 | The provider failed (after any sign-in move inside the provider, the retries, and every model of `provider.fallbackModels` not yet tried). |
+| `provider_exhausted` | 1 | Every backend of the selected `synthetic` model is exhausted (rate limits and cooldowns) and no model of `provider.fallbackModels` was left to try: `All providers for the selected synthetic model are exhausted`. |
 | `hook_denied` | 1 | A `Pre:llm:chat` hook refused the model request, which ends the turn. (A `Pre:tool:*` hook that refuses a tool call fails only that call; the turn goes on.) |
 | `tool_loop_circuit_breaker` | 1 | The turn was stopped by a turn limit or its budget before the request was complete: `Stopped: <the limit, or 'a turn limit was reached'>. The request is not complete.` |
 | `unexpected_error` | 1 | The turn failed in an unexpected way (the run's own error is in `error`), including a turn admitted through native intake that then failed in this process (`The turn failed in this process: <reason>`). |

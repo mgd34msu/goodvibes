@@ -12,6 +12,7 @@ import { loadSavedSessionIntoLive } from './session-load.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
+import { createCheckpointsCommand, dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -80,12 +81,21 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'undo',
     effect: 'session-lifecycle',
     aliases: [],
-    description: 'Undo the last conversation turn',
-    usage: '',
-    argsHint: '',
+    description: 'Undo the last conversation turn. /undo file reverts every file the last write/edit call changed (/undo file drop sets aside an entry a later change blocks)',
+    usage: '[file [drop]]',
+    argsHint: '[file]',
+    subcommands: { file: '' },
     handler(args, ctx) {
+      if (args[0] === 'file' && args.length === 1) {
+        undoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
+        return;
+      }
+      if (args[0] === 'file' && args[1] === 'drop' && args.length === 2) {
+        dropFileChange(ctx.workspace.fileUndoManager, 'undo', (text) => ctx.print(text));
+        return;
+      }
       if (args.length > 0) {
-        throw commandRefusal('Usage: /undo\n  Removes the last conversation turn. Use execution action:"recovery" for local file edit undo.');
+        throw commandRefusal('Usage: /undo [file [drop]]\n  /undo removes the last conversation turn; /undo file reverts every file the last write/edit call changed; /undo file drop sets that entry aside without changing a file.');
       }
       if (ctx.isGenerating?.()) {
         ctx.print('A turn is still running. Stop it with Esc or let it finish, then /undo.');
@@ -93,10 +103,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       }
       const success = ctx.session.conversationManager.undo();
       if (success) {
-        ctx.print('Last turn undone. Use /redo to restore.');
+        ctx.print('Last turn undone. Use /redo to restore. Tip: /undo file to revert a file write/edit.');
         ctx.renderRequest();
       } else {
-        ctx.print('Nothing to undo.');
+        ctx.print('Nothing to undo. Tip: use /undo file to revert the last file write/edit.');
       }
     },
   });
@@ -104,12 +114,21 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
   registry.register({
     name: 'redo',
     effect: 'session-lifecycle',
-    description: 'Redo the last undone conversation turn',
-    usage: '',
-    argsHint: '',
+    description: 'Redo the last undone conversation turn. /redo file re-applies the last reverted file change (/redo file drop sets aside an entry a later change blocks)',
+    usage: '[file [drop]]',
+    argsHint: '[file]',
+    subcommands: { file: '' },
     handler(args, ctx) {
+      if (args[0] === 'file' && args.length === 1) {
+        redoLastFileChange(ctx.workspace.fileUndoManager, (text) => ctx.print(text));
+        return;
+      }
+      if (args[0] === 'file' && args[1] === 'drop' && args.length === 2) {
+        dropFileChange(ctx.workspace.fileUndoManager, 'redo', (text) => ctx.print(text));
+        return;
+      }
       if (args.length > 0) {
-        throw commandRefusal('Usage: /redo\n  Restores the last undone conversation turn. Use execution action:"recovery" for local file edit redo.');
+        throw commandRefusal('Usage: /redo [file [drop]]\n  /redo restores the last undone conversation turn; /redo file re-applies the last reverted file change; /redo file drop sets that entry aside without changing a file.');
       }
       if (ctx.isGenerating?.()) {
         ctx.print('A turn is still running. Stop it with Esc or let it finish, then /redo.');
@@ -117,13 +136,21 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       }
       const success = ctx.session.conversationManager.redo();
       if (success) {
-        ctx.print('Turn restored.');
+        ctx.print('Turn restored. Tip: /redo file to re-apply a reverted file.');
         ctx.renderRequest();
       } else {
-        ctx.print('Nothing to redo.');
+        ctx.print('Nothing to redo. Tip: use /redo file to re-apply the last reverted file.');
       }
     },
   });
+
+  // /checkpoints and /checkpoints restore: the same lines the terminal app runs.
+  registry.register(createCheckpointsCommand<CommandContext>({
+    manager: (ctx) => ctx.workspace.workspaceCheckpointManager,
+    record: (ctx, text) => ctx.print(text),
+    emptyHint: 'The Agent takes checkpoints only in a registered workspace (goodvibes-agent workspaces register --yes).',
+    listFooter: '',
+  }));
 
   registry.register(contentCommands.retryCommand);
 

@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { EMPTY_OBJECT_SCHEMA,STRING_SCHEMA,BOOLEAN_SCHEMA,NUMBER_SCHEMA,arraySchema,objectSchema,listOutputSchema,bodyEnvelopeSchema,methodDescriptor,runtimeEventId } from './method-catalog-shared.js';
 import { withPathParams } from './method-catalog-path-params.js';
 import {
@@ -121,6 +122,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.accounts.action.default',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Channel Account Action',
     description: 'Run a lifecycle action on the default channel account for a surface.',
@@ -138,6 +140,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.accounts.action.named',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Named Channel Account Action',
     description: 'Run a lifecycle action on a specific channel account.',
@@ -195,6 +198,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.tools.invoke',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Channel Tool',
     description: 'Run a channel-owned operator tool.',
@@ -252,6 +256,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.actions.invoke',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Channel Action',
     description: 'Run a channel-owned operator action.',
@@ -269,6 +274,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.targets.resolve',
+    repeat: 'safe',
     title: 'Resolve Channel Target',
     description: 'Resolve a typed channel target for outbound delivery or routing.',
     category: 'channels',
@@ -280,6 +286,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.authorize',
+    repeat: 'safe',
     title: 'Authorize Channel Action',
     description: 'Evaluate channel authorization and availability for a requested action.',
     category: 'channels',
@@ -298,6 +305,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.allowlist.resolve',
+    repeat: 'safe',
     title: 'Resolve Channel Allowlist',
     description: 'Resolve allowlist candidates into stable channel identities.',
     category: 'channels',
@@ -318,6 +326,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.allowlist.edit',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Edit Channel Allowlist',
     description: 'Apply allowlist additions or removals for a channel surface.',
@@ -349,9 +358,10 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.policies.update',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Update Channel Policy',
-    description: 'Update ingress policy configuration for a channel surface.',
+    description: 'Update ingress policy configuration for a channel surface. `open` makes it a shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised (off by default, so the first unknown sender raises a claim the owner accepts or declines). Anyone admitted who is not the channel\'s owner talks as a guest: their turn may read and answer, and every change it asks for is put to the owner.',
     category: 'channels',
     scopes: ['write:channels'],
     access: 'admin',
@@ -359,6 +369,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     inputSchema: bodyEnvelopeSchema({
       surface: STRING_SCHEMA,
       enabled: BOOLEAN_SCHEMA,
+      open: BOOLEAN_SCHEMA,
       requireMention: BOOLEAN_SCHEMA,
       allowDirectMessages: BOOLEAN_SCHEMA,
       allowGroupMessages: BOOLEAN_SCHEMA,
@@ -425,6 +436,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Watcher',
     description: 'Register a new watcher (kind defaults to polling). The kinds that can be created here, and what each needs: webhook or polling with a url (polling also takes endpoint), requested every intervalMs, its response being what the watcher observes; filesystem with a path, whose size and modification time are observed; manual, which needs nothing and runs only when started by hand. socket and integration watchers are registered by the component that owns them, and are refused here because nothing would observe them. A header carrying a credential must be a goodvibes://secrets/ reference.',
     category: 'watchers',
@@ -451,6 +463,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.update',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Update Watcher',
     description: 'Update an existing watcher. A kind change needs what that kind needs (see watchers.create): a url for webhook or polling, a path for filesystem, nothing for manual. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
     category: 'watchers',
@@ -478,6 +491,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Watcher',
     description: 'Delete an existing watcher.',
@@ -492,6 +506,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.start',
+    repeat: 'safe',
     title: 'Start Watcher',
     description: 'Start a watcher instance.',
     category: 'watchers',
@@ -504,6 +519,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.stop',
+    repeat: 'safe',
     title: 'Stop Watcher',
     description: 'Stop a watcher instance.',
     category: 'watchers',
@@ -516,6 +532,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'watchers.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Watcher',
     description: 'Trigger a watcher immediately.',
@@ -540,6 +557,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'services.install',
+    repeat: 'safe',
     title: 'Install Service',
     description: 'Install the GoodVibes platform service.',
     category: 'services',
@@ -551,6 +569,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'services.start',
+    repeat: 'safe',
     title: 'Start Service',
     description: 'Start the GoodVibes platform service.',
     category: 'services',
@@ -562,6 +581,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'services.stop',
+    repeat: 'safe',
     title: 'Stop Service',
     description: 'Stop the GoodVibes platform service.',
     category: 'services',
@@ -573,6 +593,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'services.restart',
+    repeat: 'unsafe',
     title: 'Restart Service',
     description: 'Restart the GoodVibes platform service.',
     category: 'services',
@@ -584,6 +605,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'services.uninstall',
+    repeat: 'safe',
     title: 'Uninstall Service',
     description: 'Uninstall the GoodVibes platform service.',
     category: 'services',
@@ -666,6 +688,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.inbox.applyLabels',
+    repeat: 'safe',
     title: 'Apply Inbox Labels',
     description:
       'Write triage labels to inbox messages at their provider: an IMAP keyword on mail, a reaction on Slack, a reaction or forum tag on Discord. `itemIds` are ids from channels.inbox.list (up to 100); `labels` are GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name. Writes only for accounts whose owner switch is on (surfaces.slack.inboxTagging, surfaces.discord.inboxTagging, surfaces.email.inboxTagging). Returns one result per message: `applied` (every label is on it now), `refused` (nothing was written, with the reason and what to do) or `failed` (the provider did not take a label; `effects` says which mark was written or not).',
@@ -698,6 +721,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.inbox.triage',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Triage Inbox Now',
     description:
       'Score a page of one provider\'s stored inbox now: each message gets a spam / priority / normal label from the decision model on the account\'s privacy-screening route (labels otherwise come after each poll, so this is for a backlog or a re-check). `provider` is required (slack, discord or email); page with `limit` (at most 100) and `cursor` (nextCursor from channels.inbox.list or an earlier answer). `dryRun: true` returns the readings without storing them. Returns one receipt per message: `settled` with its label and score, or `held` / `unavailable` / `withheld` with why nothing was settled. When triage is off for the account the call is refused with the reason and what turns it on; channels.inbox.list reports the same state on each provider as `triage`.',
@@ -746,6 +770,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.routing.assign',
+    repeat: 'safe',
     title: 'Assign Channel Routing Rule',
     description: 'Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it on every channel surface (slack, discord, telegram, msteams and the rest) and to slack, discord and email inbox items: an agent started for a message from the channel takes the profile\'s model and reasoning effort when neither the request nor the channel profile chose a model. routeId is the conversation (a chat, channel or room id); without it the rule covers the whole surface, and surfaceKind any covers every channel. tui, web and service are refused with 400 ROUTING_SURFACE_NOT_ROUTED, because their model is chosen in the surface itself. Requires explicit confirmation; a call made with the Agent\'s credential (the Agent acting on the owner\'s behalf) instead takes fresh recorded native admission.',
     category: 'channels',
@@ -773,6 +798,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.routing.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Channel Routing Rule',
     description: 'Remove a channel-to-profile routing rule from the daemon-persisted routing table.',
@@ -815,6 +841,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.drafts.save',
+    repeat: 'unsafe',
     title: 'Save Channel Draft',
     description: 'Mirror a channel draft to the daemon-side store. Webhook values must be redacted before transmission; raw webhook tokens are rejected. Requires explicit confirmation; a call made with the Agent\'s credential (the Agent acting on the owner\'s behalf) instead takes fresh recorded native admission.',
     category: 'channels',
@@ -830,6 +857,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'channels.drafts.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Channel Draft',
     description: 'Remove a channel draft from the daemon-side store.',

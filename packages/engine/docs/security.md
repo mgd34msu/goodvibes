@@ -77,7 +77,7 @@ Users authenticate with a username and password via the login endpoint. On succe
 - A sign-in lasts **12 hours** without use (`OPERATOR_SESSION_TTL_MS`, the same value the control plane publishes as `sessionTtlMs`); each use moves its end 12 hours ahead (at most once a minute), and the login response carries `expiresAt`. `GET /api/control-plane/auth` reports the session's current end as `expiresAt` and, when the session arrived as the session cookie, re-issues the cookie with that end; the web app keeps the reported end and reads it again shortly before it, so a session in use is not dropped at the end given at sign-in. Sessions are held in memory, so a daemon restart ends them
 - Sessions are pruned on access; expired sessions are rejected and cleaned up
 - Local auth status reports expose an independent opaque session `id`, username and expiry. Use that ID to revoke a session; raw session bearer tokens are not returned by status APIs
-- On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; setting that user's password deletes the file, and the first sign-in with a real password retires it too
+- On first boot with no user store, the daemon bootstraps a default admin account and writes a plaintext credential file for initial login; the generated password signs in only while that file holds it (deleting or clearing the file withdraws it and ends the sign-ins made with it), and setting that user's password deletes the file
 - Login failures are locked out per account and client address, independent of the per-address login rate limiter below, so repeated failures from one address never lock the owner out from another. Failures never leak whether the username exists; an unknown username still runs a constant-time password check against a dummy hash. The lockout escalates with repeated failures, 30 seconds at 6-9 failures, 5 minutes at 10-19, and 30 minutes at 20 or more. The thresholds are set above the default 5-per-minute IP login budget so the per-IP limiter throttles an attacker before the account lock engages for a normal in-budget attempt. An attempt made while locked counts toward the address's rate limit only, never toward the lock, and the failure count starts again once the last failure (or the end of its lock) is a quiet period behind: the lock's own length, at least a minute. A successful login clears the failure count.
 
 Session tokens are carried as:
@@ -466,7 +466,7 @@ purpose=Use these credentials only for local daemon/http listener /login routes 
 note=Normal platform host usage does not require these credentials.
 ```
 
-This file is an **output**, not an authentication input. The runtime reads it only to recognize bootstrap-credential logins and to explain a failed one; the hash in `auth-users.json` is authoritative, so edits to this file do not change the stored password hash. It is written only when the first admin is generated, never with a password the owner chose.
+The hash in `auth-users.json` is what checks the password, so edits to this file do not change it, but the file is also what keeps the generated password alive: the generated admin is stored with `"bootstrap": true`, and while it carries that mark its password signs in only when this file still names it with that password. Deleting or emptying the file withdraws the password (`/login` answers 401 `BOOTSTRAP_CREDENTIAL_WITHDRAWN`), and a session signed in with it ends at its next check once the file no longer names its user (the file is read at most once a second, only for such sessions). `rotatePassword()` drops the mark. A sign-in by another user never deletes the file while the user it names still has the generated password. The file is written only when the first admin is generated, never with a password the owner chose.
 
 #### A file that fell behind
 
@@ -501,7 +501,7 @@ No password is derived at start to compare the file with the store. When a sign-
 
 | Situation | Outcome |
 |---|---|
-| Bootstrap file deleted before first login | Re-bootstrap by deleting both `auth-bootstrap.txt` **and** `auth-users.json`; both files are regenerated on next start |
+| Bootstrap file deleted or emptied before a password is set | The generated password stops signing in (401 `BOOTSTRAP_CREDENTIAL_WITHDRAWN`) and its sessions end. Set a password with `goodvibes auth rotate-password admin` (the CLI writes the user store directly), or delete both `auth-bootstrap.txt` **and** `auth-users.json` to have both regenerated on next start |
 | `auth-users.json` deleted while `auth-bootstrap.txt` still exists | Daemon re-bootstraps with a new password and writes it to a new bootstrap file |
 | Both files deleted | Clean re-bootstrap: a new admin account and new bootstrap file are created. All existing sessions are invalidated (sessions are in-memory) |
 | Bootstrap file manually edited | Password mismatch; `/login` answers a sign-in with the file's exact username and password with 401 `BOOTSTRAP_CREDENTIAL_STALE` (the file fell behind the user store; nothing is derived at start to find this out) and logs it once. Set a password with `goodvibes auth rotate-password <username>` (`rotatePassword()`), which deletes the file |

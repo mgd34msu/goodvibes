@@ -7,6 +7,7 @@ import {
   type ProviderRegistry,
   type FavoritesStore,
   type CanonicalModel,
+  type ModelDefinition,
 } from '@goodvibes-jev/engine/platform/platform/providers';
 import { summarizeProviderAuthRoutes } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
 import type { formatProviderAuthRoute as ProviderAuthRouteFormatter } from '@goodvibes-jev/engine/platform/platform/providers/auth-route-presentation';
@@ -20,6 +21,24 @@ export interface CliProviderRuntime {
 export interface CliProviderServices {
   readonly providerRegistry: ProviderRegistry;
   readonly favoritesStore: FavoritesStore;
+}
+
+/**
+ * The model in force, or why the saved one cannot be used. A saved model whose
+ * provider is not registered (a scanned server that was removed, a typo) must
+ * not stop the commands that list and change models.
+ */
+type CurrentModelReading =
+  | { readonly model: ModelDefinition; readonly problem?: undefined }
+  | { readonly model?: undefined; readonly problem: string };
+
+function readCurrentModel(registry: ProviderRegistry): CurrentModelReading {
+  try {
+    const model = registry.getCurrentModel();
+    return registry.isUnregisteredModel(model) ? { problem: registry.unregisteredModelMessage(model.registryKey) } : { model };
+  } catch (error) {
+    return { problem: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Only an explicit `provider:model` names a provider; a bare or slash id is never guessed into one. */
@@ -105,8 +124,10 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         services.providerRegistry,
         policy.enrichModelFamilies ? {} : { modelFamilyEnrichment: 'none' },
       );
-      const current = services.providerRegistry.getCurrentModel();
+      const reading = readCurrentModel(services.providerRegistry);
+      const current = reading.model;
       if (sub === 'current') {
+        if (!current) return unregisteredCurrentModel(runtime, reading.problem ?? '');
         const snapshot = snapshots.find((candidate) => candidate.providerId === current.provider);
         const authRoutes = snapshot?.runtime.auth?.routes ?? [];
         const value = {
@@ -130,22 +151,29 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         ));
       }
       if (sub === 'use' || sub === 'set') {
-        const provider = rest[0];
-        if (!provider) return usage(`Usage: ${policy.binary(runtime)} providers use <provider> [modelRegistryKey]`);
+        const named = rest[0];
+        if (!named) return usage(`Usage: ${policy.binary(runtime)} providers use <provider> [modelRegistryKey]`);
+        // A provider is named by its id or display name, without regard to case.
+        const provider = services.providerRegistry.resolveProviderReference(named);
+        if (provider === undefined) {
+          const known = snapshots.map((snapshot) => snapshot.providerId);
+          return cliCommandRefusal(runtime.cli, 'provider_not_found',
+            `Unknown provider: ${named}. Nothing was changed. Registered providers: ${known.join(', ') || 'none'}.`,
+            [`${policy.binary(runtime)} providers list`]);
+        }
         const providerModels = services.providerRegistry
           .getSelectableModels()
           .filter((model) => model.provider === provider || model.registryKey.startsWith(`${provider}:`));
         const requestedModel = rest[1];
         const selected = requestedModel
           ? providerModels.find((model) => model.registryKey === requestedModel || model.id === requestedModel)
-          : (providerModels.find((model) => model.registryKey === current.registryKey) ?? providerModels[0]);
+          : (providerModels.find((model) => model.registryKey === current?.registryKey) ?? providerModels[0]);
         if (providerModels.length === 0 || !selected) {
-          // Without a model to save, an unknown provider is a typo: writing it would leave the next turn failing on a provider that does not exist.
+          // A registered provider whose model list names nothing yet: only a named model can be saved.
           if (!requestedModel) {
-            const known = snapshots.map((snapshot) => snapshot.providerId);
-            return cliCommandRefusal(runtime.cli, 'provider_not_found',
-              `Unknown provider: ${provider}. Nothing was changed. Known providers: ${known.join(', ') || 'none'}. To save a provider that is not in the local catalog, name its model: ${policy.binary(runtime)} providers use ${provider} <modelRegistryKey>`,
-              [`${policy.binary(runtime)} providers use ${provider} <modelRegistryKey>`]);
+            return cliCommandRefusal(runtime.cli, 'model_not_found',
+              `Provider ${provider} lists no models here. Nothing was changed. Name its model: ${policy.binary(runtime)} providers use ${provider} <model>`,
+              [`${policy.binary(runtime)} providers use ${provider} <model>`]);
           }
           runtime.configManager.setDynamic('provider.model', formatProviderModel(provider, requestedModel));
           return cliCommandDone(providerReceipt(provider, requestedModel, false));
@@ -193,7 +221,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           configured: snapshot.runtime.auth?.configured ?? true,
           configuredVia: snapshot.runtime.auth?.mode ?? 'unknown',
           models: snapshot.modelCount,
-          current: current.provider === snapshot.providerId,
+          current: current?.provider === snapshot.providerId,
           detail: snapshot.runtime.auth?.detail ?? snapshot.runtime.notes?.join('; ') ?? '',
           authRoutes: snapshot.runtime.auth?.routes ?? [],
           authRouteSummary: summarizeProviderAuthRoutes(snapshot.runtime.auth?.routes),
@@ -203,6 +231,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         value,
         [
           'GoodVibes providers',
+          ...(reading.problem ? [`  ${reading.problem}`] : []),
           ...value.map((provider) =>
             `  ${provider.current ? '*' : ' '} ${provider.provider.padEnd(18)} setup${policy.inlineReceipts ? '=' : ' '}${provider.setupClass} configured${policy.inlineReceipts ? '=' : ' '}${yesNo(provider.configured)} via${policy.inlineReceipts ? '=' : ' '}${provider.configuredVia ?? 'n/a'} models${policy.inlineReceipts ? '=' : ' '}${provider.models} routes${policy.inlineReceipts ? '=' : ' '}${provider.authRouteSummary} ${provider.detail ?? ''}`.trimEnd(),
           ),
@@ -215,7 +244,8 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
     const usage = (text: string): CliCommandOutput => cliCommandRefusal(runtime.cli, 'usage', text);
     return await withRuntimeServices(runtime, async (services): Promise<CliCommandOutput> => {
       const [subOrFilter, ...rest] = runtime.cli.commandArgs;
-      const current = services.providerRegistry.getCurrentModel().registryKey;
+      const reading = readCurrentModel(services.providerRegistry);
+      const current = reading.model?.registryKey;
       const providerSnapshots = await listProviderRuntimeSnapshots(
         services.providerRegistry,
         policy.enrichModelFamilies ? {} : { modelFamilyEnrichment: 'none' },
@@ -231,7 +261,8 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         return reading;
       };
       if (subOrFilter === 'current') {
-        const model = services.providerRegistry.getCurrentModel();
+        const model = reading.model;
+        if (!model) return unregisteredCurrentModel(runtime, reading.problem ?? '');
         const setup = await classifyModelProvider(model.provider);
         const providerSnapshot = providerSnapshots.find((candidate) => candidate.providerId === model.provider);
         const value = {
@@ -260,19 +291,28 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
       if (subOrFilter === 'use' || subOrFilter === 'set') {
         const modelKey = rest[0];
         if (!modelKey) return usage(`Usage: ${policy.binary(runtime)} models use <registryKey>`);
-        const model = services.providerRegistry
-          .getSelectableModels()
-          .find((candidate) => candidate.registryKey === modelKey || candidate.id === modelKey);
+        const selectable = services.providerRegistry.getSelectableModels();
+        const find = (key: string) => selectable.find((candidate) => candidate.registryKey === key || candidate.id === key);
+        // The provider half names a registered provider by id or display name, without regard to case.
+        const canonicalKey = services.providerRegistry.canonicalModelKey(modelKey);
+        const model = find(modelKey) ?? (canonicalKey === null ? undefined : find(canonicalKey));
         if (!model) {
-          const provider = explicitProviderOfRegistryKey(modelKey);
-          if (!provider) {
+          const named = explicitProviderOfRegistryKey(modelKey);
+          if (!named) {
             return cliCommandRefusal(runtime.cli, 'model_not_found',
               `Unknown model: ${modelKey}. Nothing was changed. Name the provider to save a model that is not in the local catalog: ${policy.binary(runtime)} models use <provider>:${modelKey}`,
               [`${policy.binary(runtime)} models use <provider>:${modelKey}`]);
           }
-          runtime.configManager.setDynamic('provider.model', formatProviderModel(provider, modelKey));
-          await services.favoritesStore.recordUsage(modelKey);
-          return cliCommandDone(modelReceipt('selected', modelKey, false, provider));
+          if (canonicalKey === null) {
+            const known = services.providerRegistry.listProviders().map((candidate) => candidate.name).filter((name) => name !== 'decision-router');
+            return cliCommandRefusal(runtime.cli, 'provider_not_found',
+              `Unknown provider: ${named} (in ${modelKey}). Nothing was changed. Registered providers: ${known.join(', ') || 'none'}. A local server is registered by a scan (/scan).`,
+              [`${policy.binary(runtime)} providers list`, `${policy.binary(runtime)} models`]);
+          }
+          const provider = canonicalKey.slice(0, canonicalKey.indexOf(':'));
+          runtime.configManager.setDynamic('provider.model', canonicalKey);
+          await services.favoritesStore.recordUsage(canonicalKey);
+          return cliCommandDone(modelReceipt('selected', canonicalKey, false, provider));
         }
         runtime.configManager.setDynamic('provider.model', model.registryKey);
         await services.favoritesStore.recordUsage(model.registryKey);
@@ -355,6 +395,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         value,
         [
           `GoodVibes models${filter ? ` (${filter})` : ''}`,
+          ...(reading.problem ? [`  ${reading.problem}`] : []),
           ...(matching.length > models.length
             ? [`  showing ${models.length} of ${matching.length}; add a provider or text filter to narrow the list`]
             : []),
@@ -365,6 +406,11 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
         ].join('\n'),
       ));
     });
+  }
+  /** `models current` and `providers current` when the saved model cannot be used: what is wrong and how to choose another. */
+  function unregisteredCurrentModel(runtime: Runtime, problem: string): CliCommandOutput {
+    const binary = policy.binary(runtime);
+    return cliCommandRefusal(runtime.cli, 'model_not_registered', problem, [`${binary} models`, `${binary} models use <provider>:<model>`]);
   }
   return { renderProviders, renderModels };
 }

@@ -45,6 +45,17 @@ interface AutomationSchedulingContext {
    * same work. Absent, every due occurrence starts.
    */
   readonly hasRunningRun?: ((jobId: string) => boolean) | undefined;
+  /**
+   * In a group (cluster/group-work.ts): whether this machine arms the job's
+   * timer, which is where the automation role is held. Absent, every job runs here.
+   */
+  readonly runsHere?: ((job: AutomationJob) => boolean) | undefined;
+  /**
+   * In a group: write the occurrence about to start onto the group's record
+   * before it starts, so the next holder does not run it again. Resolves to
+   * the job to run, or null when it must not run here.
+   */
+  readonly claimOccurrence?: ((job: AutomationJob) => Promise<AutomationJob | null>) | undefined;
 }
 
 function completeOneShotJob(context: Pick<AutomationSchedulingContext, 'jobs' | 'timers' | 'saveJobs'>, current: AutomationJob, reason: string): void {
@@ -73,10 +84,17 @@ function saveJobsAsync(context: Pick<AutomationSchedulingContext, 'saveJobs'>, r
 export function scheduleAutomationJob(context: AutomationSchedulingContext, job: AutomationJob): void {
   cancelAutomationTimer(context.timers, job.id);
   if (!context.running() || !job.enabled) return;
+  // In a group, only the machine holding the automation role arms a timer.
+  if (context.runsHere && !context.runsHere(job)) return;
 
   const now = Date.now();
   const catchUpWindowMs = Number(context.configManager.get('automation.catchUpWindowMinutes') ?? 30) * 60_000;
-  const nextRunAtCandidate = job.nextRunAt ?? computeNextRun(job.schedule, now);
+  let nextRunAtCandidate = job.nextRunAt ?? computeNextRun(job.schedule, now);
+  // An occurrence a machine of the group already started (it may have stopped
+  // before writing the next run time) is not run again: the next one is due.
+  if (job.lastOccurrenceAt !== undefined && nextRunAtCandidate !== undefined && nextRunAtCandidate <= job.lastOccurrenceAt) {
+    nextRunAtCandidate = computeNextRun(job.schedule, job.lastOccurrenceAt);
+  }
   // A planned occurrence older than the catch-up window never fired. Record it
   // as a missed run (a first-class outcome that flows the same delivery path as
   // a failure) instead of silently recomputing the next occurrence.
@@ -119,6 +137,8 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     context.capacityWaits?.delete(waitKey);
     const latest = context.jobs.get(job.id);
     if (!latest?.enabled) return;
+    // The role moved while the timer waited: the new holder runs this occurrence.
+    if (context.runsHere && !context.runsHere(latest)) return;
     if (latest.execution.wakeMode === 'next-heartbeat') {
       queueHeartbeatWake(context.heartbeatWakes, latest, 'scheduled', true, 1, 'scheduled-due');
       return;
@@ -164,14 +184,24 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     }
     // A start failure is recorded, announced and followed up by the execution
     // itself; the scheduler only needs to log it and move on.
-    void context.executeJob(latest, 'scheduled', true)
+    // An occurrence not claimed here (the role moved, or the group's record
+    // could not be written) is neither run nor passed over: the holder runs
+    // it, or the next reconcile pass tries again.
+    let claimedHere = true;
+    const claimed = context.claimOccurrence ? context.claimOccurrence(latest) : Promise.resolve(latest);
+    void claimed
+      .then((claimedJob) => {
+        if (claimedJob) return context.executeJob(claimedJob, 'scheduled', true);
+        claimedHere = false;
+        return undefined;
+      })
       .catch((error) => {
         logger.error('AutomationManager: scheduled execution failed', {
           jobId: latest.id,
           error: summarizeError(error),
         });
       })
-      .finally(advance);
+      .finally(() => { if (claimedHere) advance(); });
   }, delayMs);
   timer.unref?.();
   context.timers.set(job.id, timer);

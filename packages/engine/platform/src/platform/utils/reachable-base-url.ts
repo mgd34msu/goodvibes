@@ -52,7 +52,7 @@
  * needs. `0.0.0.0` itself is never emitted, it is a bind address, not a
  * destination.
  */
-import { isIP } from 'node:net';
+import { isLoopbackHost as isLoopbackHostname } from '@goodvibes-jev/engine/transport-http/paths';
 import { networkInterfaces as osNetworkInterfaces } from 'node:os';
 import {
   deriveControlPlaneBaseUrl,
@@ -66,40 +66,9 @@ export function isWildcardHost(host: string | undefined): boolean {
   return WILDCARD_HOSTS.has(host.trim().toLowerCase());
 }
 
-/**
- * Loopback: correct on this machine, unreachable from any other one. The W3C
- * Secure Contexts list: localhost and `*.localhost`, an IPv4 address in
- * 127.0.0.0/8, or ::1 in any spelling including the IPv4-mapped form. A URL's
- * bracketed IPv6 `[::1]` counts. The address is parsed, not prefix-matched, so
- * a DNS name such as 127.example.com is not loopback.
- */
+/** Loopback: this machine, unreachable from any other one; the rule is the transport's `isLoopbackHost`. */
 export function isLoopbackHost(host: string | undefined): boolean {
-  if (!host) return false;
-  const name = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (name === 'localhost' || name.endsWith('.localhost')) return true;
-  const family = isIP(name);
-  if (family === 4) return name.split('.')[0] === '127';
-  if (family !== 6) return false;
-  const groups = expandIpv6(name);
-  if (groups === null) return false;
-  if (groups.every((group, index) => group === (index === 7 ? 1 : 0))) return true;
-  return groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff && groups[6]! >> 8 === 127;
-}
-
-/** The eight 16-bit groups of an IPv6 address, or null when it cannot be read. */
-function expandIpv6(address: string): number[] | null {
-  let text = address;
-  const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
-  if (tail) {
-    const octets = tail[1]!.split('.').map(Number);
-    text = `${text.slice(0, tail.index)}${((octets[0]! << 8) | octets[1]!).toString(16)}:${((octets[2]! << 8) | octets[3]!).toString(16)}`;
-  }
-  const [head, rest] = text.split('::') as [string, string | undefined];
-  const left = head === '' ? [] : head.split(':');
-  const right = rest === undefined || rest === '' ? [] : rest.split(':');
-  const missing = rest === undefined ? 0 : 8 - left.length - right.length;
-  const groups = [...left, ...Array.from({ length: missing }, () => '0'), ...right].map((group) => Number.parseInt(group, 16));
-  return groups.length === 8 && groups.every((group) => Number.isInteger(group) && group >= 0 && group <= 0xffff) ? groups : null;
+  return host !== undefined && host !== '' && isLoopbackHostname(host);
 }
 
 /**

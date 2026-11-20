@@ -631,9 +631,10 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   // A conversation turn carries text. `!@file` and `@path`/URL references are
   // already text by the time the composer submits (the composer expands them,
-  // each file capped with the cut stated), and held `!` output goes in front of
-  // the message in ownerTurns.sendTurn. Only an image cannot go with it: say so before
-  // anything is pinned or sent, and give the draft back.
+  // each file capped with the cut stated, and refuses any other binary file),
+  // and held `!` output goes in front of the message in ownerTurns.sendTurn.
+  // Only an image (pasted, `/image`, or a typed reference to an image file)
+  // cannot go with it: say so before anything is pinned or sent, and give the draft back.
   const refuseUnsendable = (draft: string, source: NativeConversationInput | undefined, content: readonly ContentPart[] | undefined): boolean => {
     const images = (source?.unsupportedSources ?? []).filter((part) => part.kind === 'image');
     if (content?.some((part) => part.type !== 'text') && images.length === 0) images.push({ kind: 'image', label: 'attached image' });

@@ -1,23 +1,26 @@
 /**
- * group-store.ts, where the group's secrets and its roster actually live.
+ * group-store.ts, where the group's secrets live, and how the generations a
+ * machine accepts are worked out from them and the authority record.
  *
- * Two stores, deliberately different, because they hold different things:
+ * Two homes, deliberately different, because they hold different things:
  *
- *   KEY MATERIAL, the join key, the group keys, this node's private keys,
- *   goes in the ENCRYPTED secrets store and nowhere else. Not in config, not in
- *   a log line, not in /status, not in a datagram. The only way any of it
- *   reaches a human is `cluster key`, which prints the join key and nothing
- *   else, on request.
+ *   KEY MATERIAL, the join key, the group key of each generation, this node's
+ *   private keys and the group's signing private key, goes in the ENCRYPTED
+ *   secrets store and nowhere else. Not in config, not in a log line, not in
+ *   /status, not in a datagram in clear. The only way any of it reaches a human
+ *   is `cluster key`, which prints the join key and nothing else, on request.
  *
- *   THE ROSTER is public to the group by construction: it holds node ids,
- *   labels and PUBLIC keys, and every member gossips it to every other member.
- *   It goes in a plain file under the cluster state directory, where an
- *   operator can read it if they want to.
+ *   THE PUBLIC FACTS, who the members are and every key generation (its cause,
+ *   its minter, a commitment to its key, the signing public key and the join
+ *   verifier in force from it), are entries of the authority record
+ *   (authority-record.ts), carried to every member by authority-sync.ts.
  *
- * Both are bounded, content-validated on load, and swept, a store that only
- * ever grows is a slow leak, and one that trusts whatever it finds on disk
- * turns a half-written file into a crash loop.
+ * Which generation is current, and whether the previous one is still
+ * accepted, is not stored anywhere: it is computed from those two
+ * (`computeKeyAcceptance`), so no machine holds a copy of the answer that can
+ * disagree with the group's record.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -26,25 +29,22 @@ import {
   generateNodeKeyMaterial,
   isValidPublicKey,
   type NodeKeyMaterial,
-  type NodeKeyPairMaterial,
 } from './group-crypto.js';
-import {
-  createGroupStateDocument,
-  DEFAULT_GROUP_DISPLAY_NAME,
-  readGroupStateDocument,
-  sweepGroupState,
-  type GroupStateDocument,
-} from './group-state.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
+import type { AuthorityPublicParts } from './authority-record.js';
 import type { ClusterKeyring } from './protocol-envelope.js';
 import type { ClusterLogger } from './types.js';
 
-/** The roster file, relative to the cluster state directory. */
-export const GROUP_STATE_FILENAME = 'group-state.json';
-/** The replicated settings file, alongside the roster. Public to the group, like it. */
+/** The replicated settings file, in the cluster state directory. Public to the group. */
 export const GROUP_REPLICA_FILENAME = 'group-config.json';
 /** Shared-setting changes made here and held until this machine holds the group's settings. */
 export const GROUP_HELD_CONFIG_FILENAME = 'group-config-held.json';
+/**
+ * Set when another member told this machine, in a way it could verify, that the
+ * group removed it. Kept so `cluster status` still says so after a restart;
+ * cleared when this machine joins a group again.
+ */
+export const GROUP_REMOVAL_FILENAME = 'group-removed.json';
 /**
  * The single secrets-store key holding every piece of group key material.
  *
@@ -74,63 +74,99 @@ export const GROUP_MATERIAL_SECRET_KEY = daemonSecretKeyFor('cluster.groupMateri
 export const MAX_KEY_GENERATIONS = 16;
 export const MAX_KEY_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 
-/** One generation of the group key. */
+/** One generation of the group key, as this machine holds it. */
 export interface GroupKeyRecord {
   readonly generation: number;
   readonly key: string;
   readonly createdAt: number;
-  /**
-   * The node that minted this generation.
-   *
-   * Only one member mints a given rotation, but a network that partitions
-   * mid-rotation can produce two candidates for the same generation. When that
-   * happens every node picks the one from the lexicographically SMALLER node
-   * id, a rule with no dependence on arrival order or clock, so both sides of
-   * a healed partition land on the same key without negotiating.
-   */
+  /** The node that minted this generation (the record's key-epoch entry says the same). */
   readonly mintedBy: string;
+  /**
+   * When THIS machine took the key. Local, never compared across machines: the
+   * previous generation stays accepted for the grace window after it.
+   */
+  readonly adoptedAt: number;
 }
 
 /**
- * Which of two candidate keys for the same generation wins.
- *
- * Exported because it is the whole of the partition-rotation tiebreak and is
- * tested directly.
+ * Everything secret about this node's membership of one group. No public fact
+ * lives here: which generation is current is computed (`computeKeyAcceptance`).
  */
-export function preferredKeyRecord(a: GroupKeyRecord, b: GroupKeyRecord): GroupKeyRecord {
-  if (a.generation !== b.generation) return a.generation > b.generation ? a : b;
-  return a.mintedBy <= b.mintedBy ? a : b;
-}
-
-/** Everything secret about this node's membership of one group. */
 export interface GroupKeyMaterial {
   readonly version: 1;
   readonly groupId: string;
   readonly joinKey: string;
   readonly joinSalt: string;
+  /** The verifier of `joinKey`, kept with it so a JOIN is checked without a slow derivation. */
   readonly joinVerifier: string;
   readonly keys: readonly GroupKeyRecord[];
-  readonly currentGeneration: number;
-  /**
-   * Wall-clock ms until which the PREVIOUS generation is still accepted.
-   *
-   * Set on a scheduled rotation, so members that have not yet cut over keep
-   * being heard. Set to 0 on a rotation caused by a REMOVAL, so the machine
-   * that was just ejected stops being heard immediately, which is the entire
-   * point of rotating on removal.
-   */
-  readonly previousAcceptedUntil: number;
   readonly node: NodeKeyMaterial;
   /**
    * The GROUP's signing key pair, and which generation of it this is.
    *
    * Every member holds the private half, so any member can answer a returning
-   * machine as the group rather than as itself. It rotates only on REMOVAL,
-   * not on a scheduled rotation, because its whole job is to be verifiable by
-   * a machine holding a public key from months ago, and rotating it daily would
-   * make that impossible for no gain.
+   * machine as the group rather than as itself. It is replaced by a
+   * REVOCATION (a removal, or `rotate --now`), whose new private half reaches
+   * every remaining member sealed with that generation's key; a scheduled
+   * rotation leaves it alone, because its job is to be verifiable by a machine
+   * holding a public key from months ago.
    */
   readonly groupSigning: GroupSigningMaterial;
+}
+
+/** A key generation's public facts, as the authority record holds them. */
+export type KeyEpochFacts = AuthorityPublicParts['key-epoch'];
+
+/**
+ * A public commitment to one generation's key: who holds the same key can be
+ * checked against the record without the key ever being written there.
+ */
+export function keyCommitment(groupId: string, epoch: number, key: string): string {
+  return createHash('sha256').update(`goodvibes-cluster-key-epoch-v1\0${groupId}\0${epoch}\0${key}`).digest('hex');
+}
+
+/** Which generations this machine signs with and accepts, computed, never stored. */
+export interface KeyAcceptance {
+  /** The generation this machine signs with. */
+  readonly current: number;
+  /** The generation before it while it is still accepted, else null. */
+  readonly previous: number | null;
+  /** Wall-clock ms until which `previous` is accepted. */
+  readonly previousUntil: number;
+  /** The highest generation minted by a revocation, or -1: the generation below it is never reopened. */
+  readonly floor: number;
+}
+
+/**
+ * The generations this machine accepts, from the record's key epochs and the
+ * keys it holds. Nothing else decides it.
+ *
+ *  - current: the highest generation on the record whose key this machine
+ *    holds with a matching commitment. A machine that holds a key the record
+ *    does not know (the record was lost) signs with its newest key until it
+ *    catches up.
+ *  - previous (current - 1): accepted only while the current generation is
+ *    above every generation a revocation minted (a removal or `rotate --now`
+ *    opens no window, on any machine, and a machine that joins later learns
+ *    the same floor from the record), and only for the grace window after this
+ *    machine took the current key.
+ */
+export function computeKeyAcceptance(
+  material: GroupKeyMaterial,
+  epochs: ReadonlyMap<number, KeyEpochFacts>,
+  graceMs: number,
+): KeyAcceptance {
+  let floor = -1;
+  for (const epoch of epochs.values()) if (epoch.cause === 'revocation') floor = Math.max(floor, epoch.epoch);
+  const matches = (record: GroupKeyRecord): boolean => {
+    const facts = epochs.get(record.generation);
+    return facts !== undefined && facts.keyCommitment === keyCommitment(material.groupId, record.generation, record.key);
+  };
+  const newestFirst = [...material.keys].sort((a, b) => b.generation - a.generation);
+  const current = newestFirst.find(matches) ?? newestFirst[0]!;
+  const before = newestFirst.find((record) => record.generation === current.generation - 1);
+  const previous = current.generation > floor && before && (epochs.size === 0 || matches(before)) ? before.generation : null;
+  return { current: current.generation, previous, previousUntil: previous === null ? 0 : current.adoptedAt + graceMs, floor };
 }
 
 /** The group's signing key pair at one generation. */
@@ -156,6 +192,7 @@ export function readKeyRecord(value: unknown): GroupKeyRecord | null {
     key: candidate['key'],
     createdAt: Math.trunc(candidate['createdAt']),
     mintedBy: typeof candidate['mintedBy'] === 'string' ? candidate['mintedBy'] : '',
+    adoptedAt: isFiniteNumber(candidate['adoptedAt']) ? Math.trunc(candidate['adoptedAt']) : Math.trunc(candidate['createdAt']),
   };
 }
 
@@ -211,10 +248,6 @@ export function readGroupKeyMaterial(value: unknown): GroupKeyMaterial | null {
     .filter((entry): entry is GroupKeyRecord => entry !== null)
     .sort((a, b) => b.generation - a.generation);
   if (keys.length === 0) return null;
-  const currentGeneration = isFiniteNumber(candidate['currentGeneration'])
-    ? Math.trunc(candidate['currentGeneration'])
-    : (keys[0]?.generation ?? 0);
-  if (!keys.some((entry) => entry.generation === currentGeneration)) return null;
   return {
     version: 1,
     groupId: candidate['groupId'],
@@ -222,10 +255,6 @@ export function readGroupKeyMaterial(value: unknown): GroupKeyMaterial | null {
     joinSalt: candidate['joinSalt'],
     joinVerifier: candidate['joinVerifier'],
     keys,
-    currentGeneration,
-    previousAcceptedUntil: isFiniteNumber(candidate['previousAcceptedUntil'])
-      ? Math.trunc(candidate['previousAcceptedUntil'])
-      : 0,
     node,
     groupSigning,
   };
@@ -267,44 +296,38 @@ export function sweepKeyHistory(
 /**
  * The keyring the envelope codec signs and verifies with.
  *
- * Reads through to whatever material the store currently holds, so a rotation
- * that replaces the material is picked up by the very next datagram without
- * anything having to be re-wired.
+ * Reads through to the material and the acceptance the runtime computed last
+ * (on every change of either), so a generation taken from the record is used
+ * by the very next datagram, and a datagram costs no file read.
  */
 export class GroupKeyring implements ClusterKeyring {
   constructor(
-    private readonly readMaterial: () => GroupKeyMaterial,
+    private readonly read: () => { readonly material: GroupKeyMaterial; readonly acceptance: KeyAcceptance },
     private readonly now: () => number,
   ) {}
 
   get groupId(): string {
-    return this.readMaterial().groupId;
+    return this.read().material.groupId;
   }
 
   get currentGeneration(): number {
-    return this.readMaterial().currentGeneration;
+    return this.read().acceptance.current;
   }
 
   keyForGeneration(generation: number): string | null {
-    return this.readMaterial().keys.find((entry) => entry.generation === generation)?.key ?? null;
+    return this.read().material.keys.find((entry) => entry.generation === generation)?.key ?? null;
   }
 
-  /**
-   * The current generation, plus the previous one while the cutover window is
-   * open. A removal closes the window immediately by setting
-   * `previousAcceptedUntil` to 0, so the ejected machine's key stops verifying
-   * on the same tick the tombstone is written.
-   */
+  /** The current generation, plus the previous one while `computeKeyAcceptance` keeps it open. */
   acceptedGenerations(): readonly number[] {
-    const material = this.readMaterial();
-    const current = material.currentGeneration;
-    if (material.previousAcceptedUntil > this.now() && current > 0) return [current, current - 1];
-    return [current];
+    const { acceptance } = this.read();
+    if (acceptance.previous !== null && acceptance.previousUntil > this.now()) return [acceptance.current, acceptance.previous];
+    return [acceptance.current];
   }
 
   /** Every generation still held, for checking an old-key proof from a returning node. */
   heldGenerations(): readonly number[] {
-    return this.readMaterial().keys.map((entry) => entry.generation);
+    return this.read().material.keys.map((entry) => entry.generation);
   }
 }
 
@@ -396,7 +419,7 @@ export async function clearGroupKeyMaterial(secrets: ClusterSecretStore): Promis
   await secrets.delete(GROUP_MATERIAL_SECRET_KEY);
 }
 
-/** Mint the key material for a brand-new group. */
+/** Mint the key material for a brand-new group: generation 0, minted here. */
 export function createGroupKeyMaterial(input: {
   readonly groupId: string;
   readonly joinKey: string;
@@ -405,49 +428,16 @@ export function createGroupKeyMaterial(input: {
   readonly nodeId: string;
   readonly now: number;
 }): GroupKeyMaterial {
+  const now = Math.trunc(input.now);
   return {
     version: 1,
     groupId: input.groupId,
     joinKey: input.joinKey,
     joinSalt: input.joinSalt,
     joinVerifier: input.joinVerifier,
-    keys: [{
-      generation: 0,
-      key: generateGroupKey(),
-      createdAt: Math.trunc(input.now),
-      mintedBy: input.nodeId,
-    }],
-    currentGeneration: 0,
-    previousAcceptedUntil: 0,
+    keys: [{ generation: 0, key: generateGroupKey(), createdAt: now, mintedBy: input.nodeId, adoptedAt: now }],
     node: generateNodeKeyMaterial(),
     groupSigning: { ...generateGroupSigningKeyPair(), generation: 0 },
-  };
-}
-
-/** Key material for a node that has proved itself and is being handed the group. */
-export function joiningGroupKeyMaterial(input: {
-  readonly groupId: string;
-  readonly joinKey: string;
-  readonly joinSalt: string;
-  readonly joinVerifier: string;
-  readonly keys: readonly GroupKeyRecord[];
-  readonly currentGeneration: number;
-  readonly node: NodeKeyMaterial;
-  readonly groupSigning: GroupSigningMaterial;
-  readonly now: number;
-  readonly graceMs: number;
-}): GroupKeyMaterial {
-  return {
-    version: 1,
-    groupId: input.groupId,
-    joinKey: input.joinKey,
-    joinSalt: input.joinSalt,
-    joinVerifier: input.joinVerifier,
-    keys: sweepKeyHistory(input.keys, input.currentGeneration, input.now).keys,
-    currentGeneration: input.currentGeneration,
-    previousAcceptedUntil: Math.trunc(input.now + input.graceMs),
-    node: input.node,
-    groupSigning: input.groupSigning,
   };
 }
 
@@ -455,121 +445,16 @@ export function joiningGroupKeyMaterial(input: {
 export type RotationCause = 'scheduled' | 'revocation';
 
 /**
- * Advance to a new generation.
- *
- * `scheduled` opens the acceptance window for `graceMs`, so nobody's heartbeat
- * is dropped mid-cutover. `revocation` opens nothing: the previous key is
- * refused from this instant, which is what stops the machine that was just
- * removed from being heard.
+ * Take one generation's key into the material: added, or put in place of a
+ * different key held for the same generation (another minter's key won that
+ * generation on the record). Bounded by `sweepKeyHistory`.
  */
-export function rotateGroupKeyMaterial(
-  material: GroupKeyMaterial,
-  cause: RotationCause,
-  nodeId: string,
-  now: number,
-  graceMs: number,
-  /**
-   * A replacement join key and its verifier, for a revocation. The key a
-   * removed machine still holds on its disk must stop being a way back in, so
-   * a revocation hands every remaining member a new one with the new group key.
-   */
-  join?: { readonly joinKey: string; readonly joinVerifier: string },
-): GroupKeyMaterial {
-  const generation = material.currentGeneration + 1;
-  const minted: GroupKeyRecord = {
-    generation,
-    key: generateGroupKey(),
-    createdAt: Math.trunc(now),
-    mintedBy: nodeId,
-  };
-  const swept = sweepKeyHistory([...material.keys, minted], generation, now);
-  return {
-    ...material,
-    ...(join ? { joinKey: join.joinKey, joinVerifier: join.joinVerifier } : {}),
-    keys: swept.keys,
-    currentGeneration: generation,
-    previousAcceptedUntil: cause === 'scheduled' ? Math.trunc(now + graceMs) : 0,
-    // A REMOVAL also replaces the key the group signs with, so the machine that
-    // was just ejected can no longer speak as the group to anyone. A scheduled
-    // rotation leaves it alone: it exists to be verifiable by a machine holding
-    // a copy from months ago, and churning it would defeat that for no gain.
-    groupSigning: cause === 'revocation'
-      ? { ...generateGroupSigningKeyPair(), generation: material.groupSigning.generation + 1 }
-      : material.groupSigning,
-  };
+export function withGroupKey(material: GroupKeyMaterial, record: GroupKeyRecord, keepFrom: number, now: number): GroupKeyMaterial {
+  const keys = [...material.keys.filter((entry) => entry.generation !== record.generation), record];
+  return { ...material, keys: sweepKeyHistory(keys, keepFrom, now).keys };
 }
 
-/**
- * Adopt keys handed over by another member, on join, on a re-key, or on the
- * rotation announcement that follows a scheduled rotation.
- *
- * Two candidates for the SAME generation are resolved by
- * {@link preferredKeyRecord}, never by arrival order, so a partition that
- * produced two rotations converges on one key when it heals.
- *
- * The acceptance window is opened here too: a node that immediately started
- * refusing the generation its peers are still finishing a cutover on would drop
- * the very heartbeats it needs.
- */
-export function adoptGroupKeys(
-  material: GroupKeyMaterial,
-  incoming: readonly GroupKeyRecord[],
-  currentGeneration: number,
-  now: number,
-  graceMs: number,
-): GroupKeyMaterial {
-  const merged = new Map<number, GroupKeyRecord>();
-  for (const record of [...material.keys, ...incoming]) {
-    const existing = merged.get(record.generation);
-    merged.set(record.generation, existing ? preferredKeyRecord(existing, record) : record);
-  }
-  const generation = Math.max(currentGeneration, material.currentGeneration);
-  const swept = sweepKeyHistory([...merged.values()], generation, now);
-  return {
-    ...material,
-    keys: swept.keys,
-    currentGeneration: generation,
-    previousAcceptedUntil: Math.trunc(now + graceMs),
-  };
-}
-
-// ── roster file ─────────────────────────────────────────────────────────────
-
-/**
- * Read the roster, swept and validated.
- *
- * A missing file is the normal first-run case. An unreadable or malformed one
- * is NOT fatal: the roster is replicated, so an empty document re-converges
- * from the first gossip the node hears. Losing it costs a round trip; refusing
- * to start would cost inbound messaging.
- */
-export function loadGroupState(
-  stateDirectory: string,
-  groupId: string,
-  now: number,
-  logger?: ClusterLogger,
-): GroupStateDocument {
-  const filePath = join(stateDirectory, GROUP_STATE_FILENAME);
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
-    const document = readGroupStateDocument(parsed);
-    if (document && document.groupId === groupId) return sweepGroupState(document, now).state;
-    if (document) {
-      logger?.warn('cluster: the stored roster belongs to a different group; starting from an empty one', { filePath });
-    } else {
-      logger?.warn('cluster: the stored roster was not readable; starting from an empty one', { filePath });
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException | null)?.code;
-    if (code !== 'ENOENT') {
-      logger?.warn('cluster: the roster file could not be read; starting from an empty one', {
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return createGroupStateDocument(groupId, DEFAULT_GROUP_DISPLAY_NAME);
-}
+// ── files beside the record ─────────────────────────────────────────────────
 
 /**
  * Read the changes this machine held for `groupId` before it stopped: the raw
@@ -622,4 +507,29 @@ export function loadReplicaDocument<T>(
     }
   }
   return null;
+}
+
+/** The record of this machine's removal from a group, as `cluster status` reports it. */
+export interface GroupRemovalNote {
+  readonly groupId: string;
+  readonly groupName: string | null;
+  readonly at: number;
+  readonly reason: string;
+}
+
+/** Read the stored removal record, or null when there is none or it cannot be read. */
+export function loadGroupRemovalNote(stateDirectory: string): GroupRemovalNote | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(stateDirectory, GROUP_REMOVAL_FILENAME), 'utf8')) as Record<string, unknown> | null;
+    const removed = parsed?.['removed'] as Record<string, unknown> | null | undefined;
+    if (!removed || typeof removed['groupId'] !== 'string' || typeof removed['at'] !== 'number' || typeof removed['reason'] !== 'string') return null;
+    return {
+      groupId: removed['groupId'],
+      groupName: typeof removed['groupName'] === 'string' ? removed['groupName'] : null,
+      at: removed['at'],
+      reason: removed['reason'],
+    };
+  } catch {
+    return null;
+  }
 }

@@ -543,6 +543,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     } | undefined;
     // Warning: (ae-forgotten-export) The symbol "ApprovalRaiseService" needs to be exported by the entry point index.d.ts
     readonly approvalRaise?: ApprovalRaiseService | undefined;
+    // Warning: (ae-forgotten-export) The symbol "AuthorityRecordFile" needs to be exported by the entry point index.d.ts
+    readonly authority?: AuthorityRecordFile | undefined;
     // Warning: (ae-forgotten-export) The symbol "AutomationManager" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
@@ -567,6 +569,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     }[]>) | undefined;
     // Warning: (ae-forgotten-export) The symbol "CiWatchSubscription" needs to be exported by the entry point index.d.ts
     readonly ciNativeContinuationRevocation?: ((watch: CiWatchSubscription) => Promise<void>) | undefined;
+    // Warning: (ae-forgotten-export) The symbol "ClusterRoles" needs to be exported by the entry point index.d.ts
+    readonly clusterRoles?: Pick<ClusterRoles, 'holds' | 'coordinated' | 'onRoleChange'> | undefined;
     readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback' | 'subscribe' | 'resolveForConsumer' | 'setMany'>>;
     // Warning: (ae-forgotten-export) The symbol "RewindConversationPort" needs to be exported by the entry point index.d.ts
     readonly conversationRewindPort?: RewindConversationPort | null | undefined;
@@ -597,6 +601,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal' | 'listSnapshots' | 'restoreSnapshot'>>) | undefined;
     // Warning: (ae-forgotten-export) The symbol "GatePresetName" needs to be exported by the entry point index.d.ts
     readonly modeInForce?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => GatePresetName) | undefined;
+    readonly modeInForceReason?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => string | undefined) | undefined;
     // (undocumented)
     readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
     // Warning: (ae-forgotten-export) The symbol "OwnerInboxGatewayService" needs to be exported by the entry point index.d.ts
@@ -1370,6 +1375,13 @@ export interface ResolveRemoteTargetInput {
 // @public (undocumented)
 export function resolveRuntimeEndpointBinding(config: Pick<ConfigManager, 'get'>, endpoint: RuntimeEndpointId): RuntimeEndpointBinding;
 
+// @public
+export function resolveWebSurfaceExposure(config: Pick<ConfigManager, 'get'>): {
+    readonly served: boolean;
+    readonly binding: RuntimeEndpointBinding;
+    readonly networkFacing: boolean;
+};
+
 // Warning: (ae-forgotten-export) The symbol "ContractOperatorService" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -1757,9 +1769,9 @@ export function writeTreeStatusMarker(line: Line, glyph: string | null, fg: stri
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:271:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:350:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:351:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:287:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:366:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:367:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:141:5 - (ae-forgotten-export) The symbol "WorkflowManager" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:143:5 - (ae-forgotten-export) The symbol "HookActionManager" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:144:5 - (ae-forgotten-export) The symbol "ScheduleManager" needs to be exported by the entry point index.d.ts

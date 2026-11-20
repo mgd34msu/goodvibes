@@ -179,6 +179,12 @@ export interface ClusterConsumerGate {
   stop(reason: string): Promise<void>;
 }
 
+/** The state of `cluster.secret`; see `ClusterSettings.secret`. */
+export type ClusterSecretSetting =
+  | { readonly state: 'none' }
+  | { readonly state: 'set'; readonly value: string }
+  | { readonly state: 'unavailable'; readonly reason: string };
+
 /** Resolved `cluster.*` settings. */
 export interface ClusterSettings {
   readonly enabled: boolean;
@@ -187,7 +193,14 @@ export interface ClusterSettings {
   readonly bootProbeSeconds: number;
   readonly port: number;
   readonly multicastGroup: string;
-  readonly secret: string;
+  /**
+   * `cluster.secret`, which signs election traffic outside a group. Three
+   * states, never a blank string standing for two of them: `none` (not set,
+   * traffic is deliberately unsigned), `set`, or `unavailable` (the setting
+   * names a stored secret that could not be read; no election traffic is sent
+   * or taken until it can, because unsigned would not be what was asked for).
+   */
+  readonly secret: ClusterSecretSetting;
   readonly peers: readonly string[];
   /** Settings this node runs with a different value than the configured one; empty when none was adjusted. */
   readonly adjustments?: readonly ClusterSettingAdjustment[] | undefined;
@@ -271,6 +284,13 @@ export interface ClusterStatus {
   readonly heldSurfaceCount: number;
   /** True when election traffic is authenticated: by the group key inside a group, by `cluster.secret` without one. */
   readonly signed: boolean;
+  /**
+   * How election traffic is authenticated: `group-key` inside a group; outside
+   * one `secret` (cluster.secret), `none` (not set, deliberately unsigned), or
+   * `unavailable` (cluster.secret names a secret that cannot be read: this
+   * machine sends and takes no election traffic until it can).
+   */
+  readonly electionAuthentication: 'group-key' | 'secret' | 'none' | 'unavailable';
   readonly surfaces: readonly ClusterSurfaceStatus[];
   readonly peers: readonly ClusterPeerStatus[];
   readonly transport: ClusterTransportDescription;

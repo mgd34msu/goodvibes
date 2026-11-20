@@ -158,7 +158,7 @@ export const GLOBAL_FLAGS: readonly DaemonCommandFlagSpec[] = [
     field: 'daemonHome',
     kind: 'string',
     valueName: 'dir',
-    summary: "The daemon's own identity directory (operator tokens, daemon settings).",
+    summary: "Run this daemon entirely out of <dir>: its identity (operator tokens, daemon settings, secrets) in <dir>, and everything else it keeps (users, device tokens, memory, sessions) under <dir>/.goodvibes/, unless GOODVIBES_HOME names that tree. Shares nothing with another daemon.",
   },
   {
     tokens: ['--working-dir', '--cd', '-C'],
@@ -201,14 +201,14 @@ const REMOTE_TARGET_FLAGS: readonly DaemonCommandFlagSpec[] = [
     field: 'host',
     kind: 'string',
     valueName: 'name',
-    summary: 'The machine to ask. Defaults to this one.',
+    summary: 'The machine to ask, as a name or a URL (https://name, https://name:3421). Defaults to this one. A URL without a port means 443 for https and 80 for http.',
   },
   {
     tokens: ['--port'],
     field: 'port',
     kind: 'port',
     valueName: 'n',
-    summary: "That daemon's control-plane port. Defaults to the configured one.",
+    summary: "That daemon's control-plane port. Defaults to the port in a --host URL, else its scheme's (443, 80), else the configured one.",
   },
   {
     tokens: ['--token'],
@@ -721,7 +721,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       '  rename <name>     rename the group',
       '  leave             leave the group',
       '  publish <setting> send this machine\'s value of a shared setting to the group',
+      '                    (user:<name>: make this machine\'s account of that name the group\'s)',
       '  accept <setting>  take the group\'s value of a shared setting here',
+      '                    (user:<name>: give up this machine\'s account of that name for the group\'s)',
       '                    (status lists the shared settings that differ here)',
       '',
       'Talks to a running daemon over the same --host/--port/--token convention',
@@ -918,8 +920,10 @@ function inferProviderFromModel(
 ): EngineParseResult<DaemonCommand, DaemonCliFlags> {
   const { provider, model } = result.flags;
   if (provider !== undefined || model === undefined) return result;
-  const inferred = model.includes(':') ? model.split(':')[0] : undefined;
-  if (inferred === undefined) return result;
+  const separator = model.indexOf(':');
+  const inferred = separator > 0 ? model.slice(0, separator) : undefined;
+  // A slash before the colon is part of a model id (`meta-llama/x:free`), not a provider.
+  if (inferred === undefined || inferred.includes('/')) return result;
   return { ...result, flags: { ...result.flags, provider: inferred } };
 }
 

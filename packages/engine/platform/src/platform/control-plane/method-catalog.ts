@@ -110,6 +110,7 @@ import {
 import {
   builtinGatewayFlagsStatusMethodDescriptors,
 } from './method-catalog-flags-status.js';
+import { builtinGatewayAuthorityMethodDescriptors } from './method-catalog-authority.js';
 import {
   builtinGatewayRewindMethodDescriptors,
 } from './method-catalog-rewind.js';
@@ -194,6 +195,7 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayCiMethodDescriptors,
   ...builtinGatewayFlagsMethodDescriptors,
   ...builtinGatewayFlagsStatusMethodDescriptors,
+  ...builtinGatewayAuthorityMethodDescriptors,
   ...builtinGatewayRewindMethodDescriptors,
   ...builtinGatewayWorkspacesMethodDescriptors,
   ...builtinGatewayStepUpMethodDescriptors,

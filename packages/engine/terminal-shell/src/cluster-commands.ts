@@ -281,8 +281,12 @@ export function describeIrreversibleClusterCommand(parsed: ParsedClusterCommand)
     case 'leave': return 'this removes this machine from its group';
     case 'forget': return `this removes ${parsed.positional ?? 'that machine'} from the group and replaces the group key immediately`;
     case 'rotate': return parsed.now ? 'this stops accepting the old group key immediately, so any machine that has not picked up the new one is cut off' : null;
-    case 'publish': return `this replaces ${parsed.positional ?? 'that setting'} on every machine in the group with this machine's value`;
-    case 'accept': return `this replaces this machine's value of ${parsed.positional ?? 'that setting'} with the group's`;
+    case 'publish': return parsed.positional?.startsWith('user:')
+      ? `this makes this machine's account of ${parsed.positional.slice('user:'.length)} the group's and ends the other accounts of that name, with their sign-ins`
+      : `this replaces ${parsed.positional ?? 'that setting'} on every machine in the group with this machine's value`;
+    case 'accept': return parsed.positional?.startsWith('user:')
+      ? `this gives up this machine's account of ${parsed.positional.slice('user:'.length)} for the group's, ending its sign-ins`
+      : `this replaces this machine's value of ${parsed.positional ?? 'that setting'} with the group's`;
     default: return null;
   }
 }
@@ -398,7 +402,12 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
     case 'accept': {
       const result = await call<SettingDecisionResult>(`/api/cluster/${parsed.subcommand}`, 'POST', { path: parsed.positional });
       if (!result.ok) return refused(result, parsed.json);
-      const said = result.data.decision === 'accepted'
+      const user = result.data.path.startsWith('user:') ? result.data.path.slice('user:'.length) : null;
+      const said = user !== null
+        ? (result.data.decision === 'accepted'
+          ? `this machine's account of "${user}" was given up; the group's account is the one on every machine now, and sign-ins of the account given up end`
+          : `this machine's account of "${user}" is the group's on every machine now; sign-ins of the other accounts of that name end`)
+        : result.data.decision === 'accepted'
         ? `this machine now runs the group's value of ${result.data.path}`
         : result.data.decision === 'held'
           ? `this machine's value of ${result.data.path} is held and sent to the group once this machine has the group's settings`

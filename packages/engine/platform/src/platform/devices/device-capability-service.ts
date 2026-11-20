@@ -16,9 +16,14 @@ import { logger } from '../utils/logger.js';
  *   6. the work is dispatched to the node over the peer transport,
  *   7. bytes that came back are retained under the capture TTL and disclosed.
  *
- * Only a change to the `device.*` settings that would refuse this request, or
- * the host shutting down, ends a request in flight, and only before the phone
- * has picked the work up: what a phone already did is never thrown away.
+ * A request admitted under a grant keeps a reference to it (its record key and
+ * revision). Revoking that grant, on any machine of the group, withdraws the
+ * work while it waits for the phone; the reference is checked again when the
+ * phone picks it up, so a revocation that has reached this machine is never
+ * run past. Otherwise only a change to the `device.*` settings that would
+ * refuse this request, or the host shutting down, ends a request in flight,
+ * and only before the phone has picked the work up: what a phone already did
+ * is never thrown away.
  *
  * The dispatcher and the confirmation handler are injected, which is what keeps
  * this node-kind neutral: the same service serves a web PWA node and a native
@@ -152,7 +157,11 @@ export type DeviceRequestRefusal =
   | 'disabled-by-config'
   | 'invalid-input'
   | 'denied-by-person'
-  | 'dispatch-failed';
+  | 'dispatch-failed'
+  /** The grant the request ran under was revoked before the phone picked it up: withdrawn, nothing ran. */
+  | 'grant-revoked-before-claim'
+  /** The grant was revoked after the phone picked the work up: it ran, and the detail says what took effect. */
+  | 'grant-revoked-after-claim';
 
 /**
  * How authority was established for one request: a live durable grant, the
@@ -339,9 +348,10 @@ export class DeviceCapabilityService {
   /**
    * Run one capability on one node.
    *
-   * `grants.find()` reads the ledger, so a grant revoked from any surface, or
-   * expired, or belonging to a node that has since been unpaired, is not
-   * honoured: the request falls through to `permissions.mode`.
+   * `grants.find()` reads the authority record, so a grant revoked from any
+   * surface on any machine of the group, or expired, or belonging to a node
+   * that has since been unpaired, is not honoured: the request falls through
+   * to `permissions.mode`.
    */
   async request(input: {
     readonly nodeId: string;
@@ -435,12 +445,27 @@ export class DeviceCapabilityService {
     // host shutting down ends the request, so a finished action is never lost.
     let claimed = false;
     const ended = new AbortController();
+    /** Why this request was ended before the phone picked it up, when it was. */
+    let endedAs: DeviceRequestRefusal = 'disabled-by-config';
+    const end = (refusal: DeviceRequestRefusal, detail: string): void => {
+      if (claimed || ended.signal.aborted) return;
+      endedAs = refusal;
+      ended.abort(new Error(detail));
+    };
     const signal = this.signal ? AbortSignal.any([ended.signal, this.signal]) : ended.signal;
-    const unsubscribe = this.onPolicyChange?.(() => {
+    const unsubscribePolicy = this.onPolicyChange?.(() => {
       if (claimed || ended.signal.aborted) return;
       const why = endedBySettings(descriptor, this.getPolicy(), authority);
-      if (why) ended.abort(new Error(why));
+      if (why) end('disabled-by-config', why);
     }) ?? (() => {});
+    // The grant this request runs under, checked against the authority record:
+    // a revocation made anywhere in the group withdraws work still waiting.
+    const endIfGrantEnded = (): void => {
+      if (!grant || claimed || ended.signal.aborted || this.grants.isCurrent(grant)) return;
+      end('grant-revoked-before-claim', `The "always allow" grant for ${descriptor.title} on ${node.label} ended (${this.grants.describeEnd(grant) ?? 'it is no longer on the record'}) before the phone picked the request up, so the request was withdrawn and nothing ran on the phone. Ask again to be confirmed by the owner.`);
+    };
+    const unsubscribeGrants = this.grants.onChange(endIfGrantEnded);
+    const unsubscribe = (): void => { unsubscribePolicy(); unsubscribeGrants(); };
     const refusedBySettings = (): DeviceCapabilityOutcome | null => {
       if (!signal.aborted) return null;
       const reason: unknown = signal.reason;
@@ -448,7 +473,7 @@ export class DeviceCapabilityService {
         ok: false,
         capabilityId: descriptor.id,
         nodeId: node.nodeId,
-        refusal: ended.signal.aborted ? 'disabled-by-config' : 'dispatch-failed',
+        refusal: ended.signal.aborted ? endedAs : 'dispatch-failed',
         detail: ended.signal.aborted && reason instanceof Error
           ? reason.message
           : 'The host is shutting down; the request was withdrawn before the phone picked it up.',
@@ -508,6 +533,7 @@ export class DeviceCapabilityService {
         // a durable grant is not written behind a policy that says it may not exist.
       }
 
+      endIfGrantEnded();
       const before = refusedBySettings();
       if (before) return before;
       const dispatched = await this.dispatcher.dispatch({
@@ -517,8 +543,10 @@ export class DeviceCapabilityService {
         timeoutMs: resolveDeviceRequestTimeoutMs(policy, input.timeoutMs),
         admission: {
           signal,
-          assertCurrent: () => { if (!claimed) signal.throwIfAborted(); },
-          claim: () => { signal.throwIfAborted(); claimed = true; },
+          assertCurrent: () => { if (!claimed) { endIfGrantEnded(); signal.throwIfAborted(); } },
+          // The phone is picking the work up: the grant is checked once more,
+          // so a revocation that reached this machine is never run past.
+          claim: () => { endIfGrantEnded(); signal.throwIfAborted(); claimed = true; },
         },
       });
       if (!dispatched.ok) {
@@ -562,6 +590,22 @@ export class DeviceCapabilityService {
         // Usage bookkeeping must not turn a completed action into an error.
         try { await this.grants.markUsed(grant.id); }
         catch (error) { logger.warn('Device grant use could not be recorded', { grantId: grant.id, error: error instanceof Error ? error.message : String(error) }); }
+        if (!this.grants.isCurrent(grant)) {
+          // The phone had picked the work up before the revocation reached it, so
+          // it ran. Say what took effect; the answer itself is not handed on.
+          const why = this.grants.describeEnd(grant) ?? 'it is no longer on the record';
+          return {
+            ok: false,
+            capabilityId: descriptor.id,
+            nodeId: node.nodeId,
+            refusal: 'grant-revoked-after-claim',
+            detail: `${node.label} had already picked up ${descriptor.title} when its "always allow" grant ended (${why}), so it ran on the phone. `
+              + (artifact
+                ? `The capture is kept as artifact ${artifact.id} for the capture retention window and is not returned here; devices.artifacts.delete removes it.`
+                : 'Its answer is not returned here.')
+              + ' The next request is put to the owner.',
+          };
+        }
       }
       return {
         ok: true,

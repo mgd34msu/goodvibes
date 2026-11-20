@@ -100,6 +100,7 @@ const OWNER_ITEM_WORDS: Readonly<Record<string, string>> = {
   claim: 'Claim',
   purchase: 'Purchase',
   'queued-action': 'Queued action',
+  report: 'Report',
 };
 
 /** Build the live state reader. Deterministic given its injected views. */

@@ -28,6 +28,8 @@ import {
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
+import { agentRetrySpawnInput } from '@goodvibes-jev/engine/daemon-api/tasks';
+import { toAgentSpawnInput } from './http/runtime-routes.js';
 import { summarizeError } from '../utils/error-display.js';
 import { approvalProposal, approvalReplyCandidates, tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
 import { proposalAnswerLiterally, proposalReplyTarget, tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
@@ -41,8 +43,11 @@ import {
   settleUnstartedWork,
   gateSurfaceSpawn,
   startAgreedWork,
+  type OwnerConversation,
   type SurfaceIngressOrigin,
 } from './surface-conversation-gate.js';
+import { isOwnerConversation, orderOwnerAlertRoutes } from './owner-alert.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import type { WorkProposalStore } from '../agents/work-proposal-store.js';
 
 /**
@@ -240,6 +245,8 @@ export class DaemonSurfaceActionHelper {
           const operator = input.userId === undefined || isChannelOwner(decision, input.userId);
           authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), operator };
           if (decision.intent !== undefined && origin.current) origin.current = { ...origin.current, intent: decision.intent };
+          // Authority belongs to the person: anyone else the channel admits starts a guest's turn.
+          if (!operator && origin.current) origin.current = { ...origin.current, guest: true };
         }
         // A protected-input refusal must not stay readable from the cell the gated
         // spawn path reads.
@@ -371,7 +378,34 @@ export class DaemonSurfaceActionHelper {
         };
       },
       deliverSurfaceNotice: this.context.deliverSurfaceNotice,
+      ownerConversations: (surface: string) => this.ownerConversations(surface),
+      senderIsGuest: (surface: string, userId: string | undefined) => this.senderIsGuest(surface, userId),
     };
+  }
+
+  /**
+   * Whether a sender on a channel is someone it admits who is not its owner,
+   * the same rule ingress applies (`isChannelOwner`): a sender with no id is
+   * admitted by the surface's secret and is not a guest.
+   */
+  senderIsGuest(surface: string, userId: string | undefined): boolean {
+    if (userId === undefined || !isChannelSurfaceKind(surface)) return false;
+    return !isChannelOwner({ policy: this.context.channelPolicy.getPolicy(surface) }, userId);
+  }
+
+  /** The owner's own conversations, those on `surface` first, newest first (owner-alert.ts). */
+  ownerConversations(surface: string): OwnerConversation[] {
+    let bindings: readonly AutomationRouteBinding[];
+    try { bindings = this.context.routeBindings.listBindings(); }
+    catch { return []; }
+    const owners = new Map<string, string | undefined>();
+    const ownerOf = (kind: string): string | undefined => {
+      if (!owners.has(kind)) owners.set(kind, isChannelSurfaceKind(kind) ? this.context.channelPolicy.getPolicy(kind).ownerId : undefined);
+      return owners.get(kind);
+    };
+    const preferred = isChannelSurfaceKind(surface) ? surface : null;
+    return orderOwnerAlertRoutes(bindings.filter((binding) => isOwnerConversation(binding, ownerOf(binding.surfaceKind))), preferred)
+      .map((binding) => ({ binding, ...(ownerOf(binding.surfaceKind) ? { ownerId: ownerOf(binding.surfaceKind) } : {}) }));
   }
 
   /**
@@ -477,6 +511,9 @@ export class DaemonSurfaceActionHelper {
         replyOnChannel: async (target, notice) => {
           const binding = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
           await deliverProposalNotice(this.context, binding, notice);
+          // A guest's proposal was answered by the owner in his own conversation: he hears the outcome there too.
+          const answering = target.answerFrom?.routeId ? this.context.routeBindings.getBinding(target.answerFrom.routeId) : undefined;
+          if (answering && answering !== binding) await deliverProposalNotice(this.context, answering, notice);
         },
       });
       // The answer has already been acted on: the adapter neither creates a session nor sends a chat turn.
@@ -597,13 +634,9 @@ export class DaemonSurfaceActionHelper {
     } catch {
       const agent = this.context.agentManager.getStatus(command.id);
       if (agent) {
-        const retried = this.context.trySpawnAgent({
-          mode: 'spawn',
-          task: agent.task,
-          ...(agent.model ? { model: agent.model } : {}),
-          ...(agent.provider ? { provider: agent.provider } : {}),
-          ...(agent.tools.length > 0 ? { tools: agent.tools } : {}),
-        }, 'DaemonSurfaceActionHelper.performSurfaceControlCommand');
+        // The same work on the same model, tools and routing, in the session that started it.
+        const retried = this.context.trySpawnAgent(toAgentSpawnInput(agentRetrySpawnInput(agent)),
+          'DaemonSurfaceActionHelper.performSurfaceControlCommand', agent.sessionId);
         if (!(retried instanceof Response)) {
           return `Retried agent ${command.id} as ${retried.id}`;
         }
@@ -640,6 +673,10 @@ export class DaemonSurfaceActionHelper {
     const runMatch = actionId.match(/^gv:run:(cancel|retry):(.+)$/);
     if (runMatch) {
       const [, action, runId] = runMatch;
+      // A run button acts on the owner's work: only the channel's owner may press it, as for the typed commands.
+      if (!isChannelOwner({ policy: this.context.channelPolicy.getPolicy(surface) }, userId?.trim() || undefined)) {
+        return `Not done: ${action} ${runId} was refused. Only the owner of this channel may cancel or retry a run.`;
+      }
       if (action === 'cancel') {
         const run = await this.context.automationManager.cancelRun(runId!, 'interactive-surface-cancel');
         return run ? `Cancelled run ${runId}` : `Failed to cancel run ${runId}`;

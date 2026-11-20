@@ -1,17 +1,5 @@
 import { persistProviders, scanLocalhost, type DiscoveredServer, type ScanResult } from '@goodvibes-jev/engine/platform/platform/discovery';
-import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-
-/**
- * A daemon registers and remembers only servers on its own computer: whatever
- * answers on a well-known port of another machine must not become a provider
- * that prompts (and their contents) are sent to. The daemon's own scan probes
- * only this computer; this filter is for the shared discovery cache, which the
- * terminal app's explicit network scan also writes.
- */
-export function onlyLoopbackServers(servers: readonly DiscoveredServer[]): DiscoveredServer[] {
-  return servers.filter((server) => isLoopbackHost(server.host));
-}
 
 /** Production uses the canonical scanner/cache; tests supply synthetic boundaries. */
 export interface DaemonProviderDiscoveryDependencies {

@@ -63,7 +63,8 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 | `--target main\|current\|isolated\|pinned\|background\|session:<id>` | Which session the run uses. |
 | `--wake now\|next-heartbeat` | Run at once when due, or with the next heartbeat. |
 | `--template <tmpl>` | A prompt template. |
-| `--tool <name>` | Allow only these tools (repeat the option). |
+| `--tool <name>` | Allow only these tools (repeat the option). A run limited this way does not get the mail and calendar tool unless `--tool google` is given. |
+| `--deliver <channel>` | Where each run's answer goes: a channel written as in settings, `telegram`, `slack:C123` and so on (`telegram` alone uses `surfaces.telegram.defaultChatId`). Without it the answer goes to the owner inbox. |
 | `--external-source <kind>` | Marks where outside content comes from. |
 | `--allow-unsafe-external-content` | Lets outside content in unscreened. |
 | `--light-context` | Run with a small context. |
@@ -76,6 +77,7 @@ Routine created: job-3f9c2a1b7d
   name: check the build status
   schedule: every 15m
   next run: 2026-11-18 10:15 America/Chicago (runs once, with or without a terminal open)
+  answer goes to: the owner inbox
 ```
 
 An id may be given as a unique prefix. An ambiguous prefix is refused with the candidates, and nothing changes.
@@ -136,37 +138,37 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 - A cancelled run stays cancelled and is not retried.
 - At most `automation.maxConcurrentRuns` runs execute at once; `automation.runHistoryLimit` runs per job are kept.
 - `automation.enabled` `false` stops the whole subsystem.
+- In a group of machines (`cluster`), a routine made on any machine is listed on every machine and runs once in the group, on the machine holding the `automation` role; disabling or removing it on any machine applies on all of them, and when the role moves the new holder carries on from the last occurrence started. See "What a cluster does and does not do" under "Clusters" in "The daemon, the web UI and networking". The scheduled check-in is the exception: it follows the `checkin` role.
 
 ### Where a routine's result goes, and what a routine can use
 
-- A routine created with the terminal app's `/schedule add` has no delivery: its result is kept in the run history (the web UI and the `automation.runs.*` methods) and is not sent anywhere.
-- The Agent's `/schedule remind` and `/schedule promote-routine`, and the Agent model's schedule tools, take a delivery target: `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. The part after `:` is a route binding id, not a chat id. A Telegram delivery with no route goes to `surfaces.telegram.defaultChatId`; with neither, it fails with `Missing Telegram chat id`.
+- Each run's answer goes to the surface named on the routine. The terminal app's `/schedule add` takes `--deliver <channel>`; the Agent's `/schedule remind` and `/schedule promote-routine`, and the Agent model's schedule tools, take `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. In the Agent's flags the part after `:` is a route binding id, not a chat id. A Telegram delivery with no route or address goes to `surfaces.telegram.defaultChatId`; with neither, that send fails with `Missing Telegram chat id`.
+- A routine that names no surface, or whose every named surface failed, leaves its answer in the owner inbox as a report titled `Scheduled run: <name>` (the answer, cut at about 3,800 characters; when a send failed, the reason first). It stays open until you answer it `read` (`/inbox`, the web UI's Work view, or a channel). A failed or missed run of such a routine leaves `Scheduled run failed: <name>` (or `missed`) there too. Every run is also kept in the run history (the web UI and the `automation.runs.*` methods).
+- A routine the terminal app keeps itself (with `daemon.enabled` off) has no owner inbox to fall back to: an answer with no surface is kept only in its run history.
 - `/schedule remind` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered.
-- A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). It has no Gmail and no Calendar tool: the `google` and calendar tools exist only in the Agent's own turns and in daemon-hosted Agent sessions, not in scheduled runs.
+- A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). Once you have connected mail or a calendar (a Google account with `/google connect`, or a CalDAV server in `surfaces.calendar.caldavUrl` and `surfaces.calendar.caldavUser`), it also gets the `google` tool: `mail.list` and `mail.read` on the connected Gmail, and `calendar.list` on the daemon's calendar (the CalDAV server when one is set, otherwise the Google calendar). Its calls pass the same permission gate as any turn. A send or a calendar event it makes may not carry what it read from mail or a calendar, and `calendar.create` is refused in a scheduled run (nobody asked for that event at that moment). A routine limited with `--tool` gets the tool only when `google` is listed.
 
 ### A daily 8 am summary of mail and calendar delivered to Telegram
 
-Which steps are possible:
-
-| Step | Possible |
-| --- | --- |
-| Run something at 8 am every day | Yes. |
-| Deliver its answer to your Telegram chat | Yes. |
-| Read your Gmail and Google Calendar inside that run | No. A scheduled run has no mail or calendar tool (see above), so it cannot read them. |
-
-So a complete unattended "summary of mail and calendar" cannot be built from the shipped commands. What can be done:
-
-1. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/config set surfaces.telegram.defaultChatId <your-numeric-id>`.
-2. In the Agent, a daily 8 am message to Telegram:
+1. Connect the mail and calendar to the daemon: in the Agent, `/google connect` (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. `/google status` shows the connection.
+2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/config set surfaces.telegram.defaultChatId <your-numeric-id>`.
+3. Create the routine in the terminal app:
 
    ```text
-   /schedule remind --cron "0 8 * * *" --timezone America/Chicago --delivery-channel telegram --message "Check today's mail and calendar" --yes
-   /schedule list
-   /schedule run <schedule-id> --yes
+   /schedule add cron "0 8 * * *" --tz America/Chicago --deliver telegram "Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order."
    ```
 
-   This delivers a model-written reminder; it does not read your mail or calendar.
-3. For the summary itself, ask the Agent in conversation ("summarize today's unread mail and my calendar"): there the model has the `google` and calendar tools (after `/google connect`) and can send the result to Telegram with its channel-send tool.
+   ```text
+   Routine created: job-3f9c2a1b7d
+     name: Summarize my unread mail from the last
+     schedule: cron 0 8 * * * (America/Chicago)
+     next run: 2026-11-20 08:00 America/Chicago (runs once, with or without a terminal open)
+     answer goes to: telegram
+   ```
+
+4. Try it at once: `/schedule run job-3f9c2a1b7d`. The run reads the mail and the calendar with the `google` tool and its answer arrives in your Telegram chat. If the send fails (the bot cannot reach the chat), the answer is in the owner inbox instead, with the reason.
+
+In the Agent the same routine is `/schedule remind --cron "0 8 * * *" --timezone America/Chicago --delivery-channel telegram --message "Summarize my unread mail from the last 24 hours and today's calendar events" --yes`; its run is framed as a reminder (see above) and has the same tools.
 
 ## Supervised triggers
 
@@ -225,7 +227,7 @@ Why it fired: <reason>
 Act on what this actually indicates. Verify before assuming anything the trigger did not directly observe.
 ```
 
-`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. The trigger itself delivers the turn's answer nowhere: the firing is recorded in the trigger's runs (`/triggers history <id>`, with the action's result) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner approved with `/triggers grant`; the grant answer prints the exact action JSON to use.
+`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. When the turn ends its answer is delivered: to the channel `deliverTo` names (`{"kind":"agent-turn","deliverTo":"telegram"}`, or `"slack:C123"`; written as in settings), else to the owner inbox as a report titled `Trigger <label>`. A send that fails puts the answer in the owner inbox with the reason. A `deliverTo` that names no delivery surface is refused when the trigger is created. The firing is also recorded in the trigger's runs (`/triggers history <id>`, with the action's result, `agent:<id>`) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). The turn gets the same tools as a scheduled run, the `google` mail and calendar tool included once mail or a calendar is connected. `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner approved with `/triggers grant`; the grant answer prints the exact action JSON to use.
 
 Spec fields:
 
@@ -653,20 +655,23 @@ Each surface has an ingress policy.
 - A surface with every list empty has no owner yet. The first message from an unknown sender is not answered: it raises an owner claim in the owner inbox, titled `Make <sender-id> (<name>) the owner of <surface>?`, with the choices `accept` and `decline`. Accepting puts that sender on the user list and makes him the surface's owner; from then on the surface answers only him. Declining is remembered and that sender is not asked about again. At most three claims per surface are open at once.
 - Once a surface has an owner, a message from a sender not on the user list is not answered either: it raises `Let <sender-id> (<name>) reach you on <surface>?`. Accepting adds that sender to the user list (he is not made owner); declining is remembered.
 - The `<sender-id>` in a claim is the provider's user id (on Telegram the numeric user id, on Slack the `U...` id). Use it with `--allow-users`.
-- An admitted message gets a conversational reply. A message that reads as a request for work is proposed back ("reply yes or go ahead to start it") and starts only when the same sender answers yes in the same conversation (`conversationGate.mode` `propose`, the default, on every surface in `conversationGate.gatedSurfaces`). `confirm-all` confirms every message; `off` starts work at once. Reading a message as work needs a decision model; only a confident "work" reading is proposed, and an unsure one gets a conversational reply. With no decision model in use, no proposal is ever made: every admitted message is answered at once by a conversational agent turn.
+- An admitted message gets a conversational reply. A message from the owner that reads as a request for work is proposed back ("reply yes or go ahead to start it") and starts only when he answers yes in the same conversation (`conversationGate.mode` `propose`, the default, on every surface in `conversationGate.gatedSurfaces`). `confirm-all` confirms every message; `off` starts work at once. Reading a message as work needs a decision model; only a confident "work" reading is proposed, and an unsure one gets a conversational reply. With no decision model in use, no proposal is ever made: every admitted message is answered at once by a conversational agent turn.
+- Work a guest (any admitted sender who is not the owner) asks for is proposed to the owner, never to the guest: the proposal (`<guest-id> on <surface> (not you) asks for work: <summary>`) goes to the owner's own direct conversation on that surface (or, when he has none there, his most recently used direct conversation on another surface) and is answered only there, by the owner. The guest is told `I asked the owner to agree to this: <summary>. You will hear here whether it starts.` and hears the outcome; a guest's own "yes" is ordinary chat. When none of the owner's conversations takes the proposal, the guest is told `Not started: the owner could not be asked about this: <summary>`.
 - The owner and other admitted senders. This is the whole rule:
 
   | | The surface's owner | Any other admitted sender |
   | --- | --- | --- |
   | Talk to the assistant and get replies | Yes | Yes |
-  | Start work (answer `yes` to his own work proposal; or, with no decision model in use, every message starts a turn) | Yes | Yes |
+  | Start a turn that reads and answers | Yes | Yes (with no decision model in use, every message starts one) |
+  | Agree to work | Yes (`yes` to his own work proposal, and to a guest's, in his own conversation) | No. His work request is put to the owner; his own `yes` is ordinary chat. |
+  | Change anything (write, edit, run a command, send, fetch, read app state or files outside the allowed directories) | Decided by the gate as on the surface (see below) | Never on his own word: every such call is put to the owner as an approval (`channel-request`), in every permission mode (`yolo` included) and with or without a decision model; in `just-vibes` it is held for the owner. A plain read of files inside the allowed directories runs. |
   | Answer a permission ask | Yes (see "Answering an approval from a channel") | No. A guest's text reply is ordinary chat. On Slack and Discord, an approval button pressed by a guest is refused with HTTP 403 `APPROVAL_ANSWER_REFUSED`; the ask stays pending. |
   | Approve or veto a purchase, type a card code | Yes | No |
   | `status`, `cancel`, `retry` on a run, agent or session | Yes, for work started from the same conversation | No: `Not done: <action> <id> was refused. Status, cancel and retry act on any run or agent, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.` |
 
-  Where the asks of a guest's turn go: an approval is sent to the conversation the turn came from. A turn a guest started in his own direct chat therefore puts its approval prompt in his chat, where his reply is ordinary chat and the owner cannot reply; the owner answers it in `/questions` (either terminal app) or the web UI, where every pending approval is listed. A turn started in a group the owner is in puts the prompt in that group, where the owner can answer it. When the prompt cannot be delivered there, the owner is alerted over another surface ("Approval required for <tool>: ... It could not be shown in the conversation it came from. Answer it in the terminal app or the web UI").
+  Where the asks of a guest's turn go: never to the guest's chat. The approval prompt goes to the owner's own direct conversation on that surface (newest first), or when none takes it, to his direct conversations on other surfaces; it is also listed in the owner inbox (`/questions` in either terminal app, the web UI). The owner answers it by replying in any of his own direct conversations, or in the inbox. When none of his conversations takes the prompt, he is alerted ("Approval required for <tool>: ... It was asked for by someone on <surface> who is not you, and none of your own conversations took it. Answer it in the terminal app or the web UI") and the alert is kept as a receipt for the next terminal or web UI.
 
-  Authority over what that work may change is per surface, not per sender. On Telegram (a command-authority surface) a turn any admitted sender starts runs as if typed in the terminal app: its tool calls go through the gate in the owner's permission mode, with no channel approval, and the asks it raises go to the owner. On every other chat surface, a change the turn asks for becomes an approval for the owner each time (`channel-request`); on email, webhook and ntfy it is refused. So on Telegram admit only people you would let type in your terminal.
+  Authority belongs to the person, not the surface. The owner's own messages keep the surface's authority: on Telegram (a command-authority surface) his turn runs as if typed in the terminal app, in his permission mode; on every other chat surface a change his turn asks for becomes an approval for him each time (`channel-request`); on email, webhook and ntfy it is refused. A guest's turn runs under the guest form of the surface (`guest:<surface>`), which carries no authority on any surface, Telegram included. A guest's message is also never handed to an agent already running in that conversation; it starts a guest's turn of its own. A surface with no owner (`open`, below) has only guests.
 
 ```text
 /channel policy                             every surface's rules
@@ -676,13 +681,13 @@ Each surface has an ingress policy.
 /channel policy set matrix --allow-users none
 ```
 
-`/channel policy set` options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channel policy set telegram --allow-users <your-id>`); include yourself, or you lock yourself out. The stored policy also has an `open` flag that admits every sender while the lists are empty; no command or operator method sets it in this release.
+`/channel policy set` options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channel policy set telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
 
 A message names a command only when its first word is written as one (`/status`, `!status`, `/status@yourbot`); `allowedCommands` limits those.
 
 #### Answering an approval from a channel
 
-An approval prompt for a turn started from a channel is shown in that conversation. The owner answers it by replying in the same conversation (same chat, channel and thread); a reply anywhere else does not count. With a decision model in use, any wording is read (approve, deny, or approve with changes, which declines the original call and passes the change back); a reply the model reads as unclear leaves the ask waiting and the message goes on as conversation. With several asks waiting in one conversation, the reply must make clear which one it answers. With no decision model in use, only the exact `/approve <id>` or `/deny <id>` is recognised (the id from the prompt), with nothing else on the line. Slack and Discord prompts also carry Approve and Deny buttons; only the owner's press counts. A guest's reply never answers an ask.
+An approval prompt for a turn the owner started from a channel is shown in that conversation, and he answers it by replying in the same conversation (same chat, channel and thread); a reply anywhere else does not count. An approval a guest's turn raised is shown in the owner's own direct conversation instead, and he answers it by replying in any of his own direct conversations. With a decision model in use, any wording is read (approve, deny, or approve with changes, which declines the original call and passes the change back); a reply the model reads as unclear leaves the ask waiting and the message goes on as conversation. With several asks waiting in one conversation, the reply must make clear which one it answers. With no decision model in use, only the exact `/approve <id>` or `/deny <id>` is recognised (the id from the prompt), with nothing else on the line. Slack and Discord prompts also carry Approve and Deny buttons; only the owner's press counts. A guest's reply never answers an ask.
 
 #### Run control
 
@@ -767,7 +772,7 @@ Steps: create a Discord application and bot, install it into your server, `/chan
 
 ### Telegram
 
-Telegram is a command-authority surface: an agent turn started from an admitted Telegram chat is decided as if typed in the terminal app (see "Who may talk to the assistant").
+Telegram is a command-authority surface for its owner: an agent turn the owner starts from Telegram is decided as if typed in the terminal app. A turn anyone else the surface admits starts is a guest's turn: it may read and answer, and every change is put to the owner (see "Who may talk to the assistant").
 
 From nothing to the first answered message:
 
@@ -835,7 +840,7 @@ Setup from nothing:
 3. Make the daemon reachable from Home Assistant: Home Assistant calls the daemon's control plane, which listens on `127.0.0.1:3421` by default, so a Home Assistant on another machine needs the daemon exposed on the network (see "Network exposure" in "The daemon, the web UI and networking").
 4. Send a prompt. Two routes:
    - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.
-   - Conversation API, authenticated by an operator token with the `write:sessions` scope (`Authorization: Bearer <operator-token>`; tokens are described under "Credentials and pairing" in "The daemon, the web UI and networking"): `POST /api/homeassistant/conversation` with `{"text":"what is on my calendar today","conversationId":"home"}`. The answer carries `status`, `sessionId` and `assistant` with `text` and `speechText`. It waits up to 120 seconds by default (`timeoutMs` 1000 to 600000; `wait: false` returns at once). `POST /api/homeassistant/conversation/stream` returns the same as one server-sent `final` or `error` event; `POST /api/homeassistant/conversation/cancel` with `sessionId` (or a known `messageId`) stops a turn. `GET /api/homeassistant/health` reports the surface's state and endpoints.
+   - Conversation API, authenticated by an operator token with the `write:sessions` scope (`Authorization: Bearer <operator-token>`; tokens are described under "Credentials and pairing" in "The daemon, the web UI and networking"): `POST /api/homeassistant/conversation` with `{"text":"what is on my calendar today","conversationId":"home"}`. The answer carries `status`, `sessionId` and `assistant` with `text` and `speechText`. It waits up to 120 seconds by default (`timeoutMs` 1000 to 600000; `wait: false` returns at once). `POST /api/homeassistant/conversation/stream` returns the same as one server-sent `final` or `error` event. A `messageId` the caller chooses makes a repeat of either safe: the utterance is posted once and the repeat answers with that turn's outcome; `POST /api/homeassistant/conversation/cancel` with `sessionId` (or a known `messageId`) stops a turn. `GET /api/homeassistant/health` reports the surface's state and endpoints.
 5. Receive replies: the daemon fires the event `goodvibes_message` on Home Assistant (`POST <instanceUrl>/api/events/goodvibes_message` with the access token). Its data includes `body`, `speechText`, `status`, `sessionId`, `conversationId`, `messageId` and `replyToMessageId`. In Home Assistant, an automation with an event trigger of that type can notify, speak or update a helper from it.
 
 Prompts from Home Assistant run in isolated remote-chat sessions, never in a terminal session. A turn longer than two minutes is answered "Still working on that." (status `running`) and the final reply follows as a second event. The Home Graph routes under `/api/homeassistant/home-graph/*` build a separate knowledge space about the house; they are used by an integration and are not configured from the terminal apps.
@@ -1106,13 +1111,13 @@ How that call is checked, in order:
 1. The permission gate decides the `agent_operator_method` call like any other tool call. `payments.checkout.begin` and `payments.purchase.cancel` are not owner-only methods, so the call is a judgment call: with a working decision model Jev decides it in `jev-decides` and `just-vibes` (held instead of refused in `just-vibes`), `ask-me` runs it unless the reading is critical, irreversible or security-weakening; without a decision model it is asked (held in `just-vibes`); `yolo` runs it; `plan` refuses it. The owner-only methods (answering a window, typing a card code, approving in advance, adding a standing authorisation) are refused to the model in every mode.
 2. The tool screens the request: it is held if it would carry text the model may not send on (the judgment-input boundary) or card material. It does not run the outward-content check other operator calls get: a purchase's taint is judged by the daemon against the purchase itself.
 3. A begin without `standingId` is sent as the owner's own request (the explicit-user-request context); a begin naming `standingId` claims no owner request and is bound to that entry's shops, item and maximums.
-4. The daemon then applies every payment gate below (purchases enabled, the owner asked directly, taint of item, maximum, merchant and link, an unclustered daemon, a card, a shipping address), then the budget decision and the window. These apply in every permission mode, `yolo` included.
+4. The daemon then applies every payment gate below (purchases enabled, the owner asked directly, taint of item, maximum, merchant and link, this daemon runs payments for its group, a card, a shipping address), then the budget decision and the window. These apply in every permission mode, `yolo` included.
 
 The model may start a purchase (`payments.checkout.begin`) and cancel one, and read status and the purchase list. Everything else (answering a window, typing a security code, approving in advance, adding a standing authorisation) is the owner's act and is refused to the model.
 
 ### How a purchase is decided
 
-1. Gates, each a refusal with no approval path: purchases enabled; the purchase was asked for by the owner directly, not by content he read; this daemon is not part of a cluster (only an unclustered daemon may buy); a usable card; a shipping address; item and maximum not taken from untrusted content; a checkout link that passes full link validation.
+1. Gates, each a refusal with no approval path: purchases enabled; the purchase was asked for by the owner directly, not by content he read; this daemon runs payments (alone it always does; in a cluster exactly one machine holds the group's payments role, chosen by the election, and every other machine refers the owner to it: `Refused: in this group of machines purchases run on one machine at a time, and that is <name>. Ask there (its terminal app, web UI or channels); it buys with its own card, address and daily budget.`); a usable card; a shipping address; item and maximum not taken from untrusted content; a checkout link that passes full link validation.
 2. The merchant is graded on the domain that takes the card. Established recourse makes the later window a veto window; anything else makes it an approval window. Grading needs a decision model: with none in use (or under `Hybrid` after the set model failed) the merchant is "not judged, because no decision model is in use", which is not established recourse, so every purchase opens an approval window (60 minutes, silence denies), even within every budget. An eBay auction or Best Offer listing is refused. `payments.majorRetailersAdditional` and `payments.majorRetailersExcluded` adjust the grade; `payments.ebayMinSellerFeedbackCount` (100) and `payments.ebayMinSellerPositivePercent` (98) set the eBay seller bar.
 3. The page's prices are parsed into numbers, the cart must hold only what was asked for, and a subscription or recurring charge is refused.
 4. Budget: the item price against what is left of `budget.dailyItem` (over it, the purchase needs approval: "This item costs USD 40.00 and only USD 25.00 is left in today's item budget, USD 15.00 short."; it is not refused for that); tax, mandatory fees and delivery against `budget.dailyOverage`, stepping delivery down from `payments.shipping.preferredTier` (`normal`, `fast`, `fastest`) one tier at a time until it fits; then the overage tolerance pool if `budget.overageToleranceEnabled`; otherwise refused. The full total is checked against the card's declared issuer cap (over it is refused), the per-purchase ceiling (over it needs approval) and the maximum the owner asked for (over it needs approval). A checkout in another currency is refused.
@@ -1287,7 +1292,7 @@ Some settings hold a whole list. Each is read and written as one JSON value; a m
 | `sandbox.egressAllowlist` | Command names the exec sandbox lets reach the network. From the next command. | `["git","npm"]` |
 | `sandbox.workspaceWritable` | Extra absolute paths sandboxed commands may write. From the next command. | `["/home/me/.cache/build"]` |
 | `surfaces.email.imap.authservIds` | Authserv-ids your mailbox's receiving server writes in `Authentication-Results`, for a provider that is not built in. An entry starting with `.` matches the hosts under that domain. | `["mx.example.com"]` |
-| `provider.fallbackModels` | Your fallback order: the provider-qualified models a turn moves to when the selected model fails on every sign-in of its provider. Empty: the turn stops and says so. | `["anthropic:claude-sonnet-5"]` |
+| `provider.fallbackModels` | Your fallback order: the provider-qualified models a turn moves to, in every program (terminal app, `run`, the Agent, hosted sessions, the daemon's agents), when the selected model fails on every sign-in of its provider and its retries. The provider half is matched by id or display name without regard to case. Empty: the turn stops and says so. | `["anthropic:claude-sonnet-5"]` |
 | `cluster.peers` | Cluster peers (`host` or `host:port`) contacted directly as well as over multicast, for a network that drops multicast. | `["10.0.0.2","10.0.0.3:4000"]` |
 | `conversationGate.gatedSurfaces` | Channel surfaces whose inbound messages pass the conversation gate before a session sees them. | `["slack","telegram"]` |
 | `contract.gates` | Quality gates a contract runs before it reports work done: objects `{ "name", "command", "enabled" }` with optional `required` and `verification`; a gate passes or fails on its command's exit code. A gate that cannot run is refused when saved. | `[{"name":"tests","command":"bun run test","enabled":true}]` |

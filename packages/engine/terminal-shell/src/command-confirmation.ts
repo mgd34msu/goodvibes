@@ -218,7 +218,7 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
         title: `Loosen MCP trust for ${server}?`,
         detail: words[1] === 'config'
           ? `${server} goes back to its configured trust mode, which may allow more than the mode set for this session.`
-          : `${server} may then act anywhere inside its scope without asking; calls outside it are still denied.`,
+          : `${server} may then act anywhere inside its scope without asking, kept in its MCP config past a restart; a call outside its scope is put to you.`,
         confirmLabel: 'Loosen',
       };
     }

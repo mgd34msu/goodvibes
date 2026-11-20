@@ -22,7 +22,6 @@
  */
 // The credential catalog alone, not the providers module: argument parsing runs
 // on every invocation, `--version` included, and must not load the provider stack.
-import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
 import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
 import type { GoodVibesCliCommand, GoodVibesCliFlags, GoodVibesCliOutputFormat } from './cli-types.js';
 
@@ -58,34 +57,23 @@ function createDefaultFlags(): GoodVibesCliFlags {
 }
 
 /**
- * Providers that run on the operator's machine and so do not appear in the
- * credential catalog, which only lists providers that take a key.
- */
-const LOCAL_PROVIDER_IDS: ReadonlySet<string> = new Set(['ollama', 'lmstudio', 'lm-studio', 'llamacpp', 'llama-cpp', 'litellm', 'vllm', 'copilot-proxy']);
-
-function isKnownProviderId(prefix: string): boolean {
-  return (
-    Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, prefix) ||
-    LOCAL_PROVIDER_IDS.has(prefix)
-  );
-}
-
-/**
  * `provider:model` names the provider inside the model id; that is the
- * platform's own model reference grammar. But model ids carry colons of their
- * own (Ollama `llama3:8b`, OpenRouter `:free`), so the text before a colon
- * names a provider only when it is one the platform knows. Otherwise the whole
- * value is the model id and the configured provider stays. A provider defined
- * only in the operator's own config is named with `--provider`. A slash is not
- * a separator either: `meta-llama/Llama-3.1-8B` carries one inside the model
- * name. An explicit `--provider` always wins; callers use this only when none
- * was given.
+ * platform's own model reference grammar. The text before the first colon is
+ * the provider (Ollama's `llama3:8b` under it is `ollama:llama3:8b`), named by
+ * the provider's id or display name without regard to case; the registry
+ * resolves it once the providers are known, and a name it does not know is an
+ * error that lists the registered providers, never a model of another
+ * provider. A slash is not a separator: an id such as
+ * `meta-llama/llama-3.3-70b-instruct:free` carries its colon inside the model
+ * name, so text with a slash before the colon keeps the configured provider.
+ * An explicit `--provider` always wins; callers use this only when none was
+ * given.
  */
 export function inferProviderFromModel(model: string): string | undefined {
   const separator = model.indexOf(':');
   if (separator <= 0) return undefined;
   const prefix = model.slice(0, separator);
-  return isKnownProviderId(prefix) ? prefix : undefined;
+  return prefix.includes('/') || prefix.trim() !== prefix ? undefined : prefix;
 }
 
 const OUTPUT_FORMAT_VALUES: readonly GoodVibesCliOutputFormat[] = ['text', 'json', 'stream-json'];

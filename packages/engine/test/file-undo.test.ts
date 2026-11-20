@@ -25,7 +25,7 @@ test('undo of a creation whose file was deleted afterwards succeeds and does not
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('undo refuses an edit whose file changed externally, leaves the file alone and drops the entry', () => {
+test('undo refuses an edit whose file changed externally, leaves the file alone and keeps the entry', () => {
   const root = mkdtempSync(join(tmpdir(), 'file-undo-'));
   try {
     const path = join(root, 'edited.txt');
@@ -35,6 +35,6 @@ test('undo refuses an edit whose file changed externally, leaves the file alone 
     writeFileSync(path, 'user version');
     expect(() => manager.undo()).toThrow(FileUndoConflictError);
     expect(readFileSync(path, 'utf8')).toBe('user version');
-    expect(manager.undoDepth()).toBe(0);
+    expect(manager.undoDepth()).toBe(1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

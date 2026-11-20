@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { readCliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
+import { readCliModelInUse, readCliProviderSignInFacts, readSavedCliModelInUse } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { agentTrustsScannedServer } from '../runtime/lan-scan-consent-store.ts';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
@@ -83,11 +83,16 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     workspaceRegistered: resolveCheckpointEligibilitySync(shellPaths, workingDirectory).status === 'covered',
     unregisteredWorkspaceMode: readCheckpointRegistrationSetting(configManager),
   };
+  // The model a run would use, resolved as the registry a run builds resolves it (custom providers, the saved
+  // scan): from the saved names when they settle it, else by building that registry, loaded only then.
+  const modelInUse = readSavedCliModelInUse(configManager, { homeDirectory, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, trustScannedServer: (server) => agentTrustsScannedServer(server, shellPaths, GOODVIBES_AGENT_SURFACE_ROOT) })
+    ?? await (await import('./one-shot-services.ts')).withProviderServices(runtime, ({ providerRegistry }) => readCliModelInUse(providerRegistry), { modelData: 'skip' });
   const statusOptions = {
     configManager,
     workingDirectory,
     homeDirectory,
-    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, getProviderIdFromModel(configManager.get('provider.model'))),
+    modelInUse,
+    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, modelInUse.provider),
     onboardingMarker,
     checkpoints,
     auth: {

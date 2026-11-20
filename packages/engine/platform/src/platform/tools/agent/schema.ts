@@ -186,7 +186,7 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
             template: { type: 'string', enum: ['orchestrator', 'planner', 'engineer', 'reviewer', 'tester', 'researcher', 'integrator', 'general'], description: 'Agent template.' },
             model: { type: 'string', description: 'Model for this task. A bare model id resolves automatically; use provider:model only when the id exists on more than one provider.' },
             provider: { type: 'string', description: 'Provider override.' },
-            fallbackModels: { type: 'array', items: { type: 'string' }, description: 'Ordered models to try if the primary model fails. Bare ids resolve automatically.' },
+            fallbackModels: { type: 'array', items: { type: 'string' }, description: 'Ordered models to try if the primary model fails. Bare ids resolve automatically. Without them the owner\'s provider.fallbackModels applies; routing.providerFailurePolicy "fail" tries none.' },
             executionIntent: {
               type: 'object',
               properties: {

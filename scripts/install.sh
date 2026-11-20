@@ -14,6 +14,10 @@
 # the former GOODVIBES_VECTOR opt-out no longer skips those runtime files.
 # GOODVIBES_SHADOW_REMOVE=ask|0|1 controls existing command shadow removal.
 # GOODVIBES_UNINSTALL=1 removes installed programs/services, preserving data.
+# GOODVIBES_AUTO_UPDATE=0 (or --no-auto-update) keeps every program from updating
+# itself, from the first launch. GOODVIBES_RELEASE_DIR=DIR (or --from-dir DIR)
+# installs from a directory holding a release's files and its SHA256SUMS.txt,
+# with no request to GitHub; each file is checked against that list the same way.
 # Upgrade, service ownership/migration, PATH and uninstall behavior is retained
 # from goodvibes-tui/scripts/install.sh at e492721d58cf9986407fe63a07bd6da9bbf970ec.
 
@@ -31,6 +35,8 @@ RESTART_DAEMON="${GOODVIBES_RESTART_DAEMON:-1}"
 WITH_WAKE_MODEL="${GOODVIBES_WAKE_MODEL:-1}"
 DAEMON_SERVICE="${GOODVIBES_DAEMON_SERVICE:-1}"
 UNINSTALL="${GOODVIBES_UNINSTALL:-0}"
+AUTO_UPDATE="${GOODVIBES_AUTO_UPDATE:-1}"
+RELEASE_DIR="${GOODVIBES_RELEASE_DIR:-}"
 
 # Where the unpacked web UI bundles live: one versioned directory per installed
 # version under the install tree, beside the binaries that serve them. Versioned
@@ -83,6 +89,10 @@ DAEMON_SERVICE_PATH=""
 DAEMON_SERVICE_PLATFORM=""
 DAEMON_SERVICE_OWNER=""
 DAEMON_SERVICE_INSTALLED=0
+# The names of every daemon service GoodVibes wrote for this user (the one above
+# and any second daemon installed under its own service.serviceName), one per
+# line, as `service-status --json` lists them in productServices.
+DAEMON_PRODUCT_SERVICES=""
 # Set when refresh_daemon_service changed the definition on disk in this run, so
 # the restart reloads a launchd agent (kickstart alone keeps the plist it loaded).
 DAEMON_DEFINITION_CHANGED=0
@@ -148,6 +158,7 @@ read_daemon_service() {
   DAEMON_SERVICE_PLATFORM=""
   DAEMON_SERVICE_OWNER=""
   DAEMON_SERVICE_INSTALLED=0
+  DAEMON_PRODUCT_SERVICES=""
   [ -x "$INSTALL_DIR/goodvibes-daemon" ] || return 1
   # Exits 0, 3 and 4 all print the document; 1 (manager unreachable) prints none.
   _rds_json=$(daemon_service_command service-status --json 2>/dev/null) || :
@@ -162,6 +173,11 @@ read_daemon_service() {
   DAEMON_SERVICE_PLATFORM=$_rds_platform
   DAEMON_SERVICE_OWNER=$_rds_owner
   if [ "$(daemon_service_word installed "$_rds_json")" = true ]; then DAEMON_SERVICE_INSTALLED=1; fi
+  DAEMON_PRODUCT_SERVICES=$(printf '%s\n' "$_rds_json" | awk '
+    /"productServices": \[\]/ { exit }
+    /"productServices": \[/ { inside = 1; next }
+    inside && /\]/ { exit }
+    inside { gsub(/[ ",]/, ""); if ($0 ~ /^[A-Za-z0-9_.@-]+$/) print }')
   DAEMON_SERVICE_KNOWN=1
 }
 
@@ -315,6 +331,13 @@ resolve_platform() {
 fetch() {
   # fetch <url> <dest>; reuse only this run's private verified staging.
   [ ! -f "$2" ] || return 0
+  # From a local release directory BASE_URL is that directory: copy the file;
+  # the caller checks it against SHA256SUMS.txt exactly as a download.
+  if [ -n "$RELEASE_DIR" ]; then
+    [ -f "$1" ] || fail INSTALL_E125 "$1 is not in the release directory $RELEASE_DIR; copy every file of the release (and its SHA256SUMS.txt) there"
+    cp -- "$1" "$2" || fail INSTALL_E126 "could not copy $1"
+    return 0
+  fi
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --retry 3 -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
@@ -369,7 +392,21 @@ resolve_version() {
   for requested in "$REQUESTED_DAEMON_VERSION" "$REQUESTED_AGENT_VERSION" "$REQUESTED_WEBUI_VERSION"; do
     [ "${requested#v}" = "${REQUESTED_VERSION#v}" ] || fail INSTALL_E008 "All products use GOODVIBES_VERSION; remove conflicting per-product version overrides."
   done
-  VERSION=$(resolve_tag "$REPO" "$REQUESTED_VERSION")
+  if [ -n "$RELEASE_DIR" ]; then
+    # A local release names its version in its web UI bundle's file name.
+    [ -f "$RELEASE_DIR/SHA256SUMS.txt" ] || fail INSTALL_E127 "$RELEASE_DIR has no SHA256SUMS.txt; copy the whole release there, including that file"
+    _dir_version=$(sed -n 's/^[0-9a-fA-F]\{64\}  *\*\{0,1\}goodvibes-webui-bundle-\([0-9][0-9A-Za-z.+-]*\)\.tar\.gz$/\1/p' "$RELEASE_DIR/SHA256SUMS.txt" | head -n 1)
+    if [ "$REQUESTED_VERSION" = latest ]; then
+      [ -n "$_dir_version" ] || fail INSTALL_E128 "cannot tell which release $RELEASE_DIR holds; name it with --version vX.Y.Z"
+      VERSION="v$_dir_version"
+    else
+      VERSION=$REQUESTED_VERSION
+      case "$VERSION" in v*) : ;; *) VERSION="v$VERSION" ;; esac
+      [ -z "$_dir_version" ] || [ "v$_dir_version" = "$VERSION" ] || fail INSTALL_E129 "$RELEASE_DIR holds release v$_dir_version, not $VERSION"
+    fi
+  else
+    VERSION=$(resolve_tag "$REPO" "$REQUESTED_VERSION")
+  fi
   printf '%s\n' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || fail INSTALL_E009 "Invalid release version: $VERSION"
 }
 
@@ -1521,6 +1558,19 @@ restart_bare_processes() {
       say "Skipping pid $pid: it is supervised by a service manager; its unit owns the restart."
       continue
     fi
+    # A program running in someone's terminal (an interactive goodvibes-agent,
+    # a daemon in the foreground) is never stopped: a relaunch would have no
+    # terminal, so it would take the session away. It keeps the version it
+    # started with; the person running it is told to restart it.
+    _tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ' || :)
+    case "$_tty" in
+      ''|'?'|'??') : ;;
+      *)
+        say ""
+        say "Leaving ${new_bin##*/} (pid $pid) running: it is attached to terminal $_tty and still runs the previous version."
+        say "  Quit it and start it again in that terminal to use $VERSION."
+        continue ;;
+    esac
     if [ "$_supervision" = "unknown" ]; then
       say ""
       say "Skipping pid $pid: cannot determine whether it is service-managed (service manager unreachable)."
@@ -1714,8 +1764,26 @@ reload_launchd_agent() {
   return 0
 }
 
+# Every other daemon service GoodVibes wrote for this user (a second daemon
+# under its own service.serviceName, with its own GOODVIBES_HOME) runs the
+# same program file, so it is restarted too when it is running. One that is
+# stopped is left stopped. Its definition names the program by path, so a
+# restart is enough; nothing else of it changes.
+restart_other_daemon_services() {
+  [ -n "$DAEMON_PRODUCT_SERVICES" ] || return 0
+  for _other in $DAEMON_PRODUCT_SERVICES; do
+    [ "$_other" != "$DAEMON_SERVICE_NAME" ] || continue
+    if [ "$DAEMON_SERVICE_PLATFORM" = systemd ]; then
+      restart_systemd_unit "$_other.service" "$INSTALL_DIR/goodvibes-daemon" || :
+    else
+      restart_launchd_agent "$_other" || :
+    fi
+  done
+}
+
 restart_running_daemon() {
   [ "$RESTART_DAEMON" = "1" ] || return 0
+  restart_other_daemon_services
   if [ "$os_tag" = "macos" ]; then
     if [ "$DAEMON_SERVICE_KNOWN" = "1" ]; then
       if [ "$DAEMON_DEFINITION_CHANGED" = "1" ]; then
@@ -1735,7 +1803,9 @@ restart_running_daemon() {
 
 restart_running_agent() {
   [ "$RESTART_DAEMON" = "1" ] || return 0
-  # The agent has no service of its own; its running processes are restarted in place.
+  # The agent has no service of its own. One in a terminal is left running and
+  # named (restart_bare_processes never stops a program that has a terminal);
+  # one without a terminal is restarted in place.
   restart_bare_processes '[g]oodvibes-agent' "$INSTALL_DIR/goodvibes-agent"
 }
 
@@ -1772,7 +1842,8 @@ daemon_running() {
 setup_daemon_service() {
   if [ "$DAEMON_SERVICE" != "1" ]; then
     say ""
-    say "Daemon service setup skipped (GOODVIBES_DAEMON_SERVICE=0). Run it yourself with:"
+    say "Daemon service setup skipped (--no-service); service.enabled records that this machine runs without one,"
+    say "  so a daemon started by hand does not install one. Start the daemon yourself with:"
     say "  $INSTALL_DIR/goodvibes-daemon"
     return 0
   fi
@@ -3287,20 +3358,64 @@ apply_decision_policy() {
   say "    $INSTALL_DIR/goodvibes-daemon config set judgment.policy '$DECISION_POLICY'"
 }
 
+AUTO_UPDATE_UNSAVED=0
+
+# --no-auto-update: update.auto and update.autoUpdateAtLaunch are daemon
+# settings, kept in the daemon's settings file and read by the daemon, the
+# terminal app and the Agent alike, so these two writes keep all three programs
+# from replacing themselves, from their first launch. Like the decision policy,
+# a refused write is said and the install continues.
+apply_update_choice() {
+  [ "$AUTO_UPDATE" = 0 ] || return 0
+  if "$INSTALL_DIR/goodvibes-daemon" config set update.auto false >/dev/null \
+    && "$INSTALL_DIR/goodvibes-daemon" config set update.autoUpdateAtLaunch false >/dev/null; then
+    say ""
+    say "Automatic updates: off for goodvibes, goodvibes-daemon and goodvibes-agent. Update by running this installer again."
+    return 0
+  fi
+  AUTO_UPDATE_UNSAVED=1
+  say ""
+  say "  NOTE: automatic updates could not be turned off; the install continues. Turn them off with:"
+  say "    $INSTALL_DIR/goodvibes-daemon config set update.auto false"
+  say "    $INSTALL_DIR/goodvibes-daemon config set update.autoUpdateAtLaunch false"
+}
+
+# --no-service on a machine with no daemon service: record the choice in
+# service.enabled, the setting the daemon reads before it would install itself
+# as a service at its first idle moment, and the one doctor reads. An
+# installed service is left alone and recorded as it is.
+apply_service_choice() {
+  [ "$DAEMON_SERVICE" = 0 ] || return 0
+  [ "$DAEMON_SERVICE_INSTALLED" != 1 ] || return 0
+  if "$INSTALL_DIR/goodvibes-daemon" config set service.enabled false >/dev/null; then
+    return 0
+  fi
+  say ""
+  say "  NOTE: the no-service choice could not be saved, so a daemon started by hand may install itself as a service."
+  say "    Save it with: $INSTALL_DIR/goodvibes-daemon config set service.enabled false"
+}
+
 parse_options() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h)
         say 'Install released GoodVibes binaries, daemon, agent, browser driver and WebUI.'
-        say 'Usage: install.sh [--version VERSION] [--bin-dir DIR] [--no-service|--service] [--decision-policy POLICY] [--uninstall]'
+        say 'Usage: install.sh [--version VERSION] [--bin-dir DIR] [--from-dir DIR] [--no-service|--service] [--no-auto-update]'
+        say '                  [--decision-policy POLICY] [--uninstall]'
         say 'GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.'
         say ''
         say 'Options:'
         say '  --version VERSION     Install this release, such as v3.3.1, for every program (default: latest;'
         say '                        also GOODVIBES_VERSION).'
         say '  --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).'
-        say '  --no-service          Do not install the daemon as a service (also GOODVIBES_DAEMON_SERVICE=0).'
+        say '  --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,'
+        say '                        with no request to GitHub; every file is checked against that list (also'
+        say '                        GOODVIBES_RELEASE_DIR). The release is read from the file names unless --version names it.'
+        say '  --no-service          Do not install the daemon as a service, and record that choice so a daemon started'
+        say '                        by hand never installs one (also GOODVIBES_DAEMON_SERVICE=0).'
         say '  --service             Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0.'
+        say '  --no-auto-update      Keep the daemon, the terminal app and the Agent from updating themselves, from their'
+        say '                        first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer.'
         say '  --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or'
         say '                        "No Decision Model" (sets judgment.policy).'
         say '  --uninstall           Remove the installed programs and services; settings and data in ~/.goodvibes are kept.'
@@ -3309,11 +3424,13 @@ parse_options() {
       --uninstall) UNINSTALL=1; shift ;;
       --no-service) DAEMON_SERVICE=0; shift ;;
       --service) DAEMON_SERVICE=1; shift ;;
-      --version|--bin-dir|--install-dir|--decision-policy)
+      --no-auto-update) AUTO_UPDATE=0; shift ;;
+      --version|--bin-dir|--install-dir|--decision-policy|--from-dir)
         [ "$#" -ge 2 ] && [ -n "$2" ] || fail INSTALL_E110 "$1 needs a value"
         case "$1" in
           --version) REQUESTED_VERSION=$2; REQUESTED_DAEMON_VERSION=$2; REQUESTED_AGENT_VERSION=$2; REQUESTED_WEBUI_VERSION=$2 ;;
           --bin-dir|--install-dir) INSTALL_DIR=$2; WEBUI_ROOT="$INSTALL_DIR/webui" ;;
+          --from-dir) RELEASE_DIR=$2 ;;
           --decision-policy)
             case "$2" in 'Decision Model Only'|Hybrid|'No Decision Model') DECISION_POLICY=$2 ;; *) fail INSTALL_E111 'Unknown decision policy' ;; esac ;;
         esac
@@ -3326,6 +3443,11 @@ parse_options() {
 main() {
   parse_options "$@"
   resolve_platform
+  if [ -n "$RELEASE_DIR" ]; then
+    RELEASE_DIR=$(CDPATH= cd -- "$RELEASE_DIR" 2>/dev/null && pwd -P) || fail INSTALL_E130 "the release directory given with --from-dir (GOODVIBES_RELEASE_DIR) does not exist"
+    # The wake-word model is downloaded by the daemon, not part of the release files.
+    [ -n "${GOODVIBES_WAKE_MODEL:-}" ] || WITH_WAKE_MODEL=0
+  fi
 
   if [ "$UNINSTALL" = "1" ]; then
     for installed_command in goodvibes goodvibes-daemon goodvibes-agent; do
@@ -3382,7 +3504,11 @@ main() {
   done
   resolve_version
 
-  BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+  if [ -n "$RELEASE_DIR" ]; then
+    BASE_URL=$RELEASE_DIR
+  else
+    BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+  fi
   WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-install.XXXXXX")
   trap cleanup_release_install EXIT
   trap 'exit 130' INT
@@ -3447,6 +3573,7 @@ main() {
   release_install_claims || fail INSTALL_E116 "Suite files were installed, but this run's transaction claims in $INSTALL_CLAIM_DIR changed, so services were not started. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone."
 
   apply_decision_policy
+  apply_update_choice
   # Both commands may load configuration and publish native data. Their real
   # writer checks must see a complete, idle suite, never our own in-flight
   # installation. Provisioning still precedes the first service start.
@@ -3456,6 +3583,7 @@ main() {
   # The daemon names its service once for the steps below, then brings its own
   # definition to the current launch BEFORE the restart, so the restart applies it.
   read_daemon_service || :
+  apply_service_choice
   refresh_daemon_service
 
   restart_running_daemon
@@ -3496,6 +3624,9 @@ main() {
   fi
   if [ "$WITH_AGENT" = "1" ]; then
     say "Personal agent:   goodvibes-agent"
+  fi
+  if [ "$AUTO_UPDATE_UNSAVED" = "1" ]; then
+    say "Automatic updates: NOT turned off (the daemon refused the write); see the NOTE above."
   fi
   if [ "$DECISION_POLICY_UNSAVED" = "1" ]; then
     say "Decision policy:  NOT saved (the daemon refused the write); set it with: $INSTALL_DIR/goodvibes-daemon config set judgment.policy '$DECISION_POLICY'"

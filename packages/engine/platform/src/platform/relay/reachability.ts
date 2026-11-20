@@ -95,8 +95,14 @@ export interface RelayReachability {
    * do, and whether the daemon keeps trying), or null when it has not.
    */
   readonly lastRefusal: RelayRegistrationRefusal | null;
-  /** Mint a pairing payload a surface can scan, or null when disabled. */
-  mintPairing(): Promise<RelayPairingPayload | null>;
+  /** Mint a pairing payload carrying `code` (the device's relay code) that a surface can scan, or null when disabled. */
+  mintPairing(code: string): Promise<RelayPairingPayload | null>;
+  /**
+   * End every relay connection that presented a relay code `revoked` answers
+   * true for (a code just revoked): its streams are closed with `reason`, its
+   * requests aborted. Resolves to how many connections were closed.
+   */
+  closeConnectionsPresenting(revoked: (code: string) => boolean, reason: string): Promise<number>;
 }
 
 /** Whether all three gates are satisfied. */
@@ -206,9 +212,12 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     get lastRefusal(): RelayRegistrationRefusal | null {
       return isEnabled() ? (registration?.lastRefusal ?? null) : null;
     },
-    async mintPairing(): Promise<RelayPairingPayload | null> {
+    async mintPairing(code: string): Promise<RelayPairingPayload | null> {
       if (!registration) return null;
-      return registration.mintPairing(readConfig().label || undefined);
+      return registration.mintPairing(code, readConfig().label || undefined);
+    },
+    async closeConnectionsPresenting(revoked: (code: string) => boolean, reason: string): Promise<number> {
+      return registration ? registration.closePipesPresenting(revoked, reason) : 0;
     },
   };
   return controller;

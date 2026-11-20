@@ -4,6 +4,7 @@
  * Who answered is the authenticated caller on the invocation (principal and
  * client kind), never a field of the body.
  */
+import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
@@ -37,6 +38,7 @@ function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
   return {
     actor: invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
+    ...(isAutomationCredential(invocation.context) ? { automation: true } : {}),
   };
 }
 
@@ -44,6 +46,9 @@ function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
 function outcomeResponse(outcome: OwnerAnswerOutcome, field: string): OwnerAnswerOutcome {
   if (!outcome.applied && outcome.refusal.code === 'NOT_FOUND') {
     throw new GatewayVerbError(outcome.refusal.reason, 'NOT_FOUND', 404);
+  }
+  if (!outcome.applied && outcome.refusal.code === 'OWNER_ONLY') {
+    throw new GatewayVerbError(outcome.refusal.reason, 'OWNER_ONLY', 403);
   }
   if (!outcome.applied && outcome.refusal.code === 'INVALID_ARGUMENT') {
     throw new GatewayVerbError(`${outcome.refusal.reason} ${outcome.refusal.next[0] ?? ''}`.trim(), 'INVALID_ARGUMENT', 400, field);

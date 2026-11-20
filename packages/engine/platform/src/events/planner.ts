@@ -73,8 +73,10 @@ export interface WorkPlanEventBase {
 export type PlannerEvent =
   /**
    * The planner's choice of execution strategy (single, cohort, background,
-   * remote) with its scored candidates and inputs. Declared for subscribers;
-   * nothing in this release emits it.
+   * remote) with its scored candidates and inputs, published each time a
+   * decision is recorded (when `/workstream` drafts a plan and asks whether to
+   * split the goal). An unsettled reading is published too, with `selected`
+   * `auto` and reason `JUDGMENT_UNSETTLED`.
    */
   | ({
     type: 'PLAN_STRATEGY_SELECTED';

@@ -28,6 +28,7 @@ import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema.js';
 import { logger } from '../../utils/logger.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
+import type { AuthorityRecordFile } from '../../cluster/authority-record-file.js';
 
 /** The slice of the gateway dependency bag push composition needs. */
 export interface PushCompositionDeps {
@@ -45,6 +46,11 @@ export interface PushCompositionDeps {
    * (an unreadable key pair) is recorded there for the next attached surface.
    */
   readonly daemonReceipts?: { record(text: string): unknown } | undefined;
+  /**
+   * The authority record the registrations live on: a device registered, or
+   * turned off, through any machine of the group is so on every machine.
+   */
+  readonly authority?: AuthorityRecordFile | undefined;
 }
 
 function readNumber(deps: PushCompositionDeps, key: ConfigKey, fallback: number): number {
@@ -104,7 +110,7 @@ export function createPushSubscriptionStore(deps: PushCompositionDeps): PushSubs
   });
   return new PushSubscriptionStore(
     controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'push-subscriptions.json'),
-    { policy },
+    { policy, ...(deps.authority ? { authority: deps.authority } : {}) },
   );
 }
 

@@ -11,6 +11,7 @@ import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STO
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
+import { acceptOwnerApprovalAnswer, type AppliedAnswer } from './owner-approval';
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/platform/platform/channels/telegram-cursor';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
@@ -504,13 +505,25 @@ export function webuiRouteFor(methodId: string): RouteDefinition | undefined {
  *
  * The `input` parameter is typed `OperatorMethodInput<TMethodId>` directly, so a contract
  * change to any verb fails this app's compile instead of reaching the daemon as a stale
- * body. `TOutput` may be overridden only to narrow the reply a view reads.
+ * body. A write the daemon put to the owner rejects (lib/owner-approval.ts), so the
+ * pending answer is not part of the reply type. `TOutput` may be overridden only to
+ * narrow the reply a view reads.
  */
 async function invokeOperator<
   TMethodId extends OperatorMethodId,
-  TOutput = OperatorMethodOutput<TMethodId>,
+  TOutput = AppliedAnswer<OperatorMethodOutput<TMethodId>>,
 >(methodId: TMethodId, input?: OperatorMethodInput<TMethodId>, signal?: AbortSignal): Promise<TOutput>;
 async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
+  const answer = await invokeOperatorOnce(methodId, input, signal);
+  // A loosening change asked from a token minted for automation is put to the
+  // owner (202 OWNER_APPROVAL_PENDING): it is shown as waiting for him, never as saved.
+  return OWNER_APPROVAL_WRITES.has(methodId) ? acceptOwnerApprovalAnswer(answer) : answer;
+}
+
+/** The writes the daemon can put to the owner instead of applying (see lib/owner-approval.ts). */
+const OWNER_APPROVAL_WRITES: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'sessions.permissionMode.set']);
+
+async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
   const route = EXTRA_METHOD_ROUTES[methodId];
   if (!route) {
     // The one unavoidable escape hatch: every methodId that reaches this branch (no
@@ -1016,6 +1029,7 @@ export type PushReconcileDrift = OperatorMethodOutput<'push.subscriptions.reconc
 // see the redacted view (id, name, timestamps).
 
 export type PublicPairingToken = OperatorMethodOutput<'pairing.tokens.list'>['tokens'][number];
+export type PublicRelayCode = OperatorMethodOutput<'relay.codes.list'>['codes'][number];
 /** An origin's TLS/capability posture: each browser-gated capability is available or carries the daemon's own reason. */
 export type OriginPosture = OperatorMethodOutput<'pairing.posture.get'>['posture'];
 export type PairingHandoffCompleteInput = OperatorMethodInput<'pairing.handoff.complete'>;
@@ -1037,9 +1051,9 @@ export type StepUpCredentialSummary = OperatorMethodOutput<'stepup.credentials.l
 // ─── Config and credentials ──────────────────────────────────────────────────
 
 /** config.set's and config.reset's outcome: where the value landed (`persistedTo`), its tier, and whether the daemon owns the key. */
-export type ConfigSetOutcome = OperatorMethodOutput<'config.set'>;
+export type ConfigSetOutcome = AppliedAnswer<OperatorMethodOutput<'config.set'>>;
 /** config.setMany's outcome: the configuration revision and, per key, what the host now holds and where. */
-export type ConfigSetManyOutcome = OperatorMethodOutput<'config.setMany'>;
+export type ConfigSetManyOutcome = AppliedAnswer<OperatorMethodOutput<'config.setMany'>>;
 /** Where credentials.set put the credential, never the value. */
 export type CredentialSetOutcome = OperatorMethodOutput<'credentials.set'>;
 
@@ -1800,8 +1814,9 @@ export const client = {
       tokens: {
         list: () => invokeGatewayMethod('pairing.tokens.list', {}),
         create: (name: string) => invokeGatewayMethod('pairing.tokens.create', { name }),
-        // migrate: mint a new per-device token for an operator still on the legacy
-        // shared token, without yet revoking it, a bridge step before revokeShared.
+        // migrate: mint a new per-device token for a client still on the legacy
+        // shared token, without yet revoking it. Minted through the API, so the token
+        // is an automation token; this browser moves with handoff.selfFromSharedToken.
         migrate: (name: string) => invokeGatewayMethod('pairing.tokens.migrate', { name }),
         rename: (id: string, name: string) => invokeGatewayMethod('pairing.tokens.rename', { id, name }),
         delete: (id: string) => invokeGatewayMethod('pairing.tokens.delete', { id }),
@@ -1814,6 +1829,12 @@ export const client = {
       handoff: {
         create: (name: string, offers?: readonly string[]) =>
           invokeGatewayMethod('pairing.handoff.create', offers && offers.length > 0 ? { name, offers } : { name }),
+        // The owner's own browser, signed in with the shared operator token, pairs ITSELF
+        // onto its own token through the owner's pairing flow: the token it gets is an
+        // owner device (origin owner-pairing). pairing.tokens.migrate is a script's path
+        // and gives an automation token.
+        selfFromSharedToken: (name: string) =>
+          invokeGatewayMethod('pairing.handoff.create', { name, offers: [], fromSharedToken: true }),
         complete: (input: PairingHandoffCompleteInput) => invokeGatewayMethod('pairing.handoff.complete', input),
       },
       // posture.get: the same honest TLS/capability read outside a pairing exchange, a
@@ -1822,6 +1843,14 @@ export const client = {
       // not wherever the daemon's configured web origin happens to be.
       posture: {
         get: (origin?: string) => invokeGatewayMethod('pairing.posture.get', origin ? { origin } : {}),
+      },
+    },
+    // Per-device relay codes: every relay pairing carries a code of its own, so one
+    // phone is cut off the relay without touching any other. ws-only, generic-invoke.
+    relay: {
+      codes: {
+        list: () => invokeGatewayMethod('relay.codes.list', {}),
+        revoke: (id: string) => invokeGatewayMethod('relay.codes.revoke', { id }),
       },
     },
     // cost.attribution.get: windowed (24h/7d), cache-aware-priced cost

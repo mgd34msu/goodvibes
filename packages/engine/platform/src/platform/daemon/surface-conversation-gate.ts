@@ -3,6 +3,7 @@ import { assertSynchronousCurrent } from './reading-lifetime.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
 import { readInboundMessage, type InboundReading } from './inbound-reading.js';
+import { withGuestTurn } from '../security/turn-boundary.js';
 /**
  * The conversation-first spawn gate, at the shared surface spawn boundary.
  *
@@ -34,11 +35,13 @@ import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
 import {
   isGatedSurface,
   readConversationGateConfig,
+  renderGuestProposalAskedMessage,
+  renderGuestWorkProposalMessage,
   renderWorkProposalMessage,
   summarizeWorkRequest,
   type ConversationGateConfigReader,
 } from '../agents/conversation-gate.js';
-import type { WorkProposalRecord, WorkProposalStore } from '../agents/work-proposal-store.js';
+import type { WorkProposalAnswerFrom, WorkProposalRecord, WorkProposalStore } from '../agents/work-proposal-store.js';
 import type { SurfaceNoticeDelivery } from './types.js';
 import {
   conversationalTurnCapabilities,
@@ -65,6 +68,20 @@ export interface SurfaceIngressOrigin {
   readonly threadId?: string | undefined;
   /** The intent the message's one inbound reading gave, when ingress already asked it. */
   readonly intent?: InboundReading['intent'];
+  /**
+   * The sender is admitted by the channel but is not its owner (`isChannelOwner`).
+   * Their turn runs as a guest's (security/turn-boundary.ts, withGuestTurn): it
+   * may read and answer, every change is put to the owner, and work they ask
+   * for is proposed to the owner, never to them.
+   */
+  readonly guest?: true | undefined;
+}
+
+/** One of the owner's own conversations, with the id he writes from there. */
+export interface OwnerConversation {
+  readonly binding: AutomationRouteBinding;
+  /** The channel owner's user id on that surface; absent where the surface has no sender ids (ntfy). */
+  readonly ownerId?: string | undefined;
 }
 
 export type SpawnInput = Parameters<AgentManager['spawn']>[0];
@@ -91,6 +108,13 @@ export interface ConversationGateDeps {
   readonly deliverSurfaceNotice?:
     | ((binding: AutomationRouteBinding | undefined, text: string) => Promise<SurfaceNoticeDelivery>)
     | undefined;
+  /**
+   * The owner's own conversations (owner-alert.ts, isOwnerConversation), the
+   * ones on `surface` first, newest first. A guest's work proposal is put to
+   * the first that accepts it. Absent: a guest's work is not proposed anywhere
+   * and their message is answered as conversation.
+   */
+  readonly ownerConversations?: ((surface: string) => readonly OwnerConversation[]) | undefined;
 }
 
 /**
@@ -174,6 +198,9 @@ async function gateOwnedSurfaceSpawn(
   }
 
   if (!store) throw new Error('Conversation gate proposal store is unavailable');
+  // A guest's work is the owner's to agree to: with no conversation of his to
+  // put it to, the guest's message is answered as conversation instead.
+  if (origin?.guest === true && !deps.ownerConversations) return spawnConversational();
   const summary = summarizeWorkRequest(inboundText);
   const binding = resolveOriginBinding(deps, origin, sessionId);
   const inputId = findHeldInput(deps, origin, sessionId)?.id;
@@ -197,16 +224,30 @@ async function gateOwnedSurfaceSpawn(
   // meantime is treated as what it is rather than as an answer to something
   // the owner was never shown. Fails closed: any refusal drops the proposal.
   // The store may have folded an earlier pending request from this conversation into this proposal; the notice names both.
-  const delivery = await deliverProposalNotice(deps, binding, renderWorkProposalMessage({ summary: proposal.summary, expiresInMs: config.proposalTtlMs, requestCount: proposal.requestCount }));
+  // A guest's proposal goes to the owner's own conversation, the only place it
+  // can be answered; the guest is told it was put to the owner.
+  const guestAsk = origin?.guest === true
+    ? await deliverGuestProposal(deps, origin, proposal, config.proposalTtlMs)
+    : undefined;
+  const delivery = guestAsk
+    ? guestAsk.delivery
+    : await deliverProposalNotice(deps, binding, renderWorkProposalMessage({ summary: proposal.summary, expiresInMs: config.proposalTtlMs, requestCount: proposal.requestCount }));
   try { options.signal?.throwIfAborted(); assertSynchronousCurrent(sourceCurrent); }
   catch (error) { store.markUndeliverable(proposal.id, 'source-invalidated'); throw error; }
   if (!delivery.delivered) {
     store.markUndeliverable(proposal.id, delivery.reason);
-    await failHeldInput(deps, origin, sessionId, 'The message was not acted on because the work proposal could not be shown. Send it again.', inputId);
-    await failFoldedInputs(deps, proposal, 'The message was not acted on because the work proposal could not be shown. Send it again.');
+    const reason = guestAsk
+      ? 'The message was not acted on because the owner could not be asked to agree to it. Send it again later.'
+      : 'The message was not acted on because the work proposal could not be shown. Send it again.';
+    if (guestAsk) await deliverProposalNotice(deps, binding, `Not started: the owner could not be asked about this: ${proposal.summary}`);
+    await failHeldInput(deps, origin, sessionId, reason, inputId);
+    await failFoldedInputs(deps, proposal, reason);
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-proposal-undelivered' }, { status: 202 });
   }
-  const delivered = store.markDelivered(proposal.id);
+  const delivered = store.markDelivered(proposal.id, guestAsk?.answerFrom);
+  if (guestAsk && delivered) {
+    await deliverProposalNotice(deps, binding, renderGuestProposalAskedMessage(proposal.summary));
+  }
   if (!delivered || !store.listPending().includes(delivered)) {
     await failHeldInput(deps, origin, sessionId, 'The work proposal expired before it could be answered. Send the message again.', inputId);
     await failFoldedInputs(deps, proposal, 'The work proposal expired before it could be answered. Send the message again.');
@@ -300,7 +341,11 @@ async function spawnOrSettle(
   logLabel: string | undefined,
   sessionId: string | undefined,
 ): Promise<AgentRecord | Response> {
-  const spawned = deps.trySpawnAgent(input, logLabel, sessionId);
+  // A guest's message starts a guest's turn: the spawn runs in that scope, so the
+  // agent (and any agent it starts) carries it to every tool call it makes.
+  const spawned = origin?.guest === true
+    ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(input, logLabel, sessionId))
+    : deps.trySpawnAgent(input, logLabel, sessionId);
   if (!(spawned instanceof Response)) return spawned;
   const held = spawned.status === 429 && sessionId ? findHeldInput(deps, origin, sessionId) : undefined;
   // The arrival reading waits with the row, so starting it later reads nothing again.
@@ -330,6 +375,7 @@ function conversationalFirstTurnOptions(
     routed: true,
     ...(origin?.surface ? { surfaceKind: origin.surface } : {}),
     ...(origin?.channelId ? { address: origin.channelId } : {}),
+    ...(origin?.guest === true ? { guest: true as const } : {}),
   };
   const options = { configReader: conversationalTurnConfigReaderFrom(deps.configManager), tools };
   // Even a sessionless or unidentified ingress gets an explicit bound authority;
@@ -368,6 +414,38 @@ export function resolveOriginBinding(
   return resolved?.surfaceKind === origin.surface
     && (resolved.channelId ?? resolved.externalId) === origin.channelId
     && resolved.threadId === origin.threadId ? resolved : undefined;
+}
+
+/**
+ * Put a guest's proposal to the owner: his own conversations, those on the
+ * guest's surface first, until one accepts it. The one that did is the only
+ * conversation that answers it (`answerFrom`).
+ */
+async function deliverGuestProposal(
+  deps: ConversationGateDeps,
+  origin: SurfaceIngressOrigin,
+  proposal: WorkProposalRecord,
+  ttlMs: number,
+): Promise<{ readonly delivery: SurfaceNoticeDelivery; readonly answerFrom?: WorkProposalAnswerFrom | undefined }> {
+  const conversations = deps.ownerConversations?.(origin.surface) ?? [];
+  const text = renderGuestWorkProposalMessage({
+    summary: proposal.summary, expiresInMs: ttlMs, requestCount: proposal.requestCount,
+    surface: origin.surface, ...(origin.userId ? { sender: origin.userId } : {}),
+  });
+  let last: SurfaceNoticeDelivery = { delivered: false, reason: 'no-route-binding' };
+  for (const { binding, ownerId } of conversations) {
+    last = await deliverProposalNotice(deps, binding, text);
+    if (!last.delivered) continue;
+    const channelId = binding.channelId ?? binding.externalId;
+    return { delivery: last, answerFrom: {
+      surfaceKind: binding.surfaceKind,
+      routeId: binding.id,
+      ...(ownerId ? { userId: ownerId } : {}),
+      ...(channelId ? { channelId } : {}),
+      ...(binding.threadId ? { threadId: binding.threadId } : {}),
+    } };
+  }
+  return { delivery: last };
 }
 
 /**
@@ -419,7 +497,10 @@ export async function startAgreedWork(
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
-  const spawned = deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
+  // A guest's agreed work is still the guest's turn: the owner agreed to the
+  // request, not to letting its text direct changes, so each change is still his.
+  const start = () => deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
+  const spawned = proposal.answerFrom ? withGuestTurn(proposal.surfaceKind, start) : start();
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
   if (spawned instanceof Response) {
     logger.warn('Agreed work could not be started', { proposalId: proposal.id, status: spawned.status });

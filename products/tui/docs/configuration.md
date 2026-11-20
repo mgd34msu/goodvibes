@@ -85,9 +85,9 @@ for it to read when it starts.
 | `controlPlane.hostMode` | `local` | Control-plane bind mode: `local`, `network`, or `custom` |
 | `controlPlane.port` | `3421` | Control-plane daemon/API port |
 | `httpListener.port` | `3422` | Webhook/event listener port |
-| `web.enabled` | `true` | Enable the browser operator surface (bound to loopback until `web.hostMode` is widened) |
-| `web.hostMode` | `local` | Web surface bind mode: `local`, `network`, or `custom` |
-| `web.port` | `3423` | Web/browser surface port |
+| `web.enabled` | `true` | Switch the web channel on; the web UI is served on the control-plane port after `goodvibes-daemon webui enable` |
+| `web.hostMode` | `local` | Bind mode of the web UI's development server: `local`, `network`, or `custom` |
+| `web.port` | `3423` | Port of the web UI's development server; the daemon never binds it and no link uses it |
 | `orchestration.recursionEnabled` | `false` | Allow recursive agent orchestration under bounded policy controls |
 | `orchestration.maxDepth` | `0` | Maximum recursive orchestration depth: `0` disables, higher values (up to `5`) allow deeper bounded recursion |
 | `daemon.enabled` | `true` | Whether this client adopts a running daemon at all. It does not start one itself; see [deployment-and-services.md](deployment-and-services.md) |

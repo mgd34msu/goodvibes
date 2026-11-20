@@ -18,6 +18,9 @@ const descriptions = {
 export const builtinGatewayNativeConversationIntakeMethodDescriptors: readonly GatewayMethodDescriptor[] = (['capture', 'get', 'admit', 'resume', 'cancel'] as const).map(operation => methodDescriptor({
   id: `workLedger.intake.${operation}`, title: `${operation[0]!.toUpperCase()}${operation.slice(1)} Native Conversation Intake`, category: 'work-ledger',
   description: descriptions[operation], access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
+  ...(operation === 'capture' || operation === 'admit' || operation === 'resume'
+    ? { replay: { in: 'body' as const, name: 'inputId', behavior: 'One input id is captured and admitted once: an exact repeat returns the original source identity or joins the operation already running instead of acting again.' } }
+    : { repeat: 'safe' as const }),
   http: { method: 'POST', path: `/api/work-ledger/intake/${operation}` },
   inputSchema: json(operation === 'capture' ? nativeConversationIntakeCaptureRequestSchema : operation === 'get' ? nativeConversationIntakeLookupRequestSchema : nativeConversationIntakeTransitionRequestSchema),
   outputSchema: json(operation === 'get' ? nativeConversationIntakeLookupResultSchema : nativeConversationIntakeResultSchema),

@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { BOOLEAN_SCHEMA, EMPTY_OBJECT_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, bodyEnvelopeSchema, branchedSchema,requirementBranch, methodDescriptor, objectSchema } from './method-catalog-shared.js';
 import { METADATA_SCHEMA } from './operator-contract-schemas-shared.js';
 import {
@@ -66,6 +67,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.tts',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Text To Speech',
     description: 'Synthesize audio through a registered voice provider.',
@@ -78,6 +80,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.tts.stream',
+    repeat: 'unsafe',
     effect: 'outward',
     title: 'Stream Text To Speech',
     description: 'Synthesize audio as streamed bytes through a registered streaming voice provider.',
@@ -97,6 +100,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.stt',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Speech To Text',
     description: 'Transcribe an audio artifact through a registered voice provider.',
@@ -109,6 +113,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'voice.realtime.session',
+    repeat: 'unsafe',
     effect: 'outward',
     title: 'Open Voice Realtime Session',
     description: 'Open a realtime voice session through a registered voice provider.',
@@ -131,6 +136,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'web_search.query',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Web Search',
     description: 'Execute a provider-backed web search and return normalized ranked results.',
@@ -166,6 +172,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'artifacts.create',
+    repeat: 'unsafe',
     title: 'Create Artifact',
     description: 'Store a file or attachment artifact for later delivery, analysis, or knowledge ingest. JSON supports small inline bodies and daemon-local path/URI references; HTTP callers can also send multipart/form-data or a raw binary body for large uploads.',
     category: 'artifacts',
@@ -245,6 +252,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.analyze',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Analyze Media Artifact',
     description: 'Analyze an artifact through a registered media provider.',
@@ -257,6 +265,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.transform',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Transform Media Artifact',
     description: 'Transform an artifact through a registered media provider.',
@@ -269,6 +278,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.generate',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Generate Media Artifact',
     description: 'Generate a media artifact through a registered media provider. A job the provider accepted but had not finished when the wait ended comes back with artifacts empty and pending set (providerId, taskId, resume); the job is paid for and keeps running, and media.collect finishes it. The kind asked for (the major type of outputMimeType, or image with options.image true) chooses the provider: without providerId the first configured provider that makes that kind is used, and when none does (or the named provider does not) the answer is 409 MEDIA_OUTPUT_UNAVAILABLE naming the providers that make it; nothing is sent.',
@@ -281,6 +291,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'media.collect',
+    repeat: 'safe',
     effect: 'outward',
     title: 'Collect Pending Media Job',
     description: 'Finish a generation job an earlier media.generate answered as pending: pass the providerId, taskId and resume it named. Waits up to waitSeconds (0 checks once) and returns the outputs, or pending again when the job is still running. Nothing new is paid for.',
@@ -313,6 +324,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'multimodal.analyze',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Multimodal Analysis',
     description: 'Analyze an image, audio file, video artifact, or document through the unified multimodal service.',
@@ -336,6 +348,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'multimodal.writeback',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Write Back Multimodal Analysis',
     description: 'Persist a multimodal analysis result as an artifact and ingest it into the structured knowledge store.',
     category: 'media',

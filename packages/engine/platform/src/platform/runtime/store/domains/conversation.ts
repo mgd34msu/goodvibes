@@ -19,12 +19,8 @@ export type TurnState =
 /** States for the tool execution machine. */
 export type ToolExecutionState =
   | 'received'
-  | 'validated'
-  | 'prehooked'
   | 'permissioned'
   | 'executing'
-  | 'mapped'
-  | 'posthooked'
   | 'succeeded'
   | 'failed'
   | 'cancelled';

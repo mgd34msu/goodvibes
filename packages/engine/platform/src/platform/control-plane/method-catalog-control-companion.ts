@@ -11,6 +11,7 @@
  * companion.chat.sessions.delete).
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -81,6 +82,7 @@ const COMPANION_MODEL_ROUTE_DEPENDENCY: Readonly<Record<string, readonly string[
 export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'companion.chat.sessions.create',
+    repeat: 'unsafe',
     title: 'Create Companion Chat Session',
     description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.',
     category: 'companion',
@@ -124,6 +126,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.sessions.update',
+    repeat: 'safe',
     title: 'Update Companion Chat Session',
     description: 'Update companion-chat session metadata, including session-local provider, model and requested reasoning effort, without changing the daemon/TUI current model. Routing changes are refused while a reply is active; null effort restores provider defaults.',
     category: 'companion',
@@ -151,6 +154,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.sessions.close',
+    repeat: 'safe',
     title: 'Close Companion Chat Session',
     description: 'Close a companion-chat session (soft close). The session record and its messages are preserved in closed state and remain listable with includeClosed. Distinct from companion.chat.sessions.delete, which permanently removes the record.',
     category: 'companion',
@@ -164,6 +168,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.sessions.reopen',
+    repeat: 'safe',
     title: 'Reopen Companion Chat Session',
     description: 'Open a closed companion-chat session again so it accepts messages. The model history is rebuilt from the saved transcript on the next send. A chat that is already open answers `reopened: false` with its current status; an unknown id is a 404 SESSION_NOT_FOUND.',
     category: 'companion',
@@ -178,6 +183,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.sessions.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Companion Chat Session',
     description: 'Permanently remove a companion-chat session: the on-disk record file is deleted and the session is dropped from the shared session store, this does NOT merely close it (use companion.chat.sessions.close for a soft close). Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop.',
@@ -192,6 +198,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.messages.create',
+    replay: { in: 'body', name: 'clientMessageId', behavior: 'A second send with the same `clientMessageId` returns the first message\'s id and starts no second turn, while the session stays loaded in the daemon (a daemon restart forgets the id).' },
     effect: 'outward',
     title: 'Send Companion Chat Message',
     description: 'Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`. A message queued behind a running turn whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`. Optional `clientMessageId` (1-128 characters) makes the send safe to repeat: a second send with the same id returns the first message\'s id and starts no second turn, so a client whose response was lost can resend. The id is remembered while the session stays loaded in the daemon; a daemon restart forgets it.',
@@ -243,6 +250,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.messages.retry',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Regenerate Companion Chat Response',
     description: 'Regenerate an assistant response. Omitted `messageId`: the latest answered user message is answered again; whatever followed it in its exchange (its reply, a failed reply, or nothing) is SUPERSEDED, while a reply to an earlier message that was stored after it stays active, so retrying a failed regenerate repeats the same exchange. With `messageId` (an active assistant message): that response and every message after it are superseded, and the turn re-runs from the user message it answered. Superseded messages are kept in the message list and on disk, flagged as retained history, never deleted. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND); a `messageId` that is unknown is 404 MESSAGE_NOT_FOUND, already superseded 409 MESSAGE_SUPERSEDED, not an assistant message 400 NOT_AN_ASSISTANT_MESSAGE; with no user message to answer again it is 409 NO_ANCHOR_MESSAGE. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.',
@@ -262,6 +270,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.messages.edit',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Edit Companion Chat Message And Branch',
     description: 'Edit a user message and branch the conversation from it. `messageId` (required) is the user message to edit; the edited text is passed as `body` or `content` (as message create accepts), with optional `attachments` referencing artifacts. The original message and everything after it are SUPERSEDED, retained as history, never deleted, a new user message carrying `revisionOf` back to the original is appended, and a fresh turn answers it. Returns the new message id and the superseded ids for honest lineage. Same closed/unknown-session refusals as companion.chat.messages.retry, and the same 409 CHAT_TURN_BUSY while a reply, a message being prepared, or queued sends are in flight (nothing is superseded).',
@@ -284,6 +293,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.messages.steer',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Steer Companion Chat (Interrupt And Send)',
     description: 'Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is running. The message jumps to the front of the pending-turn queue; the active turn is cancelled through the same finalization path as companion.chat.turns.cancel (any non-empty partial reply is persisted with `deliveryState: "cancelled"` and the terminal `turn.cancelled` event reaches every subscriber), then the steered message\'s turn starts. Messages queued behind an active turn keep their places behind the steer. With no turn running this behaves as an ordinary send. Accepts the same payload as companion.chat.messages.create (`body`/`content`, `attachments`, `metadata`). Returns the new message id, `steered: true`, and `cancelledTurnId` when a turn was interrupted. Ordinary sends posted while a turn is running are QUEUED (transcript-visible immediately with `deliveryState: "queued"`, answered in order), steer is the explicit jump-the-line verb. A queued message whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`, never silently dropped.',
@@ -301,6 +311,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.turns.cancel',
+    repeat: 'safe',
     title: 'Cancel Companion Chat Turn',
     description: 'Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: "cancelled"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: "stopping"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.',
     category: 'companion',
@@ -337,6 +348,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.queuedMessages.edit',
+    repeat: 'safe',
     title: 'Edit a Queued Companion Chat Message',
     description: 'Replace the text of a companion chat message still waiting for its turn; its attachments stay. The transcript shows the new text. A message whose turn has started (or that was removed) is 404 MESSAGE_NOT_QUEUED.',
     category: 'companion',
@@ -355,6 +367,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   }),
   methodDescriptor({
     id: 'companion.chat.queuedMessages.delete',
+    repeat: 'safe',
     title: 'Remove a Queued Companion Chat Message',
     description: 'Take a companion chat message out of the queue before its turn starts, so it is never answered. The transcript keeps it, marked `deliveryState: "unanswered"`, and leaves it out of what the model sees. A message whose turn has started (or that was already removed) is 404 MESSAGE_NOT_QUEUED.',
     category: 'companion',

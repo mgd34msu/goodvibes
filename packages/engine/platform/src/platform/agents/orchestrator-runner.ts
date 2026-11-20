@@ -56,6 +56,8 @@ import { backgroundToolCallOwner } from './background-permission-gate.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { ProviderAttemptDeniedError } from '../providers/attempt-guard.js';
+import { createTurnFailover } from '../providers/failover.js';
+import { findModelDefinition } from '../providers/registry-models.js';
 import { resolveTurnBudget, formatTurnLimitError, formatTurnLimitWarning, turnLimitWarningTurn, TURN_BUDGET_EXHAUSTED, type ResolvedTurnBudget } from './turn-budget.js';
 import { toolFormatTelemetry } from '../runtime/telemetry/tool-format-telemetry.js';
 import {
@@ -518,13 +520,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     ]);
     terminal.assertCurrent();
     let activeRoute = decisionRoute ? { ...primaryRoute, provider: decisionRoute.provider, modelId: decisionRoute.model.id } : primaryRoute;
-    let fallbackRouteIndex = 0;
-    const fallbackRoutes = decisionRoute ? [] : context.resolveFallbackModelRoutes(
-      providerRegistry,
-      record,
-      currentModel,
-      primaryRoute.requestedModelId,
-    );
+    // The decision route serves the requests until a provider failure moves the run to a fallback model.
+    let activeDecisionRoute = decisionRoute;
     const modelId = activeRoute.modelId;
     record.model = decisionRoute ? activeRoute.modelId : record.model ?? primaryRoute.requestedModelId;
     record.provider = decisionRoute ? activeRoute.provider.name : record.provider ?? activeRoute.provider.name;
@@ -909,6 +906,36 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
      * fallback route; any other failure goes back to the turn loop, which
      * retries it when it is retryable by its own facts.
      */
+    // A request that failed for good moves the run along its fallback order (providers/failover.ts),
+    // the same rule as every other turn; the turn loop asks after its retries.
+    const agentFailover = createTurnFailover({
+      registry: providerRegistry,
+      fallbackOrder: () => context.resolveFallbackOrder(providerRegistry, record, currentModel),
+      current: () => {
+        const registryKey = providerQualifiedRouteLabel(activeRoute);
+        return { registryKey, provider: activeRoute.provider.name, displayName: activeRoute.modelId };
+      },
+      switchTo: (choice) => {
+        const listed = findModelDefinition(choice.registryKey, providerRegistry.listModels());
+        const previousRouteId = providerQualifiedRouteLabel(activeRoute);
+        activeRoute = {
+          ...activeRoute,
+          provider: providerRegistry.getForModel(choice.registryKey, choice.provider),
+          modelId: listed?.id ?? choice.registryKey.slice(choice.registryKey.indexOf(':') + 1),
+          requestedModelId: choice.registryKey,
+        };
+        activeDecisionRoute = undefined;
+        context.providerOptimizer?.recordFallbackTransition(previousRouteId, choice.registryKey, choice.because);
+        record.model = choice.registryKey;
+        record.provider = activeRoute.provider.name;
+      },
+      notify: (line, level) => {
+        activeConversation.addNotice(line, { level, kind: 'operational' });
+        logger.warn('[AgentOrchestrator] provider failover', { agentId: record.id, line });
+        progress(line, 'owner'); // their reply, not the machine
+      },
+    });
+
     const requestRound = async (): Promise<Awaited<ReturnType<LLMProvider['chat']>>> => {
       let response: Awaited<ReturnType<LLMProvider['chat']>> | undefined;
       while (response === undefined) {
@@ -946,7 +973,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         } : undefined;
         // A verification request carries the proposal and its evidence, never the knowledge block, so it takes no code check.
         const assertVerificationSource = async () => {
-          terminal.assertCurrent(); decisionRoute?.assertCurrent();
+          terminal.assertCurrent(); activeDecisionRoute?.assertCurrent();
           await capturedCode?.assertCurrent?.(capturedCodeGeneration);
           // beforeProviderRequest ran for this request at the top of the round; an attempt does not repeat it.
           assertOrchestratorKnowledgeCurrent(record, promptContext);
@@ -955,13 +982,14 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           terminal.assertCurrent();
         };
         const assertNativeProviderSource = async () => {
-          terminal.assertCurrent(); decisionRoute?.assertCurrent();
+          terminal.assertCurrent(); activeDecisionRoute?.assertCurrent();
           await codeAuthorityForAttempt?.();
           await assertVerificationSource();
         };
         assertVerificationProvider = assertVerificationSource;
         try {
-          const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
+          const route = activeDecisionRoute;
+          const chat = route ? (request: ChatRequest) => chatWithDecisionRoute(route, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
           // Core tools in full, the rest one line each; a closing request keeps them (providers reject a tool history without them) and its calls are not run.
           toolDefinitions = toolRegistry.getModelToolDefinitions();
           const answersCarried = inlet.beforeRequest();
@@ -971,7 +999,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
             systemPrompt: composeTurnSystemPrompt(systemPrompt) + privateContextBlock,
             ...((codeAuthorityForAttempt || nativeSource || promptContext?.preparedKnowledgePrompt || context.beforeProviderRequest) ? { beforeAttempt: assertNativeProviderSource } : {}),
-            ...(decisionRoute ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
+            ...(route ? { reasoningEffort: route.effort.value, reasoningEffortSpec: route.effort.spec }
               : record.reasoningEffort ? { reasoningEffort: record.reasoningEffort } : {}),
             // The agent's cancellation reaches the in-flight request, so a cancel aborts it mid-stream.
             ...(runSignal ? { signal: runSignal } : {}),
@@ -1017,23 +1045,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             activeConversation.replaceMessagesForLLM(compacted);
             if (promptBeforeEmergency === undefined) { promptBeforeEmergency = systemPrompt; promptContextBeforeEmergency = promptContext; }
             systemPrompt = await rebuildSystemPrompt(0);
-          } else if (fallbackRouteIndex < fallbackRoutes.length) {
-            const previousRoute = activeRoute;
-            activeRoute = fallbackRoutes[fallbackRouteIndex++]!;
-            const reason = chatErr instanceof Error ? chatErr.message : String(chatErr);
-            const previousRouteId = providerQualifiedRouteLabel(previousRoute);
-            const activeRouteId = providerQualifiedRouteLabel(activeRoute);
-            logger.warn('[AgentOrchestrator] switching to fallback model', {
-              agentId: record.id,
-              from: previousRouteId,
-              to: activeRouteId,
-              reason,
-            });
-            context.providerOptimizer?.recordFallbackTransition(previousRouteId, activeRouteId, reason);
-            record.model = activeRouteId;
-            record.provider = activeRoute.provider.name;
-            progress(`Model fallback → ${activeRouteId}`, 'owner'); // their reply, not the machine
           } else {
+            // A provider failure goes to the turn loop: it retries what is retryable, then the
+            // run's failover (agentFailover below) moves it along the fallback order.
             throw chatErr;
           }
         }
@@ -1216,6 +1230,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         return again ? 'continue' : 'end';
       },
       retryDelaysMs: TURN_RETRY_DELAYS_MS,
+      failOver: (error) => agentFailover(error),
       onRetry: (attempt, delayMs, error, failure) => {
         const label = failure.category === 'network' ? 'Network error' : failure.category === 'rate_limit' ? 'Rate limited' : 'Provider error';
         const delaySec = Math.round(delayMs / 1000);

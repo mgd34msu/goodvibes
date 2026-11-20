@@ -31,6 +31,7 @@
  * one presence check (a stat, a small file read) per answered question still
  * waiting. `revision()` is one statement over SQLite's change counters.
  */
+import { isOwnerActApproval } from './owner-act.js';
 import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import type { ApprovalActionOutcome } from './approval-broker-owner.js';
@@ -58,8 +59,12 @@ export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER
  * open while the owner can still act on it (undo, never, always, ask, keep),
  * and only a list that names the kind shows it, so it never reads as something
  * waiting on him.
+ *
+ * `report` is the answer of a run nobody was watching (a scheduled run or a
+ * trigger's turn) that named no surface to deliver to, or whose delivery
+ * failed: it is open until the owner answers `read`.
  */
-export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action' | 'decision';
+export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action' | 'decision' | 'report';
 export type OwnerItemStatus = 'open' | 'answered' | 'withdrawn' | 'expired';
 
 /** An answer: one of the item's options, or free text when it has none. Text may accompany an option. */
@@ -72,6 +77,11 @@ export interface OwnerAnswer {
 export interface OwnerAnswerSource {
   readonly actor: string;
   readonly surface: string;
+  /**
+   * The answer came with a token minted for automation, which does not answer
+   * a change put to the owner (owner-act.ts).
+   */
+  readonly automation?: boolean | undefined;
 }
 
 export interface OwnerItem {
@@ -291,7 +301,7 @@ export interface OwnerInboxPort {
   answer(id: string, answer: OwnerAnswer): Promise<OwnerAnswerOutcome>;
 }
 
-export const OWNER_ITEM_KINDS: readonly OwnerItemKind[] = ['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision'];
+export const OWNER_ITEM_KINDS: readonly OwnerItemKind[] = ['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision', 'report'];
 export const OWNER_ITEM_LIMITS = Object.freeze({
   titleChars: 200,
   detailChars: 4000,
@@ -302,7 +312,7 @@ export const OWNER_ITEM_LIMITS = Object.freeze({
   metadataEntries: 16,
 });
 
-const POSTABLE_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision']);
+const POSTABLE_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision', 'report']);
 
 /**
  * Applies the owner's choice on a `decision` item in the process whose gate
@@ -362,7 +372,7 @@ function optionalText(value: unknown, field: string, max: number): string | unde
 /** Validate a producer's item; the store trusts what it is given. */
 export function validateNewOwnerItem(input: NewOwnerItem): Omit<StoredOwnerItem, 'id' | 'createdAt'> {
   if (!POSTABLE_KINDS.has(input.kind)) {
-    throw new OwnerInboxInputError('kind must be question, claim, purchase, queued-action or decision; permission asks are raised through approvals.', 'kind');
+    throw new OwnerInboxInputError('kind must be question, claim, purchase, queued-action, decision or report; permission asks are raised through approvals.', 'kind');
   }
   const options = input.options ?? [];
   if (!Array.isArray(options) || options.length > OWNER_ITEM_LIMITS.options) {
@@ -799,6 +809,15 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     }
     const approval = this.#approvals?.getApproval(id);
     if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
+    if (by.automation === true && isOwnerActApproval(approval)) {
+      return { applied: false, refusal: refusal({
+        code: 'OWNER_ONLY',
+        state: 'not answered',
+        reason: `Approval ${id} asks the owner to make a change only he makes; a token minted for automation cannot answer it.`,
+        next: ['The owner answers it from his own app: the approval prompt, /approval in a terminal, or the web UI signed in as him.'],
+        status: 403,
+      }) };
+    }
     return this.#answerApproval(this.#approvals, approval, answer, by);
   }
 

@@ -280,6 +280,8 @@ const EVENT_FIELD_OVERRIDES = {
   WORK_PLAN_TASK_UPDATED: { task: { withhold: ['title', 'notes'] } },
   WORK_PLAN_TASK_STATUS_CHANGED: { task: { withhold: ['title', 'notes'] } },
   WORK_PLAN_TASK_DELETED: { task: { withhold: ['title', 'notes'] } },
+  // Authority record changes name entries by kind and id, never a value.
+  AUTHORITY_CHANGED: { ids: 'shown', cascade: 'shown', origin: 'shown' },
 } as const satisfies { readonly [T in EventType]?: { readonly [K in FreeFields<EventOf<T>>]?: EventFieldClass } };
 
 type ClassifiedFields<T extends EventType> = keyof typeof EVENT_FIELD_CLASS

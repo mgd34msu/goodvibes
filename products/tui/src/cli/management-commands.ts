@@ -20,7 +20,7 @@ import {
 import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
@@ -188,7 +188,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     lines.push('', qr);
     // A device that cannot resolve the name in the link (no mDNS, not on the
     // tailnet) can still use the routable address with the same one-time token.
-    if (webOrigin.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {
+    if (webOrigin?.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {
       lines.push('', 'If the link does not open on the device, use the address instead:', `  ${webOrigin.alternateOrigin}${link.slice(webOrigin.origin.length)}`);
     }
     return lines.join('\n');
@@ -248,26 +248,42 @@ export async function renderRemote(runtime: CliCommandRuntime, label: 'remote' |
   }, { modelData: 'skip' });
 }
 
+/**
+ * `goodvibes web [--open]`: where the web UI is served, from the engine's one
+ * owner of that address. The daemon serves the bundle on its control-plane
+ * listener; `web.host`/`web.port` describe only a web UI it does not serve
+ * (the development server), and `--hostname`/`--port` name such an endpoint
+ * for this one command.
+ */
 export function renderWeb(runtime: CliCommandRuntime): string {
-  const binding = resolveRuntimeEndpointBinding(runtime.configManager, 'web');
-  const publicBaseUrl = String(runtime.configManager.get('web.publicBaseUrl') ?? '');
+  const config = runtime.configManager;
+  const binding = resolveRuntimeEndpointBinding(config, 'web');
   const hasEndpointOverride = runtime.cli.flags.hostname !== undefined || runtime.cli.flags.port !== undefined;
   // The engine's stable-host rule, the same one the daemon and pairing print.
-  const url =
-    !hasEndpointOverride && publicBaseUrl ? publicBaseUrl : formatHttpOrigin(stableUrlHostForBindHost(binding.host).host, binding.port);
+  const served = hasEndpointOverride
+    ? { origin: formatHttpOrigin(stableUrlHostForBindHost(binding.host).host, binding.port) }
+    : resolveWebUiOrigin(config);
+  const forLinks = hasEndpointOverride ? null : resolvePairingWebOrigin(config);
+  const publicUrl = forLinks?.fromPublicBaseUrl && forLinks.origin !== served?.origin ? forLinks.origin : undefined;
+  const servedByDaemon = !hasEndpointOverride && config.get('controlPlane.webui.serve') === true;
   const value = {
-    enabled: runtime.configManager.get('web.enabled'),
+    enabled: config.get('web.enabled'),
+    servedByDaemon,
     ...binding,
-    url,
+    url: served?.origin ?? null,
+    ...(publicUrl !== undefined ? { publicUrl } : {}),
   };
+  const notServed = 'none: no web UI is served; serve the bundle with goodvibes-daemon webui enable --bundle-dir <dir>';
   return formatJsonOrText(runtime.cli)(
     value,
     [
       'GoodVibes web',
       `  enabled: ${yesNo(value.enabled)}`,
-      `  bind: ${formatRuntimeEndpointBinding(value)}`,
-      `  url: ${value.url}`,
-      ...(runtime.cli.flags.open ? [`  open: ${openBrowser(value.url)}`] : []),
+      `  served by: ${servedByDaemon ? 'the daemon, on its control-plane listener' : value.url === null ? 'nothing' : 'a web UI the daemon does not serve'}`,
+      `  url: ${value.url ?? notServed}`,
+      ...(publicUrl !== undefined ? [`  public url (links for other devices): ${publicUrl}`] : []),
+      `  development endpoint (web.host/web.port): ${formatRuntimeEndpointBinding(binding)}`,
+      ...(runtime.cli.flags.open ? [`  open: ${value.url === null ? 'nothing to open' : openBrowser(value.url)}`] : []),
     ].join('\n'),
   );
 }

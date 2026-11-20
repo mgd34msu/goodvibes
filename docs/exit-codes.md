@@ -47,7 +47,7 @@ Branching rules that hold for every program:
 | `awaiting-owner` | `1` | Delegated work stopped for an owner decision: open the session interactively, answer it, and the work continues. |
 | `turn-unsettled` | `3` | The turn ended without a final event, so its outcome is unknown; inspect the session before running again. |
 | `preflight_failed`, `context_overflow` | `3` (as `turn-unsettled`) | A turn refused before it started carries one of these on its `PREFLIGHT_FAIL` event: `preflight_failed` when an equivalent turn is already in flight, `context_overflow` when the conversation is too large for the model's context window. A headless run does not settle on that event, so it reports `turn-unsettled` and exits `3`. Compact the conversation or choose a model with a larger window, then run again. |
-| `provider_error` | `1` | The provider refused or failed the request; `error` says why. Check the provider's key or sign-in and the model, then run again. |
+| `provider_error` | `1` | The provider refused or failed the request, and no model of `provider.fallbackModels` was left to try; `error` says why. Check the provider's key or sign-in and the model, then run again. |
 | `provider_exhausted` | `1` | Every provider serving the selected synthetic model is exhausted (rate limits). Wait and run again, or choose another model. |
 | `hook_denied` | `1` | A hook on the model request denied it; `error` is the hook's reason. Change or remove the hook. |
 | `tool_loop_circuit_breaker` | `1` | The turn was stopped by a turn limit or budget before the request was complete; `error` says which. Raise the limit or narrow the request. |

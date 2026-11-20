@@ -3,7 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding, type RuntimeEndpointId } from './cli-endpoints.js';
-import { classifyBindPosture, isNetworkFacing } from './cli-network-posture.js';
+import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from './cli-network-posture.js';
 import { redactText } from './cli-redaction.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 export interface CliServiceRuntime {
@@ -182,18 +182,22 @@ export async function readServiceEndpoints(
   options.assertCurrent();
   const endpoints = await Promise.all(
     definitions.map(async (endpoint) => {
-      const enabled = endpoint.isEnabled ? endpoint.isEnabled(runtime.configManager) : runtime.configManager.get(endpoint.enabledKey) === true;
+      const switchedOn = endpoint.isEnabled ? endpoint.isEnabled(runtime.configManager) : runtime.configManager.get(endpoint.enabledKey) === true;
+      // The web UI listens only where it is served: the control-plane listener
+      // while the daemon serves the bundle, nowhere otherwise (web.* is a development server's).
+      const web = endpoint.id === 'web' ? resolveWebSurfaceExposure(runtime.configManager) : undefined;
+      const enabled = web === undefined ? switchedOn : switchedOn && web.served;
       const servesOtherMachines = endpoint.servesOtherMachinesKey === undefined
         ? undefined
         : enabled && runtime.configManager.get(endpoint.servesOtherMachinesKey) === true;
-      const binding = resolveRuntimeEndpointBinding(runtime.configManager, endpoint.id);
+      const binding = web?.binding ?? resolveRuntimeEndpointBinding(runtime.configManager, endpoint.id);
       const result: CliServiceEndpointPosture = {
         id: endpoint.id,
         label: endpoint.label,
         enabled,
         binding,
         bindPosture: classifyBindPosture(binding),
-        networkFacing: isNetworkFacing(servesOtherMachines ?? enabled, binding),
+        networkFacing: web === undefined ? isNetworkFacing(servesOtherMachines ?? enabled, binding) : enabled && web.networkFacing,
         ...(servesOtherMachines === undefined ? {} : { servesOtherMachines }),
         ...(options.probe && enabled && binding.recognized && options.mayProbe(binding)
           ? { reachable: await options.probeTcp(binding.host, binding.port) }
@@ -216,6 +220,8 @@ export function serviceEndpointIssues(endpoints: readonly CliServiceEndpointPost
   const enabled = endpoints.filter((endpoint) => endpoint.enabled);
   for (const [index, left] of enabled.entries()) {
     for (const right of enabled.slice(index + 1)) {
+      // A served web UI is the control-plane listener itself, not a second bind.
+      if ((left.id === 'web' && right.id === 'controlPlane') || (left.id === 'controlPlane' && right.id === 'web')) continue;
       const a = left.binding,
         b = right.binding;
       if (a.port === b.port && (a.host === b.host || a.host === '0.0.0.0' || b.host === '0.0.0.0' || a.host === '::' || b.host === '::')) {

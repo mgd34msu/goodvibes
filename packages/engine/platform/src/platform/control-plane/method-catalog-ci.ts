@@ -8,6 +8,7 @@
  * conclusions with continue-on-error jobs flagged as violations.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -136,6 +137,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   }),
   methodDescriptor({
     id: 'ci.watches.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create CI Watch',
     description: 'Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies the channel. Failed jobs request a fresh recorded repair decision from the original source owner; the compatibility flag is not authorization.',
     category: 'ci',
@@ -146,6 +148,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   }),
   methodDescriptor({
     id: 'ci.watches.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete CI Watch',
     description: 'Remove a standing CI watch. Returns { deleted: false } when no watch with that id existed.',
@@ -158,6 +161,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   }),
   methodDescriptor({
     id: 'ci.watches.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Check CI Watch Now',
     description: 'Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error. When the check ended the watch without a verdict or a repair, `retired` is true and `endedReason` says why.',

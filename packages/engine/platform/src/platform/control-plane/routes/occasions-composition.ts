@@ -89,6 +89,13 @@ export interface OccasionsCompositionDeps {
   readonly calendar?: OccasionCalendarMirror | undefined;
   /** Where a connected Agent hears that a reminder is waiting. Absent, it reads at its next turn or idle check. */
   readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
+  /**
+   * False when another machine in this group runs the reminders (it holds the
+   * group's occasions role, cluster/roles.ts): the occasions settings and the
+   * owner's profile are the same on every machine, so a sweep on each would
+   * nudge once per machine. Absent: this machine sweeps.
+   */
+  readonly sweepsHere?: (() => boolean) | undefined;
 }
 
 /**
@@ -210,6 +217,7 @@ export function composeOccasions(
   }).sweepIntervalMinutes * 60_000;
   const ticker = startOccasionSweepTicker({
     sweep: async () => {
+      if (deps.sweepsHere && !deps.sweepsHere()) return;
       const outcome = await service.sweep();
       const raised = outcome.nudge !== null || outcome.conflictMessages.length > 0 || outcome.resumedInterviews.length > 0;
       if (raised && deps.runtimeBus !== undefined && nudgeAnnouncesToAgent(String(deps.configManager.get('occasions.nudgeChannel' as ConfigKey) ?? ''))) {
@@ -286,6 +294,10 @@ export interface OccasionsInstallDeps {
   readonly calendarGateway?: Pick<CalendarGatewayService, 'createEvent'> | undefined;
   /** Carries the "a reminder is waiting" event to connected Agents. */
   readonly runtimeBus?: Pick<RuntimeEventBus, 'emit'> | undefined;
+  /** Which group roles this machine holds; the reminders run where the occasions role is held. */
+  readonly clusterRoles?: Pick<import('../../cluster/roles.js').ClusterRoles, 'holds' | 'coordinated' | 'onRoleChange'> | undefined;
+  /** The authority record: in a group, each occasion's answered state is kept on it, so no machine asks again what another was told. */
+  readonly authority?: import('../../cluster/authority-record-file.js').AuthorityRecordFile | undefined;
   readonly disposal?: { add(label: string, dispose: () => void | Promise<void>): void } | undefined;
 }
 
@@ -314,7 +326,12 @@ export function installOccasions(
       ? {}
       : { calendar: createOccasionCalendarMirror(deps.calendarGateway) }),
     ...(deps.runtimeBus === undefined ? {} : { runtimeBus: deps.runtimeBus }),
+    ...(deps.clusterRoles === undefined ? {} : { sweepsHere: () => deps.clusterRoles!.holds('occasions') }),
   });
   deps.disposal?.add('occasions', () => composition.dispose());
+  if (deps.authority && deps.clusterRoles) {
+    const detach = composition.state.attachGroupWork({ file: deps.authority, roles: deps.clusterRoles });
+    deps.disposal?.add('occasions group state', detach);
+  }
   return composition;
 }

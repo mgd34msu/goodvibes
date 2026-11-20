@@ -17,7 +17,6 @@ import {
   yesNo,
 } from './management-utils.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { serviceSettingsIssues } from './service-posture.ts';
 
 export const SURFACE_CONFIGS = [
   ['slack', 'Slack', ['surfaces.slack.signingSecret', 'surfaces.slack.botToken']],
@@ -424,16 +423,7 @@ export async function buildListenerTestResult(runtime: CliCommandRuntime): Promi
   const issues: string[] = [];
   if (!binding.recognized) issues.push(`httpListener.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind until it is corrected.`);
   if (enabled !== true) issues.push('HTTP listener is disabled.');
-  if (enabled === true) {
-    // The same service rules doctor and service status read; whether a service
-    // is installed is not looked up here, so the autostart rule does not apply.
-    issues.push(...serviceSettingsIssues({
-      enabled: service.enabled === true,
-      autostart: service.autostart === true,
-      restartOnFailure: service.restartOnFailure === true,
-      serverBackedEnabled: true,
-    }).map((issue) => issue.summary));
-  }
+  // The service rules read what the service manager reports; `goodvibes service check` and doctor apply them.
   if (isNetworkFacing(enabled, binding) && !auth.userStorePresent) issues.push('Network-facing listener has no local auth user store.');
   if (isNetworkFacing(enabled, binding) && auth.bootstrapCredentialPresent) issues.push('Network-facing listener still has a bootstrap credential file.');
   for (const surface of surfaces) {

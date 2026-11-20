@@ -1,4 +1,5 @@
 import { BROWSER_JUDGMENT_PATH, BROWSER_JUDGMENT_BATTERY_VERSIONS, type BrowserJudgmentBatteryId } from '@goodvibes-jev/engine/daemon-api';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { methodDescriptor, objectSchema, arraySchema, STRING_SCHEMA, NUMBER_SCHEMA, BOOLEAN_SCHEMA } from './method-catalog-shared.js';
 
 const literal = (value: string | number) => ({ type: typeof value, enum: [value] });
@@ -31,6 +32,7 @@ const output = (battery: BrowserJudgmentBatteryId, value: Record<string, unknown
 
 export const builtinBrowserJudgmentMethodDescriptors = [methodDescriptor({
   id: 'judgment.battery.run', effect: 'outward', title: 'Run Browser Judgment Battery', category: 'judgment',
+  replay: IDEMPOTENCY_KEY_REPLAY,
   description: 'Run one explicitly installed, authorized browser battery. Unconfigured services and unresolved or unauthorized input remain held.',
   access: 'authenticated', scopes: ['write:judgment'], transport: ['http'], invokable: false,
   http: { method: 'POST', path: BROWSER_JUDGMENT_PATH },

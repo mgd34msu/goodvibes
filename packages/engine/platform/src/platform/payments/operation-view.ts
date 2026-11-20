@@ -171,7 +171,7 @@ type OperationRefusalCode = 'recovery-unavailable' | 'daemon-stopped' | 'reply-h
 // Typed by the code unions so a new refusal code is a compile error until it
 // has a sentence here; the generic fallback is only for records from elsewhere.
 const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | OperationRefusalCode, string>> = {
-  'disabled': 'Payments are disabled, or this daemon is part of a cluster and payments run only on a single, unclustered daemon.',
+  'disabled': 'Payments are disabled, or this machine is in a group whose purchases run on another machine (cluster status shows which).',
   'recovery-unavailable': 'The original checkout could not be restored. Check its paired owner, payment settings, original browser and reply channel before starting a new checkout.',
   'no-card': 'No usable payment card is configured, or payments.cvvHandling is set to prompt on a host with no way to ask for the code. Check the card in payment settings, or set payments.cvvHandling to stored.',
   'no-shipping-address': 'The stored address is incomplete, unavailable or changed. Check payment address settings.',

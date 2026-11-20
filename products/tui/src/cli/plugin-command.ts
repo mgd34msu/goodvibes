@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverPlugins, PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { discoverPlugins, getPluginDirectories, PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { validateManifestV2 } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
@@ -82,13 +82,40 @@ function validatePluginDirectory(dirPath: string): PluginValidation {
   return { ok: false, path: resolved, reasons };
 }
 
-function renderValidation(result: PluginValidation, json: boolean): CliCommandOutput {
+/**
+ * Whether the apps load a plugin from this folder: the loader reads only the
+ * folders directly inside its search directories (the project's
+ * `.goodvibes/plugins`, searched when an app runs in this project, and the
+ * user's `~/.goodvibes/plugins`).
+ */
+interface PluginPlacement {
+  readonly searched: boolean;
+  readonly searchDirectories: readonly string[];
+}
+
+function pluginPlacement(pluginDir: string, runtime: CliCommandRuntime): PluginPlacement {
+  const searchDirectories = getPluginDirectories({ cwd: runtime.workingDirectory, homeDir: runtime.homeDirectory }).map((dir) => resolve(dir));
+  return { searched: searchDirectories.includes(dirname(resolve(pluginDir))), searchDirectories };
+}
+
+function placementLines(placement: PluginPlacement, name: string | undefined): string[] {
+  if (!placement.searched) {
+    return [
+      `  NOT LOADED  no app loads a plugin from this folder: plugins are read only from folders directly inside ${placement.searchDirectories.join(' or ')}.`,
+      '  Move the folder into one of them, then enable it.',
+    ];
+  }
+  return [`  next: a plugin starts disabled. In the terminal app or the Agent run /plugin enable ${name ?? '<name>'} (no restart needed).`];
+}
+
+function renderValidation(result: PluginValidation, json: boolean, placement: PluginPlacement): CliCommandOutput {
   if (json) {
-    return { output: JSON.stringify(result, null, 2), exitCode: result.ok ? 0 : 1 };
+    return { output: JSON.stringify({ ...result, loadedFromHere: placement.searched, searchDirectories: placement.searchDirectories }, null, 2), exitCode: result.ok ? 0 : 1 };
   }
   const lines = ['GoodVibes plugin validation', `  path: ${result.path}`];
   if (result.ok) {
-    lines.push(`  PASS  ${result.manifestName} v${result.manifestVersion}: the plugin loader accepts this directory.`);
+    lines.push(`  PASS  ${result.manifestName} v${result.manifestVersion}: the plugin loader accepts this manifest and entry.`);
+    lines.push(...placementLines(placement, result.manifestName));
   } else {
     lines.push('  FAIL  the plugin loader rejects this directory:');
     for (const reason of result.reasons) lines.push(`    - ${reason}`);
@@ -128,6 +155,7 @@ function handlePluginInit(runtime: CliCommandRuntime): CliCommandOutput {
     ? resolve(dirArg)
     : join(runtime.workingDirectory, '.goodvibes', 'plugins', name);
   const manifestPath = join(targetDir, 'manifest.json');
+  const placement = pluginPlacement(targetDir, runtime);
   if (existsSync(manifestPath)) {
     return {
       output: json
@@ -160,7 +188,7 @@ function handlePluginInit(runtime: CliCommandRuntime): CliCommandOutput {
   const validation = validatePluginDirectory(targetDir);
   if (json) {
     return {
-      output: JSON.stringify({ ok: validation.ok, path: targetDir, created: ['manifest.json', 'index.js'], validation }, null, 2),
+      output: JSON.stringify({ ok: validation.ok, path: targetDir, created: ['manifest.json', 'index.js'], validation, loadedFromHere: placement.searched, searchDirectories: placement.searchDirectories }, null, 2),
       exitCode: validation.ok ? 0 : 1,
     };
   }
@@ -168,9 +196,9 @@ function handlePluginInit(runtime: CliCommandRuntime): CliCommandOutput {
     `Scaffolded plugin "${name}" at ${targetDir}`,
     '  created: manifest.json, index.js',
     validation.ok
-      ? '  validation: PASS; the plugin loader accepts this directory.'
+      ? '  validation: PASS; the plugin loader accepts this manifest and entry.'
       : `  validation: FAIL; ${validation.reasons.join('; ')}`,
-    `  next: run "goodvibes plugin validate ${targetDir}" or restart the TUI to load it.`,
+    ...(validation.ok ? placementLines(placement, name) : []),
   ];
   return { output: lines.join('\n'), exitCode: validation.ok ? 0 : 1 };
 }
@@ -233,7 +261,7 @@ export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<C
     if (!target) {
       return { output: 'Usage: goodvibes plugin validate <path>', exitCode: 2 };
     }
-    return renderValidation(validatePluginDirectory(target), json);
+    return renderValidation(validatePluginDirectory(target), json, pluginPlacement(target, runtime));
   }
   if (sub === 'bundles') {
     return handlePluginBundlesCommand(runtime, runtime.cli.commandArgs.slice(1), {

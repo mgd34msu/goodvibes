@@ -1,4 +1,5 @@
-import { captureCliStatusFacts, describeCliSignIns, secretPolicyLabel, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import type { PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -32,6 +33,8 @@ export interface CliStatusOptions {
   readonly homeDirectory: string;
   /** How the configured model's provider is signed in and where its model list came from (read from files by the caller). */
   readonly providerSignIn?: CliProviderSignInFacts;
+  /** The model a run would use, resolved by the provider registry (the caller builds it). */
+  readonly modelInUse?: CliModelInUse;
   /** The marker that decides whether setup is done (`readOnboardingDoneMarker`); absent when not read. */
   readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly nativeReadiness?: ConnectedHostReadiness;
@@ -92,11 +95,15 @@ export interface CliStatusSnapshot {
     readonly provider: string;
     readonly model: string;
     readonly reasoning: string;
+    /** Why the model cannot be used (no registered provider has its name) and how to choose another. */
+    readonly problem?: string | undefined;
     /** Sign-ins in the order requests use them, and the model list's source and age. */
     readonly signIn?: CliProviderSignInFacts | undefined;
   };
   readonly auth: {
     readonly permissionMode: unknown;
+    /** The mode in force for a session started now, and why it is not the saved mode. */
+    readonly permissionModeInForce: PermissionModeInForce;
     readonly permissionLabel: string;
     readonly autoApprove: boolean;
     readonly automaticApprovals: boolean;
@@ -245,9 +252,12 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         cause: `Agent could not reach ${options.externalRuntime.baseUrl}${options.externalRuntime.error ? `: ${options.externalRuntime.error}` : '.'}`,
         impact:
           'Companion chat, isolated Agent Knowledge, approvals, automation status, and build delegation cannot work until the connected GoodVibes host is available.',
-        action: 'Make the owning GoodVibes host available, then rerun goodvibes-agent status.',
+        action: 'Start the daemon it names. On this machine: goodvibes-daemon start-service (without a daemon service: goodvibes-daemon serve).',
       });
-    } else if (!options.externalRuntime.compatible) {
+    } else if (!options.externalRuntime.compatible
+      // With no token nothing was asked; the token finding below names the fix.
+      && !(options.externalRuntime.agentKnowledge.probed === false && !options.externalRuntime.operatorToken.present)) {
+      const refused = options.externalRuntime.agentKnowledge.probed === false;
       findings.push({
         id: 'external-runtime-incompatible',
         area: 'runtime',
@@ -258,7 +268,9 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
             ? `Connected host is reachable, but the Agent routes were not checked${options.externalRuntime.operatorToken.present ? ` because the host refused its status request${options.externalRuntime.statusCode === null ? '' : ` (HTTP ${options.externalRuntime.statusCode})`}` : ' because no operator token is present'}.`
             : 'Connected host is reachable, but at least one public Agent route is unavailable or incompatible.',
         impact: 'Agent-only routes, especially isolated Agent Knowledge, may be unavailable.',
-        action: 'Update the owning GoodVibes host so its public Agent routes are compatible.',
+        action: refused
+          ? 'The daemon refused this Agent\'s token. Pair again: goodvibes-agent setup pair --apply'
+          : 'The daemon and the Agent are different releases. Install one release of both: curl -fsSL https://goodvibes.sh/install.sh | sh',
       });
     }
 
@@ -270,7 +282,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         summary: 'Connected-host operator token is missing.',
         cause: `No operator token was found at ${options.externalRuntime.operatorToken.path}.`,
         impact: 'Agent can inspect only unauthenticated routes and cannot use protected connected-host APIs.',
-        action: 'Pair or provision access through the owning GoodVibes host, then rerun goodvibes-agent auth.',
+        action: 'Pair this Agent with the daemon: goodvibes-agent setup pair --apply',
       });
     }
 
@@ -375,7 +387,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel);
+  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel, options.modelInUse);
 
   const findings = buildCliDoctorFindings(options);
   const posture = readApprovalPosture(config);
@@ -433,8 +445,9 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     `  home directory ${options.homeDirectory}`,
     '',
     'Provider',
-    `  provider ${getProviderIdFromModel(config.get('provider.model'))}`,
-    `  model ${String(config.get('provider.model'))}`,
+    `  provider ${snapshot.provider.provider}`,
+    `  model ${snapshot.provider.model}`,
+    ...(snapshot.provider.problem ? [`  problem ${snapshot.provider.problem}`] : []),
     `  reasoning ${String(config.get('provider.reasoningEffort'))}`,
     ...(snapshot.provider.signIn ? [
       `  sign-in ${describeCliSignIns(snapshot.provider.signIn)}`,
@@ -446,18 +459,18 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth',
-    `  permissions: ${snapshot.auth.permissionLabel} (${String(config.get('permissions.mode'))})`,
+    ...describeCliPermissionMode(snapshot.auth.permissionModeInForce),
     `  autoApprove: ${yesNo(snapshot.auth.autoApprove)} (behavior.autoApprove)`,
     `  approval checks: ${snapshot.auth.permissionDetail}`,
     `  secretPolicy: ${secretPolicyLabel(config.get('storage.secretPolicy'))} (${String(config.get('storage.secretPolicy'))})`,
+    // Local users and the setup credential belong to the daemon; the Agent
+    // shows its own copies only when they exist, since nothing is wrong without them.
+    ...(options.auth?.userStorePresent ? [`  local auth store present (${options.auth.userStorePath})`] : []),
+    ...(options.auth?.bootstrapCredentialPresent ? [`  setup credential present (${options.auth.bootstrapCredentialPath})`] : []),
     options.auth
-      ? `  local auth store ${options.auth.userStorePresent ? 'present' : 'missing'} (${options.auth.userStorePath})`
-      : '  local auth store unknown',
-    options.auth
-      ? `  setup credential ${options.auth.bootstrapCredentialPresent ? 'present' : 'missing'} (${options.auth.bootstrapCredentialPath})`
-      : '  setup credential unknown',
-    options.auth
-      ? `  connected host token ${options.auth.operatorTokenPresent ? 'present' : 'missing'} (${options.auth.operatorTokenPath})`
+      ? options.auth.operatorTokenPresent
+        ? `  connected host token present (${options.auth.operatorTokenPath})`
+        : '  connected host token none: pair this Agent with the daemon: goodvibes-agent setup pair --apply'
       : '  connected host token unknown',
     '',
     'Connected GoodVibes host:',
@@ -487,8 +500,8 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     '  product: interactive operator TUI',
     '  host lifecycle: external',
     '  starts or exposes host: no',
-    ...(options.service
-      ? [`  host log signal ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`]
+    ...(options.service?.log.path
+      ? [`  daemon service log ${options.service.log.path}${options.service.log.exists ? '' : ' (not written yet)'}`]
       : []),
     'Onboarding',
     `  checked ${marker?.exists ? 'yes' : 'no'}`,
@@ -518,7 +531,11 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     lines.push(
       '',
       'Readiness Checks:',
-      `  isolated Agent Knowledge route: ${!externalRuntime || externalRuntime.agentKnowledge.probed === false ? 'not checked' : externalRuntime.agentKnowledge.ready ? 'ready' : 'not ready'}`,
+      `  isolated Agent Knowledge route: ${!externalRuntime ? 'not checked (no connected host)'
+        : !externalRuntime.reachable ? 'not checked (the daemon is not reachable; see the warning below)'
+        : externalRuntime.agentKnowledge.probed === false
+          ? externalRuntime.operatorToken.present ? 'not checked (the daemon refused this Agent\'s token; pair again: goodvibes-agent setup pair --apply)' : 'not checked (no connected host token; pair: goodvibes-agent setup pair --apply)'
+          : externalRuntime.agentKnowledge.ready ? 'ready' : 'not ready (see the warning below)'}`,
     );
     const problems = findings.filter((finding) => finding.severity !== 'note');
     const notes = findings.filter((finding) => finding.severity === 'note');

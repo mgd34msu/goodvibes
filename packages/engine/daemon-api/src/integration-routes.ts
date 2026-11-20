@@ -159,6 +159,35 @@ function taskSnapshotFor(context: DaemonIntegrationRouteContext, req: Request | 
   };
 }
 
+/**
+ * The health snapshot with its control-plane entry describing the listener
+ * actually bound, not the settings: a setting the listener has not moved to
+ * (still rebinding, or refused by the system) shows as the setting it differs
+ * from, and no listener at all is not ready.
+ */
+function withServingListener(snapshot: unknown, servingListener: DaemonIntegrationRouteContext['servingListener']): unknown {
+  if (!servingListener || !snapshot || typeof snapshot !== 'object') return snapshot;
+  const record = snapshot as { readonly network?: { readonly controlPlane?: Record<string, unknown> } & Record<string, unknown> } & Record<string, unknown>;
+  const configured = record.network?.controlPlane;
+  if (!record.network || !configured) return snapshot;
+  const listener = servingListener();
+  const configuredErrors = Array.isArray(configured['errors']) ? configured['errors'] as readonly unknown[] : [];
+  const setting = `${String(configured['host'])}:${String(configured['port'])}`;
+  const controlPlane = listener === null
+    ? { ...configured, ready: false, errors: [...configuredErrors, `no control-plane listener is bound; the settings name ${setting} (see the daemon log for why it could not bind)`] }
+    : {
+      ...configured,
+      host: listener.host,
+      port: listener.port,
+      scheme: listener.scheme,
+      ...(listener.host === configured['host'] && listener.port === configured['port'] ? {} : {
+        configured: { host: configured['host'], port: configured['port'] },
+        errors: [...configuredErrors, `the settings name ${setting}; this listener has not moved to it (see the daemon log)`],
+      }),
+    };
+  return { ...record, network: { ...record.network, controlPlane } };
+}
+
 export function createDaemonIntegrationRouteHandlers(
   context: DaemonIntegrationRouteContext,
 ): DaemonIntegrationRouteHandlers {
@@ -179,7 +208,7 @@ export function createDaemonIntegrationRouteHandlers(
     },
     getRoutesSnapshot: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getRouteSnapshot())),
     getRemote: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getRemoteSnapshot())),
-    getHealth: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getHealthSnapshot())),
+    getHealth: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(withServingListener(helpers.getHealthSnapshot(), context.servingListener))),
     getAccounts: async () => {
       if (!context.integrationHelpers) {
         return jsonErrorResponse({ error: 'Integration helper service unavailable' }, { status: 503 });

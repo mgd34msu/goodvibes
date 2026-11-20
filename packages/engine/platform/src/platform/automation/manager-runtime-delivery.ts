@@ -7,6 +7,7 @@ import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { readFailureTransience, type FailureTransience } from '../integrations/delivery.js';
+import type { UnattendedAnswer, UnattendedRuns } from './unattended-runs.js';
 
 export interface AutomationFailureFollowUpContext {
   readonly jobs: Map<string, AutomationJob>;
@@ -27,6 +28,8 @@ interface AutomationRunDeliveryContext {
   readonly runs: Map<string, AutomationRun>;
   readonly deliveryInFlight: Set<string>;
   readonly deliveryManager: AutomationDeliveryManager | null;
+  /** The owner inbox a run's answer goes to when the job names no target or every target failed. */
+  readonly unattendedRuns?: UnattendedRuns | undefined;
   readonly syncRunToRuntime: (run: AutomationRun, source: string) => void;
   readonly saveRuns: () => Promise<void>;
 }
@@ -219,6 +222,31 @@ export function failureNoticeCoversRunDelivery(job: AutomationJob): boolean {
   return !job.failure.notifyRouteId && !job.failure.deadLetterRouteId;
 }
 
+/** A failed or missed run's notice, as the owner inbox keeps it when the job names no target. */
+export function automationFailureAnswer(job: AutomationJob, run: AutomationRun): UnattendedAnswer {
+  return {
+    source: 'schedule',
+    runId: run.id,
+    ownerId: job.id,
+    title: run.status === 'missed' ? `Scheduled run missed: ${job.name}` : `Scheduled run failed: ${job.name}`,
+    body: buildFailureNoticeMessage(job, run),
+    ...(run.agentId ? { agentId: run.agentId } : {}),
+  };
+}
+
+/** A run's answer, as a channel or the owner inbox receives it. */
+function automationRunAnswer(job: AutomationJob, run: AutomationRun): UnattendedAnswer {
+  const result = typeof run.result === 'string' ? run.result : run.result !== undefined && run.result !== null ? JSON.stringify(run.result, null, 2) : '';
+  return {
+    source: 'schedule',
+    runId: run.id,
+    ownerId: job.id,
+    title: `Scheduled run: ${job.name}`,
+    body: run.error ? `${result}\n\nError: ${run.error}`.trim() : result,
+    ...(run.agentId ? { agentId: run.agentId } : {}),
+  };
+}
+
 function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): string {
   const heading = run.status === 'missed'
     ? `Automation missed run: ${job.name}`
@@ -247,12 +275,12 @@ export function maybeDeliverAutomationFailureNotice(
   run: AutomationRun,
   onDeliveryGap?: (job: AutomationJob, run: AutomationRun) => void,
 ): void {
-  if (!deliveryManager) return;
   const { primary, fallback } = resolveAutomationFailureNoticeTargets(job);
   if (primary.length === 0 && fallback.length === 0) {
     onDeliveryGap?.(job, run);
     return;
   }
+  if (!deliveryManager) return;
   const message = buildFailureNoticeMessage(job, run);
   void (async () => {
     const attempts = primary.length > 0
@@ -276,13 +304,26 @@ export function maybeDeliverAutomationRun(
   job: AutomationJob,
   run: AutomationRun,
 ): void {
-  if (!context.deliveryManager) return;
-  if (job.delivery.mode === 'none') return;
   if (context.deliveryInFlight.has(run.id)) return;
   if (run.deliveryIds.length > 0) return;
+  // A job that names no target: its answer goes to the owner inbox, never only to the run history.
+  if (job.delivery.mode === 'none' || !context.deliveryManager) {
+    if (!context.unattendedRuns || run.status === 'cancelled') return;
+    context.deliveryInFlight.add(run.id);
+    void context.unattendedRuns.postToInbox(automationRunAnswer(job, run))
+      .finally(() => { context.deliveryInFlight.delete(run.id); });
+    return;
+  }
   context.deliveryInFlight.add(run.id);
   void context.deliveryManager.deliverJobRun(job, run)
     .then(async (deliveryAttempts) => {
+      // Every named target failed (or none could be resolved): the answer goes to the owner inbox instead.
+      if (context.unattendedRuns && deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered')) {
+        const reason = deliveryAttempts.length === 0
+          ? 'No delivery target of this job could be reached.'
+          : `Not delivered: ${deliveryAttempts.map((attempt) => attempt.error ?? attempt.status).join('; ')}.`;
+        await context.unattendedRuns.postToInbox(automationRunAnswer(job, run), reason);
+      }
       if (deliveryAttempts.length === 0) return;
       const latest = context.runs.get(run.id);
       if (!latest) return;

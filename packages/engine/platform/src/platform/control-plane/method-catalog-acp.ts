@@ -12,6 +12,7 @@
  * `/api/control-plane/methods/{id}/invoke` endpoint.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -74,6 +75,7 @@ export const builtinGatewayAcpMethodDescriptors: readonly GatewayMethodDescripto
   }),
   methodDescriptor({
     id: 'acp.sessions.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Spawn a Third-Party Coding Agent Session',
     description: 'Spawn a discovered third-party agent into a working directory as a hosted daemon session in ONE act: the binary is launched in ACP stdio mode, the handshake and session creation run under a bound timeout, and the result is the hosted record, which appears as a steerable/stoppable fleet row (kind acp-agent). Its permission asks are decided by the autonomous admission of the daemon against the current policy, never by a person, so a row is never waiting on a human; an ask that times out or cannot be decided is refused and shown as `lastRefusal`. A binary that fails the handshake returns the SAME record with state "failed" and a structured error (which binary, which stage, what happened), an honest outcome, never a hung row and never a bare string. An optional initial prompt starts the first turn.',
     category: 'acp',

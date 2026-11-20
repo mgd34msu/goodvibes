@@ -5,6 +5,7 @@ import * as tls from 'node:tls';
 import { logger } from '../../utils/logger.js';
 import { isLocalHostname, readPemEntriesFromDirectory, resolvePathFromGoodVibesRoot } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { exemptLoopbackFromProxy } from '@goodvibes-jev/engine/transport-http/paths';
 
 export type OutboundTrustMode = 'bundled' | 'bundled+custom' | 'custom';
 
@@ -232,6 +233,8 @@ async function executeNetworkFetch(
 ): Promise<Response> {
   const nextInit = applyOutboundTlsToFetchInit(input, init, scopedOutboundTls.getStore() ?? configManager);
   const url = extractRequestUrl(input);
+  // Requests to this machine never go through a proxy.
+  if (url) exemptLoopbackFromProxy(url.hostname);
   const method = extractRequestMethod(input, nextInit);
   const shouldTrace = url ? shouldTraceProviderRequest(url, method) : false;
 
@@ -341,6 +344,7 @@ export class GlobalNetworkTransportInstaller {
     }
 
     this.configManager = configManager;
+    exemptLoopbackFromProxy();
     this.originalFetchRef = globalThis.fetch.bind(globalThis);
     const wrapped = (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (!this.originalFetchRef || !this.configManager) {

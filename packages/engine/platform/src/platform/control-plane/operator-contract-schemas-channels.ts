@@ -332,6 +332,8 @@ export const CHANNEL_POLICY_SCHEMA = objectSchema({
   allowlistGroupIds: STRING_LIST_SCHEMA,
   allowedCommands: STRING_LIST_SCHEMA,
   groupPolicies: arraySchema(CHANNEL_GROUP_POLICY_SCHEMA),
+  /** A shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised. */
+  open: BOOLEAN_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['surface', 'enabled', 'requireMention', 'allowDirectMessages', 'allowGroupMessages', 'allowThreadMessages', 'dmPolicy', 'groupPolicy', 'allowTextCommandsWithoutMention', 'allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands', 'groupPolicies', 'updatedAt', 'metadata']);

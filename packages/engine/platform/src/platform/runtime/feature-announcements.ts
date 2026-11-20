@@ -14,7 +14,8 @@
  * pure empty-state builder, and a first-contained-run announcer callback.
  */
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
-import { resolveWebBinding } from '../daemon/host-resolver.js';
+import { resolveHostBinding, resolveWebBinding } from '../daemon/host-resolver.js';
+import { resolvePairingWebOrigin } from '../pairing/web-origin.js';
 import { join } from 'node:path';
 import { trySyncFileLock } from '../config/sync-file-lock.js';
 import { logger } from '../utils/logger.js';
@@ -244,17 +245,13 @@ export function featureAnnouncementsPath(
   return join(configManager.getControlPlaneConfigDir(), 'control-plane', 'feature-announcements.json');
 }
 
-/** The web surface's reachable URL from its settings. */
-export function resolveWebSurfaceUrl(configManager: Pick<ConfigManager, 'get'>): string {
-  const publicBaseUrl = configManager.get('web.publicBaseUrl');
-  if (publicBaseUrl.trim().length > 0) return publicBaseUrl;
-  // Anchored to the web binding resolver so the announced URL always carries a
-  // validated port and the mode-resolved host (never a raw 0/NaN/typo value).
-  const binding = resolveWebBinding({ hostMode: configManager.get('web.hostMode'), host: configManager.get('web.host'), port: configManager.get('web.port') });
-  // A wildcard bind address is where the server listens, not an address a
-  // browser can open; this machine reaches it as localhost.
-  const host = binding.host === '0.0.0.0' || binding.host === '::' ? 'localhost' : binding.host;
-  return `http://${host}:${binding.port}`;
+/**
+ * The web UI's address from its settings: a user-set `web.publicBaseUrl`,
+ * else where the web UI is served, from the one owner of that address
+ * (pairing/web-origin.ts). Undefined when no web UI is served.
+ */
+export function resolveWebSurfaceUrl(configManager: Pick<ConfigManager, 'get'>): string | undefined {
+  return resolvePairingWebOrigin(configManager)?.origin;
 }
 
 export const WEB_SURFACE_ANNOUNCEMENT_ID = 'web-surface-url';
@@ -274,25 +271,23 @@ export function collectStartupAnnouncements(deps: {
   readonly store: Pick<FeatureAnnouncementStore, 'record'>;
 }): FeatureAnnouncement[] {
   const lines: FeatureAnnouncement[] = [];
-  if (deps.configManager.get('web.enabled')) {
-    const url = resolveWebSurfaceUrl(deps.configManager);
-    // The scope suffix MUST come from the RESOLVER, not the raw stored value: a
-    // case/space variant ('  Local ') is recognized-local and still needs the
-    // scope note the old raw `=== 'local'` check silently dropped, and an
-    // unrecognized value ('LAN') is served at loopback under the safe fallback,
-    // it must be announced as unrecognized, never as the network mode the
-    // operator may have believed they set.
-    const rawHostMode = deps.configManager.get('web.hostMode');
-    const binding = resolveWebBinding({
-      hostMode: rawHostMode,
-      host: deps.configManager.get('web.host'),
-      port: deps.configManager.get('web.port'),
-    });
+  const url = resolveWebSurfaceUrl(deps.configManager);
+  if (url !== undefined) {
+    // The scope suffix comes from the listener that serves the web UI (the
+    // control plane when the daemon serves the bundle), through the resolver,
+    // never the raw stored value: an unrecognized mode ('LAN') is served at
+    // loopback under the safe fallback and is announced as unrecognized.
+    const servedByDaemon = deps.configManager.get('controlPlane.webui.serve') === true;
+    const modeKey = servedByDaemon ? 'controlPlane.hostMode' : 'web.hostMode';
+    const rawHostMode = deps.configManager.get(modeKey);
+    const binding = servedByDaemon
+      ? resolveHostBinding(typeof rawHostMode === 'string' ? rawHostMode : 'local', String(deps.configManager.get('controlPlane.host') ?? ''), Number(deps.configManager.get('controlPlane.port')), 'controlPlane')
+      : resolveWebBinding({ hostMode: rawHostMode, host: deps.configManager.get('web.host'), port: deps.configManager.get('web.port') });
     let suffix = '';
     if (!binding.recognized) {
-      suffix = `, web.hostMode value ${JSON.stringify(String(rawHostMode))} is unrecognized; applied the safe local default, so this serves this machine only`;
+      suffix = `, ${modeKey} value ${JSON.stringify(String(rawHostMode))} is unrecognized; applied the safe local default, so this serves this machine only`;
     } else if (binding.effectiveMode === 'local') {
-      suffix = ', serving this machine only until web.hostMode is widened';
+      suffix = servedByDaemon ? ', serving this machine only until goodvibes-daemon webui enable --lan' : ', serving this machine only until web.hostMode is widened';
     } else if ((binding.host === '0.0.0.0' || binding.host === '::') && deps.configManager.get('web.publicBaseUrl').trim().length === 0) {
       suffix = ', listening on every network interface: other devices use this machine\'s address, or set web.publicBaseUrl to announce a fixed URL';
     }

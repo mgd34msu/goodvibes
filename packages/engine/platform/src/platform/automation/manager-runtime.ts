@@ -1,4 +1,5 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
+import type { UnattendedRuns } from './unattended-runs.js';
 import { captureAutomationSource } from './action-source.js';
 import { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
@@ -51,6 +52,7 @@ import {
   type AutomationHeartbeatWake,
 } from './manager-runtime-scheduling.js';
 import {
+  automationFailureAnswer,
   maybeDeliverAutomationFailureNotice,
   maybeDeliverAutomationRun,
   scheduleAutomationFailureFollowUp,
@@ -80,6 +82,7 @@ import {
 } from './manager-runtime-job-mutations.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
+import { GroupJobFamily, type GroupJobItem, type GroupWorkLink } from '../cluster/group-work.js';
 
 export type {
   CreateAutomationJobInput,
@@ -110,6 +113,8 @@ interface AutomationManagerConfig {
    */
   readonly providerRegistry?: Pick<import('../providers/registry.js').ProviderRegistry, 'listModels'> | undefined;
   readonly featureFlags?: FeatureFlagReader | undefined;
+  /** Where a run's answer goes when its job names no delivery target or every target failed: the owner inbox. */
+  readonly unattendedRuns?: UnattendedRuns | undefined;
 }
 
 export interface AutomationHeartbeatResult {
@@ -145,6 +150,7 @@ export class AutomationManager {
   /** Scheduled occurrences and retries put off at the concurrency limit. */
   private readonly capacityWaits = new Map<string, AutomationCapacityWait>();
   private deliveryManager: AutomationDeliveryManager | null;
+  private readonly unattendedRuns: UnattendedRuns | undefined;
   private readonly deliveryInFlight = new Set<string>();
   // Attached post-construction by the CheckinService (attachCheckinEvaluator);
   // runs the briefing→judgment→delivery loop for kind:'checkin' jobs.
@@ -162,6 +168,8 @@ export class AutomationManager {
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   // Jobs already logged as having no reachable failure-notice target (reported once per job).
   private readonly warnedDeliveryGapJobs = new Set<string>();
+  /** The group's copy of the jobs (cluster/group-work.ts), once attached; it acts only while this machine is in a group. */
+  private group: GroupJobFamily | null = null;
 
   constructor(config: AutomationManagerConfig) {
     this.configManager = config.configManager;
@@ -180,6 +188,7 @@ export class AutomationManager {
     }
     this.runtimeBus = config.runtimeBus ?? null;
     this.deliveryManager = config.deliveryManager ?? null;
+    this.unattendedRuns = config.unattendedRuns;
     this.featureFlags = config.featureFlags ?? null;
   }
 
@@ -330,6 +339,9 @@ export class AutomationManager {
       ? ownedAutomationJob(withCurrentSchedulerState(previous, next, latest), candidate.mutationRevision)
       : candidate;
     this.jobs.publish(published);
+    await this.publishToGroup([published]).catch((error: unknown) => {
+      logger.warn('AutomationManager: a job change could not be written to the group\'s record; the next save tries again', { jobId, error: summarizeError(error) });
+    });
     return published;
   }
 
@@ -362,8 +374,15 @@ export class AutomationManager {
       settleAutomationRun(this.runSettleContext(), run, { status: 'cancelled', endedAt: Date.now(), reason: detail }, 'automation.job-removed');
       cancelled = true;
     }
+    const removed = this.jobs.get(jobId);
     this.jobs.delete(jobId);
     removeAutomationJobFromRuntime(this.runtimeDispatch, jobId, `automation.${reason}`);
+    // Removed in the group, for good: no machine runs or lists it again.
+    if (removed && this.sharedWithGroup(removed) && this.group?.shared()) {
+      void this.group.remove(jobId, 'automation-manager', reason).catch((error: unknown) => {
+        logger.warn('AutomationManager: a job removal could not be written to the group\'s record', { jobId, error: summarizeError(error) });
+      });
+    }
     if (cancelled) {
       void this.saveRuns().catch((error: unknown) => {
         logger.warn('AutomationManager: run persistence failed', { reason: 'job-removed', jobId, error: summarizeError(error) });
@@ -432,6 +451,160 @@ export class AutomationManager {
    */
   attachCheckinEvaluator(evaluator: AutomationCheckinEvaluator): void {
     this.checkinEvaluator = evaluator;
+  }
+
+  /**
+   * Keep the jobs on the group's record (cluster/group-work.ts). In a group, a
+   * job made, changed, disabled or removed on any machine is the same on
+   * every machine, and its timer is armed only on the machine holding the
+   * automation role. The check-in job is not shared: every machine makes it
+   * from the replicated check-in settings and the check-in role decides where
+   * it runs. Outside a group this changes nothing.
+   */
+  attachGroupWork(link: GroupWorkLink): void {
+    if (this.group) return;
+    const group = new GroupJobFamily(link, 'automation');
+    this.group = group;
+    group.onRemoteChange((ids, caughtUp) => {
+      if (ids.length > 0) this.takeFromGroup(ids);
+      // Back in step with the group after being away: arm what it now holds.
+      if (caughtUp && group.holdsRole()) this.reconcileSchedules();
+    });
+    link.roles.onRoleChange('automation', (held) => {
+      if (!held) {
+        this.dropGroupTimers();
+        return;
+      }
+      // Taken over: start from what the group last wrote, then arm the timers.
+      this.takeFromGroup();
+      this.reconcileSchedules();
+    });
+  }
+
+  /** A job the group shares: every job but the check-in, which each machine makes for itself. */
+  private sharedWithGroup(job: AutomationJob): boolean {
+    return job.kind !== 'checkin';
+  }
+
+  /** Whether this machine arms the job's timer: always outside a group, else where the automation role is held. */
+  private runsHere(job: AutomationJob): boolean {
+    const group = this.group;
+    if (!group || !this.sharedWithGroup(job) || !group.shared()) return true;
+    return group.holdsRole();
+  }
+
+  private groupItem(job: AutomationJob): GroupJobItem {
+    const { lastOccurrenceAt, ...definition } = job;
+    return { id: job.id, definition: definition as unknown as Readonly<Record<string, unknown>>, lastOccurrenceAt: lastOccurrenceAt ?? 0 };
+  }
+
+  /** The job a record entry describes, or null when the entry is not a readable job. */
+  private jobFromGroup(item: GroupJobItem): AutomationJob | null {
+    const definition = item.definition as unknown as Partial<AutomationJob>;
+    if (definition.id !== item.id || typeof definition.mutationRevision !== 'string' || !definition.mutationRevision
+      || typeof definition.name !== 'string' || !definition.schedule || typeof definition.schedule !== 'object') return null;
+    try {
+      const job = normalizeJobRecord(definition as AutomationJob, this.configManager);
+      return { ...job, mutationRevision: definition.mutationRevision, ...(item.lastOccurrenceAt > 0 ? { lastOccurrenceAt: item.lastOccurrenceAt } : {}) };
+    } catch {
+      return null;
+    }
+  }
+
+  private async publishToGroup(jobs: Iterable<AutomationJob>): Promise<void> {
+    const group = this.group;
+    if (!group?.shared()) return;
+    const items: GroupJobItem[] = [];
+    for (const job of jobs) if (this.sharedWithGroup(job)) items.push(this.groupItem(job));
+    await group.publish(items);
+  }
+
+  /**
+   * Take in what the group's record holds: jobs made or changed on another
+   * machine, and removals (a removal is terminal, so a machine that slept
+   * through one drops the job rather than bringing it back). With `only`,
+   * just those jobs; without, every job, and jobs this machine had before it
+   * joined go onto the record.
+   */
+  private takeFromGroup(only?: readonly string[]): void {
+    const group = this.group;
+    if (!group || !this.loaded || !group.shared()) return;
+    const local = new Map<string, GroupJobItem>();
+    for (const job of this.jobs.values()) if (this.sharedWithGroup(job)) local.set(job.id, this.groupItem(job));
+    const difference = group.difference(local, only);
+    for (const id of difference.remove) this.removeJobRecord(id, 'job-removed-in-group');
+    for (const item of difference.adopt) {
+      const job = this.jobFromGroup(item);
+      if (!job) {
+        logger.warn('AutomationManager: a job on the group\'s record could not be read; it is left out here', { jobId: item.id });
+        continue;
+      }
+      const existed = this.jobs.has(job.id);
+      this.jobs.restore(job);
+      group.adopted(item);
+      const adopted = this.jobs.get(job.id)!;
+      this.syncJobToRuntime(adopted, 'automation.group');
+      if (existed) this.emitJobUpdated(adopted, ['group']);
+      else this.emitJobCreated(adopted);
+      // Re-armed here when this machine runs it; dropped when it no longer does.
+      this.scheduleJob(adopted);
+    }
+    if (difference.remove.length > 0 || difference.adopt.length > 0) {
+      void this.saveJobs().catch((error: unknown) => {
+        logger.warn('AutomationManager: jobs taken from the group could not be saved here', { error: summarizeError(error) });
+      });
+    }
+    if (difference.seed.length > 0) {
+      void group.publish(difference.seed).catch((error: unknown) => {
+        logger.warn('AutomationManager: this machine\'s jobs could not be written to the group\'s record; the next save tries again', { error: summarizeError(error) });
+      });
+    }
+  }
+
+  /** The automation role went to another machine: drop every timer of a job the group shares. */
+  private dropGroupTimers(): void {
+    for (const job of this.jobs.values()) {
+      if (!this.sharedWithGroup(job)) continue;
+      this.cancelTimer(job.id);
+      this.heartbeatWakes.delete(job.id);
+      for (const [key, wait] of this.capacityWaits) if (wait.jobId === job.id) this.capacityWaits.delete(key);
+      for (const [key, timer] of this.retryTimers) {
+        if (!key.startsWith(`${job.id}:`)) continue;
+        clearTimeout(timer);
+        this.retryTimers.delete(key);
+      }
+    }
+  }
+
+  /**
+   * In a group, write the occurrence about to start onto the group's record
+   * BEFORE it starts: a holder that dies mid-run leaves the next holder an
+   * occurrence it knows was started, so it is neither run twice nor skipped.
+   * Null when it must not run here (the record could not be written, or the
+   * job was disabled meanwhile); the next reconcile pass tries again.
+   */
+  private async claimOccurrence(job: AutomationJob): Promise<AutomationJob | null> {
+    const group = this.group;
+    if (!group || !this.sharedWithGroup(job) || !group.shared()) return job;
+    if (!group.holdsRole()) return null;
+    const current = this.jobs.get(job.id);
+    if (!current?.enabled) return null;
+    const plannedAt = Math.max(current.nextRunAt ?? Date.now(), current.lastOccurrenceAt ?? 0);
+    try {
+      await group.publish([this.groupItem({ ...current, lastOccurrenceAt: plannedAt })]);
+    } catch (error) {
+      logger.warn('AutomationManager: a scheduled occurrence was not started, because the group\'s record could not be written', { jobId: job.id, error: summarizeError(error) });
+      return null;
+    }
+    if (group.occurrenceOnRecord(job.id) < plannedAt) {
+      // Another machine changed the job first; take its version and let the next pass decide.
+      this.takeFromGroup([job.id]);
+      return null;
+    }
+    const latest = this.jobs.get(job.id);
+    if (!latest?.enabled) return null;
+    this.jobs.set(job.id, { ...latest, lastOccurrenceAt: plannedAt });
+    return this.jobs.get(job.id) ?? null;
   }
 
   attachRuntime(config: {
@@ -572,7 +745,9 @@ export class AutomationManager {
       this.heartbeatWakes.delete(wake.jobId);
       if (!job?.enabled) continue;
       try {
-        const run = await this.executeJob(job, wake.trigger, wake.dueRun, wake.attempt);
+        const claimed = wake.trigger === 'scheduled' ? await this.claimOccurrence(job) : job;
+        if (!claimed) continue;
+        const run = await this.executeJob(claimed, wake.trigger, wake.dueRun, wake.attempt);
         processed.push(run);
         this.advanceScheduledHeartbeatJob(job.id);
       } catch (error) {
@@ -673,6 +848,7 @@ export class AutomationManager {
     this.loaded = true;
     this.pruneRunHistory();
     this.syncRuntimeSnapshot();
+    this.takeFromGroup();
   }
 
   private scheduleJob(job: AutomationJob): void {
@@ -689,6 +865,8 @@ export class AutomationManager {
       executeJob: (scheduledJob, trigger, dueRun, attempt) => this.executeJob(scheduledJob, trigger, dueRun, attempt),
       recordMissedRun: (missedJob, plannedRunAt) => this.recordMissedRun(missedJob, plannedRunAt),
       hasRunningRun: (jobId) => this.hasRunningRun(jobId),
+      runsHere: (scheduledJob) => this.runsHere(scheduledJob),
+      claimOccurrence: (scheduledJob) => this.claimOccurrence(scheduledJob),
     }, job);
   }
 
@@ -720,7 +898,8 @@ export class AutomationManager {
   }
 
   private queueDueHeartbeatJobs(reason: string): void {
-    queueDueHeartbeatAutomationJobs(this.jobs.values(), this.heartbeatWakes, reason);
+    const jobs = this.group?.shared() ? [...this.jobs.values()].filter((job) => this.runsHere(job)) : this.jobs.values();
+    queueDueHeartbeatAutomationJobs(jobs, this.heartbeatWakes, reason);
   }
 
   private advanceScheduledHeartbeatJob(jobId: string): void {
@@ -798,6 +977,9 @@ export class AutomationManager {
 
   private async saveJobs(): Promise<void> {
     await this.jobStore.save(sortJobs(this.jobs.values()));
+    await this.publishToGroup(this.jobs.values()).catch((error: unknown) => {
+      logger.warn('AutomationManager: job state could not be written to the group\'s record; the next save tries again', { error: summarizeError(error) });
+    });
   }
 
   private async saveRuns(): Promise<void> {
@@ -888,6 +1070,11 @@ export class AutomationManager {
 
   private maybeDeliverFailureNotice(job: AutomationJob, run: AutomationRun): void {
     maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun) => {
+      // No target: the notice goes to the owner inbox, so a failed or missed unattended run is never silent.
+      if (this.unattendedRuns) {
+        void this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun));
+        return;
+      }
       if (this.warnedDeliveryGapJobs.has(gapJob.id)) return;
       this.warnedDeliveryGapJobs.add(gapJob.id);
       logger.warn('AutomationManager: failure notice has no delivery target', { jobId: gapJob.id, jobName: gapJob.name, runId: gapRun.id, status: gapRun.status });
@@ -936,6 +1123,7 @@ export class AutomationManager {
       runs: this.runs,
       deliveryInFlight: this.deliveryInFlight,
       deliveryManager: this.deliveryManager,
+      unattendedRuns: this.unattendedRuns,
       syncRunToRuntime: (nextRun, source) => this.syncRunToRuntime(nextRun, source),
       saveRuns: () => this.saveRuns(),
     }, job, run);

@@ -79,7 +79,7 @@ export function buildPolicyPreflightReview(params: {
         severity: 'warn',
         source: 'mcp',
         serverName: server.serverName,
-        message: `MCP server "${server.serverName}" is allowed inside its configured scope; calls outside it are denied.`,
+        message: `MCP server "${server.serverName}" is allowed inside its configured scope; calls outside it are put to you.`,
         detail: `role=${server.role} paths=${server.allowedPaths.length} hosts=${server.allowedHosts.length}`,
       });
     }

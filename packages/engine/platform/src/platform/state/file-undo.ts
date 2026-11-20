@@ -58,7 +58,7 @@ const MAX_STACK_SIZE = 50;
  */
 export class FileUndoConflictError extends Error {
   constructor(readonly path: string, readonly direction: 'undo' | 'redo', readonly paths: readonly string[] = [path]) {
-    super(`Cannot ${direction} the change to ${path}${paths.length > 1 ? ` (one of the ${paths.length} files that tool call changed)` : ''}: the file was changed after that operation (by you, another tool or another program). No file was changed and that history entry was dropped; the next ${direction} acts on the one before it.`);
+    super(`Cannot ${direction} the change to ${path}${paths.length > 1 ? ` (one of the ${paths.length} files that tool call changed)` : ''}: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and ${direction} again, or drop the entry (/${direction} file drop) to reach the one before it.`);
     this.name = 'FileUndoConflictError';
   }
 }
@@ -155,7 +155,8 @@ export class FileUndoManager {
   /**
    * Revert the most recent tool call's file operations: every file or none.
    * Every file is checked first; a file changed since the call refuses the
-   * whole entry (FileUndoConflictError, entry dropped, nothing written).
+   * whole entry (FileUndoConflictError, nothing written, entry kept: the owner
+   * puts the file back and tries again, or drops the entry with {@link discard}).
    * Returns the restored paths, or `null` if nothing to undo.
    */
   undo(): FileUndoResult | null {
@@ -198,15 +199,25 @@ export class FileUndoManager {
           logger.warn(`file-undo: ${direction} could not put back a file`, { path: op.path, error: summarizeError(rollbackError) });
         }
       }
-      // A conflict drops the entry (it can never apply again, and keeping it
-      // would block every older operation); a write failure keeps it to retry.
-      if (!(err instanceof FileUndoConflictError)) from.push(entry);
+      // The entry is kept either way: a conflict until the owner puts the file back or
+      // drops it (discard), a write failure to retry. Nothing he could still undo is lost.
+      from.push(entry);
       throw err;
     }
     for (const op of done) this.options.onFileChanged?.(op.path);
     to.push(entry);
     if (to.length > MAX_STACK_SIZE) to.shift();
     return { path: entry.path, paths, tool: entry.tool };
+  }
+
+  /**
+   * Drop the newest undo (or redo) entry without touching any file: the way
+   * past an entry a later change makes impossible to apply. Returns what was
+   * dropped, or null when there was none.
+   */
+  discard(direction: 'undo' | 'redo'): FileUndoResult | null {
+    const entry = (direction === 'undo' ? this.undoStack : this.redoStack).pop();
+    return entry ? { path: entry.path, paths: entry.operations.map((op) => op.path), tool: entry.tool } : null;
   }
 
   /**

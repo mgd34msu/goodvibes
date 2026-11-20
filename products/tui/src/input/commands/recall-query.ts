@@ -37,7 +37,7 @@ export function getMemorySpine(context: CommandContext): MemorySpineClient | nul
   return memorySpine;
 }
 
-export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList } =
+export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList, handleRecallEdit } =
   createRecallQueryCommands<CommandContext>(getMemorySpine, getMemoryApi, {
     tag: '[recall]',
     command: 'recall',

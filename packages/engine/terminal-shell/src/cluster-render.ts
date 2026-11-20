@@ -62,11 +62,17 @@ function pad(value: string, width: number): string {
 export function renderStatus(report: GroupStatusReport, now: number): string[] {
   if (report.membership !== 'member') {
     return [
-      report.membership === 'no-group'
+      report.membership === 'no-group' && report.removedFrom
+        ? `this machine is not in a group: another member told it the group removed it ${describeAge(report.removedFrom.at, now)}`
+        : report.membership === 'no-group'
         ? 'this machine is not in a group'
         : 'this machine has group key material that could not be read',
       `machine: ${report.nodeName} (${report.nodeId})`,
       `version: ${report.version}`,
+      ...(report.electionAuthentication === 'unavailable'
+        ? ['election traffic: none sent or taken, cluster.secret names a stored secret that cannot be read; '
+          + 'store the phrase with `secrets set` and point cluster.secret at it, or clear cluster.secret']
+        : []),
       ...(report.advice ? ['', report.advice] : []),
     ];
   }
@@ -96,6 +102,22 @@ export function renderStatus(report: GroupStatusReport, now: number): string[] {
   );
   if (report.removedNodeCount > 0) {
     lines.push(`removed machines on record: ${report.removedNodeCount}`);
+  }
+  if (report.authority) {
+    const authority = report.authority;
+    lines.push(`authority: revision ${authority.revision}, digest ${authority.digest.slice(0, 12)}`
+      + (authority.behindOn.length === 0 ? ', the same on every member heard'
+        : authority.behind ? `, behind ${authority.behindOn.join(', ')}; taking their record now`
+          : `, differs on ${authority.behindOn.join(', ')}; they are taking it`));
+    if (authority.droppedOnReturn) {
+      const dropped = authority.droppedOnReturn;
+      lines.push(`  on returning after longer than cluster.revocationRetentionMinutes, ${dropped.count} entr${dropped.count === 1 ? 'y' : 'ies'} the group had removed were dropped here, not brought back`
+        + ` (${new Date(dropped.at).toISOString()}): ${dropped.keys.join(', ')}${dropped.count > dropped.keys.length ? ', ...' : ''}`);
+    }
+    for (const username of authority.userConflicts ?? []) {
+      lines.push(`  user "${username}" exists as separate accounts made on different machines; each machine keeps its own, and changes to it stay on that machine.`
+        + ` Keep one: \`cluster publish user:${username} --yes\` on the machine whose account the group should keep, or \`cluster accept user:${username} --yes\` to give up this machine's`);
+    }
   }
   if (report.replication) {
     const replication = report.replication;
@@ -302,7 +324,7 @@ export function renderRotated(result: RotateKeyResult): string[] {
       ? 'the previous key stopped being accepted immediately, and the key the group signs with'
       : 'the previous key stays accepted for a few minutes so nothing is interrupted while',
     result.immediate
-      ? 'was replaced too. A machine that is asleep right now will ask to come back when it wakes.'
+      ? 'was replaced too. A machine that is asleep right now takes the new key from the group when it wakes.'
       : `the other ${Math.max(0, result.memberCount - 1)} machine(s) pick the new one up.`,
     '',
     `accepting generation${result.acceptedGenerations.length === 1 ? '' : 's'} `

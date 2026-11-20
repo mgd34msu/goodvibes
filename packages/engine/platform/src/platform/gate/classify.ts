@@ -12,7 +12,8 @@
  *      model's call in every mode, yolo included: whoever approved the call,
  *      the daemon refuses it from a model;
  *   1. surface authority (a change asked for on a channel the owner set up is
- *      his to approve; on a surface anyone can write to it is refused), then
+ *      his to approve; on a surface anyone can write to it is refused; a turn
+ *      a channel's guest started runs only plain reads without him), then
  *      the plan posture;
  *   2. yolo runs everything that passed 1;
  *   3. a matching deny or ask rule;
@@ -32,7 +33,7 @@
 import { relative, resolve, isAbsolute, sep } from 'node:path';
 import type { PermissionCategory, ToolArgumentPath, ToolDecision, ToolDefinition, ToolSideEffect } from '../types/tools.js';
 import type { GatePresetName } from './presets.js';
-import { effectPermittedForProvenance, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
+import { effectPermittedForProvenance, isGuestSurfaceId, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 import { fileOperationDestroys, unrecoverableDeletionIn } from './unrecoverable-commands.js';
 
@@ -191,6 +192,23 @@ function ruleDecision(rule: CallRuleFact, allow: boolean): ToolDecision {
   };
 }
 
+/** A read its declaration settles: files and the app's own state only (files declared and inside), or a call declared read-only that runs no command. */
+function readSettledByDeclaration(facts: CallFacts): boolean {
+  const effects = facts.sideEffects;
+  if (facts.category !== 'read' || effects === undefined) return false;
+  if (!effects.every((effect) => LOCAL_READ_EFFECTS.has(effect)) && !(facts.declaredReadOnly === true && !effects.includes('exec'))) return false;
+  return !effects.includes('read_fs') || (facts.paths !== undefined && facts.paths.every((path) => path.inside));
+}
+
+/**
+ * A plain read, what a guest's turn runs without asking: settled by its
+ * declaration, reaching nothing outside this machine (no network) and reading
+ * none of the app's own state (the owner's memory, inbox, profile, sessions).
+ */
+function plainRead(facts: CallFacts): boolean {
+  return readSettledByDeclaration(facts) && !facts.sideEffects!.some((effect) => effect === 'network' || effect === 'state');
+}
+
 /** Classify one call. The first step that settles it decides; see the module comment for the order. */
 export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass {
   if (facts.ownerOnly === 'owner-act') {
@@ -199,6 +217,13 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
       reason: `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
       next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, /approval, the web UI)'],
     } };
+  }
+  // A guest's turn (someone a channel admits who is not its owner) may read and
+  // answer: a plain read (files inside the allowed directories, see plainRead)
+  // runs; every other call is the owner's to approve, in every mode and with or
+  // without a decision model, as a change asked for on a channel is.
+  if (isGuestSurfaceId(facts.surface) && facts.category === 'read' && !plainRead(facts)) {
+    return { kind: 'owner-only', item: 'channel-request' };
   }
   if (facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)) {
     // A channel the owner set up: the request becomes his approval, answered on a command surface.
@@ -241,16 +266,13 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   // declares only files and the app's own state, or a call its registration
   // declared read-only (it changes and sends nothing, whatever it reads from).
   // A read of files is settled only when its files are declared and inside.
-  if (facts.category === 'read' && effects !== undefined
-    && (effects.every((effect) => LOCAL_READ_EFFECTS.has(effect)) || (facts.declaredReadOnly === true && !effects.includes('exec')))) {
-    const readsFiles = effects.includes('read_fs');
-    if (!readsFiles || (paths !== undefined && paths.every((path) => path.inside))) {
-      return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
-        state: 'allowed', decidedBy: 'code',
-        reason: readsFiles ? 'a read inside the allowed directories'
-          : facts.declaredReadOnly === true ? 'a call its tool declared read-only' : 'a read of the app\'s own state',
-      } };
-    }
+  if (readSettledByDeclaration(facts)) {
+    const readsFiles = effects!.includes('read_fs');
+    return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
+      state: 'allowed', decidedBy: 'code',
+      reason: readsFiles ? 'a read inside the allowed directories'
+        : facts.declaredReadOnly === true ? 'a call its tool declared read-only' : 'a read of the app\'s own state',
+    } };
   }
   if (effects !== undefined && paths !== undefined && paths.every((path) => path.inside)) {
     if (facts.category === 'write' && paths.length > 0 && facts.recoverable && effects.every((effect) => LOCAL_EFFECTS.has(effect))) {

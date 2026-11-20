@@ -46,10 +46,10 @@ export const permissionDeadlockPlaybook: Playbook = {
     {
       id: 'permission.gate-in-flight',
       label: 'Calls held at the gate',
-      description: 'Tool calls of the current turn that passed their hooks and have no permission decision yet.',
+      description: 'Tool calls of the current turn that were received and have no permission decision yet.',
       run: (ctx) => safeCheck(() => {
         const { conversation } = ctx.store.getState();
-        const held = [...conversation.activeToolCalls.values()].filter((call) => call.state === 'prehooked').length;
+        const held = [...conversation.activeToolCalls.values()].filter((call) => call.state === 'received').length;
         return {
           passed: held === 0,
           summary: held === 0 ? 'No tool call is held at the gate.' : `${held} tool call(s) are held at the gate.`,

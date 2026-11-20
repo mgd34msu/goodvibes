@@ -29,9 +29,7 @@ import {
 } from './group-crypto.js';
 import {
   findTombstone,
-  fitStateToBytes,
   isCurrentMember,
-  readGroupStateDocument,
   type GroupStateDocument,
 } from './group-state.js';
 import {
@@ -40,6 +38,7 @@ import {
   type GroupKeyRecord,
   type GroupSigningMaterial,
 } from './group-store.js';
+import { readAuthorityEntry, type AnyAuthorityEntry, type AuthorityHead } from './authority-record.js';
 import {
   canonicalizeEnvelope,
   encodeEnvelopeWith,
@@ -51,8 +50,12 @@ import {
 /** Every message type this layer speaks. */
 export const GROUP_MESSAGE_TYPES = {
   beacon: 'BEACON',
+  /**
+   * Group-key-signed gossip of this member's settings and authority-record
+   * heads. A member whose copy differs exchanges with the sender. Membership
+   * itself travels in the authority record, never in this message.
+   */
   roster: 'ROSTER',
-  rekey: 'REKEY',
   join: 'JOIN',
   joinAccept: 'JOIN_ACCEPT',
   joinRefuse: 'JOIN_REFUSE',
@@ -69,6 +72,20 @@ export const GROUP_MESSAGE_TYPES = {
    * whole timeout only to be told, wrongly, that nobody answered.
    */
   rejoinRefuse: 'REJOIN_REFUSE',
+  /**
+   * The authority record's carriage (authority-sync.ts). Signed with the
+   * SENDER's identity key, which never rotates, so a machine any number of
+   * group-key generations behind can still check and take them.
+   */
+  authorityDelta: 'AUTH_DELTA',
+  authorityPull: 'AUTH_PULL',
+  authorityPart: 'AUTH_PART',
+  /**
+   * The answer to a record request from a machine the record says was
+   * removed: its own revocation, signed with the answering member's identity
+   * key, which the removed machine can check against the record it kept.
+   */
+  authorityRemoved: 'AUTH_REMOVED',
 } as const;
 
 /** Message classes authenticated with the join verifier rather than a group key. */
@@ -80,6 +97,10 @@ const JOIN_CLASS: ReadonlySet<string> = new Set([
 
 /** Message classes authenticated with the sender's long-lived identity key. */
 const IDENTITY_CLASS: ReadonlySet<string> = new Set([
+  GROUP_MESSAGE_TYPES.authorityDelta,
+  GROUP_MESSAGE_TYPES.authorityPull,
+  GROUP_MESSAGE_TYPES.authorityPart,
+  GROUP_MESSAGE_TYPES.authorityRemoved,
   GROUP_MESSAGE_TYPES.rejoinRefuse,
   GROUP_MESSAGE_TYPES.rejoin,
   GROUP_MESSAGE_TYPES.rejoinAccept,
@@ -259,6 +280,15 @@ export interface JoinRequestBody {
 export interface RejoinRequestBody extends JoinRequestBody {
   /** Group-key generations this node still holds, newest first. Advisory only. */
   readonly heldGenerations: readonly number[];
+  /** The newest generation this node has seen the group use, when it is behind. Advisory only. */
+  readonly atLeast: number;
+  /**
+   * The generation of the group signing key this node holds, or -1 when the
+   * request did not say. A member holding a newer one signs its answer with
+   * its own identity key instead, which the asker can check against the roster
+   * it kept: an answer signed as the group would be unverifiable to it.
+   */
+  readonly signingGeneration: number;
 }
 
 /** The secret half of an acceptance, sealed to exactly one recipient. */
@@ -266,15 +296,34 @@ export interface AdmissionGrant {
   readonly joinKey: string;
   readonly joinSalt: string;
   readonly joinVerifier: string;
+  /**
+   * The group keys the granting member accepts right now: its current
+   * generation, and the one before only while that is still accepted. Which of
+   * them the new member signs with and accepts is computed from `entries`, so
+   * a generation the group closed (a removal) is never reopened by a joiner.
+   */
   readonly keys: readonly GroupKeyRecord[];
-  readonly currentGeneration: number;
-  readonly state: GroupStateDocument;
+  /**
+   * The group's part of the authority record: its members and removals, its
+   * key generations (public facts) and its name. The rest of the record
+   * follows by an identity-signed request once the machine is in.
+   */
+  readonly entries: readonly AnyAuthorityEntry[];
+  /** The granting member's record head, for `cluster status` until the full record arrives. */
+  readonly head: AuthorityHead | null;
   /**
    * The group's signing key pair. Handed over so this machine can answer a
    * returning member AS THE GROUP, and so it holds the public half to check
    * such an answer with if it is ever the one coming back.
    */
   readonly groupSigning: GroupSigningMaterial;
+  /**
+   * The digest of the request this grant answers, inside the seal. A grant is
+   * taken only for the request this machine sent, so a grant made for an
+   * earlier request (a replay, or a copy sent to another of its attempts)
+   * cannot settle this one.
+   */
+  readonly forRequest: string;
 }
 
 function readJoinRequestBody(body: Record<string, unknown>): JoinRequestBody | null {
@@ -302,7 +351,10 @@ export function parseRejoinRequestBody(body: Record<string, unknown>): RejoinReq
   const held = Array.isArray(body['heldGenerations']) ? body['heldGenerations'] : [];
   return {
     ...base,
-    heldGenerations: held.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry)),
+    heldGenerations: held.filter((entry): entry is number => typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0).slice(0, 64),
+    atLeast: typeof body['atLeast'] === 'number' && Number.isSafeInteger(body['atLeast']) && body['atLeast'] >= 0 ? body['atLeast'] : 0,
+    signingGeneration: typeof body['signingGeneration'] === 'number' && Number.isSafeInteger(body['signingGeneration']) && body['signingGeneration'] >= 0
+      ? body['signingGeneration'] : -1,
   };
 }
 
@@ -320,22 +372,25 @@ export function readAdmissionGrant(value: unknown): AdmissionGrant | null {
   const candidate = value as Record<string, unknown>;
   if (typeof candidate['joinKey'] !== 'string' || candidate['joinKey'].length === 0) return null;
   if (typeof candidate['joinSalt'] !== 'string' || typeof candidate['joinVerifier'] !== 'string') return null;
-  const currentGeneration = candidate['currentGeneration'];
-  if (typeof currentGeneration !== 'number' || !Number.isFinite(currentGeneration)) return null;
-  const state = readGroupStateDocument(candidate['state']);
-  if (!state) return null;
   const keys = readKeyRecords(candidate['keys']);
-  if (!keys.some((entry) => entry.generation === Math.trunc(currentGeneration))) return null;
+  if (keys.length === 0) return null;
+  const entries = (Array.isArray(candidate['entries']) ? candidate['entries'] : [])
+    .map(readAuthorityEntry)
+    .filter((entry): entry is AnyAuthorityEntry => entry !== null);
+  if (entries.length === 0) return null;
   const groupSigning = readGroupSigningMaterial(candidate['groupSigning']);
   if (!groupSigning) return null;
+  const head = candidate['head'] as Record<string, unknown> | null | undefined;
   return {
     joinKey: candidate['joinKey'],
     joinSalt: candidate['joinSalt'],
     joinVerifier: candidate['joinVerifier'],
     keys,
-    currentGeneration: Math.trunc(currentGeneration),
-    state,
+    entries,
+    head: head && typeof head === 'object' && typeof head['revision'] === 'number' && typeof head['digest'] === 'string'
+      ? { revision: head['revision'], digest: head['digest'] } : null,
     groupSigning,
+    forRequest: typeof candidate['forRequest'] === 'string' ? candidate['forRequest'] : '',
   };
 }
 
@@ -421,26 +476,41 @@ export function peekIdentityClassMessage(raw: string): ClusterEnvelope | null {
 // ── sealing ─────────────────────────────────────────────────────────────────
 
 /**
- * The most JSON the roster inside a grant may take. A sealed grant is base64 of
- * the whole grant (about 1.37 times its size) next to up to sixteen keys and
+ * The most JSON the record entries inside a grant may take. A sealed grant is
+ * base64 of the whole grant (about 1.37 times its size) next to two keys and
  * the signing key, inside one datagram of at most 32768 bytes.
  */
-export const GRANT_STATE_MAX_BYTES = 16_000;
+export const GRANT_ENTRIES_MAX_BYTES = 16_000;
+
+/**
+ * Fit a grant's entries into `maxBytes` of JSON by leaving out the OLDEST
+ * revoked entries (old removals, superseded key generations). Live members and
+ * live generations are never left out: a roster without them would be wrong,
+ * not smaller. What is left out reaches the new member with the whole record,
+ * which it asks for as soon as it is in.
+ */
+export function fitGrantEntries(entries: readonly AnyAuthorityEntry[], maxBytes: number): readonly AnyAuthorityEntry[] {
+  if (Buffer.byteLength(JSON.stringify(entries), 'utf8') <= maxBytes) return entries;
+  const kept = entries.filter((entry) => entry.revoked === null);
+  const revokedNewestFirst = entries.filter((entry) => entry.revoked !== null).sort((a, b) => (b.revoked?.rev ?? 0) - (a.revoked?.rev ?? 0));
+  let low = 0, high = revokedNewestFirst.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(JSON.stringify([...kept, ...revokedNewestFirst.slice(0, mid)]), 'utf8') <= maxBytes) low = mid; else high = mid - 1;
+  }
+  return [...kept, ...revokedNewestFirst.slice(0, low)];
+}
 
 /**
  * Seal a grant so only the holder of `recipientAgreementKey`'s private half reads it.
- *
- * A roster with many removal records can be larger than a datagram holds, and
- * a grant that does not fit admits nobody. The oldest removal records are left
- * out of what is sealed; the joiner learns them again from the group's roster
- * gossip, and every member that admits anyone still holds them.
+ * Entries that would not fit one datagram are left out (`fitGrantEntries`).
  */
 export function sealGrant(
   grant: AdmissionGrant,
   recipientAgreementKey: string,
   path: 'join' | 'rejoin',
 ): WrappedKeyEnvelope {
-  const fitted = { ...grant, state: fitStateToBytes(grant.state, GRANT_STATE_MAX_BYTES).state };
+  const fitted = { ...grant, entries: fitGrantEntries(grant.entries, GRANT_ENTRIES_MAX_BYTES) };
   return sealForMember(
     recipientAgreementKey,
     JSON.stringify(fitted),

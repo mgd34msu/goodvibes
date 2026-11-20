@@ -14,7 +14,7 @@
  */
 
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
-import { builtinGatewayEventDescriptors, gatewayEventAccess } from './method-catalog-events.js';
+import { OWN_SESSIONS_SCOPE, builtinGatewayEventDescriptors, gatewayEventAccess } from './method-catalog-events.js';
 import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 /** The subset of a live client this decision needs. */
@@ -35,6 +35,35 @@ export interface EventGrant {
   readonly domains: ReadonlySet<RuntimeEventDomain>;
   /** Broadcast wire events the client may receive. */
   readonly wireEvents: ReadonlySet<string>;
+  /**
+   * The client holds `read:own-sessions`: beyond `domains` and `wireEvents`
+   * it receives the turns, tool calls, approvals and lifecycle notices of the
+   * sessions its own principal started, and of no other session.
+   */
+  readonly ownSessions?: true | undefined;
+}
+
+/**
+ * `read:own-sessions` lets a credential without the admin role watch its own
+ * work live: the `turn`, `tools`, `gate` and `session` frames, the approvals
+ * (`approval-update`) and the hosted-session notices (`hosted-session-update`)
+ * of the sessions its principal created or attached to. Every other session's
+ * frames stay withheld.
+ */
+export { OWN_SESSIONS_SCOPE };
+/** Runtime domains `read:own-sessions` opens, frame by frame, to the sessions the principal owns. */
+export const OWN_SESSION_DOMAINS: ReadonlySet<RuntimeEventDomain> = new Set<RuntimeEventDomain>(['turn', 'tools', 'gate', 'session']);
+/** Broadcast events `read:own-sessions` opens, event by event, to the sessions the principal owns. */
+export const OWN_SESSION_WIRE_EVENTS: ReadonlySet<string> = new Set(['approval-update', 'hosted-session-update']);
+
+/**
+ * Whether delivering `event` to a client rests only on its own-sessions grant,
+ * so the frame's session must be one the client's principal owns.
+ */
+export function grantNeedsOwnedSession(grant: EventGrant, event: string): boolean {
+  if (grant.all || grant.ownSessions !== true) return false;
+  if (grant.wireEvents.has(event) || grant.domains.has(event as RuntimeEventDomain)) return false;
+  return OWN_SESSION_WIRE_EVENTS.has(event) || OWN_SESSION_DOMAINS.has(event as RuntimeEventDomain);
 }
 
 export const FULL_EVENT_GRANT: EventGrant = Object.freeze({
@@ -68,17 +97,17 @@ export function resolveEventGrant(client: Omit<ScopedClientView, 'kind'>): Event
       for (const event of descriptor.wireEvents ?? []) wireEvents.add(event);
     }
   }
-  return { all: false, domains, wireEvents };
+  return { all: false, domains, wireEvents, ...(missingScopes(client.scopes, [OWN_SESSIONS_SCOPE]).length === 0 ? { ownSessions: true as const } : {}) };
 }
 
 /** Whether the grant lets the client receive anything at all. */
 export function isEmptyEventGrant(grant: EventGrant): boolean {
-  return !grant.all && grant.domains.size === 0 && grant.wireEvents.size === 0;
+  return !grant.all && grant.domains.size === 0 && grant.wireEvents.size === 0 && grant.ownSessions !== true;
 }
 
-/** Whether the grant covers a runtime domain subscription. */
+/** Whether the grant covers a runtime domain subscription (an own-sessions domain is then filtered frame by frame). */
 export function grantAllowsDomain(grant: EventGrant, domain: RuntimeEventDomain): boolean {
-  return grant.all || grant.domains.has(domain);
+  return grant.all || grant.domains.has(domain) || (grant.ownSessions === true && OWN_SESSION_DOMAINS.has(domain));
 }
 
 /**
@@ -89,6 +118,8 @@ export function grantAllowsDomain(grant: EventGrant, domain: RuntimeEventDomain)
  */
 export function grantAllowsEvent(grant: EventGrant, event: string, addressedToClient: boolean): boolean {
   if (grant.all || grant.wireEvents.has(event) || grant.domains.has(event as RuntimeEventDomain)) return true;
+  // Own-sessions events pass here; the gateway then checks the frame's session (grantNeedsOwnedSession).
+  if (grant.ownSessions === true && (OWN_SESSION_WIRE_EVENTS.has(event) || OWN_SESSION_DOMAINS.has(event as RuntimeEventDomain))) return true;
   return addressedToClient && !DECLARED_WIRE_EVENTS.has(event);
 }
 

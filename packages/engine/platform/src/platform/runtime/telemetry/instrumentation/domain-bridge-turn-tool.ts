@@ -135,7 +135,7 @@ export function attachToolDomain(
     }),
   );
 
-  const phase = (type: 'TOOL_VALIDATED' | 'TOOL_PREHOOKED' | 'TOOL_EXECUTING' | 'TOOL_MAPPED' | 'TOOL_POSTHOOKED', name: ToolPhase) => {
+  const phase = (type: 'TOOL_EXECUTING', name: ToolPhase) => {
     unsubs.push(
       bus.on(type, (env: Env<Extract<ToolEvent, { type: typeof type }>>) => {
         helpers.safe(() => {
@@ -144,11 +144,7 @@ export function attachToolDomain(
       }),
     );
   };
-  phase('TOOL_VALIDATED', 'validated');
-  phase('TOOL_PREHOOKED', 'prehooked');
   phase('TOOL_EXECUTING', 'executing');
-  phase('TOOL_MAPPED', 'mapped');
-  phase('TOOL_POSTHOOKED', 'posthooked');
 
   unsubs.push(
     bus.on('TOOL_PERMISSIONED', (env: Env<Extract<ToolEvent, { type: 'TOOL_PERMISSIONED' }>>) => {

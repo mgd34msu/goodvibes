@@ -6,11 +6,12 @@
  * validates them, and settings search, the settings screen and `settings set`
  * all reach them. This reader applies the Agent's clamps and defaults.
  *
- * Both config scopes reach this reader identically: the user-level file at
- * `<home>/.goodvibes/agent/settings.json` loads first and a working-directory
- * `.goodvibes/agent/settings.json` deep-merges on top. Neither scope is
- * special-cased for `update.*`, and there is no daemon-tier overlay for it,
- * `update.` is not a daemon-owned prefix.
+ * `update.auto` and `update.autoUpdateAtLaunch` are daemon settings: one value
+ * for the machine's installation, in the daemon's settings file, read by the
+ * daemon, the terminal app and the Agent alike (the installer's
+ * --no-auto-update writes them there). The other `update.*` keys are the
+ * Agent's own: its user-level file loads first and a working-directory
+ * `.goodvibes/agent/settings.json` deep-merges on top.
  *
  * The reader hand-validates each field and returns a PARTIAL object holding
  * only the keys the user actually set to a well-typed value, a missing or
@@ -96,48 +97,42 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
 }
 
 /**
- * Which `update.*` keys the person actually WROTE, as opposed to inherited.
+ * Which of the self-update switches (`update.auto`, `update.autoUpdateAtLaunch`)
+ * the person actually WROTE, as opposed to inherited.
  *
  * `readUpdateSettings` reads the resolved config, and the platform ships real
- * defaults for part of the `update` namespace (`auto`, `intervalMinutes`,
- * `firstCheckSeconds`, …). So a resolved `auto: true` says nothing about
- * whether anyone chose it, every install reports it. That distinction is
- * load-bearing for one decision and one only: whether an explicit
- * `autoUpdateAtLaunch: false` should also stop the while-running updater, or
- * whether the person has separately asked to keep it (see
- * runtime/periodic-update.ts). Guessing from the merged value cannot answer it.
+ * defaults for both, so a resolved `auto: true` says nothing about whether
+ * anyone chose it. That distinction is load-bearing for one decision and one
+ * only: whether an explicit `autoUpdateAtLaunch: false` should also stop the
+ * while-running updater, or whether the person has separately asked to keep it
+ * (see runtime/periodic-update.ts).
  *
- * Both scopes count as explicit, a key written in either the user-level file
- * or the working-directory file was written by a person. The files are read
- * directly rather than through the manager because the manager's whole job is
- * to erase this difference by merging defaults in.
+ * Both switches are daemon settings (config-ownership.ts): one choice for the
+ * machine's installation, kept in the daemon's settings file and read by every
+ * program. So that file is the one read here. The Agent's own file and a
+ * project's file cannot state them (a daemon key there is left out at load),
+ * which is what keeps a project's settings file from turning the while-running
+ * update back on.
  *
  * Unreadable or malformed files yield "nothing was stated", which degrades to
- * the documented switch governing both updaters, the safe direction, since it
- * means an off switch is honored rather than quietly overridden.
+ * the documented switch governing both updaters, the safe direction.
  */
 export function readExplicitUpdateKeys(
   configManager: {
-    readonly getConfigPath?: () => string | undefined;
-    readonly getProjectConfigPath?: () => string | undefined;
+    readonly getDaemonTierPath?: () => string | null | undefined;
   },
 ): ReadonlySet<string> {
   const explicit = new Set<string>();
-  // The path accessors are optional: a caller holding only a value reader
-  // cannot say what was stated, and "nothing stated" is the answer that keeps
-  // the documented off switch in force.
-  const paths = [configManager.getConfigPath?.(), configManager.getProjectConfigPath?.()];
-  for (const path of paths) {
-    if (!path || !existsSync(path)) continue;
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-      if (!parsed || typeof parsed !== 'object') continue;
-      const block = (parsed as RawRecord)['update'];
-      if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+  const path = configManager.getDaemonTierPath?.();
+  if (!path || !existsSync(path)) return explicit;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    const block = parsed && typeof parsed === 'object' ? (parsed as RawRecord)['update'] : undefined;
+    if (block && typeof block === 'object' && !Array.isArray(block)) {
       for (const key of Object.keys(block as RawRecord)) explicit.add(key);
-    } catch {
-      // A file that cannot be read stated nothing.
     }
+  } catch {
+    // A file that cannot be read stated nothing.
   }
   return explicit;
 }

@@ -108,6 +108,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import { type SessionSurface } from '@/runtime/index.ts';
 import { createLazyMcpRegistry } from './mcp-lazy-start.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { agentTrustsScannedServer } from './lan-scan-consent-store.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { FeatureAnnouncementStore } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
@@ -752,6 +753,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         // Launch tolerance: an absent key is an unconfigured provider, never a construction failure.
         providerRegistryFactory: buildAgentProviderRegistry,
         modelDiscovery: shouldRefreshModels(options.modelDiscovery) ? 'run' : 'skip',
+        // The same rule as the start-up pass: network servers only while network scanning is on.
+        trustScannedServer: (server, paths) => agentTrustsScannedServer(server, paths, GOODVIBES_AGENT_SURFACE_ROOT),
         // Absent: the non-spawning unavailable seam. The interactive boot passes the host seam.
         powerSeam: options.powerSeam,
         currentSessionId: options.resolveSessionId ? () => options.resolveSessionId?.({}) ?? null : undefined,

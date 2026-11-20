@@ -229,6 +229,12 @@ export interface McpAttackPathReview {
 /** Permission verdict for a single tool invocation. */
 export interface McpPermission {
   readonly causes?: readonly ('path-out-of-scope' | 'host-out-of-scope')[] | undefined;
+  /**
+   * Set when the server is trusted `ask-on-risk` and the call is outside its
+   * configured scope: the sentence the owner is asked with. The call runs only
+   * when he allows it; with nobody to ask it is refused.
+   */
+  readonly askOwner?: string | undefined;
   /** Whether the tool call is permitted. */
   allowed: boolean;
   /** Human-readable explanation for the verdict. */

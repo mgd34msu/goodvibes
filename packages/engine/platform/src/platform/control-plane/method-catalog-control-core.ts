@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
@@ -54,6 +55,7 @@ import {
   SHARED_SESSION_ROUTING_INTENT_SCHEMA,
   SHARED_SESSION_WITH_INPUTS_SCHEMA,
   SHARED_SESSION_WITH_MESSAGES_SCHEMA,
+  OWNER_APPROVAL_PENDING_SCHEMA,
   TASK_ACTION_OUTPUT_SCHEMA,
   TASK_CREATE_INPUT_SCHEMA,
   TASK_CREATE_OUTPUT_SCHEMA,
@@ -83,10 +85,23 @@ const INVALID_KIND: ContractErrorCode = { code: 'INVALID_KIND', status: 400, mea
 const INVALID_MESSAGE_ID: ContractErrorCode = { code: 'INVALID_MESSAGE_ID', status: 400, meaning: 'messageId is not 1 to 128 letters, digits, ".", "_", ":" or "-"; nothing was changed.' };
 /** What every route that submits work to a session can answer. */
 const SUBMISSION_ERROR_CODES: readonly ContractErrorCode[] = [SESSION_NOT_FOUND, SESSION_CLOSED, SESSION_AGENT_BIND_FAILED];
+const INVALID_ARGUMENT: ContractErrorCode = { code: 'INVALID_ARGUMENT', status: 400, meaning: 'A field is missing or not in its documented shape (the body names it in `field`); nothing was changed.' };
+/** What a route that starts an agent can answer for the model and routing it was asked to run on. */
+const AGENT_START_ERROR_CODES: readonly ContractErrorCode[] = [
+  { code: 'MODEL_NOT_FOUND', status: 400, meaning: 'No registered model answers to the model (or a fallback model) named; nothing was started. Name a model this daemon holds.' },
+  { code: 'MODEL_AMBIGUOUS', status: 400, meaning: 'The bare model id is served by several providers; nothing was started. Name it provider-qualified, as the message lists.' },
+  { code: 'CAPACITY_EXCEEDED', status: 429, meaning: 'The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds.' },
+];
+const TASK_NOT_FOUND: ContractErrorCode = { code: 'TASK_NOT_FOUND', status: 404, meaning: 'No runtime task has that id.' };
+const APPROVAL_NOT_FOUND: ContractErrorCode = { code: 'APPROVAL_NOT_FOUND', status: 404, meaning: 'No approval has that id; nothing was answered.' };
+const OWNER_ONLY: ContractErrorCode = { code: 'OWNER_ONLY', status: 403, meaning: 'Only the owner answers this approval: the Agent\'s credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered.' };
+/** What approve and deny answer beyond the shared codes. */
+const APPROVAL_DECISION_ERROR_CODES: readonly ContractErrorCode[] = [INVALID_ARGUMENT, APPROVAL_NOT_FOUND, OWNER_ONLY];
 
 export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'control.auth.login',
+    repeat: 'unsafe',
     title: 'Login',
     description: 'Authenticate a local control-plane user and create a session token.',
     category: 'control-plane',
@@ -100,6 +115,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'control.auth.logout',
+    repeat: 'safe',
     title: 'Logout',
     description: 'End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.',
     category: 'control-plane',
@@ -113,6 +129,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'control.auth.current',
+    repeat: 'safe',
     title: 'Current Auth Context',
     description: 'Return the current control-plane principal, granted scopes, and authentication mode.',
     category: 'control-plane',
@@ -389,6 +406,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.create',
+    repeat: 'unsafe',
     title: 'Create Shared Session',
     description: 'Create a shared session for a surface, route, or web client.',
     category: 'sessions',
@@ -433,6 +451,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.close',
+    repeat: 'safe',
     title: 'Close Shared Session',
     description: 'Mark a shared session as closed.',
     category: 'sessions',
@@ -446,6 +465,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.reopen',
+    repeat: 'safe',
     title: 'Reopen Shared Session',
     description: 'Reopen a previously closed shared session.',
     category: 'sessions',
@@ -459,6 +479,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.detach',
+    repeat: 'safe',
     title: 'Detach Shared Session Participant',
     description: 'Remove a surface\'s participant and its route binding from a session so that surface stops receiving updates, WITHOUT closing or killing the session (detach != close != kill). Every participant carrying the given surfaceId is removed and any route binding they alone held is unbound; the session and all other participants keep running. Idempotent: detaching an already-detached surface, or detaching from a closed session, is a no-op success. An unknown session is a 404.',
     category: 'sessions',
@@ -475,6 +496,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Shared Session',
     description: 'Permanently remove a shared session record and its queued inputs/messages from the home-scoped store. A distinct, explicit hard-delete verb, NEVER triggered by close; closed sessions stay listable (includeClosed) and deletionRetentionMs semantics for non-deleted records are untouched. Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop. Emits control.session_update (session-deleted) so subscribers drop the row live.',
@@ -502,7 +524,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.permissionMode.get',
     title: 'Get Session Permission Mode',
-    description: 'Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.',
+    description: 'Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}/permission-mode' },
@@ -510,13 +532,16 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
       mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
+      chosenMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
+      reason: STRING_SCHEMA,
     }, ['sessionId', 'mode']),
   }),
   methodDescriptor({
     id: 'sessions.permissionMode.set',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     ownerOnly: true,
     title: 'Set Session Permission Mode',
-    description: 'Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.',
+    description: 'Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.',
     category: 'sessions',
     scopes: ['write:sessions'],
     access: 'admin',
@@ -526,11 +551,11 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
       sessionId: STRING_SCHEMA,
       mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
     }, ['sessionId', 'mode']),
-    outputSchema: objectSchema({
+    outputSchema: { anyOf: [objectSchema({
       sessionId: STRING_SCHEMA,
       mode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
       previousMode: { type: 'string', enum: SESSION_GATE_PRESET_NAMES },
-    }, ['sessionId', 'mode', 'previousMode']),
+    }, ['sessionId', 'mode', 'previousMode']), OWNER_APPROVAL_PENDING_SCHEMA] },
   }),
   methodDescriptor({
     id: 'sessions.contextUsage.get',
@@ -672,6 +697,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.inputs.cancel',
+    repeat: 'safe',
     title: 'Cancel Shared Session Input',
     description: 'Cancel a queued shared-session input before it is delivered or spawned. An input already being answered (delivered/spawned) or already ended is refused with 409 `CANCEL_NOT_ALLOWED`, the input in its actual state, and no cancel event; an already-cancelled input answers 200.',
     category: 'sessions',
@@ -688,6 +714,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'sessions.inputs.deliver',
+    repeat: 'safe',
     effect: 'outward',
     title: 'Mark Shared Session Input Delivered',
     description: 'A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface\'s `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `surfaceInstance`, sent with `agentId`, names the surface process running that agent; it is kept in the input\'s `metadata.deliveringSurfaceInstance` (cleared by a report that names none), so a surface that restarted can fail the inputs a process that is gone was answering. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.',
@@ -771,14 +798,15 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'tasks.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Create Task',
-    description: 'Submit a task to the daemon or a shared session.',
+    description: 'Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), or 409 with `mode` `rejected` and `acknowledged: false`. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing\'s `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.',
     category: 'tasks',
     scopes: ['write:tasks'],
     access: 'admin',
     http: { method: 'POST', path: '/task' },
-    errorCodes: SUBMISSION_ERROR_CODES,
+    errorCodes: [...SUBMISSION_ERROR_CODES, INVALID_ARGUMENT, { code: 'INVALID_JSON', status: 400, meaning: 'The body is not JSON; nothing was started.' }, ...AGENT_START_ERROR_CODES],
     events: [runtimeEventId('tasks')],
     inputSchema: TASK_CREATE_INPUT_SCHEMA,
     outputSchema: TASK_CREATE_OUTPUT_SCHEMA,
@@ -786,43 +814,54 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'tasks.get',
     title: 'Get Runtime Task',
-    description: 'Return a single runtime task record.',
+    description: 'Return a single runtime task record, as `{ task }`.',
     category: 'tasks',
     scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/tasks/{taskId}' },
+    errorCodes: [TASK_NOT_FOUND],
     inputSchema: objectSchema({ taskId: STRING_SCHEMA }, ['taskId']),
     outputSchema: TASK_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'tasks.cancel',
+    repeat: 'safe',
     title: 'Cancel Runtime Task',
     description: 'Cancel an in-flight runtime task.',
     category: 'tasks',
     scopes: ['write:tasks'],
     access: 'admin',
     http: { method: 'POST', path: '/api/tasks/{taskId}/cancel' },
+    errorCodes: [TASK_NOT_FOUND],
     inputSchema: objectSchema({ taskId: STRING_SCHEMA }, ['taskId']),
     outputSchema: TASK_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'tasks.retry',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Retry Runtime Task',
-    description: 'Retry a runtime task through the task action endpoint.',
+    description: 'Retry a failed or cancelled agent task: a new agent runs the same task on the model, provider, tools, routing (fallback models, provider selection and failure policy, reasoning effort), execution limits and contract settings the task was started with, in the session that started it. The task keeps its id and its `owner` becomes the new agent, returned as `agentId`. When the record of the agent that ran it is no longer held, nothing is started (409 TASK_SETTINGS_UNAVAILABLE).',
     category: 'tasks',
     scopes: ['write:tasks'],
     access: 'admin',
     http: { method: 'POST', path: '/api/tasks/{taskId}/retry' },
+    errorCodes: [
+      TASK_NOT_FOUND,
+      { code: 'TASK_NOT_RETRYABLE', status: 400, meaning: 'Only a failed or cancelled agent task can be retried; nothing was started.' },
+      { code: 'TASK_SETTINGS_UNAVAILABLE', status: 409, meaning: 'The record of the agent that ran the task is no longer held, so the model, tools and routing it ran with are unknown; nothing was started. Create the task again.' },
+      ...AGENT_START_ERROR_CODES,
+    ],
     inputSchema: objectSchema({ taskId: STRING_SCHEMA }, ['taskId']),
     outputSchema: TASK_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'tasks.status',
     title: 'Get Task Status',
-    description: 'Return lightweight runtime task status by agent id.',
+    description: 'Return lightweight runtime task status by agent id. `status` is pending, running, completed, failed or cancelled.',
     category: 'tasks',
     scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/task/{agentId}' },
+    errorCodes: [{ code: 'AGENT_NOT_FOUND', status: 404, meaning: 'No agent with that id is held.' }],
     inputSchema: objectSchema({ agentId: STRING_SCHEMA }, ['agentId']),
     outputSchema: TASK_STATUS_OUTPUT_SCHEMA,
   }),
@@ -842,6 +881,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'approvals.raise',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Raise Approval',
     description: 'Raise a permission ask INTO the shared broker from a surface that is not in the daemon\'s process, the write counterpart to approvals.list/claim/approve/deny/cancel, which could only ever act on asks the daemon\'s own in-process callers had created. The ask becomes a record every surface can see and decide, and the daemon\'s attention machinery (web push, blocked-on-user) fans it out. Returns the PENDING record immediately and does NOT block waiting for an answer: the decision arrives on the control.approval_update event (SSE/WS, `gate` domain), which is the channel to watch using the returned id. An identical ask already in flight (same session, tool and args) coalesces onto the existing record, one prompt, one decision, `coalesced: true`, and the returned record is that earlier one. Optional timeoutMs expires the ask if nobody answers (clamped to 12h); optional waitMs waits inline for a decision for callers that want one round trip (clamped to 60s) and reports `decided: false` with the record still pending when it runs out, never a decision that was not made. ws-only invoke verb; no REST binding.',
     category: 'approvals',
@@ -852,47 +892,55 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   }),
   methodDescriptor({
     id: 'approvals.claim',
+    repeat: 'safe',
     title: 'Claim Approval',
     description: 'Claim a pending approval for operator handling. A claim is advisory: it shows who is handling the ask and does not stop another participant from deciding it. An approval that already ended is returned unchanged with `applied: false` and a `refusal`.',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
     http: { method: 'POST', path: '/api/approvals/{approvalId}/claim' },
+    errorCodes: [APPROVAL_NOT_FOUND],
     inputSchema: objectSchema({ approvalId: STRING_SCHEMA }, ['approvalId']),
     outputSchema: APPROVAL_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'approvals.approve',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Approve Approval',
-    description: 'Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval\'s own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command\'s terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).',
+    description: 'Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval\'s own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command\'s terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner\'s act: the Agent\'s credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
     http: { method: 'POST', path: '/api/approvals/{approvalId}/approve' },
+    errorCodes: APPROVAL_DECISION_ERROR_CODES,
     inputSchema: APPROVAL_APPROVE_INPUT_SCHEMA,
     outputSchema: APPROVAL_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'approvals.deny',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Deny Approval',
-    description: 'Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user\'s free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).',
+    description: 'Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user\'s free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response\'s recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner\'s act: the Agent\'s credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
     http: { method: 'POST', path: '/api/approvals/{approvalId}/deny' },
+    errorCodes: APPROVAL_DECISION_ERROR_CODES,
     inputSchema: APPROVAL_DENY_INPUT_SCHEMA,
     outputSchema: APPROVAL_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'approvals.cancel',
+    replay: { in: 'body', name: 'holdId', behavior: 'A surface releasing an ask it raised (`release: true`) passes the `holdId` approvals.raise returned: a repeat of that release gives up nothing more, even when another surface holds the same ask. A plain cancel of an ended approval is answered `applied: false`.' },
     title: 'Cancel Approval',
     description: 'Cancel a pending approval. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state. A surface that raised the ask through approvals.raise and is leaving passes `release: true`: the ask is cancelled only when no other surface that raised the same ask is still waiting, otherwise it stays pending for them and the response reads `applied: false`. Pass the `holdId` that approvals.raise returned so a retried release is harmless instead of giving up another surface\'s hold.',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
     http: { method: 'POST', path: '/api/approvals/{approvalId}/cancel' },
+    errorCodes: [APPROVAL_NOT_FOUND],
     inputSchema: APPROVAL_CANCEL_INPUT_SCHEMA,
     outputSchema: APPROVAL_ACTION_OUTPUT_SCHEMA,
   }),

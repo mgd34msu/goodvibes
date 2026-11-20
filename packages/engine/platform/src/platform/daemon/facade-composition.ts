@@ -1,3 +1,5 @@
+import { IdempotentReplayStore } from '../control-plane/idempotent-replay.js';
+import { controlPlaneStorePath } from '../control-plane/control-plane-store-paths.js';
 import { requestedEffortOverride, resolveEffortForModelSurface } from '../providers/reasoning-effort-surface.js';
 import { assertSynchronousCurrent } from './reading-lifetime.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
@@ -11,6 +13,7 @@ import { createFacadeWorkProposalStore } from './facade-work-proposal-store.js';
 import { readConversationGateConfig, type ConversationGateConfigReader } from '../agents/conversation-gate.js';
 import { continuationContractOptions, decideContinuationEscalation } from '../agents/conversation-continuation.js';
 import { gateSurfaceSpawn, type SurfaceIngressOrigin } from './surface-conversation-gate.js';
+import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -209,6 +212,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       let resolve: (() => void) | null = null;
       let done = false;
       let streamError: string | undefined;
+      let streamFailure: unknown;
       let routeMetadata: Pick<CompanionProviderChunk, 'decisionRoute' | 'usage'> = {};
       let streamedContent = '';
       const push = (chunk: CompanionProviderChunk): void => {
@@ -260,8 +264,9 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
           }
         }
       }).catch((err: unknown) => {
-        // Mid-stream error: capture message so it can be yielded as a terminal chunk.
+        // Mid-stream error: capture it so it can be yielded as a terminal chunk, kind and all.
         streamError = err instanceof Error ? err.message : String(err);
+        streamFailure = err;
       }).finally(() => {
         done = true;
         resolve?.();
@@ -277,7 +282,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
       }
       await chatPromise;
       if (streamError) {
-        yield { type: 'error' as const, error: streamError };
+        yield { type: 'error' as const, error: streamError, failure: streamFailure };
       } else {
         yield { type: 'done' as const, ...routeMetadata };
       }
@@ -393,6 +398,8 @@ export function resolveDaemonFacadeRuntime(
   const companionChatManager = new CompanionChatManager({
     eventPublisher: controlPlaneGateway,
     provider: createCompanionProviderAdapter(runtimeServices.providerRegistry),
+    // A provider failure moves the chat turn along provider.fallbackModels, the same rule as every turn.
+    failoverRegistry: runtimeServices.providerRegistry,
     resolveDefaultRoute: () => {
       const model = runtimeServices.providerRegistry.getCurrentModel();
       return { provider: model.provider, model: model.id, systemPrompt: null, reasoningEffort: requestedEffortOverride(runtimeServices.configManager) };
@@ -484,12 +491,14 @@ export function resolveDaemonFacadeRuntime(
     triggerManager: runtimeServices.triggerManager,
     // The login home, as the terminal apps use: the unit and the service's pid
     // file live there, whatever GOODVIBES_HOME this daemon's tree is under.
+    // The definition it writes (boot promotion, update adoption, the web UI's
+    // install) is the one `goodvibes-daemon install-service` writes: this
+    // executable, this daemon's homes, no token.
     platformServiceManager: new PlatformServiceManager(resolvedConfigManager, {
       workingDirectory: runtimeServices.workingDirectory,
       homeDirectory: resolveServiceUnitHome(),
-      binaryBaseName: 'goodvibes',
+      launch: { homeDirectory: runtimeServices.homeDirectory, daemonHomeDirectory: config.daemonHomeDir },
       defaultServiceName: resolveDaemonServiceDefault(),
-      defaultServiceDescription: 'goodvibes omnichannel daemon host',
       featureFlags: runtimeServices.featureFlags,
     }),
     distributedRuntime: runtimeServices.distributedRuntime,
@@ -691,7 +700,12 @@ export function createDaemonFacadeCollaborators(
     workProposals,
     deliverSurfaceNotice: (binding, text) => surfaceDeliveryHelper.deliverSurfaceNotice(binding, text),
   });
+  // A channel message from someone it admits who is not its owner never directs a running agent.
+  runtime.sessionBroker.setGuestSenderRule((surfaceKind, userId) => surfaceActionHelper.senderIsGuest(surfaceKind, userId));
+  // One store answers repeats of every write that takes the shared Idempotency-Key, on each path a call arrives by.
+  const idempotentReplay = new IdempotentReplayStore(controlPlaneStorePath(runtime.runtimeServices.shellPaths, runtime.runtimeServices.surfaceRoot, 'idempotent-replay'));
   const controlPlaneHelper = new DaemonControlPlaneHelper({
+    idempotentReplay,
     authToken: options.authToken,
     settingsLifetime: options.settingsLifetime,
     pairingTokens: runtime.runtimeServices.pairingTokens,
@@ -744,7 +758,9 @@ export function createDaemonFacadeCollaborators(
   });
   cloudflareTunnel.start();
   const httpRouter = new DaemonHttpRouter({
+    idempotentReplay,
     listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
+    servingListener: options.servingListener,
     // The 401 names a refused credential the daemon knows: a device token over its
     // rotation age, an expired offer, or the shared token after it was revoked.
     describeCredentialRefusal: (token) => runtime.runtimeServices.pairingTokens.describePresentedRefusal(token, options.authToken()),
@@ -878,7 +894,7 @@ export function configureDaemonSessionContinuation(options: {
    * `continuationContractOptions` below. A continuation never starts a contract
    * just because nobody installed a gate.
    */
-  readonly surfaceActionHelper?: Pick<DaemonSurfaceActionHelper, 'conversationGateDeps'> | undefined;
+  readonly surfaceActionHelper?: Pick<DaemonSurfaceActionHelper, 'conversationGateDeps' | 'senderIsGuest'> | undefined;
   /** Reads `conversationGate.*` so both halves of the gate obey one configuration. */
   readonly configReader?: ConversationGateConfigReader | undefined;
   /**
@@ -905,11 +921,14 @@ export function configureDaemonSessionContinuation(options: {
       // A message held for capacity keeps what it was read as on arrival.
       const arrivalIntent = input.metadata[ARRIVAL_INTENT_KEY];
       const intent = arrivalIntent === 'work' || arrivalIntent === 'conversation' || arrivalIntent === 'unsure' ? arrivalIntent : undefined;
+      // A follow-up from someone the channel admits who is not its owner is a guest's turn, as at ingress.
+      const guest = input.surfaceKind !== undefined && options.surfaceActionHelper?.senderIsGuest(input.surfaceKind, input.userId) === true;
       const origin: SurfaceIngressOrigin | null = input.surfaceKind
         ? {
             surface: input.surfaceKind,
             text: input.body,
             ...(intent ? { intent } : {}),
+            ...(guest ? { guest: true as const } : {}),
             ...(input.userId ? { userId: input.userId } : {}),
             ...(routeBinding?.channelId ?? input.externalId ? { channelId: routeBinding?.channelId ?? input.externalId } : {}),
             // Session keys may synthesize channel-as-thread. Only a bound route
@@ -965,14 +984,18 @@ export function configureDaemonSessionContinuation(options: {
             routed: true,
             ...(input.surfaceKind ? { surfaceKind: input.surfaceKind } : {}),
             ...(routeBinding?.channelId ?? input.externalId ? { address: routeBinding?.channelId ?? input.externalId } : {}),
+            ...(guest ? { guest: true } : {}),
           },
         }),
       };
+      const rawSpawn = (spawnArgs: Parameters<typeof options.trySpawnAgent>[0]) => guest && input.surfaceKind
+        ? withGuestTurn(input.surfaceKind, () => options.trySpawnAgent(spawnArgs, label, sessionId))
+        : options.trySpawnAgent(spawnArgs, label, sessionId);
       const spawned = escalation.startsContract
-        ? options.trySpawnAgent(spawnInput, label, sessionId)
+        ? rawSpawn(spawnInput)
         : gateDeps
           ? await gateSurfaceSpawn(gateDeps, origin, conversationalInput, label, sessionId)
-          : options.trySpawnAgent({ ...conversationalInput, ...continuationContractOptions(input) }, label, sessionId);
+          : rawSpawn({ ...conversationalInput, ...continuationContractOptions(input) });
       if (spawned instanceof Response) {
         // The fleet is full: the input waits, queued, for the next agent to end.
         if (spawned.status === 429) return { disposition: 'capacity', reason: 'every agent slot is taken' };

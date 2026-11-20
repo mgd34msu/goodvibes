@@ -18,3 +18,10 @@
  * sites; this constant is not (yet) the single source for all of them.
  */
 export const GOODVIBES_TUI_SURFACE_ROOT = 'tui';
+
+/**
+ * Which servers the terminal app's saved scan (`discovered-providers.json`)
+ * registers in every composition: all of them, since each was found by the
+ * owner's own /scan, which may reach the local network.
+ */
+export const TUI_TRUSTS_SAVED_SCANNED_SERVERS = (): boolean => true;

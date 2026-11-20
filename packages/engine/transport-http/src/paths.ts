@@ -39,7 +39,8 @@ export interface TransportPaths {
 // the daemon never mints certificates, so the transport works over http there,
 // in a browser bundle too, where no process.env escape hatch exists.
 // Genuinely public http origins keep the insecure-transport wall.
-export { isPrivateNetworkHost, isTailnetHost, stateTailnetAddresses } from './private-network.js';
+export { isLoopbackHost, isPrivateNetworkHost, isTailnetHost, stateTailnetAddresses } from './private-network.js';
+export { exemptLoopbackFromProxy } from './loopback-proxy.js';
 
 export function normalizeBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.trim();

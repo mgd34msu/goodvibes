@@ -2,10 +2,7 @@ import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
-import { urlHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-
-/** This browser opens on THIS host, so a wildcard bind resolves to loopback. */
-const browserConnectHost = urlHostForConfiguredHost;
+import { resolveWebUiOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 /** The Agent's own onboarding marker, read from its file. */
 function agentOnboarding(context: CommandContext, includeDetails: boolean): Record<string, unknown> {
@@ -30,9 +27,11 @@ function agentOnboarding(context: CommandContext, includeDetails: boolean): Reco
 }
 
 /**
- * The connected browser cockpit, from facts this program holds: the web
- * endpoint's settings (enabled, binding, public URL) and the Agent's own
- * onboarding marker. The web UI has its own views (chat, work, library,
+ * The connected browser cockpit, from facts this program holds: where the web
+ * UI is served (the engine's one owner of that address: the daemon's
+ * control-plane listener while it serves the bundle, else a set
+ * `web.publicBaseUrl`; `web.port` is only a development server's) and the
+ * Agent's own onboarding marker. The web UI has its own views (chat, work, library,
  * personal, phone, settings) and does not mirror the Agent workspace's
  * categories, so no category, touch or install coverage is claimed for it.
  */
@@ -42,26 +41,29 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   const configManager = context.platform?.configManager;
   let enabled = false;
   let binding = { hostMode: 'local', configuredHost: '127.0.0.1', host: '127.0.0.1', port: 3423 };
-  let publicBaseUrl = '';
+  let servedUrl = '';
+  let servedByDaemon = false;
   let configFailure: string | undefined;
   if (configManager) {
     try {
       enabled = configManager.get('web.enabled') === true;
       binding = resolveRuntimeEndpointBinding(configManager, 'web');
-      publicBaseUrl = String(configManager.get('web.publicBaseUrl') ?? '').trim();
+      servedByDaemon = configManager.get('controlPlane.webui.serve') === true;
+      servedUrl = resolveWebUiOrigin(configManager)?.origin ?? '';
     } catch (error) {
       // A config that cannot be read is not the same as a web endpoint that is switched off.
       configFailure = error instanceof Error ? error.message : 'The web endpoint configuration could not be read.';
       enabled = false;
     }
   }
-  const url = configFailure ? '' : publicBaseUrl || `http://${browserConnectHost(binding.host)}:${binding.port}`;
+  const url = configFailure ? '' : servedUrl;
   return {
     enabled,
     ...(configFailure ? { status: 'unavailable', reason: configFailure } : {}),
-    readiness: configFailure ? 'unavailable' : enabled ? 'ready' : 'setup-needed',
+    // No web UI served anywhere the settings name is setup still to do, whatever web.enabled says.
+    readiness: configFailure ? 'unavailable' : url ? 'ready' : 'setup-needed',
     url,
-    source: publicBaseUrl ? 'web.publicBaseUrl' : 'web endpoint binding',
+    source: servedByDaemon ? 'the daemon\'s control-plane listener (controlPlane.webui.serve)' : url ? 'web.publicBaseUrl' : 'none: no web UI is served (goodvibes-daemon webui enable --bundle-dir <dir>)',
     endpoint: {
       id: 'web',
       binding,

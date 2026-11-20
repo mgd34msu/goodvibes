@@ -23,6 +23,7 @@
  * Handlers: payments/host/register.ts, the daemon's payments host; wire types in routes/payments.ts.
  */
 import { BOOLEAN_SCHEMA, STRING_SCHEMA, methodDescriptor, objectSchema } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { PAYMENT_PURCHASE_RECONCILE_HTTP } from '../payments/operation-view.js';
 import {
@@ -59,6 +60,7 @@ import {
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'payments.purchase.reconcile', title: 'Record the Merchant Order Finding', category: 'payments',
+    repeat: 'safe',
     scopes: ['write:payments'], access: 'admin', dangerous: true, ownerOnly: true,
     description: 'After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.',
     http: PAYMENT_PURCHASE_RECONCILE_HTTP,
@@ -66,6 +68,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.purchase.securityCode', title: 'Type the Card Security Code', category: 'payments',
+    repeat: 'safe',
     scopes: ['write:payments'], access: 'admin', dangerous: true, ownerOnly: true,
     description: 'Under payments.cvvHandling prompt, hand the card security code the owner typed to the one approved purchase waiting for it, by its exact purchaseId and windowId from payments.purchase.status. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The code is used for that purchase\'s card entry and kept nowhere. A closed or replaced request refuses; this never submits directly or overrides any budget, merchant, page or address check.',
     http: { method: 'POST', path: '/api/payments/purchase/security-code' },
@@ -80,6 +83,8 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   ...(['approve', 'deny', 'cancel'] as const).map(action => methodDescriptor({
     id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Stop This Purchase',
     category: 'payments', scopes: ['write:payments'], access: 'admin', dangerous: true,
+    // A window is answered once; a repeat finds it answered and refuses, changing nothing.
+    repeat: 'safe',
     // Answering a purchase window is the owner's; stopping a purchase is open to the Agent.
     ...(action === 'cancel' ? {} : { ownerOnly: true }),
     description: action === 'cancel'
@@ -113,6 +118,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.cards.create',
+    repeat: 'unsafe',
     title: 'Add a Payment Card',
     description:
       'Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.',
@@ -125,6 +131,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.cards.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Remove a Payment Card',
     description:
@@ -138,6 +145,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.checkout.approve',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Approve One Purchase',
     description:
       'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency ("25" and "25.00" are the same amount) and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields, expiring in five minutes; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
@@ -175,6 +183,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.standing.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Authorise a Purchase in Advance',
     description:
       'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments standing add sends both. The owner\'s own act: an agent cannot add one.',
@@ -189,6 +198,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.standing.delete',
+    repeat: 'safe',
     title: 'Withdraw a Standing Authorisation',
     description:
       'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments standing remove sends both. The owner\'s own act.',
@@ -203,6 +213,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.checkout.begin',
+    replay: { in: 'body', name: 'requestId', behavior: 'Reusing an admitted `requestId` never starts another purchase, even with changed input; after a lost response read the outcome with payments.purchase.status and that requestId.' },
     title: 'Buy What Is In This Checkout',
     description:
       "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. A purchase the owner asked for now carries the explicit-user-request context; one a schedule or trigger starts names standingId (payments.standing.list) instead and is bound to that entry's item, shops and maximums. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",

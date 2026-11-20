@@ -1,7 +1,10 @@
 /**
  * What the control-plane listener answers before any route sees a request.
  *
- * Two settings decide it, read on each request (an integer-cheap config read):
+ * Two settings decide it, read on each request (an integer-cheap config read),
+ * after one fact about the listener itself: a listener bound wider than the
+ * bind host the settings now name (every interface after a change to
+ * loopback, until the rebind replaces it) answers only this machine.
  *
  * - `controlPlane.enabled`: whether the control plane is served to other
  *   machines. Off, a request is answered only when it comes from this machine
@@ -79,6 +82,12 @@ export interface ListenerAdmissionInput {
   readonly peerAddress: string | undefined;
   /** The client the listener resolved (the forwarded one when a proxy is trusted). */
   readonly clientAddress: string;
+  /**
+   * The bind host the settings now name, when this listener serves more than
+   * it (bound to every interface while the setting names loopback, until the
+   * rebind replaces it). Only this machine is served meanwhile.
+   */
+  readonly outsideConfiguredHost?: string | undefined;
 }
 
 /** The refusal for a request this listener does not serve, or null to let it through. */
@@ -86,10 +95,22 @@ export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmis
   // The URL is parsed only when a decision needs the path, and at most once.
   let parsedPath: string | undefined;
   const path = (): string => (parsedPath ??= new URL(req.url).pathname);
+  const local = (): boolean => isThisMachine(input.peerAddress) && isThisMachine(input.clientAddress);
+  // A listener the settings no longer allow answers no other machine, webhooks
+  // included: the setting it outlived would not have received them either.
+  if (input.outsideConfiguredHost !== undefined && !local()) {
+    return jsonErrorResponse({
+      error: 'This daemon serves only its own machine',
+      code: 'CONTROL_PLANE_LOCAL_ONLY',
+      state: `the control plane is set to listen on ${input.outsideConfiguredHost}, so a request from ${input.clientAddress} is not served`,
+      next: [
+        'On the daemon machine run `goodvibes-daemon webui enable --lan` or `goodvibes-daemon config set controlPlane.hostMode network` to serve other machines',
+      ],
+    }, { status: 403 });
+  }
   // Both the socket and a trusted forwarded client must be this machine: a
   // forwarding header alone is whatever the sender wrote.
-  if (!input.servesOtherMachines && !(isThisMachine(input.peerAddress) && isThisMachine(input.clientAddress))
-    && !path().startsWith(CHANNEL_WEBHOOK_PREFIX)) {
+  if (!input.servesOtherMachines && !local() && !path().startsWith(CHANNEL_WEBHOOK_PREFIX)) {
     return jsonErrorResponse({
       error: 'This daemon serves only its own machine',
       code: 'CONTROL_PLANE_LOCAL_ONLY',

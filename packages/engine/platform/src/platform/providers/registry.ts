@@ -16,6 +16,7 @@ import { getConfiguredApiKeys, getConfiguredModelId, resolveApiKeys } from '../c
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProvidersChanged, emitProviderWarning, emitModelChanged } from '../runtime/emitters/index.js';
 import { loadCustomProviders, watchCustomProviders } from './custom-loader.js';
+import { builtinProviderNames } from './provider-names.js';
 import { clearProviderHealth, readProviderHealth, type ProviderHealthEntry } from './provider-health.js';
 import {
   buildSyntheticCanonicalModels, getCatalogCachePath, getCatalogModelDefinitionsFrom, getCatalogTmpPath, modelCapabilityFactsFromCatalog,
@@ -64,6 +65,21 @@ export type {
  * ProviderRegistry, manages LLM provider instances and model selection.
  * Lazily instantiates providers on first use.
  */
+/**
+ * `status` names the provider a saved model reference resolves to from
+ * builtinProviderNames() without building a registry (provider-names.ts); a
+ * builtin added or renamed here without that list would make it answer wrong.
+ */
+function assertBuiltinProviderNames(registered: Iterable<string>): void {
+  const expected = builtinProviderNames();
+  const actual = new Set(registered);
+  const missing = [...actual].filter((name) => !expected.has(name));
+  const extra = [...expected].filter((name) => !actual.has(name));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(`provider-names.ts does not list the built-in providers: not listed ${missing.join(', ') || 'none'}; listed but not registered ${extra.join(', ') || 'none'}.`);
+  }
+}
+
 /** Model registry and catalog lookups by id, for pricing. */
 interface PricingIndex {
   readonly registry: readonly ModelDefinition[];
@@ -88,6 +104,10 @@ export class ProviderRegistry {
    * that no longer lists a name removes it.
    */
   private customProviderNames: Set<string> = new Set();
+  /** Each custom provider's `displayName`, by provider name; a model reference may name a provider by it. */
+  private customProviderDisplayNames: Map<string, string> = new Map();
+  /** How many times registerDiscoveredProviders ran; a restore from the scan cache yields to a newer registration. */
+  private discoveredRegistrations = 0;
   /**
    * The API key each builtin was last built with, by provider id (the same
    * names `apiKey(name)` is asked for). A credential refresh rebuilds only the
@@ -247,6 +267,7 @@ export class ProviderRegistry {
         return { provider, model: { ...definition, provider: provider.name, registryKey: `${provider.name}:${definition.id}` } };
       },
     }));
+    if (!refresh) assertBuiltinProviderNames(this.providers.keys());
   }
 
   /**
@@ -538,6 +559,7 @@ export class ProviderRegistry {
    * Does not overwrite built-in or custom-loaded providers/models.
    */
   registerDiscoveredProviders(servers: DiscoveredServer[]): void {
+    this.discoveredRegistrations += 1;
     this.discoveredServers = [...servers];
     // Unregister previously discovered providers
     for (const name of this.discoveredProviderNames) {
@@ -703,6 +725,11 @@ export class ProviderRegistry {
       ? findModelDefinitionForProvider(resolvedModelId, provider, registry, CATALOG_PROVIDER_NAME_ALIASES)
       : findModelDefinition(resolvedModelId, registry);
     if (!def) {
+      // A model of a provider that is not registered: say so, and how to choose another.
+      const named = provider ?? (modelId.includes(':') ? modelId.slice(0, modelId.indexOf(':')) : undefined);
+      if (named !== undefined && this.resolveProviderReference(named) === undefined) {
+        throw new Error(this.unregisteredModelMessage(provider && !modelId.startsWith(`${provider}:`) ? `${provider}:${modelId}` : modelId));
+      }
       if (provider) throw new Error(`No model '${modelId}' for provider '${provider}' in registry.`);
       throw new Error(`No model '${modelId}' in registry.`);
     }
@@ -896,9 +923,91 @@ export class ProviderRegistry {
     const registry = this.getModelRegistry();
     const def = findModelDefinition(this.currentModelRegistryKey, registry);
     if (def) return def;
+    // `Ollama:x` and `ollama:x` name the same provider: the provider half is
+    // resolved by id or display name without regard to case.
+    const canonical = this.canonicalModelKey(this.currentModelRegistryKey);
+    if (canonical !== null && canonical !== this.currentModelRegistryKey) {
+      this.currentModelRegistryKey = canonical;
+      this._modelRegistryRevision += 1;
+      const resolved = findModelDefinition(canonical, registry);
+      if (resolved) return resolved;
+    }
     const fallback = this.buildConfiguredModelFallback(this.currentModelRegistryKey);
     if (fallback) return fallback;
-    throw new Error(`Current model '${this.currentModelRegistryKey}' not in registry.`);
+    // The selection names no registered provider (a scanned server that is gone, a typo). Reading
+    // it must not stop the program: the definition says so, and a request to it fails with
+    // unregisteredModelMessage (getForModel), which says how to choose another.
+    return this.unregisteredModelDefinition(this.currentModelRegistryKey);
+  }
+
+  /** Whether `getCurrentModel()` names a model of a provider that is not registered. */
+  isUnregisteredModel(model: Pick<ModelDefinition, 'provider'>): boolean {
+    return !this.providers.has(model.provider);
+  }
+
+  private unregisteredModelDefinition(registryKey: string): ModelDefinition {
+    const separator = registryKey.indexOf(':');
+    const providerId = separator > 0 ? registryKey.slice(0, separator) : registryKey;
+    const modelId = separator > 0 ? registryKey.slice(separator + 1) : registryKey;
+    return {
+      id: modelId,
+      provider: providerId,
+      registryKey,
+      displayName: modelId,
+      description: this.unregisteredModelMessage(registryKey),
+      capabilities: { toolCalling: false, codeEditing: false, reasoning: false, multimodal: false },
+      contextWindow: knownFallbackContextWindow(providerId, modelId),
+      contextWindowProvenance: 'fallback', contextWindowOrigin: { kind: 'family_default' },
+      selectable: false,
+      tier: 'standard',
+    };
+  }
+
+  /**
+   * The registered provider a model reference's provider half names: its id
+   * exactly, a catalog alias, or, without regard to case, a provider id or a
+   * custom provider's display name (a scanned server's name is its display
+   * name, such as `Ollama` or `LM Studio`). Undefined when it names none, or
+   * when the case-blind match is ambiguous.
+   */
+  resolveProviderReference(reference: string): string | undefined {
+    const wanted = reference.trim();
+    if (!wanted) return undefined;
+    if (this.providers.has(wanted)) return wanted;
+    const aliased = CATALOG_PROVIDER_NAME_ALIASES[wanted];
+    if (aliased !== undefined && this.providers.has(aliased)) return aliased;
+    const lowered = wanted.toLowerCase();
+    const byId = [...this.providers.keys()].filter((name) => name.toLowerCase() === lowered);
+    if (byId.length === 1) return byId[0];
+    if (byId.length > 1) return undefined;
+    const byDisplayName = [...this.customProviderDisplayNames]
+      .filter(([name, displayName]) => this.providers.has(name) && displayName.trim().toLowerCase() === lowered)
+      .map(([name]) => name);
+    return byDisplayName.length === 1 ? byDisplayName[0] : undefined;
+  }
+
+  /** `registryKey` with its provider half replaced by the registered provider it names, or null when it names none. */
+  canonicalModelKey(registryKey: string): string | null {
+    const separator = registryKey.indexOf(':');
+    if (separator <= 0) return null;
+    const provider = this.resolveProviderReference(registryKey.slice(0, separator));
+    return provider === undefined ? null : `${provider}:${registryKey.slice(separator + 1)}`;
+  }
+
+  /**
+   * Why a model reference cannot be used and how to choose another: its
+   * provider half names no registered provider. Lists the registered ones.
+   */
+  unregisteredModelMessage(registryKey: string): string {
+    const separator = registryKey.indexOf(':');
+    const provider = separator > 0 ? registryKey.slice(0, separator) : registryKey;
+    const registered = this.listProviders().map((candidate) => candidate.name).filter((name) => name !== 'decision-router');
+    return [
+      `The model '${registryKey}' cannot be used: no registered provider is named '${provider}'.`,
+      `Registered providers: ${registered.join(', ') || 'none'}.`,
+      'Choose another model with /model, or on the command line with `models use <provider>:<model>` (`models` lists them).',
+      'A local server found by a scan is registered from the saved scan; if it is not running or has moved, start it and scan again (/scan).',
+    ].join(' ');
   }
 
   /**
@@ -1068,6 +1177,9 @@ export class ProviderRegistry {
     }
 
     this.customModels = result.models;
+    this.customProviderDisplayNames = new Map(result.providers
+      .filter(({ provider }) => loadedNames.has(provider.name))
+      .map(({ provider, config }) => [provider.name, config.displayName]));
     this.catalogWindows.setCustomProviders(result.providers.map(({ config }) => config));
     this._invalidateModelRegistry();
 
@@ -1237,18 +1349,39 @@ export class ProviderRegistry {
   }
 
   /** Kick off async custom provider loading. Called once from bootstrap-owned construction. */
-  initCustomProviders(): void {
+  initCustomProviders(options: {
+    /**
+     * The local servers a scan saved, to register once the custom providers
+     * have loaded (so a saved server cannot take a custom provider's name),
+     * unless another registration of discovered servers came first. `ready()`
+     * resolves after it, so every command that waits for the registry knows a
+     * scanned model saved as the default.
+     */
+    readonly restoreDiscovered?: (() => readonly DiscoveredServer[]) | undefined;
+  } = {}): void {
+    const generation = this.discoveredRegistrations;
+    const restoreDiscovered = (): void => {
+      if (!options.restoreDiscovered || this.discoveredRegistrations !== generation) return;
+      try {
+        const servers = options.restoreDiscovered();
+        if (servers.length > 0) this.registerDiscoveredProviders([...servers]);
+      } catch (error) {
+        logger.warn('[registry] Saved local servers could not be registered', { error: summarizeError(error) });
+      }
+    };
     this._readyPromise = this.loadCustomProviders()
       .then((result) => {
         // Warnings captured in result.warnings, don't console.warn (corrupts TUI)
         // Invalidate the capability cache so custom providers' self-declared
         // capabilities are reflected in subsequent getCapabilityForModel calls.
         this.capabilityRegistry.invalidate();
+        restoreDiscovered();
         this._readyPromise = null;
       })
       .catch((err) => {
         // Not console.warn: it corrupts the TUI. The logger and the provider
         // warning event reach the operator without it.
+        restoreDiscovered();
         this._readyPromise = null;
         const message = `[registry] Custom providers could not be loaded: ${summarizeError(err)}. Their keys will report as not in the registry until a reload succeeds.`;
         logger.warn(message);

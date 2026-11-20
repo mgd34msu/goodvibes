@@ -54,7 +54,8 @@ function itemsOf(value: unknown): unknown[] {
  * on their own: an open question is never hidden behind answered ones.
  */
 async function readInbox(): Promise<InboxLists> {
-  const kinds = ['question', 'decision'] as const;
+  // A report (the answer of a scheduled run or a trigger's turn that named no surface) is shown with the questions, answered `read`.
+  const kinds = ['question', 'report', 'decision'] as const;
   const all = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT }));
   let items = all;
   if (all.length >= LIST_LIMIT) {
@@ -212,7 +213,7 @@ function readQuestions(value: unknown): OwnerQuestion[] {
   if (!Array.isArray(items)) return [];
   return items.flatMap((raw): OwnerQuestion[] => {
     const item = raw as Record<string, unknown>;
-    if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.kind !== 'question' || item.status !== 'open') return [];
+    if (typeof item.id !== 'string' || typeof item.title !== 'string' || (item.kind !== 'question' && item.kind !== 'report') || item.status !== 'open') return [];
     return [{
       id: item.id,
       title: item.title,

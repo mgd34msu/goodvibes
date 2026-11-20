@@ -174,6 +174,11 @@ function toMethodContract(d: GatewayMethodDescriptor): OperatorMethodContract {
     ...(d.recipients !== undefined ? { recipients: d.recipients } : {}),
     ...(d.invokable !== undefined ? { invokable: d.invokable } : {}),
     ...(d.replay ? { replay: d.replay } : {}),
+    // A plugin's method that states nothing is taken to act again on a repeat.
+    repeat: d.repeat ?? (d.replay ? 'keyed' : d.effect === 'read' ? 'safe' : 'unsafe'),
+    // The SDK retries a lost call by itself only when that cannot act twice: a
+    // repeat that changes nothing, or a key it sends itself (Idempotency-Key).
+    ...(d.repeat === 'safe' || (d.replay?.in === 'header' && d.replay.name === 'Idempotency-Key') ? { idempotent: true } : {}),
     ...(d.errorCodes ? { errorCodes: d.errorCodes } : {}),
     ...(d.metadata ? { metadata: d.metadata } : {}),
   };

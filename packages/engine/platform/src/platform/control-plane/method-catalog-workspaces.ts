@@ -42,6 +42,7 @@ export const builtinGatewayWorkspacesMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'workspaces.registrations.add',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Register a Workspace',
     description:
@@ -54,6 +55,7 @@ export const builtinGatewayWorkspacesMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'workspaces.registrations.remove',
+    repeat: 'safe',
     title: 'Unregister a Workspace',
     description:
       'Remove a registered workspace root. Returns { removed: false } when no root with that normalized path was registered, an honest boolean, never a 200 that pretends a phantom root was removed.',

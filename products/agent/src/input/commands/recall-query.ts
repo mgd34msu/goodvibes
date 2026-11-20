@@ -23,7 +23,7 @@ export function getMemorySpine(context: CommandContext): MemorySpineClient | nul
   return context.clients?.memorySpine ?? null;
 }
 
-export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList } =
+export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList, handleRecallEdit } =
   createRecallQueryCommands<CommandContext>(
     (context) => {
       const spine = getMemorySpine(context);
@@ -37,6 +37,12 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
             linksFor: (id) => memory.linksFor(id),
             link: (from, to, relation) => memory.link(from, to, relation),
             delete: (id) => memory.delete(id),
+            update: (id, patch) => memory.update(id, {
+              ...(patch.scope !== undefined ? { scope: patch.scope } : {}),
+              ...(patch.summary !== undefined ? { summary: patch.summary } : {}),
+              ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
+              ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+            }),
           }
         : null;
     },

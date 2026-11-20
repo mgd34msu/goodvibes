@@ -132,7 +132,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     conversation,
     requestRender,
     onSessionIdChanged,
-    cancelPendingRecovery: () => commandContext.cancelPendingRecovery?.() ?? false,
+    cancelSessionWork: () => commandContext.cancelSessionWork?.(),
     isGenerating: () => commandContext.isGenerating?.() ?? false,
     sharedSessionBroker: services.sessionBroker,
     sessionSpine,

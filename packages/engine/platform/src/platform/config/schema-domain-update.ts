@@ -51,13 +51,13 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     key: 'update.auto',
     type: 'boolean',
     default: true,
-    description: 'Daemon self-update: check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (owner-directed default; the previous binary is kept for one-command rollback)',
+    description: 'While-running self-update of this installation (the daemon, and the Agent): check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (the previous binary is kept for one-command rollback). A daemon setting: one value for every program on this machine, kept in the daemon\'s settings file; a project settings file cannot set it. The release installer\'s --no-auto-update sets it false',
   },
   {
     key: 'update.autoUpdateAtLaunch',
     type: 'boolean',
     default: true,
-    description: 'Standalone TUI and Agent binaries check for and install a newer release at launch. Set false to disable launch updates; periodic updates also stop unless update.auto is explicitly enabled',
+    description: 'The terminal app and the Agent check for and install a newer release at launch. Set false to disable launch updates; the Agent\'s while-running updates also stop unless update.auto is explicitly set. A daemon setting: one value for every program on this machine, kept in the daemon\'s settings file; a project settings file cannot set it. The release installer\'s --no-auto-update sets it false',
   },
   {
     key: 'update.launchCheckTimeoutMs',

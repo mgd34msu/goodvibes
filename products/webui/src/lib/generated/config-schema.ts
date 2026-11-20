@@ -948,13 +948,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "web.enabled",
     "type": "boolean",
     "default": true,
-    "description": "Declare the browser-based operator surface as available (status and links). This does not bind a listener: the bundle is served by the control-plane listener when controlPlane.webui.serve is true, so who can reach it follows controlPlane.hostMode and controlPlane.host."
+    "description": "Declare the browser-based operator surface as switched on (its channel status and delivery policy). Where the web UI is, and every link to it, does not depend on it. This does not bind a listener: the bundle is served by the control-plane listener when controlPlane.webui.serve is true, so who can reach it follows controlPlane.hostMode and controlPlane.host."
   },
   {
     "key": "web.hostMode",
     "type": "enum",
     "default": "local",
-    "description": "Declared endpoint mode for the web surface links (local, network or custom). Nothing binds it; exposure of the served bundle follows controlPlane.hostMode.",
+    "description": "Where the web UI's development server listens (local, network or custom), with web.host and web.port; the development server reads it through goodvibes-daemon webui status --json. It is never the web UI's address: the bundle the daemon serves, and every link to it, follow controlPlane.hostMode.",
     "enumValues": [
       "local",
       "network",
@@ -965,20 +965,20 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "web.host",
     "type": "string",
     "default": "127.0.0.1",
-    "description": "Declared host of the web surface endpoint, used for links. Nothing listens on web.host:web.port; the served bundle follows controlPlane.host and controlPlane.port."
+    "description": "Host the web UI's development server binds (with web.hostMode custom). Nothing else listens on web.host:web.port, and no link uses it; the served bundle follows controlPlane.host and controlPlane.port."
   },
   {
     "key": "web.port",
     "type": "number",
     "default": 3423,
-    "description": "Declared port of the web surface endpoint, used for links and development servers. The daemon does not bind it; the served bundle uses controlPlane.port.",
+    "description": "Port the web UI's development server binds. The daemon does not bind it and no link, pairing address, goodvibes web or tailscale serve uses it: the bundle the daemon serves is at the control-plane address (controlPlane.port).",
     "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "web.publicBaseUrl",
     "type": "string",
     "default": "",
-    "description": "Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon's own reachable address when it serves the web app (controlPlane.webui.serve), otherwise the web endpoint binding; a link only reachable on this machine is left out of messages read on other devices."
+    "description": "Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon's own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices."
   },
   {
     "key": "web.staticAssetsDir",
@@ -1039,7 +1039,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "hostedSessions.terminatedRetentionMs",
     "type": "number",
     "default": 86400000,
-    "description": "How long a terminated hosted session's record is kept before it is retired, in milliseconds. Until then it is still listable with its termination reason, so a session that ended can be asked about rather than having simply vanished.",
+    "description": "How long a terminated hosted session's record and transcript are kept before they are retired, in milliseconds. Until then the session is still listable with its termination reason, and its transcript (its reply included) stays readable with sessions.hosted.history by the client that created it, also after a daemon restart.",
     "validationHint": "integer in [0, 31536000000]"
   },
   {
@@ -1969,19 +1969,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and after cluster.masterTimeoutSeconds (90 seconds by default) when one crashes. Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger's node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way."
+    "description": "Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and within about 20 seconds when one crashes (cluster.masterTimeoutSeconds, 15 by default, plus a short election). Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger's node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way."
   },
   {
     "key": "cluster.heartbeatSeconds",
     "type": "number",
-    "default": 30,
+    "default": 5,
     "description": "How often the responsible node tells the others it is still alive, in seconds. Lower means slightly faster notice that a node is alive and more network chatter; it does not by itself shorten a crash takeover, which waits for cluster.masterTimeoutSeconds. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 3600]"
   },
   {
     "key": "cluster.masterTimeoutSeconds",
     "type": "number",
-    "default": 90,
+    "default": 15,
     "description": "How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Used as at least two heartbeats: a value below that is raised to two heartbeats at runtime. Applies after the daemon restarts.",
     "validationHint": "integer in [2, 86400]"
   },
@@ -2009,7 +2009,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.secret",
     "type": "string",
     "default": "",
-    "description": "Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. Inside a group it is not used: the group key signs every coordination message."
+    "description": "Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. When it names a stored secret that cannot be read, this machine sends and takes no coordination messages at all until it can (rather than run unsigned), and `cluster status` says election traffic is unavailable. Inside a group it is not used: the group key signs every coordination message."
   },
   {
     "key": "cluster.keyRotationHours",
@@ -2036,8 +2036,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.rosterGossipSeconds",
     "type": "number",
     "default": 60,
-    "description": "How often this machine shares the group's member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. The member list is checked on a 30 second timer, so any value below 30 behaves as 30. Higher means changes settle more slowly. Applies after the daemon restarts.",
+    "description": "How often this machine tells the others which revision of the group's shared settings and of its record (members, removals, key generations, devices, users) it holds, in seconds. A change is sent to every machine when it is made; this is how a machine that missed one (a lost message, or switched off at the time) notices and takes it. Checked on a 30 second timer, so any value below 30 behaves as 30. Higher means a missed change settles more slowly. Applies after the daemon restarts.",
     "validationHint": "integer in [10, 3600]"
+  },
+  {
+    "key": "cluster.revocationRetentionMinutes",
+    "type": "number",
+    "default": 43200,
+    "description": "How long a removed or revoked entry (a deleted schedule, a revoked device token, user, grant or peer) is kept on the group's record before it is dropped, in minutes; 43200 (30 days) by default. A machine that has not heard the group for longer than this, or has never synced with the group it is in, takes the group's record as the truth when it returns: what the group no longer holds is dropped on that machine, not brought back, unless that machine made it after it last synced, and `cluster status` lists what was dropped. It must span four gossip rounds: at least 4 x cluster.rosterGossipSeconds (counted as 30 when lower), in minutes rounded up, so 4 with the default gossip; a lower value is refused naming the minimum, and one in a hand-edited file is raised to it. Set the same value on every machine.",
+    "validationHint": "integer in [1, 525600]"
   },
   {
     "key": "cluster.nodeName",
@@ -3126,13 +3133,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "service.enabled",
     "type": "boolean",
     "default": true,
-    "description": "Enable service-install and daemon-management features (install/start/stop/status/autostart verbs), including the standalone daemon's boot-time self-promotion to a supervised service at its first idle moment. Set false to keep spawned daemons session-only (nothing installed or promoted)."
+    "description": "Whether this machine runs the daemon as a service. On, a daemon started by hand installs the service at its first idle moment and doctor reports a missing or stopped service; off (the installers' --no-service, or goodvibes-daemon uninstall-service), nothing installs one and doctor does not ask for one. goodvibes-daemon install-service turns it on. A daemon setting: one value every program and installer reads, in the daemon's settings file."
   },
   {
     "key": "service.autostart",
     "type": "boolean",
     "default": false,
-    "description": "Whether the daemon's service starts on its own at login. Changing it on the terminal app's settings screen installs and enables the service (on) or disables it (off); set any other way (a settings file, a command, Agent, the daemon) it is only recorded, and goodvibes status and doctor read it to warn about an installed service with it off. goodvibes-daemon install-service makes the service start at login whatever its value"
+    "description": "Whether the daemon's service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /config set, the Agent's /settings set, goodvibes-daemon config set, the API, or an edit of the daemon's settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon's settings file."
   },
   {
     "key": "service.restartOnFailure",
@@ -3691,13 +3698,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "update.auto",
     "type": "boolean",
     "default": true,
-    "description": "Daemon self-update: check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (owner-directed default; the previous binary is kept for one-command rollback)"
+    "description": "While-running self-update of this installation (the daemon, and the Agent): check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (the previous binary is kept for one-command rollback). A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false"
   },
   {
     "key": "update.autoUpdateAtLaunch",
     "type": "boolean",
     "default": true,
-    "description": "Standalone TUI and Agent binaries check for and install a newer release at launch. Set false to disable launch updates; periodic updates also stop unless update.auto is explicitly enabled"
+    "description": "The terminal app and the Agent check for and install a newer release at launch. Set false to disable launch updates; the Agent's while-running updates also stop unless update.auto is explicitly set. A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false"
   },
   {
     "key": "update.launchCheckTimeoutMs",
@@ -3925,12 +3932,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "",
     "description": "Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)"
-  },
-  {
-    "key": "behavior.suggestAlternativeOnProviderFail",
-    "type": "boolean",
-    "default": false,
-    "description": "Show alternative model suggestion when current provider fails non-transiently"
   },
   {
     "key": "behavior.hitlMode",
@@ -4592,7 +4593,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "provider.fallbackModels",
     "type": "object",
     "default": [],
-    "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure. Only the terminal app's interactive session moves a turn to the next model; `goodvibes run`, the Agent and the daemon's hosted sessions do not, and at most name the next model in this order when a turn fails.",
+    "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure, in every program that runs a turn: the terminal app, `goodvibes run`, the Agent, the daemon's hosted sessions and its agents. The model that answers instead is named in a [Failover] line, and the next turn starts on the selected model again. A provider may be named by its id or display name.",
     "validationHint": "list of provider-qualified model ids, for example [\"anthropic:claude-sonnet-5\"]"
   },
   {

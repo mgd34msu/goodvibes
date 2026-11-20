@@ -39,6 +39,8 @@ import type {
 } from './approval-broker.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
+import { currentTurnSurfaceId } from '../security/turn-boundary.js';
+import { guestChannelOf } from '../gate/surface-authority.js';
 
 /** A pending ask's resolvers and its expiry timer, as the broker holds them. */
 export interface PendingApprovalEntry {
@@ -127,6 +129,25 @@ function joinApproval(
   });
 }
 
+/** Metadata key naming the channel whose guest's turn raised an ask; the ask is the owner's and is delivered to him. */
+export const APPROVAL_GUEST_CHANNEL_METADATA = 'guestChannel';
+
+/** The channel whose guest's turn raised an ask, or undefined for any other ask. */
+export function approvalGuestChannel(approval: { readonly metadata: Readonly<Record<string, unknown>> }): string | undefined {
+  const value = approval.metadata[APPROVAL_GUEST_CHANNEL_METADATA];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * An ask raised inside a guest's turn (someone a channel admits who is not
+ * its owner) records that channel, read from the turn's scope, never from the
+ * request: its prompt goes to the owner's own conversation, not the guest's.
+ */
+function withGuestChannel(metadata: Record<string, unknown>): Record<string, unknown> {
+  const channel = guestChannelOf(currentTurnSurfaceId());
+  return channel === undefined ? metadata : { ...metadata, [APPROVAL_GUEST_CHANNEL_METADATA]: channel };
+}
+
 /**
  * Raise an ask through the shared broker.
  *
@@ -184,7 +205,7 @@ export async function raiseSharedApproval(
     createdAt: now,
     updatedAt: now,
     ...(input.timeoutMs && input.timeoutMs > 0 ? { expiresAt: now + input.timeoutMs } : {}),
-    metadata: input.metadata ?? {},
+    metadata: withGuestChannel(input.metadata ?? {}),
     audit: [deps.buildAudit('created', 'approval-broker', 'service')],
   };
   const timer = input.timeoutMs && input.timeoutMs > 0

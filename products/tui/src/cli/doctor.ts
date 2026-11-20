@@ -1,9 +1,17 @@
 import { describeConfiguredPermissions, describePermissionMode } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { PermissionManager, createPermissionConfigReader, describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell-paths';
+import { resolveAndValidatePath, resolveWritablePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { decisionModelUse } from '@goodvibes-jev/engine/errors';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import type { PermissionCheckResult } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
-import { createPolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { createPolicyRuntimeState, createUserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
@@ -137,6 +145,29 @@ function toolConfigKey(tool: string): string {
   return map[tool] ?? tool;
 }
 
+/** The tools that read paths and refuse one outside the project root in every mode but yolo (tools/index.ts). */
+const CONTAINED_READ_TOOLS = new Set(['read', 'find', 'inspect', 'repo_map', 'analyze']);
+/** The tools that change files and refuse a path outside the project root in every mode. */
+const CONTAINED_WRITE_TOOLS = new Set(['write', 'edit']);
+
+/**
+ * What the tool itself does with the call's path after the gate allowed it:
+ * read tools refuse a path outside the project root unless the mode in force
+ * is yolo, and write tools refuse one in every mode. Undefined when the tool
+ * has no path or keeps it.
+ */
+function containmentRefusal(tool: string, args: Record<string, unknown>, workingDirectory: string, mode: string): string | undefined {
+  const path = typeof args.path === 'string' ? args.path : undefined;
+  if (path === undefined || path.length === 0) return undefined;
+  try {
+    if (CONTAINED_WRITE_TOOLS.has(tool)) resolveWritablePath(path, workingDirectory);
+    else if (CONTAINED_READ_TOOLS.has(tool)) resolveAndValidatePath(path, workingDirectory, mode === 'yolo');
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutput> {
   const json = options.outputFormat === 'json';
   const { args } = options;
@@ -145,33 +176,101 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
   }
   const config = options.configManager;
   const target = resolveExplainTarget(args);
-  const mode = String(config.get('permissions.mode') ?? 'prompt');
+  const savedMode = String(config.get('permissions.mode') ?? 'ask-me');
   const autoApprove = config.get('behavior.autoApprove') === true;
+  const inForce = describePermissionModeInForce(config);
 
-  // Reuse the platform's OWN PermissionManager. A requestPermission handler that
-  // returns a denial lets the machinery run to its real terminal layer without
-  // actually prompting; sourceLayer 'user_prompt' is then reported as ASK.
-  // Feature flags come from live config so the policy engine layer is walked
-  // exactly when the running app would walk it.
+  // The gate the running app uses: its feature flags and managed policy from live config, the
+  // owner's remembered rules, and the decision model with its decision log in this user's home.
+  // An ask goes nowhere: the handler answers "no" without prompting, and the result is reported
+  // as ASK. Nothing is remembered, run or changed. A judgment it needs is a real request to the
+  // decision model, bounded by judgment.decisionDeadlineMs like any permission decision.
   const featureFlags = createFeatureFlagManager();
   featureFlags.loadFromConfig({ flags: deriveFeatureStates(config) });
   const policyEngineOn = featureFlags.isEnabled('permissions-policy-engine');
-  // The same policy state the running app composes, with the configured bundle loaded.
   const policyRuntimeState = createPolicyRuntimeState(config, featureFlags);
-  const manager = new PermissionManager(
-    async () => ({ approved: false, remember: false }),
-    createPermissionConfigReader(config),
-    policyRuntimeState,
-    null,
-    featureFlags,
-  );
-
-  const category = manager.getCategory(target.tool, target.args);
-  const result = await manager.checkDetailed(target.tool, target.args);
-  const verdict = verdictOf(result);
-  const decidedLayer = decidedLayerLabel(result, autoApprove);
+  const shellPaths = createShellPathService({ workingDirectory: options.workingDirectory, homeDirectory: options.homeDirectory });
+  const scope = createAsyncDisposalScope('doctor explain');
+  const controller = new AbortController();
+  let result: PermissionCheckResult;
+  let category: string;
+  let settledBy: 'fact' | 'owner-only' | 'judgment';
+  let rulesNote: string | undefined;
+  try {
+    const secretsManager = createRuntimeSecretsManager({
+      projectRoot: options.workingDirectory,
+      globalHome: options.homeDirectory,
+      surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+      configManager: config,
+      daemonHome: resolveGoodVibesDaemonHome(options.homeDirectory),
+    });
+    composeJudgment({
+      config,
+      secrets: secretsManager,
+      env: process.env,
+      stateRoot: shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT),
+      disposal: scope.registry,
+    });
+    const ruleStore = createUserPermissionRuleStore(config);
+    let rules: typeof ruleStore | null = ruleStore;
+    try { await ruleStore.awaitReady(); }
+    catch (error) {
+      // The running app refuses every call while the rules file cannot be read; say so.
+      rules = null;
+      rulesNote = `remembered rules could not be read (${error instanceof Error ? error.message : String(error)}); the running app refuses tool calls until the file loads`;
+    }
+    const manager = new PermissionManager(
+      async () => ({ approved: false, remember: false }),
+      createPermissionConfigReader(config),
+      policyRuntimeState,
+      null,
+      featureFlags,
+      rules,
+    );
+    category = manager.getCategory(target.tool, target.args);
+    // Whether this call is one the decision model is asked about at all (no request: the classifier only).
+    settledBy = (await manager.previewDecision(target.tool, target.args, undefined, controller.signal)).decided.kind;
+    try {
+      result = await manager.checkDetailed(target.tool, target.args, undefined, { signal: controller.signal });
+    } catch (error) {
+      // Under Decision Model Only a decision the model could not answer stops the call: say so instead of a stack.
+      if (!(error instanceof JudgmentError)) throw error;
+      const stopped = `not consulted: ${error.message} judgment.policy is Decision Model Only, so the call stops with this reason and nothing is asked.`;
+      if (json) {
+        return { output: JSON.stringify({ subject: args.join(' '), tool: target.tool, category, args: target.args, mode: inForce.mode, savedMode,
+          ...(inForce.reason !== undefined ? { modeReason: inForce.reason } : {}), decisionModel: stopped, decisionModelConsulted: false,
+          verdict: 'DENY', because: error.message }, null, 2), exitCode: 0 };
+      }
+      return { output: [
+        'GoodVibes doctor: explain permission decision',
+        `  subject     : ${args.join(' ')}`,
+        `  resolved as : ${target.interpretation}`,
+        `  mode        : ${inForce.mode} (${describePermissionMode(inForce.mode).label}) in force${inForce.mode === inForce.chosen ? '' : `; set: ${savedMode}`}`,
+        `  decision model: ${stopped}`,
+        '',
+        'Decision: DENY',
+        `  because    : ${error.message}`,
+      ].join('\n'), exitCode: 0 };
+    }
+  } finally {
+    controller.abort();
+    await scope.close();
+  }
+  const containment = result.approved ? containmentRefusal(target.tool, target.args, options.workingDirectory, inForce.mode) : undefined;
+  const verdict = containment !== undefined ? 'DENY' : verdictOf(result);
+  const decidedLayer = containment !== undefined ? `The ${target.tool} tool (path containment)` : decidedLayerLabel(result, autoApprove);
   const toolKey = toolConfigKey(target.tool);
-  const because = reasonExplanation(result, mode, autoApprove, toolKey);
+  const because = containment !== undefined
+    ? `${containment}. The gate allowed the call; the ${target.tool} tool refuses a path outside the project root${CONTAINED_WRITE_TOOLS.has(target.tool) ? ' in every mode' : ' in every mode except yolo'}.`
+    : reasonExplanation(result, inForce.mode, autoApprove, toolKey);
+  // Whether the decision model was asked: a fact or an owner-only item never asks it; a judgment call
+  // decided without one says why (none set, No Decision Model, or the set model failing).
+  const withoutModel = result.decisionPolicy?.operation === 'no-decision-model' ? decisionModelUse(result.decisionPolicy).line : undefined;
+  const consulted = settledBy === 'judgment' && withoutModel === undefined;
+  const decisionModel = settledBy === 'fact' ? 'not needed: a rule, a setting or the mode settled this call'
+    : settledBy === 'owner-only' ? 'not needed: only you decide this call'
+      : withoutModel !== undefined ? `not consulted: ${withoutModel} The verdict is the one the gate gives without a decision model.`
+        : 'consulted';
 
   if (json) {
     return {
@@ -180,11 +279,17 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
         tool: target.tool,
         category,
         args: target.args,
-        mode,
+        mode: inForce.mode,
+        savedMode,
+        ...(inForce.reason !== undefined ? { modeReason: inForce.reason } : {}),
         autoApprove,
         configuredPosture: describeConfiguredPermissions(config),
         permissionEvaluated: true,
         policyEngine: policyEngineOn ? 'enabled' : 'disabled',
+        decisionModel,
+        decisionModelConsulted: consulted,
+        ...(rulesNote !== undefined ? { rememberedRules: rulesNote } : {}),
+        ...(containment !== undefined ? { containment } : {}),
         verdict,
         decidedLayer,
         sourceLayer: result.sourceLayer,
@@ -205,10 +310,13 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     `  args         : ${JSON.stringify(target.args)}`,
     '',
     'Current settings:',
-    `  mode        : ${mode} (${describePermissionMode(mode).label})`,
+    `  mode        : ${inForce.mode} (${describePermissionMode(inForce.mode).label}) in force${inForce.mode === inForce.chosen ? '' : `; set: ${savedMode}`}`,
+    ...(inForce.reason !== undefined ? [`                not ${inForce.chosen}, because ${inForce.reason}`] : []),
     `  autoApprove : ${autoApprove ? 'yes (behavior.autoApprove)' : 'no'}`,
     `  posture     : ${describeConfiguredPermissions(config).detail}`,
     `  policyEngine: ${policyEngineOn ? 'enabled' : 'disabled'} (permissions.engine)`,
+    `  rules       : ${rulesNote ?? 'the remembered rules of this project were read'}`,
+    `  decision model: ${decisionModel}`,
     '',
     'Analysis (from the platform analyzer):',
     `  risk        : ${a.riskLevel.toUpperCase()} (${a.classification})`,
@@ -220,15 +328,14 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     ...(result.boundary ? [`  boundary    : ${result.boundary.passed ? 'passed' : `not passed (${result.boundary.refusedBy ?? 'unspecified'})`}`] : []),
     ...(result.reading ? [`  stakes      : ${result.reading.stakes}`] : []),
     ...(result.preset ? [`  preset      : ${result.preset.preset} -> ${result.preset.action}`] : []),
+    `  gate        : ${result.approved ? 'allowed' : verdictOf(result) === 'ASK' ? 'asks the owner' : 'refused'} (${result.sourceLayer}/${result.reasonCode})`,
+    ...(containment !== undefined ? [`  tool        : refused (${containment})`] : []),
     `  source      : ${decidedLayer}   ← DECIDED HERE`,
     '',
     `Decision: ${verdict}`,
-    `  decided by : ${result.sourceLayer} (${result.reasonCode})`,
+    `  decided by : ${containment !== undefined ? `${target.tool} tool path containment` : `${result.sourceLayer} (${result.reasonCode})`}`,
     `  because    : ${because}`,
   ];
-  if (policyEngineOn) {
-    lines.push('  note        : the runtime policy engine is enabled, but a one-shot diagnostic loads no promoted policy bundle, so its rule set is empty here.');
-  }
   return { output: lines.join('\n'), exitCode: 0 };
 }
 

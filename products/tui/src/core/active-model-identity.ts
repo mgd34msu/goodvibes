@@ -36,38 +36,6 @@ export interface FailoverTurnRecord {
   readonly servingRegistryKey: string;
 }
 
-/**
- * Mutable holder for the failover record, owned by the shell composition root
- * (main.ts) and shared between the stream-event wiring that sets it and the
- * render frame that reads it.
- */
-export interface FailoverTurnState {
-  /** The active record, or null when no failover is in effect. */
-  current(): FailoverTurnRecord | null;
-  /**
-   * Record a failover switch. On a second switch within the same turn the
-   * originally-configured key is preserved, divergence is always reported
-   * against the user's own selection.
-   */
-  begin(record: FailoverTurnRecord): void;
-  /** Drop the record, called only after serving is actually back on the configured selection. */
-  clear(): void;
-}
-
-/** Create an empty FailoverTurnState. */
-export function createFailoverTurnState(): FailoverTurnState {
-  let active: FailoverTurnRecord | null = null;
-  return {
-    current: () => active,
-    begin(record: FailoverTurnRecord): void {
-      active = active === null
-        ? record
-        : { configuredRegistryKey: active.configuredRegistryKey, servingRegistryKey: record.servingRegistryKey };
-    },
-    clear(): void { active = null; },
-  };
-}
-
 /** What the live provider registry reports as serving this frame. */
 export interface ServingModelIdentity {
   readonly id: string;
@@ -84,7 +52,11 @@ export interface ActiveModelInputs {
   readonly configuredLabel: string | undefined;
   /** The configured selection's provider id (session `runtime.provider`). */
   readonly configuredProvider: string | undefined;
-  /** The live failover record, when one is in effect. */
+  /**
+   * The engine's failover in force for the running turn (the orchestrator's
+   * turnFailoverInForce), when one is: the model answering the turn instead of
+   * the registry's selection.
+   */
   readonly failover: FailoverTurnRecord | null;
 }
 
@@ -119,6 +91,16 @@ export interface ActiveModelDisplay {
  * than the `provider:model` registry key) does not read as permanent divergence.
  */
 export function resolveActiveModelDisplay(input: ActiveModelInputs): ActiveModelDisplay {
+  // A failover inside the turn leaves the selection alone; the model answering is the record's.
+  const failoverServing = input.failover?.servingRegistryKey;
+  const separator = failoverServing?.indexOf(':') ?? -1;
+  const serving: ServingModelIdentity = failoverServing && separator > 0
+    ? { id: failoverServing.slice(separator + 1), provider: failoverServing.slice(0, separator), registryKey: failoverServing }
+    : input.serving;
+  return resolveDisplayFor({ ...input, serving });
+}
+
+function resolveDisplayFor(input: ActiveModelInputs): ActiveModelDisplay {
   const servingKey = input.serving.registryKey;
   const configuredKey = input.configuredRegistryKey;
   const diverged = Boolean(

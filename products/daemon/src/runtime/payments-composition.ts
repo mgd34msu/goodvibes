@@ -70,6 +70,13 @@ export interface PaymentsCompositionOptions {
    * gates.ts: on a clustered install the wrong answer is a double-spend.
    */
   readonly isPaymentsLeader: () => boolean;
+  /**
+   * In a group: where the other machines' spend is read and this machine's is
+   * told (the authority record), so the daily budget is spent once in the group.
+   */
+  readonly groupSpend?: import('@goodvibes-jev/engine/platform/platform/payments').GroupSpendSource | undefined;
+  /** The name of the machine that runs payments when this one does not; named in the refusal. */
+  readonly paymentsHolder?: (() => string | null) | undefined;
   /** Where the checkout pair reads the browser-checkout seam; see this file's header. */
   readonly checkoutSeam: BrowserCheckoutSeamHolder['get'];
   /** Delivers a purchase notice; the SAME router every other channel send in this daemon uses. */
@@ -167,6 +174,8 @@ export interface PaymentsServices {
   readonly ready: Promise<void>;
   /** Borrowed by DaemonConfig; this payment composition owns its lifetime. */
   readonly paymentReplies: PaymentReplyInbox;
+  /** This machine took the group's payments role: recover what a previous holder left interrupted here. */
+  readonly recoverAsLeader: () => Promise<void>;
   /** Await before handing this catalog to a replacement composition. */
   readonly close: () => Promise<void>;
   /** Legacy synchronous teardown; new composition roots must await close. */
@@ -271,6 +280,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       || operations.list().some(operation => operation.totalMinorUnits !== null
         && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
   );
+  if (options.groupSpend) budget.attachGroupSpend(options.groupSpend);
   const channelNotifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);
   const notifier = options.ownerInbox === undefined
     ? channelNotifier
@@ -340,6 +350,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     budget,
     config,
     isPaymentsLeader: options.isPaymentsLeader,
+    ...(options.paymentsHolder ? { paymentsHolder: options.paymentsHolder } : {}),
     checkout,
   });
   let closing: Promise<void> | undefined;
@@ -368,7 +379,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     return closing;
   };
   return {
-    cards, purchases, budget, paymentReplies, ready: registration.ready, close,
+    cards, purchases, budget, paymentReplies, ready: registration.ready, recoverAsLeader: registration.recoverAsLeader, close,
     unregister: () => { void close(); },
   };
 }

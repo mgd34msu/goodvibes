@@ -2,21 +2,16 @@ import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core'
 import type { SpokenTurnRuntime } from '../audio/spoken-turn-wiring.ts';
 
 /**
- * Stop spoken output and cancel the active turn, including admission and recovery.
+ * Stop spoken output and cancel the active turn, including its admission.
  * Returns whether speech was stopped, so that keypress does not also quit.
  */
 export function createCancelGeneration(
   orchestrator: Orchestrator,
   spokenTurns: Pick<SpokenTurnRuntime, 'stop'>,
-  cancelPendingRecovery?: () => boolean,
 ): () => boolean {
   return () => {
-    // TURN_ERROR finalizes the platform attempt before our async reading/memory
-    // preparation finishes. Esc/Ctrl+C must revoke that owned recovery even
-    // though isThinking is already false and abort() would emit no TURN_CANCEL.
-    const cancelledRecovery = cancelPendingRecovery?.() === true;
     const stoppedSpeech = spokenTurns.stop('Spoken output stopped.');
-    if (orchestrator.isThinking || orchestrator.isTurnInFlight || cancelledRecovery) {
+    if (orchestrator.isThinking || orchestrator.isTurnInFlight) {
       orchestrator.abort();
     }
     return stoppedSpeech;

@@ -7,6 +7,7 @@
  * from providers.list()'s tier+pricing; the capability filter reads each model's
  * capability flags and renders disabled when a daemon sends none).
  */
+import { OwnerApprovalPendingError } from '../../lib/owner-approval';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog } from '../ui/Dialog';
@@ -182,7 +183,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       // Re-read so the dialog shows what the daemon holds now; the refusal says what, if anything, was saved.
       void queryClient.invalidateQueries({ queryKey: ['config'] });
       void queryClient.invalidateQueries({ queryKey: ['models'] });
-      toast({ title: 'Model selection failed', description: formatError(error), tone: 'danger' });
+      if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Model selection failed', description: formatError(error), tone: 'danger' });
     },
   });
 
@@ -196,7 +197,7 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       await queryClient.invalidateQueries({ queryKey: ['config'] });
     },
     onError: (error: unknown) => {
-      toast({ title: 'Failed to update', description: formatError(error), tone: 'danger' });
+      if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to update', description: formatError(error), tone: 'danger' });
     },
   });
 

@@ -85,6 +85,8 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
+import { createTurnFailover, describeFailoverCost, readFallbackOrder, type TurnFailoverModel } from '../providers/failover.js';
+import type { ProviderRegistry } from '../providers/registry.js';
 import { attachToolResultImages } from '../core/tool-result-images.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -231,6 +233,12 @@ export interface CompanionChatManagerConfig {
    * not attached and the model is told so.
    */
   readonly modelReadsImages?: ((route: QueuedCompanionTurn['route']) => boolean) | undefined;
+  /**
+   * The registry a provider failure is decided against (providers/failover.ts):
+   * the turn moves to the next model of `provider.fallbackModels` (read from
+   * `configManager`). Absent: a provider failure ends the turn.
+   */
+  readonly failoverRegistry?: Pick<ProviderRegistry, 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getCurrentModel' | 'resolveModelPricing'> | undefined;
   readonly eventPublisher: CompanionChatEventPublisher;
   /**
    * ToolRegistry to use for executing tool calls emitted by the LLM.
@@ -291,6 +299,7 @@ export class CompanionChatManager {
   private readonly provider: CompanionLLMProvider;
   private readonly resolveDefaultRoute: CompanionChatManagerConfig['resolveDefaultRoute'];
   private readonly modelReadsImages: CompanionChatManagerConfig['modelReadsImages'];
+  private readonly failoverRegistry: CompanionChatManagerConfig['failoverRegistry'];
   private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
   private readonly eventPublisher: CompanionChatEventPublisher;
   private readonly toolRegistry: ToolRegistry | null;
@@ -328,6 +337,7 @@ export class CompanionChatManager {
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.runtimeBus = config.runtimeBus ?? null;
     this.configManager = config.configManager;
+    this.failoverRegistry = config.failoverRegistry;
     this.artifactStore = config.artifactStore ?? null;
     this.idleActiveMs = config.idleActiveMs ?? DEFAULT_IDLE_ACTIVE_MS;
     this.idleEmptyMs = config.idleEmptyMs ?? DEFAULT_IDLE_EMPTY_MS;
@@ -1220,6 +1230,10 @@ export class CompanionChatManager {
     });
 
     let decisionRoute: import('../providers/decision-router.js').DecisionRouterRouteInfo | undefined;
+    // Failover moves this turn made, their [Failover] lines, and why it stopped when nothing was left to try.
+    const failoverMoves: { readonly from: string; readonly to: string; readonly because: string }[] = [];
+    const failoverLines: string[] = [];
+    let failoverStop: string | undefined;
     let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
@@ -1231,10 +1245,38 @@ export class CompanionChatManager {
       writer = history;
 
       const toolRegistry = this.toolRegistry;
+      // A provider failure moves the turn along provider.fallbackModels (providers/failover.ts); the
+      // reply's metadata says which model answered, and a stop says why on the error.
+      const registry = this.failoverRegistry;
+      const currentModel = (): TurnFailoverModel => {
+        if (route.model === null || route.provider === null) {
+          const selected = registry!.getCurrentModel();
+          return { registryKey: selected.registryKey, provider: selected.provider, displayName: selected.displayName };
+        }
+        const registryKey = route.model.startsWith(`${route.provider}:`) ? route.model : `${route.provider}:${route.model}`;
+        return { registryKey, provider: route.provider, displayName: route.model };
+      };
+      const turnFailover = registry ? createTurnFailover({
+        registry,
+        fallbackOrder: () => readFallbackOrder(this.configManager?.get('provider.fallbackModels')),
+        current: currentModel,
+        switchTo: (choice) => {
+          failoverMoves.push({ from: currentModel().registryKey, to: choice.registryKey, because: choice.because });
+          route = { ...route, provider: choice.provider, model: choice.registryKey.slice(choice.registryKey.indexOf(':') + 1) };
+        },
+        notify: (line, level) => {
+          if (level === 'error') failoverStop = line;
+          else failoverLines.push(line);
+        },
+        describeCost: (from, to) => describeFailoverCost((modelId, providerId) => registry.resolveModelPricing(modelId, providerId), from, to),
+      }) : undefined;
+      // The text a failed attempt streamed is not the answer: the next model's replaces it.
+      let attemptBase = '';
       // One request of the turn. The closing request after the round limit asks
       // for an answer without tools, under the finalizer prompt.
       const request = async ({ tools, signal, onDelta }: TurnRequest): Promise<TurnModelResponse> => {
         uncommittedContent = '';
+        attemptBase = assistantContent;
         const stream = this.provider.chatStream([...conversation.getMessagesForLLM()], {
           routingContext: { sessionId, turnId, ...(tools && userMsg ? { prompt: userMsg.content } : {}) },
           systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(tools
@@ -1282,7 +1324,8 @@ export class CompanionChatManager {
               break;
             }
             case 'error':
-              throw new Error(chunk.error ?? 'Provider streaming error');
+              // The failure itself when the stream kept it, so a provider failure can fail over.
+              throw chunk.failure instanceof Error ? chunk.failure : new Error(chunk.error ?? 'Provider streaming error');
             case 'done':
               if (chunk.decisionRoute) decisionRoute = chunk.decisionRoute;
               if (chunk.usage) actualUsage = {
@@ -1300,6 +1343,13 @@ export class CompanionChatManager {
       await runTurn({
         signal: abortSignal,
         request,
+        ...(turnFailover ? {
+          failOver: (error: unknown) => {
+            const moved = turnFailover(error);
+            if (moved) { assistantContent = attemptBase; uncommittedContent = ''; }
+            return moved;
+          },
+        } : {}),
         conversation: {
           addAssistantMessage: (content, options) => {
             history.addAssistantMessage(content, options);
@@ -1352,7 +1402,11 @@ export class CompanionChatManager {
         id: assistantMessageId,
         sessionId,
         role: 'assistant',
-        ...(decisionRoute ? { metadata: { decisionRoute, usage: actualUsage } } : {}),
+        ...(decisionRoute || failoverMoves.length > 0 ? { metadata: {
+          ...(decisionRoute ? { decisionRoute, usage: actualUsage } : {}),
+          // Which model answered after a provider failure, and the [Failover] lines that say so.
+          ...(failoverMoves.length > 0 ? { failover: { moves: failoverMoves, answeredBy: failoverMoves[failoverMoves.length - 1]!.to, notices: failoverLines } } : {}),
+        } } : {}),
         content: assistantContent,
         attachments: [],
         createdAt: now,
@@ -1366,14 +1420,17 @@ export class CompanionChatManager {
         body: assistantContent,
         source: 'companion-chat-assistant',
         timestamp: now,
+        ...(failoverMoves.length > 0 ? { metadata: { failover: { moves: failoverMoves, answeredBy: failoverMoves[failoverMoves.length - 1]!.to, notices: failoverLines } } } : {}),
       };
 
       publish({ type: 'turn.completed', sessionId, turnId, assistantMessageId, envelope: completedEnvelope });
       this.resolvePendingReply(userMessageId, { messageId: userMessageId, assistantMessageId, response: assistantContent });
     } catch (err: unknown) {
       if (!abortSignal.aborted) {
+        // A provider failure with nothing left in the fallback order says why nothing else was tried.
+        const reported = failoverStop ? new Error(`${err instanceof Error ? err.message : String(err)}\n${failoverStop}`) : err;
         this.recordFailedTurn(session, {
-          error: err, turnId, userMessageId, assistantMessageId, writer,
+          error: reported, turnId, userMessageId, assistantMessageId, writer,
           assistantContent, uncommittedContent, publish,
         });
       } else {

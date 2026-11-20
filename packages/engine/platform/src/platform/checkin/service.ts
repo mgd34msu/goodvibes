@@ -31,7 +31,7 @@ import { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
 import { validateSchedule } from '../automation/schedules.js';
 import { isQuietHours, parseQuietHours } from './quiet-hours.js';
 import { readConsumerSetting } from '../config/profile-fallback.js';
-import { CHANNEL_DELIVERY_SURFACE_KINDS, parseChannelDeliveryTarget } from '../channels/delivery/types.js';
+import { deliveryChannelProblem } from '../channels/delivery/types.js';
 import type { CheckinReceiptStore } from './receipts.js';
 import {
   CHECKIN_CONFIG_KEYS,
@@ -79,6 +79,13 @@ export interface CheckinServiceDeps {
   readonly receipts: CheckinReceiptStore;
   /** The automation manager the scheduled check-in job is synced onto (optional in tests). */
   readonly automation?: Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'attachCheckinEvaluator'> | undefined;
+  /**
+   * False when another machine in this group runs the scheduled check-in (it
+   * holds the group's check-in role, cluster/roles.ts). Every machine holds
+   * the job, made from the replicated checkin.* settings; only one runs it.
+   * Absent: this machine runs it.
+   */
+  readonly runsHere?: (() => boolean) | undefined;
   /** Injectable clock for quiet-hours tests. */
   readonly now?: (() => number) | undefined;
   readonly onRetry?: ((progress: JudgmentRetryProgress) => void) | undefined;
@@ -111,10 +118,9 @@ export class CheckinConfigError extends Error {
 }
 
 /** Why a delivery channel names no surface a check-in can be delivered to; undefined when it does. */
-function deliveryChannelProblem(channel: string): string | undefined {
-  const { surfaceKind } = parseChannelDeliveryTarget(channel);
-  if ((CHANNEL_DELIVERY_SURFACE_KINDS as readonly string[]).includes(surfaceKind ?? '')) return undefined;
-  return `deliveryChannel "${channel}" names no delivery surface ("${surfaceKind ?? ''}" is not one of ${CHANNEL_DELIVERY_SURFACE_KINDS.join(', ')})`;
+function checkinChannelProblem(channel: string): string | undefined {
+  const problem = deliveryChannelProblem(channel);
+  return problem ? `deliveryChannel ${problem}` : undefined;
 }
 
 const DELIVERY_CHANNEL_EXAMPLE = 'Set deliveryChannel to a surface, optionally with an address, for example "slack:C123" or "telegram".';
@@ -235,7 +241,7 @@ export class CheckinService {
         'Use 24-hour HH:MM-HH:MM in local time, for example "22:00-08:00", or an empty string for none.');
     }
     const named = input.deliveryChannel?.trim();
-    const channelProblem = named ? deliveryChannelProblem(named) : undefined;
+    const channelProblem = named ? checkinChannelProblem(named) : undefined;
     if (channelProblem) throw new CheckinConfigError(`${channelProblem}.`, 'deliveryChannel', DELIVERY_CHANNEL_EXAMPLE);
     if (input.enabled === true || input.deliveryChannel !== undefined) {
       const current = this.getConfig();
@@ -349,6 +355,11 @@ export class CheckinService {
    * scheduled run whose job was removed, disabled or redefined sends nothing.
    */
   async evaluate(trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
+    // The group runs the scheduled check-in once, on the machine holding its
+    // role; asked for by hand, it runs where it was asked.
+    if (trigger === 'scheduled' && this.deps.runsHere && !this.deps.runsHere()) {
+      return { outcome: 'skipped', summary: 'Another machine in this group runs the scheduled check-in.' };
+    }
     // One run at a time: a manual run overlapping a scheduled one would each judge
     // and deliver, contacting the owner twice about the same state.
     if (this.evaluating) {
@@ -407,7 +418,7 @@ export class CheckinService {
         if (!config.enabled) return await this.record(trigger, ranAt, 'skipped-disabled', 'check-in disabled', {});
         if (isQuietHours(ranAt, config.quietHours)) return await this.record(trigger, ranAt, 'skipped-quiet-hours', 'quiet hours', {});
         const channel = config.deliveryChannel.trim();
-        const channelProblem = channel ? deliveryChannelProblem(channel) : undefined;
+        const channelProblem = channel ? checkinChannelProblem(channel) : undefined;
         if (channelProblem) {
           // Refused before any model is asked: no judgment can be delivered to a surface that does not exist.
           return await this.record(trigger, ranAt, 'error', 'not assembled', { error: `${channelProblem}. ${DELIVERY_CHANNEL_EXAMPLE}` });

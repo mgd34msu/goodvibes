@@ -87,6 +87,14 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     content: { kind: 'string' },
     accumulated: { kind: 'string' },
   },
+  AUTHORITY_CHANGED: {
+    kinds: { kind: 'string[]' },
+    ids: { kind: 'string[]' },
+    change: { kind: 'enum', values: ['absorbed', 'issued', 'revoked', 'updated'] },
+    rev: { kind: 'number' },
+    origin: { kind: 'string' },
+    cascade: { kind: 'string[]' },
+  },
   AUTH_FAILED: {
     usernameAttempted: { kind: 'string' },
     clientIp: { kind: 'string' },
@@ -1339,27 +1347,12 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
       { key: 'preview', kind: 'string', optional: true },
     ] },
   },
-  TOOL_MAPPED: {
-    callId: { kind: 'string' },
-    turnId: { kind: 'string' },
-    tool: { kind: 'string' },
-  },
   TOOL_PERMISSIONED: {
     callId: { kind: 'string' },
     turnId: { kind: 'string' },
     tool: { kind: 'string' },
     approved: { kind: 'boolean' },
     autonomousDecision: { kind: 'object', optional: true },
-  },
-  TOOL_POSTHOOKED: {
-    callId: { kind: 'string' },
-    turnId: { kind: 'string' },
-    tool: { kind: 'string' },
-  },
-  TOOL_PREHOOKED: {
-    callId: { kind: 'string' },
-    turnId: { kind: 'string' },
-    tool: { kind: 'string' },
   },
   TOOL_RECEIVED: {
     callId: { kind: 'string' },
@@ -1386,11 +1379,6 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
       { key: 'byteSize', kind: 'number' },
       { key: 'preview', kind: 'string', optional: true },
     ] },
-  },
-  TOOL_VALIDATED: {
-    callId: { kind: 'string' },
-    turnId: { kind: 'string' },
-    tool: { kind: 'string' },
   },
   TRANSPORT_AUTHENTICATING: {
     transportId: { kind: 'string' },

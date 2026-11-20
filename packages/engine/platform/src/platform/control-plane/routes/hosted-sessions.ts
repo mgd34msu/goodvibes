@@ -26,9 +26,11 @@ import {
   HostedSessionUnavailableError,
 } from '../../hosted-sessions/manager.js';
 import type { HostedSessionAttachment } from '../../hosted-sessions/manager.js';
+import { ModelReferenceError } from '../../providers/model-id-resolution.js';
 import type {
   CreateHostedSessionInput,
   HostedDetachPolicy,
+  HostedSessionHistoryMessage,
   HostedSessionRecord,
 } from '../../hosted-sessions/types.js';
 
@@ -47,6 +49,8 @@ export interface HostedSessionVerbService {
   detach(sessionId: string, clientId: string, principalId?: string): Promise<HostedSessionRecord>;
   kill(sessionId: string): Promise<HostedSessionRecord>;
   list(options?: { readonly includeTerminated?: boolean | undefined }): readonly HostedSessionRecord[];
+  readHistory(sessionId: string): Promise<{ readonly session: HostedSessionRecord; readonly history: readonly HostedSessionHistoryMessage[] }>;
+  isOwnedBy(sessionId: string, principalId: string | undefined): boolean;
 }
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {
@@ -111,6 +115,10 @@ export function toGatewayVerbError(error: unknown): never {
   }
   if (error instanceof HostedSessionLimitError) {
     throw new GatewayVerbError(error.message, 'HOSTED_SESSION_LIMIT_REACHED', 429);
+  }
+  if (error instanceof ModelReferenceError) {
+    // The caller's input names no model this daemon can run: a 400 naming why, never a retryable 500.
+    throw new GatewayVerbError(error.message, error.code, 400, 'modelId');
   }
   if (error instanceof HostedSessionArgumentError) {
     throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
@@ -227,6 +235,32 @@ export function createHostedSessionListHandler(service: HostedSessionVerbService
   };
 }
 
+/**
+ * A session's transcript, live or ended. An admin reads any session; any other
+ * credential reads only a session its principal started or joined, so a
+ * least-privilege client reads its own reply after the session ended.
+ */
+export function createHostedSessionHistoryHandler(service: HostedSessionVerbService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const sessionId = requireString(params, 'sessionId');
+    try {
+      const read = await service.readHistory(sessionId);
+      if (invocation.context.admin !== true && !service.isOwnedBy(sessionId, invocation.context.principalId)) {
+        throw new GatewayVerbError(
+          `Hosted session ${sessionId} was not started or joined by this credential, so its transcript is not shown. Read it with an admin credential, or with the credential that created it.`,
+          'HOSTED_SESSION_NOT_OWNED',
+          403,
+          'sessionId',
+        );
+      }
+      return read;
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
 /** Every verb this module owns, in the order a client meets them. */
 export const HOSTED_SESSION_METHOD_IDS: readonly string[] = [
   'sessions.hosted.create',
@@ -234,6 +268,7 @@ export const HOSTED_SESSION_METHOD_IDS: readonly string[] = [
   'sessions.hosted.detach',
   'sessions.hosted.kill',
   'sessions.hosted.list',
+  'sessions.hosted.history',
 ];
 
 /**
@@ -258,6 +293,7 @@ export function registerHostedSessionGatewayMethods(
   attach('sessions.hosted.detach', createHostedSessionDetachHandler(service));
   attach('sessions.hosted.kill', createHostedSessionKillHandler(service));
   attach('sessions.hosted.list', createHostedSessionListHandler(service));
+  attach('sessions.hosted.history', createHostedSessionHistoryHandler(service));
 }
 
 /**

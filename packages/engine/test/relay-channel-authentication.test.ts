@@ -72,7 +72,7 @@ function relay(answerWith: RelayKeyPair, rid: string, replayEarlierFrame: () => 
 test('only the paired daemon completes the handshake, and a frame delivered again tears the channel down', async () => {
   const daemonKey = await generateRelayIdentity();
   const rid = await relayIdentityRendezvousId(daemonKey);
-  const pairing = createRelayPairingPayload({ relayUrl: 'wss://relay.invalid/connect', rid, daemonPublicKey: await relayIdentityPublicKeyBase64Url(daemonKey) });
+  const pairing = createRelayPairingPayload({ relayUrl: 'wss://relay.invalid/connect', rid, daemonPublicKey: await relayIdentityPublicKeyBase64Url(daemonKey), code: 'relay-code-under-test' });
 
   // The control: the real daemon's key completes the handshake and one request round-trips.
   let replay = false;

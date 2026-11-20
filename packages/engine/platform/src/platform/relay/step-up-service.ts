@@ -13,6 +13,15 @@
 // of registered credentials. The policy travels WITH the credentials because a
 // self-hosted deployment establishes it at registration time; there is no
 // separate config surface to keep in sync.
+//
+// The authority record (cluster/authority-record.ts) answers which passkeys
+// are current: every registration is a `passkey` entry there (public key and
+// relying-party policy; the public key is not a secret) and every removal a
+// terminal revocation. A passkey registered through one machine of a group
+// confirms relayed actions on every machine, and one removed on any machine
+// (a lost phone) confirms nothing anywhere, including on a machine that was
+// asleep or restarted. The signature counter stays per machine, in the state
+// above: each machine refuses a counter that goes backwards from what it saw.
 
 import { fromBase64Url, randomBytes, toBase64Url } from '@goodvibes-jev/engine/transport-core/relay';
 import {
@@ -23,6 +32,9 @@ import {
   type StoredStepUpCredential,
 } from './step-up-webauthn.js';
 import type { StepUpAssertionVerifier, StepUpRefusalReason, StepUpRequestContext, StepUpVerification } from './step-up-policy.js';
+import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import type { AuthorityEntry, AuthorityKey, AuthorityView } from '../cluster/authority-record.js';
+import { randomUUID } from 'node:crypto';
 
 /** User-verification requirement for the ceremony. Default `required`. */
 export type UserVerificationRequirement = 'required' | 'preferred' | 'discouraged';
@@ -73,6 +85,17 @@ export interface StepUpServiceOptions {
   /** Random-challenge source injection for tests. Default relay `randomBytes`. */
   readonly randomChallenge?: () => Uint8Array<ArrayBuffer>;
   readonly logger?: { warn(message: string, fields?: Record<string, unknown>): void };
+  /** The authority record passkeys live on; absent, the stored state answers alone. */
+  readonly authority?: AuthorityRecordFile | undefined;
+}
+
+const passkeyKey = (id: string): AuthorityKey => `passkey:${id}`;
+
+/** The passkey entries for one credential id on the record, live ones first. */
+function passkeyEntries(view: AuthorityView, credentialId: string): { live: AuthorityEntry<'passkey'>[]; revoked: boolean } {
+  const all = view.list('passkey').filter((entry) => entry.public.credentialId === credentialId);
+  const live = all.filter((entry) => !view.isRevoked(passkeyKey(entry.id)));
+  return { live, revoked: all.length > 0 && live.length === 0 };
 }
 
 /** Input to register a step-up credential (an admin/local-only ceremony verb). */
@@ -162,18 +185,84 @@ export class StepUpService {
   private stateQueue: Promise<unknown> = Promise.resolve();
   /** Registered credentials as of the last read or write of the stored state; undefined before the first. */
   private knownCredentialCount: number | undefined;
+  private readonly authority: AuthorityRecordFile | undefined;
 
   constructor(options: StepUpServiceOptions) {
+    this.authority = options.authority;
     this.secrets = options.secrets;
     this.now = options.now ?? (() => Date.now());
     this.randomChallenge = options.randomChallenge ?? (() => randomBytes(CHALLENGE_BYTES));
     this.logger = options.logger;
   }
 
+  /**
+   * The stored state as the authority record has it: a credential revoked
+   * there (removed on any machine of the group) is left out, and one
+   * registered through another machine is added with its policy. An
+   * unreadable record leaves no credential: nothing is confirmed on a guess.
+   */
   private async loadState(): Promise<StepUpState> {
-    const state = parseState(await this.secrets.get(STEP_UP_STATE_KEY), this.logger);
+    const stored = parseState(await this.secrets.get(STEP_UP_STATE_KEY), this.logger);
+    const state = this.withRecord(stored);
     this.knownCredentialCount = state.credentials.length;
     return state;
+  }
+
+  private withRecord(stored: StepUpState): StepUpState {
+    const authority = this.authority;
+    if (!authority) return stored;
+    const view = authority.view();
+    if (!view) return { ...stored, credentials: [] };
+    const credentials = stored.credentials.filter((credential) => !passkeyEntries(view, credential.credentialId).revoked);
+    const held = new Set(credentials.map((credential) => credential.credentialId));
+    let policy: Pick<StepUpState, 'rpId' | 'origins' | 'userVerification'> = { rpId: stored.rpId, origins: stored.origins, userVerification: stored.userVerification };
+    for (const entry of view.list('passkey')) {
+      if (view.isRevoked(passkeyKey(entry.id)) || held.has(entry.public.credentialId)) continue;
+      held.add(entry.public.credentialId);
+      credentials.push({
+        credentialId: entry.public.credentialId,
+        publicKeyCose: entry.public.publicKeyCose,
+        signCount: entry.public.signCount,
+        ...(entry.public.label ? { label: entry.public.label } : {}),
+        createdAt: entry.public.createdAt,
+      });
+      if (!policy.rpId || credentials.length === 1) policy = { rpId: entry.public.rpId, origins: [...entry.public.origins], userVerification: entry.public.userVerification };
+      else if (policy.rpId === entry.public.rpId) policy = { ...policy, origins: [...new Set([...policy.origins, ...entry.public.origins])] };
+    }
+    return { ...policy, credentials };
+  }
+
+  /** Write a registration or removal to the authority record. Throws when it cannot, so a removal is never reported done on this machine only. */
+  private async publish(change: { readonly register?: { readonly credential: StoredStepUpCredential; readonly state: StepUpState } | undefined; readonly remove?: string | undefined }): Promise<void> {
+    const authority = this.authority;
+    if (!authority) return;
+    await authority.write((view) => {
+      const changes: AuthorityChange<null>[] = [];
+      const credentialId = change.register?.credential.credentialId ?? change.remove;
+      if (credentialId === undefined) return { kind: 'none', value: null };
+      // A registration replaces the credential's earlier entry; a removal ends every one.
+      for (const entry of passkeyEntries(view, credentialId).live) {
+        changes.push({ kind: 'revoke', key: passkeyKey(entry.id), by: 'owner', reason: change.register ? 'registered again' : 'removed by the owner', value: null });
+      }
+      const registered = change.register;
+      if (registered) {
+        changes.push({ kind: 'issue', value: null, entries: [{
+          kind: 'passkey',
+          id: `pk-${randomUUID()}`,
+          public: {
+            credentialId: registered.credential.credentialId,
+            publicKeyCose: registered.credential.publicKeyCose,
+            label: registered.credential.label ?? '',
+            createdAt: registered.credential.createdAt,
+            signCount: registered.credential.signCount,
+            rpId: registered.state.rpId,
+            origins: [...registered.state.origins],
+            userVerification: registered.state.userVerification,
+          },
+        }] });
+      }
+      return changes.length === 0 ? { kind: 'none', value: null } : { kind: 'many', changes, value: null };
+    });
   }
 
   private async saveState(state: StepUpState): Promise<void> {
@@ -231,6 +320,8 @@ export class StepUpService {
       if (remaining.length === state.credentials.length) return false;
       state.credentials = remaining;
       await this.saveState(state);
+      // Removed on every machine of the group: a lost phone confirms nothing anywhere.
+      await this.publish({ remove: credentialId });
       return true;
     });
   }
@@ -281,6 +372,7 @@ export class StepUpService {
     };
     state.credentials = [...state.credentials.filter((c) => c.credentialId !== credential.credentialId), credential];
     await this.saveState(state);
+    await this.publish({ register: { credential, state } });
     return {
       credentialId: credential.credentialId,
       ...(credential.label ? { label: credential.label } : {}),

@@ -87,7 +87,7 @@ export const hostedSessionsConfigSettings: ConfigSettingDefinition[] = [
     key: 'hostedSessions.terminatedRetentionMs',
     type: 'number',
     default: 24 * 60 * 60_000,
-    description: 'How long a terminated hosted session\'s record is kept before it is retired, in milliseconds. Until then it is still listable with its termination reason, so a session that ended can be asked about rather than having simply vanished.',
+    description: 'How long a terminated hosted session\'s record and transcript are kept before they are retired, in milliseconds. Until then the session is still listable with its termination reason, and its transcript (its reply included) stays readable with sessions.hosted.history by the client that created it, also after a daemon restart.',
     ...intRange(0, 31_536_000_000),
   },
   {

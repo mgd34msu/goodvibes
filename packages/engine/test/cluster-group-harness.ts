@@ -5,7 +5,8 @@
  * `ClusterGroupRuntime` with real crypto and key material, its key saved in a
  * real encrypted `SecretsManager` under the test's temp directory (seen through
  * the same `clusterSecretStoreFrom` view the daemon builds), its replicated
- * settings in a real `ConfigManager`, and its roster in a real directory. Only
+ * settings in a real `ConfigManager`, and its roster and key generations in a
+ * real authority record file in its state directory. Only
  * the network (an in-process bus) and the clock (moved by the test) stand in.
  */
 import { mkdtempSync, rmSync } from 'node:fs';

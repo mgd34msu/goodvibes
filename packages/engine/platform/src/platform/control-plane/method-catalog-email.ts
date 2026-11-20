@@ -326,6 +326,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.draft.create',
+    repeat: 'unsafe',
     title: 'Create Email Draft',
     description:
       'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field.',
@@ -354,6 +355,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.send',
+    replay: { in: 'body', name: 'clientSendId', behavior: 'A repeat with the same `clientSendId` and the same message within ten minutes returns the first answer instead of sending again; the same id with a different message is 409 CLIENT_SEND_ID_REUSED.' },
     recipients: ['to'],
     effect: 'outward',
     title: 'Send Email',
@@ -379,6 +381,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.inbox.update',
+    repeat: 'safe',
     title: 'Mark, Archive or Delete an Email',
     description:
       'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. Pass uidValidity when you have it so a reset mailbox refuses instead of changing another message. Answers { uid, action, movedTo? }.',
@@ -456,6 +459,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
    */
   methodDescriptor({
     id: 'email.expectation.open',
+    repeat: 'unsafe',
     transport: ['ws'],
     title: 'Open Verification Expectation',
     description:
@@ -488,6 +492,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.expectation.cancel',
+    repeat: 'safe',
     transport: ['ws'],
     title: 'Cancel Verification Expectation',
     description:

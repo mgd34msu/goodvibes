@@ -18,78 +18,28 @@
  * The platform reports what it found as data; this file words it, one summary
  * line per outcome, never a host:port per server (`/provider` shows the detail).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import {
   startBackgroundProviderRegistration,
   type BackgroundProviderDiscoveryOptions,
   type BackgroundRuntimeTaskHandle,
   type HostSystemMessageSink,
-  type ShellPathService,
 } from '@/runtime/index.ts';
 import type { ProviderDiscoveryReporter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import {
+  discoveredProvidersFilePath,
+  loadLanScanConsent,
+  saveLanScanConsent,
+  type ConsentRoots,
+} from './lan-scan-consent-store.ts';
 
-export type LanScanDecision = 'granted' | 'declined';
-
-export interface LanScanConsentState {
-  readonly decision: LanScanDecision;
-  readonly decidedAt: string;
-}
-
-type ConsentRoots = Pick<ShellPathService, 'resolveUserPath'>;
-
-const CONSENT_FILE_NAME = 'network-discovery-consent.json';
-const DISCOVERED_PROVIDERS_FILE = 'discovered-providers.json';
-
-function consentFilePath(roots: ConsentRoots, surfaceRoot: string): string {
-  return roots.resolveUserPath(surfaceRoot, CONSENT_FILE_NAME);
-}
-
-/**
- * The path the platform persists discovered servers to, for display in user-facing
- * copy (this module does not read or write that file, the platform owns it).
- */
-export function discoveredProvidersFilePath(roots: ConsentRoots, surfaceRoot: string): string {
-  return roots.resolveUserPath(surfaceRoot, DISCOVERED_PROVIDERS_FILE);
-}
-
-/**
- * Load the persisted LAN-scan consent decision.
- * Returns undefined when no decision has ever been recorded (true first run).
- */
-export function loadLanScanConsent(roots: ConsentRoots, surfaceRoot: string): LanScanConsentState | undefined {
-  const path = consentFilePath(roots, surfaceRoot);
-  try {
-    if (!existsSync(path)) return undefined;
-    const raw = readFileSync(path, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<LanScanConsentState> | null;
-    if (!parsed || (parsed.decision !== 'granted' && parsed.decision !== 'declined')) {
-      logger.warn('[LanScanConsent] ignoring invalid consent file', { path });
-      return undefined;
-    }
-    return {
-      decision: parsed.decision,
-      decidedAt: typeof parsed.decidedAt === 'string' ? parsed.decidedAt : new Date(0).toISOString(),
-    };
-  } catch (err) {
-    logger.warn('[LanScanConsent] load failed; treating as undecided', { path, error: summarizeError(err) });
-    return undefined;
-  }
-}
-
-/** Persist the user's LAN-scan consent decision (explicit grant, decline, or the first-run default). */
-export function saveLanScanConsent(roots: ConsentRoots, surfaceRoot: string, decision: LanScanDecision): void {
-  const path = consentFilePath(roots, surfaceRoot);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    const state: LanScanConsentState = { decision, decidedAt: new Date().toISOString() };
-    writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, 'utf-8');
-  } catch (err) {
-    logger.warn('[LanScanConsent] save failed; decision will not persist', { path, error: summarizeError(err) });
-  }
-}
+export {
+  agentTrustsScannedServer,
+  discoveredProvidersFilePath,
+  loadLanScanConsent,
+  saveLanScanConsent,
+  type LanScanConsentState,
+  type LanScanDecision,
+} from './lan-scan-consent-store.ts';
 
 // ── Wording ──────────────────────────────────────────────────────────────
 

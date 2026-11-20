@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.1
- * Methods: 636 total, 529 REST-routed, 107 ws-only invoke.
+ * Methods: 640 total, 530 REST-routed, 110 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -103,6 +103,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "local_auth.users.scopes.set": {
     "method": "POST",
     "path": "/api/local-auth/users/{username}/scopes"
+  },
+  "authority.status": {
+    "method": "GET",
+    "path": "/api/authority/status"
   },
   "automation.heartbeat.list": {
     "method": "GET",
@@ -2184,6 +2188,8 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "contracts.retryUnit",
   "contracts.status",
   "contracts.summaries",
+  "relay.codes.list",
+  "relay.codes.revoke",
   "relay.pairing.mint",
   "relay.reachability.get",
   "update.check",
@@ -2253,6 +2259,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "sessions.hosted.attach",
   "sessions.hosted.create",
   "sessions.hosted.detach",
+  "sessions.hosted.history",
   "sessions.hosted.kill",
   "sessions.hosted.list",
   "sessions.hosted.workspaces",
@@ -2296,6 +2303,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "local_auth.users.delete": "rest",
   "local_auth.users.password.rotate": "rest",
   "local_auth.users.scopes.set": "rest",
+  "authority.status": "rest",
   "automation.heartbeat.list": "rest",
   "automation.heartbeat.run": "rest",
   "automation.integration.snapshot": "rest",
@@ -2476,6 +2484,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "control.snapshot": "rest",
   "control.status": "rest",
   "control.web": "rest",
+  "relay.codes.list": "ws-invoke",
+  "relay.codes.revoke": "ws-invoke",
   "relay.pairing.mint": "ws-invoke",
   "relay.reachability.get": "ws-invoke",
   "update.check": "ws-invoke",
@@ -2812,6 +2822,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "sessions.hosted.attach": "ws-invoke",
   "sessions.hosted.create": "ws-invoke",
   "sessions.hosted.detach": "ws-invoke",
+  "sessions.hosted.history": "ws-invoke",
   "sessions.hosted.kill": "ws-invoke",
   "sessions.hosted.list": "ws-invoke",
   "sessions.hosted.workspaces": "ws-invoke",
@@ -4036,6 +4047,37 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sample"
         ]
       }
+    }
+  },
+  "authority.status": {
+    "input": {},
+    "output": {
+      "readable": false,
+      "nodeId": "sample",
+      "groupId": "sample",
+      "revision": 0,
+      "digest": "sample",
+      "revocationFloor": 0,
+      "kinds": [
+        {
+          "kind": "sample",
+          "live": 0,
+          "revoked": 0
+        }
+      ],
+      "behindOn": [
+        "sample"
+      ],
+      "behind": false,
+      "userConflicts": [
+        {
+          "username": "sample",
+          "accounts": 0,
+          "madeOn": [
+            "sample"
+          ]
+        }
+      ]
     }
   },
   "automation.heartbeat.list": {
@@ -7149,6 +7191,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "metadata": {}
           }
         ],
+        "open": false,
         "updatedAt": 0,
         "metadata": {}
       },
@@ -7693,6 +7736,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "metadata": {}
             }
           ],
+          "open": false,
           "updatedAt": 0,
           "metadata": {}
         }
@@ -7703,6 +7747,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "surface": "sample",
       "enabled": false,
+      "open": false,
       "requireMention": false,
       "allowDirectMessages": false,
       "allowGroupMessages": false,
@@ -7798,6 +7843,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "metadata": {}
         }
       ],
+      "open": false,
       "updatedAt": 0,
       "metadata": {}
     }
@@ -14626,6 +14672,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "name": "sample",
                 "behavior": "sample"
               },
+              "repeat": "safe",
               "errorCodes": [
                 {
                   "code": "sample",
@@ -14809,6 +14856,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "name": "sample",
           "behavior": "sample"
         },
+        "repeat": "safe",
         "errorCodes": [
           {
             "code": "sample",
@@ -14864,6 +14912,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "name": "sample",
             "behavior": "sample"
           },
+          "repeat": "safe",
           "errorCodes": [
             {
               "code": "sample",
@@ -14979,17 +15028,45 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "html": "sample"
     }
   },
-  "relay.pairing.mint": {
+  "relay.codes.list": {
     "input": {},
+    "output": {
+      "codes": [
+        {
+          "id": "sample",
+          "name": "sample",
+          "createdAt": 0,
+          "lastSeenAt": 0
+        }
+      ]
+    }
+  },
+  "relay.codes.revoke": {
+    "input": {
+      "id": "sample"
+    },
+    "output": {
+      "id": "sample",
+      "revoked": false,
+      "closedConnections": 0
+    }
+  },
+  "relay.pairing.mint": {
+    "input": {
+      "name": "sample"
+    },
     "output": {
       "pairing": {
         "protocol": 0,
         "relayUrl": "sample",
         "rid": "sample",
         "daemonPublicKey": "sample",
+        "code": "sample",
         "label": "sample"
       },
-      "status": "disabled"
+      "status": "disabled",
+      "codeId": "sample",
+      "codeName": "sample"
     }
   },
   "relay.reachability.get": {
@@ -24520,7 +24597,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "name": "sample",
       "offers": [
         "sample"
-      ]
+      ],
+      "fromSharedToken": false
     },
     "output": {
       "token": {
@@ -24618,7 +24696,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "client": "agent",
           "scopes": [
             "sample"
-          ]
+          ],
+          "origin": "owner-pairing"
         }
       ],
       "legacySharedRevoked": false
@@ -28727,6 +28806,56 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     }
   },
+  "sessions.hosted.history": {
+    "input": {
+      "sessionId": "sample"
+    },
+    "output": {
+      "session": {
+        "id": "sample",
+        "nativeConversation": true,
+        "workspaceRoot": "sample",
+        "title": "sample",
+        "status": "idle",
+        "detachPolicy": "kill",
+        "effectiveDetachPolicy": "kill",
+        "attachedClients": [
+          "sample"
+        ],
+        "providerId": "sample",
+        "modelId": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "turnCount": 0,
+        "messageCount": 0,
+        "lastTurnAt": 0,
+        "terminatedAt": 0,
+        "terminatedReason": "sample",
+        "restoredFromDisk": false,
+        "originSurface": "sample",
+        "permissionMode": "ask-me",
+        "contractIds": [
+          "sample"
+        ],
+        "saveError": "sample"
+      },
+      "history": [
+        {
+          "role": "user",
+          "content": "sample",
+          "at": 0,
+          "toolCalls": [
+            {
+              "id": "sample",
+              "name": "sample",
+              "arguments": {}
+            }
+          ],
+          "callId": "sample"
+        }
+      ]
+    }
+  },
   "sessions.hosted.kill": {
     "input": {
       "sessionId": "sample"
@@ -29200,7 +29329,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "sessionId": "sample",
-      "mode": "ask-me"
+      "mode": "ask-me",
+      "chosenMode": "ask-me",
+      "reason": "sample"
     }
   },
   "sessions.permissionMode.set": {

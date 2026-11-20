@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   STRING_SCHEMA,
@@ -95,6 +96,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['attendees[]'],
     title: 'Create Calendar Event',
     description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. Change it with calendar.events.update and remove it with calendar.events.delete.',
@@ -122,6 +124,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.update',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['attendees[]'],
     title: 'Update Calendar Event',
     description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
@@ -149,6 +152,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.events.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Calendar Event',
     description: 'Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
@@ -183,6 +187,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'calendar.ics.import',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Import iCalendar',
     description: 'Import raw .ics content into the configured calendar. Requires explicit confirmation (confirm: true). A series and its overrides are stored together as written; an event already on the calendar is kept unless replace: true. Guests an imported event names are not invited; they are listed in attendeesLeftOff.',
     category: 'calendar',

@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   JSON_OBJECT_SCHEMA,
@@ -145,6 +146,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.provision',
+    repeat: 'safe',
     title: 'Provision Browser',
     description: 'Install the browser driver and binary this machine needs, reporting each step it actually ran. Slow on a clean machine; every other verb provisions on demand.',
     category: 'browser',
@@ -171,6 +173,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.sessions.launch',
+    repeat: 'safe',
     title: 'Launch Browser Session',
     description: 'Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.',
     category: 'browser',
@@ -189,6 +192,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.sessions.attach',
+    repeat: 'unsafe',
     title: 'Attach To Running Browser',
     description: 'Connect to a browser already running at a remote debugging endpoint on this machine (a bare port, localhost or a loopback address; a browser elsewhere is reached through a local port forward). The daemon can drive it but can never close it.',
     category: 'browser',
@@ -206,6 +210,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.sessions.release',
+    repeat: 'safe',
     title: 'Release Browser Session',
     description: 'Disconnect from a session and leave the browser running. This is how an attached browser is let go of.',
     category: 'browser',
@@ -219,6 +224,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.sessions.close',
+    repeat: 'safe',
     title: 'Close Browser Session',
     description: 'End a browser the daemon started. A session attached to a browser the daemon did not start is refused; release it instead.',
     category: 'browser',
@@ -232,6 +238,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.navigate',
+    repeat: 'unsafe',
     effect: 'outward',
     title: 'Navigate',
     description: 'Load a URL, opening a session first if none is open. http, https, file and about schemes only; a javascript: URL is refused because it runs script against whatever page is already loaded.',
@@ -273,6 +280,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.click',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Click Element',
     description: 'Click an element resolved from the latest snapshot of this page. Activating a control that submits a form is an outward effect and is refused when this turn has read untrusted page content.',
@@ -295,6 +303,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.type',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Type Into Element',
     description: 'Type into an element resolved from the latest snapshot. There is no variant that types into whatever window has focus. submit:true presses Enter afterwards and is an outward effect.',
@@ -316,6 +325,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.select',
+    repeat: 'unsafe',
     title: 'Select Options',
     description: 'Choose option values in a select element resolved from the latest snapshot.',
     category: 'browser',
@@ -333,6 +343,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.press',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Press Key',
     description: 'Send one key to an element resolved from the latest snapshot. Enter is treated as a form submission and is an outward effect.',
     category: 'browser',
@@ -351,6 +362,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.scroll',
+    repeat: 'unsafe',
     title: 'Scroll Page',
     description: 'Scroll the page by an amount, or bring a snapshot element into view.',
     category: 'browser',
@@ -454,6 +466,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.tabs.create',
+    repeat: 'unsafe',
     title: 'Open Tab',
     description: 'Open a new tab, optionally at a URL, opening a session first if none is open.',
     category: 'browser',
@@ -469,6 +482,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.tabs.switch',
+    repeat: 'safe',
     title: 'Switch Tab',
     description: 'Make another open tab the active one for later page verbs.',
     category: 'browser',
@@ -482,6 +496,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.tabs.close',
+    repeat: 'safe',
     title: 'Close Tab',
     description: 'Close one tab. The browser itself keeps running.',
     category: 'browser',
@@ -496,6 +511,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.history.back',
+    repeat: 'unsafe',
     title: 'Go Back',
     description: 'Move the page back one entry in its history.',
     category: 'browser',
@@ -506,6 +522,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'browser.history.forward',
+    repeat: 'unsafe',
     title: 'Go Forward',
     description: 'Move the page forward one entry in its history.',
     category: 'browser',

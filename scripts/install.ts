@@ -4,9 +4,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
-import { DAEMON_SERVICE_NAME } from '../packages/engine/platform/src/platform/daemon/daemon-service-default.ts';
 import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
@@ -165,6 +163,7 @@ export interface InstallHooks {
   build?: typeof build;
   stage?: typeof stage;
   ready?: typeof ready;
+  /** Stands in for `goodvibes-daemon refresh-service` (which needs the built daemon): the unit text it would write. */
   renderUnit?: (options: Options) => Promise<string>;
   /** Replaces the installed-host pairing step (the real one needs a live daemon). */
   pairHost?: Run;
@@ -256,12 +255,11 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     activeRecovery = recover;
     try {
       await (hooks.stage ?? stage)(ROOT, release, options, commit, execute);
+      // The unit is the daemon's own (`goodvibes-daemon refresh-service`, below):
+      // the one definition every installer and service command writes, so the
+      // daemon's service commands and doctor recognise it. Its text is recorded
+      // in the receipt once written.
       let unit = '';
-      if (options.service) {
-        unit = hooks.renderUnit ? await hooks.renderUnit(options) : (await import(pathToFileURL(join(ROOT, 'packages/engine/platform/src/platform/daemon/service-manager.ts')).href)).renderSystemdUnit({
-          name: DAEMON_SERVICE_NAME, description: 'GoodVibes daemon and WebUI', workingDirectory: options.workspace ?? ROOT,
-          command: join(options.prefix, 'commands/goodvibes-daemon'), args: ['serve', '--hostname', '127.0.0.1', '--port', String(options.port)], env: {}, restartOnFailure: true });
-      }
       if (old?.service) {
         const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
         wasRunning = !['inactive', 'failed'].includes(state);
@@ -307,6 +305,9 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       if (options.decisionPolicy !== undefined) execute(daemon, ['config', 'set', 'judgment.policy', options.decisionPolicy], { cwd: options.dataDir, capture: true });
       execute(daemon, ['config', 'set', 'controlPlane.port', String(options.port)], { cwd: options.dataDir, capture: true });
       execute(daemon, ['webui', 'enable', '--loopback', '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });
+      // Whether this machine has a daemon service, where the daemon (before it
+      // would install itself as a service) and doctor read it.
+      execute(daemon, ['config', 'set', 'service.enabled', String(options.service)], { cwd: options.dataDir, capture: true });
       if (!hooks.stage) {
         console.log('Verifying the Jev connection...');
         try {
@@ -320,7 +321,12 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         }
       }
       if (options.service) {
-        atomicWrite(unitPath(options), unit, 0o644);
+        if (hooks.renderUnit) atomicWrite(unitPath(options), await hooks.renderUnit(options), 0o644);
+        // Writes the definition (through the installed launcher, which pins the
+        // release and loads the private environment file) and reloads systemd.
+        else execute(daemon, ['refresh-service', '--working-dir', options.workspace ?? ROOT], { cwd: options.dataDir, capture: true });
+        unit = readFileSync(unitPath(options), 'utf8');
+        receipt.unit = unit;
         serviceAttempted = true;
         execute('systemctl', ['--user', 'daemon-reload']);
         execute('systemctl', ['--user', 'enable', SERVICE]);
@@ -342,7 +348,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'disable', SERVICE]);
         rmSync(unitPath(options)); execute('systemctl', ['--user', 'daemon-reload']);
       }
-      if (old) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
+      if (old || options.service) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
       // The receipt names the new release from here on; a rollback now would leave it pointing at a deleted one.
       committed = true; activeRecovery = undefined;
       // Keep every earlier release until all publication and readiness checks pass, then drop the ones nothing runs from.

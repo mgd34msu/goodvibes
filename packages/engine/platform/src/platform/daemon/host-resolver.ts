@@ -8,6 +8,7 @@
  * Consumers that display the binding anchor to this resolver instead of
  * re-deriving their own defensive copies of the raw stored values.
  */
+import { isLoopbackHost, isWildcardHost } from '../utils/reachable-base-url.js';
 
 export interface ResolvedHostBinding {
   readonly host: string;
@@ -96,6 +97,18 @@ export function resolveWebBinding(input: {
     recognized: binding.recognized && portValid,
     effectiveMode: binding.effectiveMode,
   };
+}
+
+/**
+ * Whether a listener bound to `listenerHost` serves nothing the configured bind
+ * host leaves out: the same host, a loopback listener (this machine is always
+ * served), or a configured wildcard that covers every interface. A listener on
+ * every interface while the setting names loopback is the case this refuses.
+ */
+export function listenerWithinConfiguredHost(listenerHost: string, configuredHost: string): boolean {
+  const listener = listenerHost.trim().toLowerCase();
+  const configured = configuredHost.trim().toLowerCase();
+  return listener === configured || isLoopbackHost(listener) || isWildcardHost(configured);
 }
 
 /** The validated web port (fallback 3423), a convenience over {@link resolveWebBinding}. */

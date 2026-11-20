@@ -245,7 +245,7 @@ export function describeConfiguredEffort(registryKey: string, configured: string
 
   if (spec.kind === 'unavailable') return `not sent: ${modelId} has no configurable reasoning level`;
   if (spec.source === 'fallback') {
-    return `${resolved.value ?? '(model default)'}: unverified: ${modelId} is not in the model catalog, so some providers send nothing for it`;
+    return `${resolved.value ?? '(model default)'}, may not apply: ${modelId} is not in the model catalog, so some providers do not send a reasoning level for it. To use a model whose levels are known, pick one with /model`;
   }
   if (resolved.value === undefined) return `not sent: ${modelId} applies its own default`;
   if (spec.kind === 'budget_tokens') {

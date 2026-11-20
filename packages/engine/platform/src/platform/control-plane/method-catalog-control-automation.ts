@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -117,6 +118,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.create',
+    replay: { in: 'body', name: 'id', behavior: 'A create that names an `id` returns the existing job unchanged when a job with that id exists, so a repeat creates nothing more. Without an id each call creates a job.' },
     recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Create Automation Job',
     description: 'Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.',
@@ -159,6 +161,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.update',
+    repeat: 'safe',
     recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Update Automation Job',
     description: 'Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
@@ -198,6 +201,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Automation Job',
     description: 'Delete a durable automation job.',
@@ -212,6 +216,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.enable',
+    repeat: 'safe',
     title: 'Enable Automation Job',
     description: 'Enable a durable automation job.',
     category: 'automation',
@@ -224,6 +229,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.disable',
+    repeat: 'safe',
     title: 'Disable Automation Job',
     description: 'Disable a durable automation job.',
     category: 'automation',
@@ -243,6 +249,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   // packages/contracts/src/core-verbs.ts and docs/decisions/2026-07-06-core-verb-spec.md.
   methodDescriptor({
     id: 'automation.jobs.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Automation Job Now',
     description: 'Trigger an automation job immediately.',
@@ -280,6 +287,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.runs.cancel',
+    repeat: 'safe',
     title: 'Cancel Automation Run',
     description: 'Cancel an active automation run.',
     category: 'automation',
@@ -291,6 +299,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.runs.retry',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Retry Automation Run',
     description: 'Retry a completed or failed automation run.',
@@ -313,6 +322,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.heartbeat.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Automation Heartbeat',
     description: 'Process automation jobs queued for the next heartbeat.',
@@ -357,6 +367,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Create Schedule',
     description: 'Create a schedule record.',
@@ -394,6 +405,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Schedule',
     description: 'Delete a schedule record.',
@@ -407,6 +419,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.enable',
+    repeat: 'safe',
     title: 'Enable Schedule',
     description: 'Enable a schedule record.',
     category: 'automation',
@@ -418,6 +431,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.disable',
+    repeat: 'safe',
     title: 'Disable Schedule',
     description: 'Disable a schedule record.',
     category: 'automation',
@@ -429,6 +443,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.schedules.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Schedule Now',
     description: 'Trigger a schedule immediately.',
@@ -475,6 +490,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'routes.bindings.create',
+    repeat: 'safe',
     title: 'Create Route Binding',
     description: 'Create or upsert a route binding.',
     category: 'routes',
@@ -503,6 +519,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'routes.bindings.update',
+    repeat: 'safe',
     title: 'Update Route Binding',
     description: 'Update an existing route binding. (Renamed from routes.bindings.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
     category: 'routes',
@@ -527,6 +544,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'routes.bindings.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Route Binding',
     description: 'Delete an existing route binding.',

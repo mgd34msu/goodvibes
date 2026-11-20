@@ -63,12 +63,8 @@ export interface DiagnosticPanelIssue {
 /** Phase of a single tool call in its execution timeline. */
 export type ToolCallPhase =
   | 'received'
-  | 'validated'
-  | 'prehooked'
   | 'permissioned'
   | 'executing'
-  | 'mapped'
-  | 'posthooked'
   | 'succeeded'
   | 'failed'
   | 'cancelled';

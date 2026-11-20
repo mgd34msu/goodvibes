@@ -13,6 +13,7 @@
  * metacharacter. Nothing in a probe is interpolated at run time.
  */
 
+import { deliveryChannelProblem } from '../channels/delivery/types.js';
 import type {
   ComparisonOperator,
   TriggerDefinition,
@@ -476,6 +477,14 @@ export function validateAction(input: unknown, field = 'action'): TriggerFireAct
     }
     if (typeof action.prompt === 'string' && action.prompt.length > MAX_STRING_LENGTH) {
       throw new TriggerDefinitionError(`${field}.prompt`, `must be at most ${MAX_STRING_LENGTH} characters`);
+    }
+    // Where the answer goes: a channel as configuration writes one. Refused here, not at fire time.
+    if (action.deliverTo !== undefined) {
+      if (typeof action.deliverTo !== 'string' || action.deliverTo.trim() === '') {
+        throw new TriggerDefinitionError(`${field}.deliverTo`, 'must be a channel such as "telegram" or "slack:C123" when present');
+      }
+      const problem = deliveryChannelProblem(action.deliverTo.trim());
+      if (problem) throw new TriggerDefinitionError(`${field}.deliverTo`, `${problem}; leave it out to deliver the answer to the owner inbox`);
     }
     // A fired trigger starts its own agent; nothing attaches it to an existing session.
     // Refusing the field beats accepting it and running the turn somewhere else.

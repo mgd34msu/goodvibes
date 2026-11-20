@@ -20,6 +20,7 @@ const POLICY_BOOLEAN_OPTIONS = {
   'allow-groups': 'allowGroupMessages',
   'allow-threads': 'allowThreadMessages',
   'commands-without-mention': 'allowTextCommandsWithoutMention',
+  open: 'open',
 } as const;
 const POLICY_CHOICE_OPTIONS = { 'dm-policy': 'dmPolicy', 'group-policy': 'groupPolicy' } as const;
 const POLICY_LIST_OPTIONS = {
@@ -71,6 +72,7 @@ function renderPolicy(policy: ChannelPolicy, enabledInSettings: boolean | undefi
     `    ingress: ${policy.enabled ? 'accepted' : 'refused'}; mention required: ${onOff(policy.requireMention)}; commands without mention: ${onOff(policy.allowTextCommandsWithoutMention)}`,
     `    direct messages: ${onOff(policy.allowDirectMessages)} (${policy.dmPolicy}); groups: ${onOff(policy.allowGroupMessages)} (${policy.groupPolicy}); threads: ${onOff(policy.allowThreadMessages)}`,
     `    users: ${list(policy.allowlistUserIds)}; channels: ${list(policy.allowlistChannelIds)}; groups: ${list(policy.allowlistGroupIds)}`,
+    `    open (any sender admitted, no owner claim, while no list is set): ${onOff(policy.open === true)}`,
     `    commands: ${policy.allowedCommands.length > 0 ? policy.allowedCommands.join(', ') : 'all'}`,
   ];
   for (const group of policy.groupPolicies) {
@@ -401,7 +403,8 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
         + '  routes     — active route binding snapshot\n'
         + '  delivery   — outbound delivery snapshot\n'
         + '  policy [surface]  — who may reach the assistant on each surface (the daemon\'s ingress rules)\n'
-        + '  policy set <surface> [--enabled on|off] [--require-mention on|off] [--dm-policy allow|deny|inherit] ...  — change them (asks first)\n'
+        + '  policy set <surface> [--enabled on|off] [--require-mention on|off] [--dm-policy allow|deny|inherit] [--open on|off] ...  — change them (asks first)\n'
+        + '             --open on makes a shared channel: with no list set, anyone may write and no owner claim is raised\n'
         + '  profiles [list|get|set|delete]  — per-channel model/permission profile bindings\n'
         + '\n'
         + 'Options:\n'

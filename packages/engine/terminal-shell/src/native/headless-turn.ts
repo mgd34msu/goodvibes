@@ -1,7 +1,7 @@
 import { decisionModelUse } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
 import type { ContractRunner, ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
-import type { ConversationMessageSnapshot, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
+import type { ConversationMessageSnapshot, Orchestrator, TurnFailoverMove } from '@goodvibes-jev/engine/platform/platform/core';
 import type { PermissionManager, PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
@@ -18,7 +18,7 @@ import { describeCrashRecovery, type CrashRecoveryReport } from '../session-cras
 /** The parts of a bootstrapped terminal runtime one headless turn drives. */
 export interface HeadlessTurnContext {
   readonly runtimeBus: Pick<RuntimeEventBus, 'on'>;
-  readonly orchestrator: Pick<Orchestrator, 'abort' | 'handleUserInput' | 'bindNativeConversationProject'>;
+  readonly orchestrator: Pick<Orchestrator, 'abort' | 'handleUserInput' | 'bindNativeConversationProject'> & Partial<Pick<Orchestrator, 'onTurnFailover'>>;
   readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string };
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   /** The gate: calls just-vibes held during this run are reported on the result. */
@@ -73,6 +73,13 @@ export async function executeHeadlessTurn(
   };
   const { answerPermissions, ...observerLimits } = limits;
   const observer = observeHeadlessTurn(ctx.runtimeBus, format, UNSETTLED_REASON, { ...observerLimits, stop: abort });
+  // A provider failure moved the turn along the fallback order (providers/failover.ts): told on stderr in
+  // every output format, and the result names the model that answered.
+  let answeredBy: TurnFailoverMove | undefined;
+  const stopFailoverWatch = ctx.orchestrator.onTurnFailover?.((move) => {
+    answeredBy = move;
+    process.stderr.write(`[Failover] ${move.fromRegistryKey} -> ${move.toRegistryKey}, ${move.because}; ${move.toRegistryKey} answers the rest of this turn.\n`);
+  });
   const state = observer.state;
   // A script answers the owner prompts this run raises (stream-json only, checked at parse time); otherwise a headless run has nobody to ask.
   const permissionAnswers = answerPermissions
@@ -142,7 +149,9 @@ export async function executeHeadlessTurn(
       state.response = answers.join('\n\n');
       if (state.exitCode === 0) state.stopReason = 'completed';
     }
-    const result = observer.result(signal, ctx.runtime);
+    const result = observer.result(signal, answeredBy
+      ? { ...ctx.runtime, model: answeredBy.toRegistryKey, provider: answeredBy.toProvider }
+      : ctx.runtime);
     // A just-vibes run ends with what it held for the owner; nothing was run for them.
     const held = (ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
       .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason }));
@@ -152,6 +161,7 @@ export async function executeHeadlessTurn(
   } finally {
     signal.removeEventListener('abort', abort);
     permissionAnswers?.dispose();
+    stopFailoverWatch?.();
     observer.dispose();
   }
 }

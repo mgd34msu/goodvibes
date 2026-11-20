@@ -86,7 +86,9 @@ export interface ControlRouteContext {
      * token again and handlers read who called from it.
      */
     readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
-  }) => Promise<{ status: number; ok: boolean; body: unknown }>;
+    /** The caller's retry key, for a method that takes the shared Idempotency-Key. */
+    readonly idempotencyKey?: string | undefined;
+  }) => Promise<{ status: number; ok: boolean; body: unknown; readonly replayed?: boolean }>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
@@ -212,9 +214,9 @@ function withContractRetryKey(methodId: string, req: Request, body: unknown): un
 }
 
 /** A gateway call's answer; a contracts.start that returned an earlier call's contract says so in a header. */
-function gatewayCallResponse(methodId: string, response: { readonly status: number; readonly body: unknown }): Response {
+function gatewayCallResponse(methodId: string, response: { readonly status: number; readonly body: unknown; readonly replayed?: boolean }): Response {
   const record = response.body !== null && typeof response.body === 'object' ? response.body as { readonly replayed?: unknown; readonly retryAfterMs?: unknown } : undefined;
-  const replayed = methodId === 'contracts.start' && record?.replayed === true;
+  const replayed = response.replayed === true || (methodId === 'contracts.start' && record?.replayed === true);
   // A refusal that says when to come back (an in-flight call limit) says it in the header HTTP clients read too.
   const statedRetry = record?.retryAfterMs;
   const retryAfterMs = (response.status === 429 || response.status === 503) && typeof statedRetry === 'number' && Number.isFinite(statedRetry)
@@ -367,10 +369,14 @@ export function createDaemonControlRouteHandlers(
       if (payload instanceof Response) return payload;
       const invokeBody = withContractRetryKey(methodId, req, payload.body);
       if (invokeBody instanceof Response) return invokeBody;
+      // A method that takes the shared retry key reads it from the header, or beside `body` in the envelope.
+      const envelopeKey = parsedBody && typeof parsedBody.idempotencyKey === 'string' ? parsedBody.idempotencyKey : undefined;
+      const idempotencyKey = methodId === 'contracts.start' ? undefined : req.headers.get('idempotency-key') ?? envelopeKey;
       const response = await context.invokeGatewayMethodCall({
         authToken: context.extractAuthToken(req),
         signal: req.signal,
         methodId,
+        ...(idempotencyKey !== undefined && idempotencyKey !== null ? { idempotencyKey } : {}),
         query: payload.query,
         body: invokeBody,
         ...(principal ? { principal } : {}),

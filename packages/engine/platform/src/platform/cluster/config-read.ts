@@ -22,7 +22,7 @@ import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js'
 import { normalizeSecretRef } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { resolveClusterSettings } from './settings.js';
-import type { ClusterSettings } from './types.js';
+import type { ClusterSecretSetting, ClusterSettings } from './types.js';
 
 /** Where `cluster.secret` is read from when the setting holds its secret-store reference. */
 export type ClusterSecretSource = Pick<SecretsManager, 'resolveLocalSecretSync'>;
@@ -31,18 +31,26 @@ export type ClusterSecretSource = Pick<SecretsManager, 'resolveLocalSecretSync'>
  * `cluster.secret` is a credential, so the settings file holds a
  * `goodvibes://secrets/` reference and the phrase lives in the secret store.
  * Read it here, once, so the election never signs with the reference text.
+ * A reference that cannot be read is `unavailable`, never an empty secret:
+ * empty means "deliberately unsigned", which is not what the owner set.
  */
-function resolveClusterSecret(value: string, secrets: ClusterSecretSource | undefined): string {
-  if (!isSecretReferenceValue(value)) return value;
+function resolveClusterSecret(value: string, secrets: ClusterSecretSource | undefined): ClusterSecretSetting {
+  if (value.length === 0) return { state: 'none' };
+  if (!isSecretReferenceValue(value)) return { state: 'set', value };
   const ref = normalizeSecretRef(value.trim());
+  let reason = 'cluster.secret names a stored secret that is not a goodvibes:// reference this machine can read';
   if (secrets && ref?.source === 'goodvibes') {
     const stored = secrets.resolveLocalSecretSync(ref.id);
-    if (stored.state === 'resolved') return stored.value;
+    if (stored.state === 'resolved' && stored.value.length > 0) return { state: 'set', value: stored.value };
+    reason = `the stored secret cluster.secret names could not be read (${stored.state})`;
+  } else if (!secrets) {
+    reason = 'the secret store is not available to read cluster.secret from';
   }
-  logger.warn('cluster.secret names a stored secret that could not be read; election traffic outside a group runs unsigned', {
+  logger.warn('cluster.secret names a stored secret that could not be read; this machine sends and takes no election traffic outside a group until it can', {
+    reason,
     next: 'store the phrase with /secrets set and point cluster.secret at it, or clear cluster.secret',
   });
-  return '';
+  return { state: 'unavailable', reason };
 }
 
 /**
@@ -59,6 +67,10 @@ export function readClusterSettings(configManager: Pick<ConfigManager, 'getCateg
   } catch {
     settings = resolveClusterSettings(undefined);
   }
-  const secret = resolveClusterSecret(settings.secret, secrets);
-  return secret === settings.secret ? settings : { ...settings, secret };
+  let raw = '';
+  try {
+    const category = configManager.getCategory('cluster') as { readonly secret?: unknown } | undefined;
+    raw = typeof category?.secret === 'string' ? category.secret : '';
+  } catch { raw = ''; }
+  return { ...settings, secret: resolveClusterSecret(raw, secrets) };
 }

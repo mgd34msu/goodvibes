@@ -25,13 +25,13 @@ export function hasOwnedAutomationRevision(job: AutomationJob): boolean { return
  * against the definition stays current while the job keeps running.
  */
 export const AUTOMATION_SCHEDULER_STATE_FIELDS = [
-  'nextRunAt', 'lastRunAt', 'lastRunId', 'runCount', 'successCount', 'failureCount', 'updatedAt',
+  'nextRunAt', 'lastRunAt', 'lastRunId', 'lastOccurrenceAt', 'runCount', 'successCount', 'failureCount', 'updatedAt',
 ] as const satisfies readonly (keyof AutomationJob)[];
 
 type SchedulerStateField = (typeof AUTOMATION_SCHEDULER_STATE_FIELDS)[number];
 
 function definitionOf(job: AutomationJob): Omit<AutomationJob, SchedulerStateField | 'mutationRevision'> {
-  const { mutationRevision: _revision, nextRunAt: _next, lastRunAt: _last, lastRunId: _lastId, runCount: _runs,
+  const { mutationRevision: _revision, nextRunAt: _next, lastRunAt: _last, lastRunId: _lastId, lastOccurrenceAt: _occurrence, runCount: _runs,
     successCount: _successes, failureCount: _failures, updatedAt: _updated, ...definition } = job;
   return definition;
 }

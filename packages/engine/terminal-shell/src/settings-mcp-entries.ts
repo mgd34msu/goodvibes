@@ -68,3 +68,28 @@ export function keepMcpToolRuleFromSettings(
     (error: unknown) => done(`${serverName} tool ${edit.tool} not changed: ${summarizeError(error)}`, buildMcpEntries(mcpRegistry)),
   );
 }
+
+/**
+ * Keep a server's trust mode from Settings -> MCP, the owner's own screen: it
+ * applies at once, then is written with the server's entry in its MCP config
+ * file so it holds after a restart (allow-all only in the owner's global
+ * file). A server whose entry is in a file this program does not write keeps
+ * the mode for this session only, and `done` says why.
+ */
+export function keepMcpTrustModeFromSettings(
+  mcpRegistry: Pick<McpRegistry, 'setServerTrustMode' | 'storeServerPolicy' | 'listServerSecurity'>,
+  serverName: string,
+  mode: McpEntry['trustMode'],
+  done: (message: string, entries: McpEntry[]) => void,
+): void {
+  try { mcpRegistry.setServerTrustMode(serverName, mode); }
+  catch (error) {
+    done(`${serverName} trust mode not changed: ${summarizeError(error)}`, buildMcpEntries(mcpRegistry));
+    return;
+  }
+  done(`${serverName} trust mode is ${mode}; keeping it in its MCP config...`, buildMcpEntries(mcpRegistry));
+  mcpRegistry.storeServerPolicy(serverName, { trustMode: mode }).then(
+    (result) => done(`${serverName} trust mode is ${mode}, kept in ${result.scope} MCP config ${result.path}: it applies now and after a restart.`, buildMcpEntries(mcpRegistry)),
+    (error: unknown) => done(`${serverName} trust mode is ${mode} for this session only: ${summarizeError(error)}`, buildMcpEntries(mcpRegistry)),
+  );
+}

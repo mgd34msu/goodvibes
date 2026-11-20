@@ -42,6 +42,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getProcessUntrustedContentLedger, type UntrustedContentLedger } from './untrusted-content.js';
 import type { TurnInputOrigin } from '../../events/turn.js';
+import { guestSurfaceId, isGuestSurfaceId } from '../gate/surface-authority.js';
 
 /**
  * Reset the untrusted-content window if, and only if, this invocation is a
@@ -149,6 +150,26 @@ export function withTurnSurface<T>(origin: TurnInputOrigin | undefined, fn: () =
  */
 export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T): T {
   return turnSurfaceScope.run({ surface }, fn);
+}
+
+/**
+ * Runs `fn` as the turn of a channel sender who is not the channel's owner: its
+ * surface is the guest form of `surface` (gate/surface-authority.ts,
+ * guestSurfaceId), so its tool calls may read and answer and every change is
+ * put to the owner. The daemon sets it from the sender the adapter verified.
+ */
+export function withGuestTurn<T>(surface: string, fn: () => T): T {
+  return turnSurfaceScope.run({ surface: guestSurfaceId(surface) }, fn);
+}
+
+/**
+ * The surface a channel spawn runs under: a guest turn already in scope (the
+ * conversation gate started it for a non-owner sender) is kept, so starting
+ * the agent cannot hand a guest's message the channel's own authority.
+ */
+export function channelTurnSurfaceId(surface: string | undefined): string | undefined {
+  const scoped = currentTurnSurfaceId();
+  return isGuestSurfaceId(scoped) ? scoped : surface;
 }
 
 /**

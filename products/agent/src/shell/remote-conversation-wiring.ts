@@ -275,6 +275,7 @@ export function installRemoteConversationRouting(
     hasHostedOwner: () => ctx.services.configManager.get('hostedSessions.routeConversationTurns') !== false
       && (nativePending !== undefined || nativeOwnerUnconfirmed || router.hostedSessionId() !== null),
     executionMode: () => router.executionMode(),
+    executionModeDifference: () => router.executionModeDifference?.(),
     refreshExecutionMode: () => router.refreshExecutionMode(),
     setExecutionMode: mode => (router.hostedSessionId() === null && (nativePending !== undefined || nativeOwnerUnconfirmed)
       ? Promise.reject(new Error(UNCONFIRMED_NATIVE_OWNER_MODE_REASON))

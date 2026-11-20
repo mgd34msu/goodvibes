@@ -3,6 +3,7 @@ import type { ConfigKey } from '../../config/schema-types.js';
 import { CONFIG_SCHEMA } from '../../config/schema.js';
 import { READ_SECRETS_SITE } from '../../permissions/credential-read-defaults.js';
 import { effectivePermissionMode, gatePresetLabel } from '../presets.js';
+import { describePermissionModeInForce, type PermissionModeInForce } from '../../permissions/decision-model-readiness.js';
 
 // ---------------------------------------------------------------------------
 // /permissions provenance panel.
@@ -36,8 +37,16 @@ export interface PermissionProvenanceRow {
 }
 
 export interface PermissionProvenance {
+  /** The mode chosen: the saved default, or the mode chosen for this session (Shift+Tab, `--config`). */
   readonly sessionMode: string;
   readonly sessionModeLabel: string;
+  /** The saved default under a mode chosen for this session; absent when the session runs the saved default. */
+  readonly savedMode?: string;
+  /** The mode the gate decides calls by now. */
+  readonly modeInForce: string;
+  readonly modeInForceLabel: string;
+  /** Why the mode in force is not the chosen one; absent when they are the same. */
+  readonly modeInForceReason?: string;
   readonly rows: readonly PermissionProvenanceRow[];
   readonly readSecretsSite: string;
 }
@@ -52,7 +61,8 @@ const PERMISSION_KEYS: readonly { readonly key: string; readonly label: string; 
   })),
 ];
 
-export type ConfigProvenanceManager = Pick<ConfigManager, 'get' | 'describeConfigKeySource' | 'getConfigPath' | 'getProjectConfigPath'>;
+export type ConfigProvenanceManager = Pick<ConfigManager, 'get' | 'describeConfigKeySource' | 'getConfigPath' | 'getProjectConfigPath'>
+  & Partial<Pick<ConfigManager, 'getSavedValue' | 'isExplicitlySet'>>;
 
 function buildRow(
   configManager: ConfigProvenanceManager,
@@ -102,11 +112,18 @@ function buildRow(
 /** What the running process uses for the evaluator, when the surface can say. */
 export interface PermissionProvenanceOptions {
   readonly evaluatorInForce?: 'baseline' | 'policy-engine' | undefined;
+  /** The mode in force as the surface's own owner reports it (a hosted session's host); read from settings when absent. */
+  readonly modeInForce?: PermissionModeInForce | undefined;
 }
 
 export function buildPermissionProvenance(configManager: ConfigProvenanceManager, options: PermissionProvenanceOptions = {}): PermissionProvenance {
   const savedAutoApprove = configManager.get('behavior.autoApprove');
-  const mode = effectivePermissionMode(configManager.get('permissions.mode'), savedAutoApprove === true);
+  // The mode the gate decides by, read by the same rule the gate reads (decision-model-readiness.ts).
+  const inForce = options.modeInForce ?? describePermissionModeInForce(configManager);
+  const mode = options.modeInForce?.chosen ?? effectivePermissionMode(configManager.get('permissions.mode'), savedAutoApprove === true);
+  const saved = configManager.getSavedValue
+    ? effectivePermissionMode(configManager.getSavedValue('permissions.mode'), configManager.getSavedValue('behavior.autoApprove') === true)
+    : mode;
   const withInForce = (row: PermissionProvenanceRow): PermissionProvenanceRow =>
     row.key === 'permissions.engine' && options.evaluatorInForce !== undefined && options.evaluatorInForce !== row.value
       ? { ...row, inForce: `${options.evaluatorInForce} until restart (restart to apply ${String(row.value)})` }
@@ -114,6 +131,10 @@ export function buildPermissionProvenance(configManager: ConfigProvenanceManager
   return {
     sessionMode: mode,
     sessionModeLabel: gatePresetLabel(mode),
+    ...(saved !== mode ? { savedMode: saved } : {}),
+    modeInForce: inForce.mode,
+    modeInForceLabel: gatePresetLabel(inForce.mode),
+    ...(inForce.reason !== undefined ? { modeInForceReason: inForce.reason } : {}),
     rows: [
       ...PERMISSION_KEYS.map((entry) => withInForce(buildRow(configManager, entry))),
       ...(savedAutoApprove === true ? [buildRow(configManager, {
@@ -135,7 +156,12 @@ function displayValue(value: unknown): string {
 export function renderPermissionProvenance(provenance: PermissionProvenance): string {
   const lines: string[] = [
     'Permissions: settings in effect and where each came from',
-    `  session mode: ${provenance.sessionMode} (${provenance.sessionModeLabel})`,
+    `  mode in force: ${provenance.modeInForce} (${provenance.modeInForceLabel})`,
+    ...(provenance.modeInForceReason !== undefined
+      ? [`    not ${provenance.sessionMode}, because ${provenance.modeInForceReason}`] : []),
+    provenance.savedMode !== undefined
+      ? `  chosen for this session: ${provenance.sessionMode} (${provenance.sessionModeLabel}); saved default: ${provenance.savedMode} (set in /settings)`
+      : `  saved mode: ${provenance.sessionMode} (${provenance.sessionModeLabel})`,
     '',
     'Every line is traceable to its recorded origin. A value changed at runtime',
     '(e.g. via --config) is not recorded on disk and is labelled as such.',
@@ -163,7 +189,7 @@ export function renderPermissionProvenance(provenance: PermissionProvenance): st
   lines.push('');
   lines.push(`Read-only secret-material checks: ${provenance.readSecretsSite}`);
   lines.push('Safe modes use the shared secret-material reading; uncertain readings use the full permission gate.');
-  lines.push('YOLO skips execution safety readings and approval prompts.');
+  lines.push('YOLO skips execution safety readings and approval prompts; never-run rules and Pre:tool hooks still apply.');
 
   return lines.join('\n');
 }

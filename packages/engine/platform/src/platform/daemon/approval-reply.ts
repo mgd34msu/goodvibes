@@ -10,6 +10,8 @@ import { assertJudgmentInput, snapshotJudgmentInput } from '../gate/judgment-inp
 import { channelApprovalTarget } from './batteries/approval-reply.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { readInboundMessage, type InboundReading } from './inbound-reading.js';
+import { isOwnerConversation } from './owner-alert.js';
+import { approvalGuestChannel } from '../control-plane/approval-broker-raise.js';
 
 export type ApprovalReplyBroker = Pick<ApprovalBroker, 'listApprovals' | 'resolveApproval'>;
 
@@ -51,7 +53,7 @@ export function approvalDeliveryRouteId(
 
 interface ApprovalReplyDeps {
   readonly approvalBroker?: ApprovalReplyBroker | undefined;
-  readonly routeBindings: Pick<RouteBindingManager, 'getBinding'>;
+  readonly routeBindings: Pick<RouteBindingManager, 'getBinding'> & Partial<Pick<RouteBindingManager, 'listBindings'>>;
   readonly sessions?: Pick<SharedSessionBroker, 'getSession'> | undefined;
 }
 
@@ -59,7 +61,9 @@ interface ApprovalReplyDeps {
  * The asks a reply may answer, decided in code before anything is read: the
  * sender is the channel's owner (`isChannelOwner`; an allowlisted guest cannot
  * approve tool use), and the ask was delivered to the conversation the reply
- * arrived in (same surface, channel and thread). Empty when there is none.
+ * arrived in (same surface, channel and thread), or, for an ask a guest's turn
+ * raised, the reply came from one of the owner's own conversations, where it
+ * was delivered. Empty when there is none.
  */
 export function approvalReplyCandidates(
   input: ChannelIngressPolicyInput,
@@ -70,9 +74,21 @@ export function approvalReplyCandidates(
   const { userId, surface, text } = input;
   if (!broker || !decision.allowed || !userId || !text?.trim()) return [];
   if (!isChannelOwner(decision, userId)) return [];
+  // A guest's ask is delivered to the owner's own conversations, so it is
+  // answered from one of them; the reply's conversation is resolved once.
+  let ownConversation: boolean | undefined;
+  const repliedInOwnConversation = () => ownConversation ??= (() => {
+    let bindings: readonly ReturnType<RouteBindingManager['listBindings']>[number][];
+    try { bindings = deps.routeBindings.listBindings?.() ?? []; }
+    catch { return false; }
+    return bindings.some((binding) => binding.surfaceKind === surface
+      && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId
+      && isOwnerConversation(binding, decision.policy.ownerId));
+  })();
   // Inspect all pending records: truncating newest-first can hide ambiguity.
   return broker.listApprovals(Number.MAX_SAFE_INTEGER).filter((record) => {
     if (!isPending(record)) return false;
+    if (approvalGuestChannel(record) !== undefined) return input.channelId !== undefined && repliedInOwnConversation();
     const routeId = approvalDeliveryRouteId(record, deps.sessions);
     const binding = routeId ? deps.routeBindings.getBinding(routeId) : undefined;
     return binding !== undefined && binding.surfaceKind === surface

@@ -220,6 +220,34 @@ export function renderWorkProposalMessage(input: {
   ].join('\n');
 }
 
+/**
+ * The proposal put to the owner for work a guest asked for: someone the
+ * channel admits who is not its owner. The owner's answer is the only one that
+ * starts it.
+ */
+export function renderGuestWorkProposalMessage(input: {
+  readonly summary: string;
+  readonly expiresInMs: number;
+  readonly requestCount?: number | undefined;
+  /** The channel the guest wrote on. */
+  readonly surface: string;
+  /** The guest's id on that channel, when it has sender ids. */
+  readonly sender?: string | undefined;
+}): string {
+  const minutes = Math.max(1, Math.round(input.expiresInMs / 60_000));
+  const who = input.sender ? `${input.sender} on ${input.surface}` : `Someone on ${input.surface}`;
+  const folded = (input.requestCount ?? 1) > 1 ? ` (${input.requestCount} requests)` : '';
+  return [
+    `${who} (not you) asks for work${folded}: ${input.summary}`,
+    `Reply "yes" here to start it, "no" to skip (expires in ${minutes}m). Each change it makes is still put to you.`,
+  ].join('\n');
+}
+
+/** What a guest is told when their work request was put to the owner. */
+export function renderGuestProposalAskedMessage(summary: string): string {
+  return `I asked the owner to agree to this: ${summary}. You will hear here whether it starts.`;
+}
+
 export function renderProposalDeclinedMessage(summary: string): string {
   return `Skipped: ${summary}`;
 }

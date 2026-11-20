@@ -17,7 +17,9 @@
  * never in a log line, never in `/status`.
  */
 import {
+  acknowledgeRemoval,
   ClusterGroupRuntime,
+  findTombstone,
   clusterElectionTiming,
   clusterSecretStoreFrom,
   createClusterGroupVerbs,
@@ -29,6 +31,7 @@ import {
   resolveNodeIdentity,
   stillOnRoster,
   UdpClusterTransport,
+  type AuthorityRecordFile,
   type ClusterGroupVerbSurface,
   type ClusterClock,
   type ClusterSurfaceHolding,
@@ -50,8 +53,8 @@ export interface ClusterGroupComposition {
   readonly verbs: ClusterGroupVerbSurface;
   /** The transport the leader election must use, so its traffic is group-signed. */
   readonly electionTransport: ClusterTransport;
-  /** Ask the group to hand this machine its current key again, rate-limited. */
-  rejoin(): void;
+  /** Ask the group for its record and current key generation again (identity-signed, rate-limited). */
+  rejoin(generation?: number | null): void;
   /** Start the group layer. Safe to call more than once. */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -71,9 +74,6 @@ function nodeDisplayNameFor(configManager: ConfigManager, nodeId: string): strin
 
 /** Gaps between further return announcements when nobody answered; then it waits for a restart. */
 const REJOIN_RETRY_DELAYS_MS: readonly number[] = Object.freeze([30_000, 120_000, 600_000]);
-
-/** Least gap between catch-ups prompted by a datagram showing the group's key moved on. */
-const KEY_LOST_REJOIN_MIN_GAP_MS = 60_000;
 
 /**
  * Build the group layer.
@@ -106,6 +106,10 @@ export function createClusterGroupComposition(options: {
    * nothing, a distinction an operator diagnosing a silent inbox depends on.
    */
   readonly surfaceHoldings?: (() => readonly ClusterSurfaceHolding[]) | undefined;
+  /** The authority record this home answers credentials from; carried to every member of the group. */
+  readonly authorityRecord?: AuthorityRecordFile | undefined;
+  /** Where authority.status learns which members' records differ from this one. */
+  readonly setAuthorityPeers?: ((peers: { divergence(): { readonly behindOn: readonly string[]; readonly behind: boolean } } | null) => void) | undefined;
 }): ClusterGroupComposition {
   const { resolveLocalSecretSync } = options.secretsManager;
   const settings = readClusterSettings(options.configManager,
@@ -121,9 +125,13 @@ export function createClusterGroupComposition(options: {
   const clock = options.clock ?? createSystemClusterClock();
 
   const secrets = clusterSecretStoreFrom(options.secretsManager);
-  let requestRejoin: () => void = () => {};
+  let removedFromGroup: () => void = () => {};
   const runtime = new ClusterGroupRuntime({
-    onKeyGenerationLost: () => requestRejoin(),
+    // The record says the group removed this machine: drop the membership and
+    // report it. Called on every refresh until done; deferred, because it is
+    // called from inside the record's change notice.
+    onRemovedFromGroup: () => removedFromGroup(),
+    ...(options.authorityRecord ? { authorityRecord: options.authorityRecord } : {}),
     settings: groupSettings,
     transport: options.transport ?? new UdpClusterTransport({
       port: settings.port,
@@ -158,6 +166,11 @@ export function createClusterGroupComposition(options: {
     },
   });
 
+  // The authority record rides this group (membership and key generations
+  // included): identity-signed, so a member that is any number of key
+  // generations behind still takes it. authority.status reads its divergence.
+  options.setAuthorityPeers?.(runtime.authority);
+
   const context: GroupOperationsContext = {
     runtime,
     secrets: { get: secrets.get, set: secrets.set, delete: secrets.delete },
@@ -166,6 +179,16 @@ export function createClusterGroupComposition(options: {
     nodeDisplayName,
     version: VERSION,
     now: () => clock.now(),
+    electionSecret: () => settings.secret.state,
+    authorityRecord: options.authorityRecord,
+  };
+  let acknowledging = false;
+  removedFromGroup = () => {
+    if (acknowledging || !started || stopping) return;
+    acknowledging = true;
+    void Promise.resolve().then(() => acknowledgeRemoval(context)).then((result) => {
+      if (result.ok) logger.info('cluster: this machine was removed from its group by another member', { group: result.data.groupId });
+    }, () => {}).finally(() => { acknowledging = false; });
   };
 
   let started = false;
@@ -178,10 +201,11 @@ export function createClusterGroupComposition(options: {
     cancelRejoin = undefined;
     cancel?.();
   };
-  // Bounded: each unanswered announcement schedules the next on the group
-  // layer's own clock, and stopping cancels the one pending.
-  const scheduleRejoin = (attempt: number, delayMs?: number): void => {
-    if (stopping || (delayMs === undefined && attempt >= retryDelays.length)) return;
+  // Bounded: each unanswered return announcement (made only by a machine
+  // whose record no longer lists it) schedules the next on the group layer's
+  // own clock, and stopping cancels the one pending.
+  const scheduleRejoin = (attempt: number): void => {
+    if (stopping || attempt >= retryDelays.length) return;
     cancelRejoin = clock.setTimer(() => {
       cancelRejoin = undefined;
       if (stopping || !started) return;
@@ -193,24 +217,13 @@ export function createClusterGroupComposition(options: {
           scheduleRejoin(attempt + 1);
         },
       );
-    }, delayMs ?? retryDelays[attempt]!);
-  };
-  // The group's key moved on while this machine was running. The datagram that
-  // showed it is unauthenticated, so this only asks the group again (a member
-  // verifies the answer), at most once a minute and never alongside a pending one.
-  let lastKeyLostRejoinAt = Number.NEGATIVE_INFINITY;
-  requestRejoin = () => {
-    if (stopping || !started || cancelRejoin) return;
-    const now = clock.now();
-    if (now - lastKeyLostRejoinAt < KEY_LOST_REJOIN_MIN_GAP_MS) return;
-    lastKeyLostRejoinAt = now;
-    scheduleRejoin(0, 0);
+    }, retryDelays[attempt]!);
   };
   return {
     runtime,
     verbs: createClusterGroupVerbs(context),
     electionTransport: runtime.electionTransport(),
-    rejoin: () => requestRejoin(),
+    rejoin: () => runtime.catchUp(),
     start: () => {
       if (stopping) return Promise.reject(new Error('Cluster composition is stopping'));
       if (starting) return starting;
@@ -219,9 +232,9 @@ export function createClusterGroupComposition(options: {
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         await runtime.start();
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
+        started = true;
         const outcome = await announceReturn(runtime, context, nodeId);
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
-        started = true;
         if (outcome === 'retry') scheduleRejoin(0);
       }).catch(async (error: unknown) => {
         try { await runtime.stop(); }
@@ -264,6 +277,8 @@ export function createClusterServices(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
+  readonly authorityRecord?: AuthorityRecordFile | undefined;
+  readonly setAuthorityPeers?: ((peers: { divergence(): { readonly behindOn: readonly string[]; readonly behind: boolean } } | null) => void) | undefined;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -306,17 +321,19 @@ export async function startClusterServices(services: {
 }
 
 /**
- * Ask the group to take this machine back, on start.
+ * Come back to the group, on start.
  *
  * This is the zero-touch return. A machine that has been switched off for
  * months, through many group-key rotations and possibly a join-key change,
- * comes up holding stale keys, says "it is still me" with a key that never
- * rotates, and is re-keyed to the current generation by whichever member
- * answers. The operator does nothing.
+ * comes up holding stale keys and asks every member for the group's record,
+ * signed with its identity key, which never rotates. Each member that still
+ * lists it answers with the record and the current generation's secrets
+ * sealed to it; one that lists it as removed answers with its removal. The
+ * operator does nothing.
  *
- * It runs only when this machine still believes it is on the roster. A machine
- * that was REMOVED asks for nothing: it would be refused, and asking anyway
- * would put a pointless refusal in everyone's logs every time it started.
+ * A machine whose own record no longer lists it (the record was lost) says
+ * "it is still me" instead (REJOIN), and is re-keyed by whichever member
+ * answers if the group's roster still has it.
  */
 async function announceReturn(
   runtime: ClusterGroupRuntime,
@@ -324,7 +341,17 @@ async function announceReturn(
   nodeId: string,
 ): Promise<'settled' | 'retry'> {
   if (runtime.membership !== 'member') return 'settled';
-  if (!stillOnRoster(runtime.groupState, nodeId)) return 'settled';
+  if (runtime.groupState && findTombstone(runtime.groupState, nodeId)) {
+    // The record carries this machine's removal: it was forgotten by another
+    // member. It drops the membership and says so, rather than signing with
+    // keys the group no longer accepts.
+    await acknowledgeRemoval(context);
+    return 'settled';
+  }
+  if (stillOnRoster(runtime.groupState, nodeId)) {
+    runtime.catchUp();
+    return 'settled';
+  }
   const result = await rejoinGroup(context);
   if (result.ok) {
     logger.info('cluster: rejoined the group and took the current group key', {
@@ -333,6 +360,9 @@ async function announceReturn(
     });
     return 'settled';
   }
+  // The group told this machine it was removed; the operation dropped the
+  // membership and logged it with the command that puts it back.
+  if (result.failure === 'removed') return 'settled';
   if (result.terminal) {
     // A member refused this machine and proved it was a member when it did.
     // Retrying will never succeed, so this is not a quiet debug line: without

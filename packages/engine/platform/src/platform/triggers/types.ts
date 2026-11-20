@@ -221,6 +221,12 @@ export type TriggerRule =
 export interface AgentTurnAction {
   readonly kind: 'agent-turn';
   readonly prompt?: string | undefined;
+  /**
+   * Where the turn's answer is delivered, written as a channel in
+   * configuration (`telegram`, `slack:C123`). Absent, or when that send
+   * fails: the owner inbox, as a report.
+   */
+  readonly deliverTo?: string | undefined;
   /** Not honoured: a new trigger naming it is refused. Kept so triggers saved with it still load. */
   readonly sessionId?: string | undefined;
   readonly model?: string | undefined;

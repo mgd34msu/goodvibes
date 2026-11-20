@@ -274,6 +274,8 @@ export class DaemonLifecycleRuntime {
   private promotionHandover: NativeHandover | undefined;
   private promotionAbort: AbortController | null = null;
   private promotionAttempted = false;
+  /** The service.autostart subscription, while this daemon applies the setting. */
+  private autostartWatch: (() => void) | null = null;
   /** The promotion handed over and asked the process to exit; nothing about it is stale. */
   private promotionExited = false;
   private rollbackHandover: Promise<void> | null = null;
@@ -850,12 +852,47 @@ export class DaemonLifecycleRuntime {
     if (!this.reachedFullyStarted || this.stopping || this.rollbackRecovery || this.rollbackApplied || this.appliedUpdater) return;
     this.startAutoUpdater();
     this.promoteToServiceAtBoot();
+    this.watchAutostart();
     return this.promotionHandover;
+  }
+
+  /**
+   * service.autostart acts here and only here, however it was set (a settings
+   * screen, /config set, /settings set, goodvibes-daemon config set, the API, a
+   * hand edit of the daemon's settings file, which the config watcher reports):
+   * each change is applied to the service manager, and once at start, to an
+   * installed service, so a value set while no daemon ran is applied too. A
+   * daemon under an overridden home never touches the machine's service, and
+   * service.enabled false leaves it alone. Cost: one service-manager command per
+   * change and one at start.
+   */
+  private watchAutostart(): void {
+    if (this.autostartWatch || this.options.hasOverriddenHome === true) return;
+    const config = this.options.configManager;
+    const manager = this.options.platformServiceManager;
+    const apply = (when: string): void => {
+      // A handover in progress settles the service itself; this process is about to exit.
+      if (this.stopping || this.promotionTask) return;
+      if (config.get('service.enabled') === false) return;
+      const wanted = config.get('service.autostart') === true;
+      void manager.applyAutostart().then((status) => {
+        if (status.actionError) this.alertOwner(`service.autostart ${wanted ? 'on' : 'off'} (${when}) was not fully applied: ${status.actionError}`);
+        else logger.info(`DaemonServer: service.autostart ${wanted ? 'on' : 'off'} applied (${when}): the service ${status.autostart ? 'starts' : 'does not start'} at login`);
+        if (status.lingerNote) logger.info(`DaemonServer: ${status.lingerNote}`);
+      }).catch((error: unknown) => {
+        this.alertOwner(`service.autostart ${wanted ? 'on' : 'off'} (${when}) was not applied: ${summarizeError(error)}`);
+      });
+    };
+    this.autostartWatch = config.subscribe('service.autostart', () => apply('changed'));
+    if (this.promotionTimer || this.promotionTask) return;
+    void manager.statusAsync().then((status) => { if (status.installed && !status.actionError) apply('at start'); }).catch(() => {});
   }
 
   /** Fence handovers before the facade awaits any shutdown hooks. Never self-drains. */
   beginStopping(forHandover = false): void {
     this.stopping = true;
+    this.autostartWatch?.();
+    this.autostartWatch = null;
     if (!forHandover) { this.promotionAbort?.abort(); this.rollbackAbort?.abort(); }
     this.autoUpdater?.stop(forHandover);
     this.appliedUpdater?.stop(forHandover);
@@ -1206,7 +1243,13 @@ export class DaemonLifecycleRuntime {
         if (actionSignal?.aborted || this.hasTransactionRecovery()) return { status: 'unknown', detail: 'handover cancelled or filesystem recovery required' };
         // --no-block observes enqueue acceptance without waiting on the replacement
         // to bind the listener still owned by this process.
-        return command(['systemctl', '--user', '--no-block', 'enable', '--now', `${serviceName}.service`], actionSignal);
+        const adopted = await command(['systemctl', '--user', '--no-block', 'enable', '--now', `${serviceName}.service`], actionSignal);
+        // The adopted unit starts at login: service.autostart records it, so the setting says what the service does.
+        if (adopted.status === 'accepted' && this.options.configManager.get('service.autostart') !== true) {
+          try { this.options.configManager.setDynamic('service.autostart', true); }
+          catch (error) { logger.warn('DaemonServer: service.autostart could not be recorded after adoption', { error: summarizeError(error) }); }
+        }
+        return adopted;
       },
       restartService: async (actionSignal = signal) => {
         if (actionSignal?.aborted || this.hasTransactionRecovery()) return { status: 'unknown', detail: 'handover cancelled or filesystem recovery required' };
@@ -1251,16 +1294,17 @@ export class DaemonLifecycleRuntime {
     // `hasOverriddenHome`, this exact promotion put a scratchpad daemon in
     // charge of the owner's machine and their real Telegram bot.
     //
-    // Checked BEFORE `service.enabled`, deliberately: that key is client-owned
-    // and therefore read from the REAL home, so a test tree's own opt-out was
-    // written and never read. Isolation that depends on the isolated process
-    // reading its own settings file is not isolation.
+    // Checked BEFORE `service.enabled`, deliberately: isolation must not
+    // depend on the isolated process having written its own opt-out.
     if (this.options.hasOverriddenHome === true) {
       logger.info('DaemonServer: home was overridden, skipping boot promotion', {
         detail: 'a daemon running from a non-default home never adopts the machine service unit',
       });
       return;
     }
+    // The owner's choice of a machine without a daemon service (the installers'
+    // --no-service, goodvibes-daemon uninstall-service, or the setting): a
+    // daemon setting, so this is the value every program and installer wrote.
     if (this.options.configManager.get('service.enabled') === false) return;
     // Only a compiled binary may self-promote: a source/dev run would install a
     // unit whose ExecStart reconstructs a dev command line for a binary and fail

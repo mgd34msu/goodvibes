@@ -9,6 +9,7 @@
  * need an admin, the same rule the router enforces.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -112,6 +113,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'batch.jobs.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Batch Job',
     description: 'Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. When the provider cannot batch (no batch API, or not configured for it) and `batch.fallback` is `live`, the request runs at once on the live path and the job comes back finished: `completed` with its result, or `failed` with code LIVE_FALLBACK_FAILED, marked `metadata["goodvibes.execution"] = "live-fallback"`; with `fallback: fail` it is refused with BATCH_PROVIDER_UNSUPPORTED or BATCH_PROVIDER_NOT_CONFIGURED (409). Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.',
     category: 'batch',
@@ -143,6 +145,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'batch.jobs.cancel',
+    repeat: 'safe',
     title: 'Cancel Batch Job',
     description: 'Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409 BATCH_JOB_ALREADY_SUBMITTED, because provider batches cancel as a whole: the refusal names the provider batch and `next` points at batch.providerBatches.cancel. Needs an admin.',
     category: 'batch',
@@ -154,6 +157,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'batch.providerBatches.cancel',
+    repeat: 'safe',
     title: 'Cancel Provider Batch',
     description: 'Cancel a whole provider batch at the provider (the `providerBatchId` shown on a submitted job) and mark its jobs. `providerStatus` is what the provider answered: `cancelled` when it stopped, `running` while it is still winding down, in which case requests it finished before the cancel are collected by the next pass and the rest are marked cancelled when it ends. `jobs` is every job of that batch as the cancel left it. A batch whose jobs are all finished is returned unchanged. Refused with BATCH_PROVIDER_BATCH_NOT_FOUND (404) when no job belongs to the id and BATCH_PROVIDER_CANCEL_UNSUPPORTED (409) when the provider has no cancel call. Needs an admin.',
     category: 'batch',
@@ -170,6 +174,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'batch.run',
+    repeat: 'safe',
     title: 'Run Batch Pass',
     description: 'Run one submit-and-poll pass over the queue now instead of waiting for the timer. `force: true` submits queued jobs even before their delay has elapsed. Returns the counts for this pass, all zero when the mode is `off`. Spends provider budget, so it needs an admin.',
     category: 'batch',

@@ -28,8 +28,8 @@ export const CLUSTER_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   leave: '',
   rename: '"<new name>"',
   groups: '',
-  publish: '<shared setting>',
-  accept: '<shared setting>',
+  publish: '<shared setting> | user:<name>',
+  accept: '<shared setting> | user:<name>',
 };
 
 export function registerClusterRuntimeCommands(registry: CommandRegistry): void {

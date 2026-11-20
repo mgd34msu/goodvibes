@@ -25,8 +25,8 @@
  * counts the most it may come to. The store keeps only which purchases were
  * admitted under an entry and when.
  *
- * A small document held in memory and written whole on a real change. Payments
- * run on one unclustered daemon, so this process is the only writer.
+ * A small document held in memory and written whole on a real change. The
+ * file is this machine's own, and only this daemon process writes it.
  */
 import { randomBytes } from 'node:crypto';
 import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';

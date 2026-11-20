@@ -29,7 +29,7 @@ import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './a
 import { readMailboxStatus } from './commands/email-settings.ts';
 import { heldHostMailboxReading, readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
 import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
-import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
+import { readConfigBoolean, readConfigNumber, readConfigString, readFallbackOrderText } from './agent-workspace-snapshot-config.ts';
 import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
 import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
 
@@ -391,7 +391,7 @@ export interface AgentWorkspaceConfigSettingsSnapshot {
   readonly reasoningEffort: string;
   readonly helperEnabled: boolean;
   readonly toolLlmEnabled: boolean;
-  readonly providerFailureHints: boolean;
+  readonly providerFallbackOrder: string;
   readonly cacheEnabled: boolean;
   readonly cacheStableTtl: string;
   readonly cacheMonitorHitRate: boolean;
@@ -449,7 +449,7 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
     reasoningEffort: str('provider.reasoningEffort', '(default)'),
     helperEnabled: bool('helper.enabled', false),
     toolLlmEnabled: bool('tools.llmEnabled', false),
-    providerFailureHints: bool('behavior.suggestAlternativeOnProviderFail', false),
+    providerFallbackOrder: readFallbackOrderText(context, failures),
     cacheEnabled: bool('cache.enabled', true),
     cacheStableTtl: str('cache.stableTtl', '(default)'),
     cacheMonitorHitRate: bool('cache.monitorHitRate', true),

@@ -30,6 +30,7 @@ import type { FeatureFlagManager } from '../feature-flags/index.js';
 import { getSecuritySettingsReport, type SecuritySettingReport } from '../security-settings.js';
 import { readIntelligenceSnapshot } from '../ui-read-models-observability-system.js';
 import { effectivePermissionMode } from '../../gate/presets.js';
+import { describePermissionModeInForce } from '../../permissions/decision-model-readiness.js';
 
 /**
  * The HTTP routes the daemon serves, read from the method catalog that serves
@@ -300,8 +301,8 @@ export class IntegrationHelperService {
       // The gate reports a request only after its decision, so the store flag
       // never reads true while a prompt is open; the broker holds it until decided.
       awaitingDecision: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)) > 0,
-      // The setting is the one owner of the mode, read the way the status line reads it.
-      mode: effectivePermissionMode(this.context.configManager?.get('permissions.mode'), this.context.configManager?.get('behavior.autoApprove') === true),
+      // The mode in force, read the way the gate reads it (jev-decides is ask-me while no decision model works).
+      mode: this.context.configManager ? describePermissionModeInForce(this.context.configManager).mode : effectivePermissionMode(undefined),
       lastDecision: state.permissions.lastDecision,
       approvalCount: state.permissions.approvalCount,
       denialCount: state.permissions.denialCount,

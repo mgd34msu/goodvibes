@@ -105,6 +105,25 @@ export const SURFACE_RECORD_SCHEMA = objectSchema({
  * sees "success" cannot tell an applied setting from one that went into a store
  * the acting runtime never reads.
  */
+/**
+ * The answer to a change only the owner makes, asked with a paired device's
+ * credential (HTTP 202): nothing was changed; the change was put to the owner
+ * as approval `approvalId` and is applied when he approves it.
+ */
+export const OWNER_APPROVAL_PENDING_SCHEMA = objectSchema({
+  success: { type: 'boolean', const: false },
+  code: { type: 'string', const: 'OWNER_APPROVAL_PENDING' },
+  approvalId: STRING_SCHEMA,
+  key: STRING_SCHEMA,
+  keys: arraySchema(STRING_SCHEMA),
+  reasons: arraySchema(STRING_SCHEMA),
+  sessionId: STRING_SCHEMA,
+  mode: STRING_SCHEMA,
+  requestedMode: STRING_SCHEMA,
+  state: STRING_SCHEMA,
+  next: arraySchema(STRING_SCHEMA),
+}, ['code', 'approvalId', 'state'], { additionalProperties: true });
+
 export const CONFIG_SET_OUTPUT_SCHEMA = objectSchema({
   success: BOOLEAN_SCHEMA,
   key: STRING_SCHEMA,

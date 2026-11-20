@@ -30,15 +30,14 @@ import { WorkspaceSwapManager } from '../workspace/workspace-swap-manager.js';
  * what the detached-spawn hint names for setups where the daemon could not
  * promote itself.
  */
-function installServiceAndExit(config: ConfigManager, workingDir: string): never {
+function installServiceAndExit(config: ConfigManager, workingDir: string, homeDirectory: string, daemonHomeDirectory: string): never {
   // The unit goes under the login home, never this process's GOODVIBES_HOME tree.
   const unitHome = resolveServiceUnitHome();
   const manager = new PlatformServiceManager(config, {
     workingDirectory: workingDir,
     homeDirectory: unitHome,
-    binaryBaseName: 'goodvibes',
+    launch: { homeDirectory, daemonHomeDirectory },
     defaultServiceName: resolveDaemonServiceDefault(),
-    defaultServiceDescription: 'goodvibes omnichannel daemon host',
   });
   try {
     const result = manager.install();
@@ -166,7 +165,7 @@ async function main(): Promise<void> {
       ownsDaemonTier: true,
     });
     if (process.argv.includes('--install-service')) {
-      installServiceAndExit(config, workingDir);
+      installServiceAndExit(config, workingDir, homeDirectory, daemonHomeDir);
     }
     networkTransport.install(config);
     // Point the bus listener cap at `runtime.eventBus.maxListeners` before the

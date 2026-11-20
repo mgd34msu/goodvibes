@@ -35,6 +35,7 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
   "push.",
   "cloudflare.",
   "worktree.",
+  "service.",
   "voice.local.",
   "storage.secretProviders."
 ] as const;
@@ -42,7 +43,9 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
 export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   "danger.httpListener",
   "daemon.timezone",
-  "network.privateDeliveryHosts"
+  "network.privateDeliveryHosts",
+  "update.auto",
+  "update.autoUpdateAtLaunch"
 ] as const;
 
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [

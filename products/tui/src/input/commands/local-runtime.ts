@@ -8,7 +8,6 @@ import { openCommandView, requireBookmarkManager, requireProviderApi, requireSec
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: false,
-  liveDiscovery: true,
   unpinByModelId: false,
   imageHint: '<path> [prompt text]',
   supportedFormats: '\nSupported: .png, .jpg, .jpeg, .webp, .gif',

@@ -4,7 +4,10 @@
  * Two capabilities, each with honest per-state copy (never a dead toggle):
  *
  *   Push notifications, subscribe/unsubscribe this device for the approval and
- *   completion pushes the daemon fans out. Every "can't" is named: an insecure
+ *   completion pushes the daemon fans out. The switch shows what the DAEMON has
+ *   registered for this device, not only what the browser holds: a browser
+ *   subscription the daemon never registered receives nothing, and is said so;
+ *   a turn-off that did not finish is said so too. Every "can't" is named: an insecure
  *   context points at HTTPS (the Tailscale-serve pointer the dictation surface
  *   already uses); a blocked permission explains how to re-enable it; an
  *   unsupported browser says so plainly (iOS has real web-push caveats).
@@ -18,8 +21,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BellRing, BellOff, Send, ShieldAlert } from 'lucide-react';
 import {
-  currentSubscription,
   describePushSubscribeError,
+  readPushRegistrationState,
   sendTestPush,
   subscribeToPush,
   unsubscribeFromPush,
@@ -83,10 +86,12 @@ export function NotificationSettings() {
   const installBlockedByInsecureOrigin = affordance === 'none' && posture !== undefined && !posture.secureContext;
   const installReason = capabilityReason(posture, 'service-worker') ?? INSTALL_INSECURE_FALLBACK;
 
-  const subscribed = useQuery({
-    queryKey: ['push', 'subscribed'],
-    queryFn: async () => (await currentSubscription()) !== null,
+  // Both halves: this browser's subscription and the daemon's registration for it.
+  const registration = useQuery({
+    queryKey: ['push', 'registration'],
+    queryFn: readPushRegistrationState,
     enabled: support === 'ok',
+    retry: false,
   });
 
   const subscribe = useMutation({
@@ -96,8 +101,9 @@ export function NotificationSettings() {
       await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Notifications on', description: 'This device will receive approval and completion pushes.', tone: 'success' });
     },
-    onError: (error) => {
+    onError: async (error) => {
       setPermission(readNotificationPermission());
+      await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Could not enable notifications', description: pushErrorMessage(error), tone: 'danger' });
     },
   });
@@ -108,7 +114,8 @@ export function NotificationSettings() {
       await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Notifications off', description: 'This device will no longer receive pushes.', tone: 'success' });
     },
-    onError: (error) => {
+    onError: async (error) => {
+      await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Could not disable notifications', description: pushErrorMessage(error), tone: 'danger' });
     },
   });
@@ -119,7 +126,11 @@ export function NotificationSettings() {
     onError: (error) => toast({ title: 'Test push failed', description: pushErrorMessage(error), tone: 'danger' }),
   });
 
-  const isSubscribed = subscribed.data === true;
+  const state = registration.data;
+  // On means the daemon has this device registered: that is what receives pushes.
+  const isSubscribed = state?.registered != null;
+  const browserOnly = state !== undefined && state.browserSubscribed && state.registered === null && !state.removalPending;
+  const daemonOnly = state !== undefined && !state.browserSubscribed && state.registered !== null && !state.removalPending;
   // The daemon's own record of the last device it removed, so a device that stopped
   // receiving pushes is explained rather than silent.
   const devices = useQuery({
@@ -149,6 +160,30 @@ export function NotificationSettings() {
               <BellOff size={16} aria-hidden="true" /> {removalSentence(lastRemoval)}
             </div>
           )}
+          {registration.isError && (
+            <div className="banner warning" role="status">
+              <ShieldAlert size={16} aria-hidden="true" />{' '}
+              Could not read which devices the daemon has registered for push ({pushErrorMessage(registration.error)}), so whether this device receives notifications is not known.
+            </div>
+          )}
+          {state?.removalPending && (
+            <div className="banner warning" role="status">
+              <BellOff size={16} aria-hidden="true" />{' '}
+              Turning notifications off did not finish{state.registered ? ': the daemon still has this device registered' : ''}{state.browserSubscribed ? ' and this browser is still subscribed' : ''}. It is finished the next time this app opens, or now with &ldquo;Turn off notifications&rdquo;.
+            </div>
+          )}
+          {browserOnly && (
+            <div className="banner warning" role="status">
+              <BellOff size={16} aria-hidden="true" />{' '}
+              This browser is subscribed, but the daemon has not registered it, so no notification will arrive here. Turn notifications on to register it.
+            </div>
+          )}
+          {daemonOnly && (
+            <div className="banner warning" role="status">
+              <BellOff size={16} aria-hidden="true" />{' '}
+              The daemon has this device registered, but this browser holds no push subscription, so nothing it sends arrives. Turn notifications off to remove the registration, then on to subscribe this browser again.
+            </div>
+          )}
           {permission === 'denied' && (
             <div className="banner warning" role="status">
               <BellOff size={16} aria-hidden="true" />{' '}
@@ -162,16 +197,18 @@ export function NotificationSettings() {
               description="Get an approval or completion as a notification on this device, even when the app isn’t open. They come straight from your daemon; nothing is stored elsewhere."
               control={(
                 <div className="notifications-actions">
-                  {isSubscribed ? (
+                  {isSubscribed || state?.removalPending ? (
                     <>
-                      <Button
-                        size="sm"
-                        icon={<Send aria-hidden="true" />}
-                        disabled={test.isPending}
-                        onClick={() => test.mutate()}
-                      >
-                        {test.isPending ? 'Sending…' : 'Send a test push'}
-                      </Button>
+                      {isSubscribed && !state?.removalPending && (
+                        <Button
+                          size="sm"
+                          icon={<Send aria-hidden="true" />}
+                          disabled={test.isPending}
+                          onClick={() => test.mutate()}
+                        >
+                          {test.isPending ? 'Sending…' : 'Send a test push'}
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         icon={<BellOff aria-hidden="true" />}

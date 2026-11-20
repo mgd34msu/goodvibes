@@ -29,7 +29,8 @@ export interface FreshConversationContext {
     readonly hydrateSessionUsage?: (() => void) | undefined;
   };
   readonly reloadSystemPrompt?: (() => string) | undefined;
-  readonly cancelPendingRecovery?: (() => void) | undefined;
+  /** Revokes the cleared session's pending work (command readings) before its history changes. */
+  readonly cancelSessionWork?: (() => void) | undefined;
   /**
    * Runs once the local conversation is reset. A host that routes turns to a
    * daemon-held session uses it to let go of that session, so the next message
@@ -113,7 +114,7 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
     timestamp: Date.now(), saveSource: 'auto',
   });
   try {
-    ctx.cancelPendingRecovery?.();
+    ctx.cancelSessionWork?.();
     // The live snapshot goes; a crash snapshot of this session still on offer is kept apart, not deleted.
     if (surface) deleteRecoveryFile({ surface }, liveId);
   } catch (error) {

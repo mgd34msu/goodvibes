@@ -78,3 +78,5 @@ export type { ScheduleReading, ScheduleReadingInput } from './schedule-reading.j
 
 export { automationActionBinding, bindAutomationAction } from './action-source.js';
 export { createAutomationAgentControls, createAutomationSpawnTask } from './agent-controls.js';
+export { UnattendedRuns } from './unattended-runs.js';
+export type { UnattendedAnswer, UnattendedAnswerInbox, UnattendedAnswerReceipt } from './unattended-runs.js';

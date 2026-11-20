@@ -25,6 +25,7 @@ import {
 } from './recall-bundle.ts';
 import {
   getMemorySpine,
+  handleRecallEdit,
   handleRecallGet,
   handleRecallLink,
   handleRecallList,
@@ -53,6 +54,7 @@ const dispatchRecall = createRecallDispatch<CommandContext>({
   link: handleRecallLink,
   list: handleRecallList,
   remove: handleRecallRemove,
+  edit: handleRecallEdit,
   export: handleRecallExport,
   import: handleRecallImport,
   handoffExport: handleRecallHandoffExport,
@@ -67,7 +69,7 @@ export const recallCommand: SlashCommand = {
   aliases: ['rc'],
   description: 'Project memory: add decisions, constraints, incidents, and patterns with provenance.',
   usage: '<subcommand> [args]',
-  argsHint: 'add|search|link|get|list|remove|files',
+  argsHint: 'add|search|link|get|edit|list|remove|files',
   confirm(args) {
     const restore = memoryRestoreConfirmation(args, 'memory');
     if (restore) return restore;
@@ -114,6 +116,7 @@ export const recallCommand: SlashCommand = {
           '  search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>] , Full-text or sqlite-vec semantic search',
           '  vector [status|doctor|rebuild]                 , Inspect or rebuild the sqlite-vec memory index',
           '  get <id>                                      , Show record with provenance + links',
+          '  edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <scope>] , Correct a record in place',
           '  link <fromId> <toId> <relation> --yes        , Create a directed relation between records',
           '  queue [limit]                                 , Show the operator review queue',
           '  review <id> <state> [--confidence <n>] [--by <name>] [--reason <text>]',

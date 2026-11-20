@@ -31,7 +31,7 @@ import { bindOwnerInput } from '@goodvibes-jev/engine/terminal-shell/companion-i
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/state';
-import '@goodvibes-jev/engine/platform/platform/permissions';
+import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 import '@goodvibes-jev/engine/platform/platform/acp';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
 import {
@@ -42,13 +42,12 @@ import {
 } from './permissions/broker-approval-card.ts';
 import './input/command-registry.ts';
 
-import { requestedEffortLevel } from './providers/reasoning-effort-surface.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { createContractQuestionComposer } from '@goodvibes-jev/engine/terminal-shell/contract-question-composer';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { chooseFailover, describeContextWindowSource, readFallbackOrder } from '@goodvibes-jev/engine/platform/platform/providers';
+import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import './renderer/git-status.ts';
 
 import { createShellLayout } from './renderer/layout-engine.ts';
@@ -61,7 +60,7 @@ import { voiceCaptureRowVisible } from './core/voice-capture-status.ts';
 import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { worktreeStatusLines } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
-import { createFailoverTurnState, resolveActiveModelDisplay } from './core/active-model-identity.ts';
+import { resolveActiveModelDisplay } from './core/active-model-identity.ts';
 import { computePromptContentWidth } from './renderer/prompt-content-width.ts';
 import { buildConversationViewport, centerViewportContent } from './renderer/conversation-layout.ts';
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
@@ -105,7 +104,7 @@ import { footerTargetRows } from './renderer/footer-targets.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './core/stream-event-wiring.ts';
 import { createStreamMetrics, oldestRunningTool, type StreamMetrics } from './core/stream-metrics.ts';
 import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
-import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
+import { createUserTurnOwner } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
@@ -312,8 +311,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   const streamMetrics: StreamMetrics = createStreamMetrics();
   // When the running compaction was first seen (the throbber's elapsed time); undefined while none runs.
   let compactingSinceMs: number | undefined;
-  // Live failover record, written by the failover path, read every frame so the header and footer agree.
-  const failoverState = createFailoverTurnState();
 
   const getPromptContentWidth = () => computePromptContentWidth(stdout.columns);
   // Live-microphone footer row (push-to-talk or the wake detector); assigned once voice capture is wired below, null until then so pre-wiring frames size correctly.
@@ -637,7 +634,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   }
 
   const cancelTurn = commandReadings.withCancellation(
-    createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery()),
+    createCancelGeneration(orchestrator, spokenTurns),
   );
   const cancelGeneration = (): boolean => {
     shellPassthrough.cancelRunning();
@@ -681,10 +678,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   // Late-patched: bootstrap.ts populates uiServices.platform.externalServices AFTER commandContext is built.
   commandContext.platform.externalServices = uiServices.platform.externalServices;
   commandContext.cancelGeneration = cancelGeneration;
-  commandContext.cancelPendingRecovery = () => {
-    commandReadings.cancelAll();
-    return streamResult.cancelPendingRecovery();
-  };
+  commandContext.cancelSessionWork = () => { commandReadings.cancelAll(); };
   wireInteractionSeams(commandContext, {
     orchestrator,
     powerManager: ctx.services.powerManager,
@@ -910,7 +904,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       configuredRegistryKey: configManager.get('provider.model') as string,
       configuredLabel: runtime.model,
       configuredProvider: runtime.provider,
-      failover: failoverState.current(),
+      // The engine's failover in force for this turn, so the header and footer name the model that answers.
+      failover: orchestrator.turnFailoverInForce(),
     });
     lastHeaderModel = activeModel.headerModel;
     const viewFrame = views.frame(width); // an agent or process open full screen, or null in main
@@ -1076,7 +1071,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       runningAgentProgress: runningAgentSummary.progress,
       composerFlags: composerState.flags,
       composerPendingRisk: composerState.pendingRisk,
-      permissionMode: configManager.get('permissions.mode') as string,
+      // The mode in force: jev-decides shows as ask-me while no decision model works (decision-model-readiness.ts).
+      permissionMode: describePermissionModeInForce(configManager).mode,
       voiceCapture: voiceCaptureStatus(),
       throbber,
       turnRunning: turnActive,
@@ -1237,7 +1233,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       configuredRegistryKey: configManager.get('provider.model') as string,
       configuredLabel: runtime.model,
       configuredProvider: runtime.provider,
-      failover: failoverState.current(),
+      // The engine's failover in force for this turn, so the header and footer name the model that answers.
+      failover: orchestrator.turnFailoverInForce(),
     });
     const spine = uiServices.platform.externalServices?.inspect();
     const voice = voiceCaptureStatus();
@@ -1249,7 +1246,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       model: active.footerModel,
       provider: active.footerProvider,
       modelNote: active.divergenceNote,
-      permissionMode: configManager.get('permissions.mode') as string,
+      // The mode in force: jev-decides shows as ask-me while no decision model works (decision-model-readiness.ts).
+      permissionMode: describePermissionModeInForce(configManager).mode,
       toolCount: toolRegistry.list().length,
       notifyMode: modeManager.getHITLMode(),
       usage: orchestrator.usage,
@@ -1275,7 +1273,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           ? spine.sessionSpineStatus
           : undefined,
       sessionSpineRefusal: spine?.sessionSpineActive ? spine.sessionSpineRefusal ?? undefined : undefined,
-      webSurfaceUrl: configManager.get('web.enabled') ? resolveWebSurfaceUrl(configManager) : undefined,
+      webSurfaceUrl: resolveWebSurfaceUrl(configManager),
       autoApprove: isEffectiveDangerMode(configManager),
       keepAwake: powerChipSource.get().keepAwake,
       keepAwakeRefused: !keepAwakeHolding(powerChipSource.get()) && powerChipSource.get().keepAwake,
@@ -1351,17 +1349,15 @@ async function main(prepared: PreparedShellCliRuntime) {
   ));
 
   /**
-   * Send the failed turn's own prompt again. The orchestrator keeps that turn's
-   * input and the message count before it (provider failover keeps the same
-   * source identity and opaque permit). When no later turn has run, the
-   * conversation is rolled back to before the failed prompt; when one has (a
-   * prompt queued behind it), nothing is rolled back and the prompt is sent as
-   * a new turn, so the later turn is neither erased nor sent twice.
-   * `failover` is the user turn's own retry when the failover path asks (the
-   * submission then continues the same user turn); without it, as from the
-   * Alt+R retry, the submission is a new user turn.
+   * Send the failed turn's own prompt again (Alt+R). The orchestrator keeps
+   * that turn's input and the message count before it. When no later turn has
+   * run, the conversation is rolled back to before the failed prompt; when one
+   * has (a prompt queued behind it), nothing is rolled back and the prompt is
+   * sent as a new turn, so the later turn is neither erased nor sent twice.
+   * A provider failure inside a turn is not retried here: the engine's turn
+   * loop already moved it along the fallback order (providers/failover.ts).
    */
-  const resubmitLastTurn = (failover?: { readonly notice: string; readonly retry: FailoverRetry }): boolean => {
+  const resubmitLastTurn = (): boolean => {
     const failed = orchestrator.failedTurnInput();
     if (!failed) return false; // nothing failed to send again; the caller narrates instead
     const { text, content: rContent, options: rOpts } = failed;
@@ -1373,34 +1369,19 @@ async function main(prepared: PreparedShellCliRuntime) {
       render();
       return false;
     }
-    // Roll back to pre-submission count, then re-submit. platform gap, no retry-in-place (see handoff).
-    // The rollback erases the failed turn's transcript, the failover notice included, which is how
-    // that notice used to vanish before anyone could read it. The caller hands it over instead, and
-    // it is posted here: after the rollback, above the prompt it explains.
+    // Roll back to pre-submission count, then re-submit.
     orchestrator.clearFailedTurnInput(failed.turnId);
     if (!failed.superseded) conversation.removeMessagesAfter(failed.rollbackCount);
-    if (failover) systemMessageRouter.userReceipt(failover.notice, 'warning');
-    const retry = failover?.retry;
-    // A failover retry that never submits (cancelled, superseded, or its
-    // preparation failed) ends the user turn as failed instead of leaving it open.
-    let submitted = false;
     void runOwnedTurnRetry({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
-      submit: () => {
-        submitted = true;
-        retry?.submitting();
-        return orchestrator.handleUserInput(text, rContent, rOpts);
-      },
+      submit: () => orchestrator.handleUserInput(text, rContent, rOpts),
       abort: () => orchestrator.abort(),
-      isCurrent: retry?.isCurrent ?? (() => true),
-      signal: retry?.signal,
-    }).then(() => { if (!submitted) retry?.abandon(); }, (e: unknown) => {
+      isCurrent: () => true,
+    }).catch((e: unknown) => {
       logger.debug('retryTurn', { error: summarizeError(e) });
-      retry?.abandon();
     });
     return true;
   };
-  const retryTurn = (notice: string, retry: FailoverRetry): boolean => resubmitLastTurn({ notice, retry });
   const streamResult: WireStreamEventMetricsResult = wireStreamEventMetrics({
     events: uiServices.events,
     orchestrator,
@@ -1412,16 +1393,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     isActive: () => !lifecycle.isTerminalRestored(),
     userTurn,
     providerOptimizer: ctx.services.providerOptimizer,
-    // The person's own fallback order decides, never a list position (providers/failover.ts).
-    chooseFailover: (failed, visited) => chooseFailover({
-      registry: providerRegistry, current: failed, visited, fallbackOrder: readFallbackOrder(configManager.get('provider.fallbackModels')),
-    }),
-    costLookup: providerRegistry,
-    retryTurn,
-    failoverState,
-    getConfiguredRegistryKey: () => configManager.get('provider.model') as string | undefined,
-    // The REQUESTED level, through the one helper every remap site reads from.
-    getConfiguredReasoningEffort: () => requestedEffortLevel(configManager),
+    // The engine's failover moves get their billing line (providers/failover.ts decides the move).
+    observeTurnFailover: (listener) => orchestrator.onTurnFailover(listener),
     isApprovalPending: () => pendingPermission !== null,
   });
   unsubs.push(...streamResult.unsubs);

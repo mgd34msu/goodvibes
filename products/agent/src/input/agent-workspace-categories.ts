@@ -68,7 +68,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       // Advanced routes, most people can skip these
       { id: 'account-advanced-separator', label: 'Advanced routes (optional), most people can skip these', detail: 'Helper, tool, TTS, embedding, system-prompt, and cache routing are here when you need them. Chat works without any of these.', kind: 'guidance', safety: 'read-only' },
       settingAction({ id: 'account-embedding', label: 'Embedding provider', detail: 'Set the embedding provider for memory and retrieval.', key: 'provider.embeddingProvider' }),
-      settingAction({ id: 'account-provider-fallback-hint', label: 'Provider failure hints', detail: 'Toggle alternative model suggestions when the current provider fails non-transiently.', key: 'behavior.suggestAlternativeOnProviderFail' }),
       // Helper / tool / spoken-turn routes (advanced, only matters when you want dedicated routing)
       settingAction({ id: 'account-helper-enabled', label: 'Use a dedicated helper model', detail: 'Toggle a separate route for background utility work like summaries and titling.', key: 'helper.enabled' }),
       { id: 'account-helper-provider', label: 'Choose helper model', detail: 'Pick the provider and model for helper routing.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'helper', visibleWhenSettingKey: 'helper.enabled', visibleWhenSettingValue: true, safety: 'safe' },

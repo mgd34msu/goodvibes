@@ -41,6 +41,24 @@ export interface RequestPrincipal extends AuthenticatedPrincipal {
   readonly authRevision: number;
   /** When a login session ends by time. Absent for credentials without an expiry. */
   readonly expiresAt?: number;
+  /**
+   * A device token the owner paired himself through his pairing flow (recorded
+   * on the token when it was minted). Only a `device-token` carries it.
+   */
+  readonly ownerDevice?: true;
+}
+
+/**
+ * Whether a credential is automation's rather than the owner's own: a paired
+ * device's token that the owner's pairing flow did not mint (one minted
+ * through the API by another token, with narrowed scopes, or for a named
+ * client). Such a credential does not make the owner's own acts: loosening a
+ * security, permission, judgment or payment setting, or answering a change
+ * put to the owner. The operator token, a sign-in, the apps on the daemon's
+ * machine and a device the owner paired himself do.
+ */
+export function isAutomationCredential(principal: { readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: boolean | undefined } | null | undefined): boolean {
+  return principal?.credentialKind === 'device-token' && principal.ownerDevice !== true;
 }
 
 /**

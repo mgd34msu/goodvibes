@@ -25,6 +25,9 @@ import {
 } from './distributed-runtime-utils.js';
 import {
   DISTRIBUTED_PEER_PRESENCE_WINDOW_MS,
+  adoptDistributedPeerFromRecord,
+  peerTokenOnRecord,
+  publishDistributedPeerTokens,
   expireDistributedPairRequests,
   pruneAndPersistDistributedRuntime,
   publishDistributedRuntimeEvent,
@@ -33,6 +36,7 @@ import {
 } from './distributed-runtime-store.js';
 import { DistributedRuntimeRefusalError, nextDistributedPeerStatus, refusalReason } from './distributed-runtime-lifecycles.js';
 import { getPeerContract } from '../../../contracts.js';
+import { logger } from '../../utils/logger.js';
 
 export async function requestDistributedPairing(
   state: DistributedRuntimeManagerState,
@@ -271,6 +275,13 @@ export async function verifyDistributedPairRequest(
     else state.peers.delete(peer.id);
     throw error;
   }
+  // On the authority record, so the device works on every machine of the group;
+  // a failure leaves it working here, and says so.
+  try {
+    await publishDistributedPeerTokens(state, peer.id, { issued: issued.token, revoked: issued.replaced, by: 'remote-peer', reason: 'paired again' });
+  } catch (error) {
+    logger.warn('A paired peer could not be written to the authority record; it works on this machine only until it is', { peerId: peer.id, error: String(error) });
+  }
   publishDistributedRuntimeEvent(state, 'remote-pair-verified', {
     request: sanitizePairRequest(verifiedRequest),
     peer: sanitizePeer(connectedPeer),
@@ -302,6 +313,8 @@ export async function rotateDistributedPeerToken(
     note: issued.token.label,
   }));
   await pruneAndPersistDistributedRuntime(state);
+  // The replaced token is refused on every machine of the group, the new one accepted.
+  await publishDistributedPeerTokens(state, peerId, { issued: issued.token, revoked: issued.replaced, by: input.actor ?? 'operator', reason: 'rotated' });
   const updatedPeer = state.peers.get(peerId)!;
   publishDistributedRuntimeEvent(state, 'remote-token-rotated', {
     peer: sanitizePeer(updatedPeer),
@@ -339,7 +352,12 @@ export async function revokeDistributedPeerToken(
       revokedAt: now,
     };
   });
-  if (!changed) return sanitizePeer(peer);
+  const revokedIds = peer.tokens.filter((token) => !token.revokedAt && (!input.tokenId || token.id === input.tokenId)).map((token) => token.id);
+  if (!changed) {
+    // Revoked here already: make sure the record says so too (an earlier write may have failed).
+    await publishDistributedPeerTokens(state, peerId, { revoked: peer.tokens.filter((token) => !input.tokenId || token.id === input.tokenId).map((token) => token.id), by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
+    return sanitizePeer(peer);
+  }
   const activeToken = nextTokens.find((token) => !token.revokedAt && token.id !== input.tokenId) ?? null;
   const updated: StoredPeerRecord = {
     ...peer,
@@ -353,6 +371,9 @@ export async function revokeDistributedPeerToken(
     note: input.note ?? input.tokenId ?? updated.label,
   }));
   await pruneAndPersistDistributedRuntime(state);
+  // Terminal on the authority record: refused on every machine of the group,
+  // including one that was asleep or restarts later.
+  await publishDistributedPeerTokens(state, peerId, { revoked: revokedIds, by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
   publishDistributedRuntimeEvent(state, 'remote-token-revoked', { peer: sanitizePeer(updated), tokenId: input.tokenId ?? null });
   return sanitizePeer(updated);
 }
@@ -408,36 +429,47 @@ export async function authenticateDistributedPeerToken(
   await startDistributedRuntime(state);
   if (!tokenValue.trim()) return null;
   const matches = createSecretMatcher(tokenValue);
+  let found: { peer: StoredPeerRecord; token: StoredPeerTokenRecord } | null = null;
   for (const peer of state.peers.values()) {
-    for (const token of peer.tokens) {
-      if (token.revokedAt) continue;
-      if (!matches(token.secretHash)) continue;
-      const now = Date.now();
-      const updatedToken: StoredPeerTokenRecord = {
-        ...token,
-        lastUsedAt: now,
-      };
-      const updatedPeer: StoredPeerRecord = {
-        ...peer,
-        status: nextDistributedPeerStatus(peer.status, 'connected'),
-        lastSeenAt: now,
-        lastConnectedAt: now,
-        lastRemoteAddress: remoteAddress ?? peer.lastRemoteAddress,
-        activeTokenId: updatedToken.id,
-        tokens: peer.tokens.map((entry) => entry.id === updatedToken.id ? updatedToken : entry),
-      };
-      // Last-use times ride along with the next real write (a claim, a
-      // completion, a pairing change); a write per call would rewrite every
-      // record for a timestamp.
-      state.peers.set(peer.id, updatedPeer);
-      return {
-        peer: sanitizePeer(updatedPeer),
-        token: updatedToken,
-        cameBack: !isPresentlyConnected(peer, now),
-      };
-    }
+    const token = peer.tokens.find((candidate) => !candidate.revokedAt && matches(candidate.secretHash));
+    if (token) { found = { peer, token }; break; }
   }
-  return null;
+  // The authority record answers whether the token is current: revoked there
+  // (on any machine of the group) is refused here whatever this store says,
+  // and a token it holds as live that this store never saw is a peer paired
+  // on another machine, taken in now. An unreadable record admits nothing.
+  const onRecord = peerTokenOnRecord(state, hashSecret(tokenValue), found?.token.id);
+  if (onRecord.refused) return null;
+  if (!found && onRecord.entry) {
+    const peer = await adoptDistributedPeerFromRecord(state, onRecord.entry);
+    const token = peer.tokens.find((candidate) => candidate.id === onRecord.entry!.id);
+    if (token) found = { peer, token };
+  }
+  if (!found) return null;
+  const { peer, token } = found;
+  const now = Date.now();
+  const updatedToken: StoredPeerTokenRecord = {
+    ...token,
+    lastUsedAt: now,
+  };
+  const updatedPeer: StoredPeerRecord = {
+    ...peer,
+    status: nextDistributedPeerStatus(peer.status, 'connected'),
+    lastSeenAt: now,
+    lastConnectedAt: now,
+    lastRemoteAddress: remoteAddress ?? peer.lastRemoteAddress,
+    activeTokenId: updatedToken.id,
+    tokens: peer.tokens.map((entry) => entry.id === updatedToken.id ? updatedToken : entry),
+  };
+  // Last-use times ride along with the next real write (a claim, a
+  // completion, a pairing change); a write per call would rewrite every
+  // record for a timestamp.
+  state.peers.set(peer.id, updatedPeer);
+  return {
+    peer: sanitizePeer(updatedPeer),
+    token: updatedToken,
+    cameBack: !isPresentlyConnected(peer, now),
+  };
 }
 
 export async function heartbeatDistributedPeer(
@@ -673,9 +705,10 @@ function issueToken(
   label: string,
   // A new peer token holds every scope the published peer contract names.
   scopes: readonly string[] = getPeerContract().scopes,
-): { token: StoredPeerTokenRecord; value: string } {
+): { token: StoredPeerTokenRecord; value: string; replaced: string[] } {
   const peer = state.peers.get(peerId);
   if (!peer) throw new Error(`Unknown distributed peer: ${peerId}`);
+  const replaced = peer.tokens.filter((entry) => !entry.revokedAt).map((entry) => entry.id);
   const value = randomSecret('gvrt');
   const issuedAt = Date.now();
   const token: StoredPeerTokenRecord = {
@@ -698,7 +731,7 @@ function issueToken(
     activeTokenId: token.id,
     tokens: nextTokens,
   });
-  return { token, value };
+  return { token, value, replaced };
 }
 
 function updatePeerConnectionState(

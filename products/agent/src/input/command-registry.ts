@@ -167,6 +167,8 @@ export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiSe
   keybindingsManager?: KeybindingsManager;
   /** The owner's trust of this workspace, which what a repository brings (its hooks file, its MCP files) waits on. */
   workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
+  /** The workspace checkpoint store `/checkpoints` lists and restores from (creating goes through the registered-workspace gate, not here). */
+  workspaceCheckpointManager?: import('@goodvibes-jev/engine/platform/platform/workspace').WorkspaceCheckpointManager;
 
   processManager?: ProcessManager;
 }

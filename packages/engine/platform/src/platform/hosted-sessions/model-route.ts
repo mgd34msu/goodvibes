@@ -31,14 +31,15 @@
  */
 
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
-import { resolveModelReference } from '../providers/model-id-resolution.js';
+import { ModelReferenceError, resolveModelReference } from '../providers/model-id-resolution.js';
 
 /**
  * Resolve a model reference (a bare id or a `provider/model` registry key)
  * against the live registry.
  *
- * @throws when the reference names no model, names several, or names one that
- * is not selectable, with the resolver's own message, which lists candidates.
+ * @throws ModelReferenceError (MODEL_NOT_FOUND, MODEL_AMBIGUOUS or
+ * MODEL_NOT_SELECTABLE) when the reference names no model, names several, or
+ * names one that is not selectable, with a message that lists candidates.
  */
 export function resolveHostedModelDefinition(
   registry: Pick<ProviderRegistry, 'listModels'>,
@@ -48,10 +49,10 @@ export function resolveHostedModelDefinition(
   const registryKey = resolveModelReference(modelReference, models);
   const definition = models.find((model) => model.registryKey === registryKey);
   if (!definition) {
-    throw new Error(`Model '${modelReference}' is not in this daemon's model registry.`);
+    throw new ModelReferenceError('MODEL_NOT_FOUND', `Model '${modelReference}' is not in this daemon's model registry; name a model it holds, or none for its current model.`);
   }
   if (!definition.selectable) {
-    throw new Error(`Model '${definition.registryKey}' is not selectable.`);
+    throw new ModelReferenceError('MODEL_NOT_SELECTABLE', `Model '${definition.registryKey}' is not selectable; choose another model.`);
   }
   return definition;
 }

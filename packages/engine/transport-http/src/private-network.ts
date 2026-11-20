@@ -193,6 +193,46 @@ function isPrivateIpv6(host: string): boolean {
   return false;
 }
 
+/** The eight 16-bit groups of an IPv6 address (zone removed), or null when it is not one. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.replace(/%.*$/, '');
+  if (!text.includes(':')) return null;
+  const tail = /(\d{1,3}(?:\.\d{1,3}){3})$/.exec(text);
+  if (tail) {
+    const octets = ipv4Octets(tail[1] ?? '');
+    if (!octets) return null;
+    text = `${text.slice(0, tail.index)}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] === '' ? [] : (halves[0] ?? '').split(':');
+  const right = halves.length === 1 || halves[1] === '' ? [] : (halves[1] ?? '').split(':');
+  const missing = halves.length === 1 ? 0 : 8 - left.length - right.length;
+  if (missing < 0 || (halves.length === 2 && missing === 0)) return null;
+  const words = [...left, ...Array.from({ length: missing }, () => '0'), ...right];
+  if (words.length !== 8 || !words.every((word) => /^[0-9a-f]{1,4}$/.test(word))) return null;
+  return words.map((word) => Number.parseInt(word, 16));
+}
+
+/**
+ * Loopback: this machine, unreachable from any other one. The W3C Secure
+ * Contexts list: `localhost` and `*.localhost`, an IPv4 address in 127/8, or
+ * `::1` in any spelling including the IPv4-mapped form; a URL's bracketed
+ * `[::1]` counts. The address is parsed, not prefix-matched, so a DNS name such
+ * as 127.example.com is not loopback. The one rule for every program (the
+ * platform's `isLoopbackHost` is this one).
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = bareHost(hostname);
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  const ipv4 = ipv4Octets(host);
+  if (ipv4) return ipv4[0] === 127;
+  const groups = ipv6Groups(host);
+  if (groups === null) return false;
+  if (groups.every((group, index) => group === (index === 7 ? 1 : 0))) return true;
+  return groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff && (groups[6] ?? 0) >> 8 === 127;
+}
+
 /** A Tailscale MagicDNS name, or a 100.64/10 address stated to be a Tailscale address. */
 export function isTailnetHost(hostname: string): boolean {
   const host = bareHost(hostname);

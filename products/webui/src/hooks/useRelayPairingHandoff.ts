@@ -82,7 +82,7 @@ function offerRelayPairingCode(code: string): RelayOutcome {
     const pairing = decodeRelayPairingCode(code);
     const held = getStoredRelayPairing();
     const alreadyHeld = held !== null && held.relayUrl === pairing.relayUrl
-      && held.rid === pairing.rid && held.daemonPublicKey === pairing.daemonPublicKey;
+      && held.rid === pairing.rid && held.daemonPublicKey === pairing.daemonPublicKey && held.code === pairing.code;
     outcome = { status: alreadyHeld ? 'stored' : 'pending', pairing };
   } catch (error) {
     outcome = { status: 'error', error };

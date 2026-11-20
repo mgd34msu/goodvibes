@@ -4,34 +4,47 @@
  * The owner's ruling (2026-07-25): "'always allow' is OFFERED on every
  * capability, including front camera, screen capture, precise location, and
  * clipboard, as a durable per-capability, per-node grant, visible and
- * revocable in the grants surface." This store is that durable record.
+ * revocable in the grants surface."
+ *
+ * The grants themselves live on the authority record
+ * (cluster/authority-record.ts), as `device-grant` entries: the one answer, on
+ * this machine and on every machine of its group, to whether a grant is
+ * current. A grant made on one machine is in force on every machine; a
+ * revocation is a terminal record entry, so it holds on every machine, after a
+ * restart, and on a machine that was away when it was made. Nothing on this
+ * machine keeps a second copy that could say yes.
  *
  * A live grant is the whole authority for a request: it runs with no question
  * and no model call. If no live, unexpired, unrevoked grant is found, the
  * capability service lets `permissions.mode` decide (the owner is asked, except
- * under yolo). There is no cached "yes" anywhere else in the system, so
- * revocation takes effect on the very next request: the store is re-read from
- * disk on every lookup rather than served from a process-local cache that a
- * second process could not invalidate.
+ * under yolo). A lookup is a read of the record's view (one lstat, no file
+ * read unless the record moved), and work admitted under a grant keeps a
+ * reference to it, checked again when the phone picks the work up.
  *
- * Persisted state, so the housekeeping rule applies in full:
- *  1. Reap on recovery, grants for a node that no longer exists, and
- *     session-scoped grants whose session is gone, are removed at load time.
- *  2. Bound everything, per-node count cap AND an age TTL; the audit ledger
+ * What stays on this machine, in `device-grants.json`, is bookkeeping that is
+ * not authority: when each grant was last used and how often, and the audit
+ * ledger the grants surface renders.
+ *
+ * Housekeeping, since grants are persisted state:
+ *  1. Reap on recovery: grants for a node that no longer exists, and
+ *     session-scoped grants whose session is gone, are revoked at start.
+ *  2. Bound everything: per-node count cap AND an age TTL; the audit ledger
  *     has its own cap and TTL.
- *  3. Validate by content, every record is re-validated against its parsed
- *     shape and the live capability catalog; a torn or half-written record is
- *     dropped, never honoured.
- *  4. Reap periodically, `sweep()` is safe to call on a timer, not only at boot.
- *  5. Disclose what was reaped, every sweep returns an itemised report, and
- *     the removals are appended to the audit ledger the grants surface renders.
+ *  3. Validate by content: a record entry whose fields do not parse, or whose
+ *     capability is not in the catalog, is never honoured, and is revoked.
+ *  4. Reap periodically: `sweep()` is safe to call on a timer, not only at boot.
+ *  5. Disclose what was reaped: every sweep returns an itemised report, and
+ *     the removals are appended to the audit ledger.
  *
- * Sweeps are idempotent and safe to run from more than one process: each one
- * re-reads the file, recomputes removals from scratch, and writes atomically.
+ * Sweeps are idempotent and safe on every machine at once: each judges the
+ * record it reads, picks the same grants to remove, and a revocation written
+ * twice keeps the first.
  */
 import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { withProcessLock } from '../utils/process-lock.js';
+import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import type { AuthorityEntry, AuthorityKey, AuthorityRevocation, AuthorityView } from '../cluster/authority-record.js';
 import { isDeviceCapabilityId, type DeviceCapabilityId, type DeviceNodeKind } from './device-capability-contract.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
 
@@ -54,6 +67,12 @@ export interface DeviceCapabilityGrant {
   readonly useCount: number;
   /** Who approved it (operator id / surface actor). */
   readonly grantedBy: string;
+  /**
+   * The record revision of the grant's last narrowing or widening. Work
+   * admitted under the grant carries it, and is current only while the grant
+   * is live at this revision.
+   */
+  readonly authorityRev: number;
 }
 
 /** Why a grant left the store. */
@@ -89,13 +108,19 @@ export interface DeviceGrantAuditRecord {
   readonly reason?: string | undefined;
 }
 
+interface DeviceGrantUsage {
+  readonly lastUsedAt: number;
+  readonly useCount: number;
+}
+
+/** This machine's bookkeeping beside the record: use counts and the audit ledger. */
 interface DeviceGrantSnapshot extends Record<string, unknown> {
-  readonly version: 1;
-  readonly grants: readonly DeviceCapabilityGrant[];
+  readonly version: 2;
+  readonly usage: Readonly<Record<string, DeviceGrantUsage>>;
   readonly audit: readonly DeviceGrantAuditRecord[];
 }
 
-/** Result of one housekeeping pass over the grant store. */
+/** Result of one housekeeping pass over the grants. */
 export interface DeviceGrantSweepReport {
   readonly sweptAt: number;
   readonly removed: readonly DeviceGrantRemoval[];
@@ -135,6 +160,8 @@ export interface DeviceGrantOwnership {
 }
 
 export interface DeviceGrantStoreOptions {
+  /** The authority record the grants live on. */
+  readonly authority: AuthorityRecordFile;
   /**
    * Fixed bounds, or a resolver read at every use so a live settings change
    * applies without a restart (see device-policy-source.ts).
@@ -147,36 +174,30 @@ export interface DeviceGrantStoreOptions {
 /** How long a write waits for another process's write to the same ledger. */
 const GRANT_LOCK_TIMEOUT_MS = 10_000;
 
-const EMPTY_SNAPSHOT: DeviceGrantSnapshot = { version: 1, grants: [], audit: [] };
+const EMPTY_SNAPSHOT: DeviceGrantSnapshot = { version: 2, usage: {}, audit: [] };
+
+const grantKey = (id: string): AuthorityKey => `device-grant:${id}`;
 
 /**
- * Validate a grant by its parsed content, not by its presence in the file. A
- * crash mid-write, a truncated array, or a capability that no longer exists all
- * produce a record that must be dropped rather than honoured.
+ * A record entry as a grant, validated by its content: a field that does not
+ * parse, or a capability that no longer exists, is never honoured.
  */
-function validateGrant(value: unknown): DeviceCapabilityGrant | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const id = typeof record.id === 'string' ? record.id.trim() : '';
-  const nodeId = typeof record.nodeId === 'string' ? record.nodeId.trim() : '';
-  const nodeKind = typeof record.nodeKind === 'string' ? record.nodeKind.trim() : '';
-  const capabilityId = record.capabilityId;
-  const scope = record.scope;
-  const grantedAt = record.grantedAt;
-  const expiresAt = record.expiresAt;
-  const useCount = record.useCount;
-  const grantedBy = typeof record.grantedBy === 'string' ? record.grantedBy.trim() : '';
-  if (!id || !nodeId || !nodeKind || !grantedBy) return null;
-  if (!isDeviceCapabilityId(capabilityId)) return null;
+function grantFromEntry(entry: AuthorityEntry<'device-grant'>): DeviceCapabilityGrant | null {
+  const fields = entry.public as Readonly<Record<string, unknown>>;
+  const nodeId = typeof fields['nodeId'] === 'string' ? fields['nodeId'].trim() : '';
+  const nodeKind = typeof fields['nodeKind'] === 'string' ? fields['nodeKind'].trim() : '';
+  const grantedBy = typeof fields['grantedBy'] === 'string' ? fields['grantedBy'].trim() : '';
+  const capabilityId = fields['capabilityId'];
+  const scope = fields['scope'];
+  const expiresAt = fields['expiresAt'];
+  if (!nodeId || !nodeKind || !grantedBy || !isDeviceCapabilityId(capabilityId)) return null;
   if (scope !== 'always' && scope !== 'session') return null;
-  if (typeof grantedAt !== 'number' || !Number.isFinite(grantedAt)) return null;
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
-  if (typeof useCount !== 'number' || !Number.isInteger(useCount) || useCount < 0) return null;
-  const sessionId = typeof record.sessionId === 'string' && record.sessionId.trim() ? record.sessionId.trim() : undefined;
+  const sessionId = typeof fields['sessionId'] === 'string' && fields['sessionId'].trim() ? fields['sessionId'].trim() : undefined;
   if (scope === 'session' && !sessionId) return null;
-  const lastUsedAt = typeof record.lastUsedAt === 'number' && Number.isFinite(record.lastUsedAt) ? record.lastUsedAt : undefined;
+  const grantedAt = typeof fields['grantedAt'] === 'number' && Number.isFinite(fields['grantedAt']) ? fields['grantedAt'] : entry.at;
   return {
-    id,
+    id: entry.id,
     nodeId,
     nodeKind,
     capabilityId,
@@ -184,10 +205,23 @@ function validateGrant(value: unknown): DeviceCapabilityGrant | null {
     ...(sessionId ? { sessionId } : {}),
     grantedAt,
     expiresAt,
-    ...(lastUsedAt === undefined ? {} : { lastUsedAt }),
-    useCount,
+    useCount: 0,
     grantedBy,
+    authorityRev: entry.authorityRev,
   };
+}
+
+function validateUsage(value: unknown): Record<string, DeviceGrantUsage> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const usage: Record<string, DeviceGrantUsage> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const record = raw as Record<string, unknown>;
+    if (typeof record.lastUsedAt !== 'number' || !Number.isFinite(record.lastUsedAt)) continue;
+    if (typeof record.useCount !== 'number' || !Number.isInteger(record.useCount) || record.useCount < 0) continue;
+    usage[id] = { lastUsedAt: record.lastUsedAt, useCount: record.useCount };
+  }
+  return usage;
 }
 
 function validateAudit(value: unknown): DeviceGrantAuditRecord | null {
@@ -210,12 +244,19 @@ function validateAudit(value: unknown): DeviceGrantAuditRecord | null {
   };
 }
 
+/** One live grant on the record, with the entry it came from. */
+interface LiveGrant {
+  readonly grant: DeviceCapabilityGrant;
+  readonly entry: AuthorityEntry<'device-grant'>;
+}
+
 /**
- * Durable grant store. Every read re-loads from disk so a revocation written by
- * another process (the webui grants surface, say) is honoured immediately.
+ * Durable grants on the authority record, with this machine's use counts and
+ * audit ledger beside it.
  */
 export class DeviceGrantStore {
   private readonly store: PersistentStore<DeviceGrantSnapshot>;
+  private readonly authority: AuthorityRecordFile;
   private readonly resolvePolicy: () => DeviceGrantPolicy;
   private readonly now: () => number;
   private readonly ownership: DeviceGrantOwnership;
@@ -223,12 +264,13 @@ export class DeviceGrantStore {
   /** Kernel-released writer lock beside the ledger; null for an in-memory store. */
   private readonly writerLockPath: string | null;
 
-  constructor(storeOrPath: PersistentStore<DeviceGrantSnapshot> | string, options: DeviceGrantStoreOptions = {}) {
+  constructor(storeOrPath: PersistentStore<DeviceGrantSnapshot> | string, options: DeviceGrantStoreOptions) {
     this.store = typeof storeOrPath === 'string'
       ? new PersistentStore<DeviceGrantSnapshot>(storeOrPath)
       : storeOrPath;
     const lock = this.store.lockPath;
     this.writerLockPath = lock ? `${lock.slice(0, -'.lock'.length)}.writer.sqlite` : null;
+    this.authority = options.authority;
     this.resolvePolicy = resolveDevicePolicySource(options.policy, DEFAULT_DEVICE_GRANT_POLICY);
     this.now = options.now ?? (() => Date.now());
     this.ownership = options.ownership ?? {};
@@ -243,39 +285,44 @@ export class DeviceGrantStore {
     return this.resolvePolicy();
   }
 
-  private async readWithDrops(): Promise<{ snapshot: DeviceGrantSnapshot; malformed: number }> {
+  /**
+   * Grant entries this machine answers for: not revoked (itself or through a
+   * parent), meant for this machine, and parsing as a grant. `malformed` are
+   * the live entries that do not parse.
+   */
+  private liveOnRecord(view: AuthorityView): { live: LiveGrant[]; malformed: AuthorityEntry<'device-grant'>[] } {
+    const live: LiveGrant[] = [];
+    const malformed: AuthorityEntry<'device-grant'>[] = [];
+    for (const entry of view.list('device-grant')) {
+      if (view.isRevoked(grantKey(entry.id))) continue;
+      if (entry.audience !== 'group' && entry.audience.nodeId !== view.nodeId) continue;
+      const grant = grantFromEntry(entry);
+      if (grant) live.push({ grant, entry });
+      else malformed.push(entry);
+    }
+    return { live, malformed };
+  }
+
+  private async readLedger(): Promise<DeviceGrantSnapshot> {
     const raw = await this.store.load();
-    if (!raw || typeof raw !== 'object') return { snapshot: EMPTY_SNAPSHOT, malformed: 0 };
-    const rawGrants = Array.isArray(raw.grants) ? raw.grants : [];
-    const grants = rawGrants
-      .map(validateGrant)
-      .filter((entry): entry is DeviceCapabilityGrant => entry !== null);
+    if (!raw || typeof raw !== 'object') return EMPTY_SNAPSHOT;
     const audit = Array.isArray(raw.audit)
       ? raw.audit.map(validateAudit).filter((entry): entry is DeviceGrantAuditRecord => entry !== null)
       : [];
-    return { snapshot: { version: 1, grants, audit }, malformed: rawGrants.length - grants.length };
-  }
-
-  private async read(): Promise<DeviceGrantSnapshot> {
-    return (await this.readWithDrops()).snapshot;
+    return { version: 2, usage: validateUsage(raw.usage), audit };
   }
 
   /**
-   * Serialise writes within this process, and across processes (a daemon and
-   * the one taking over from it) by holding the writer lock around the whole
-   * read-modify-write: a revocation made by another process between this
-   * write's read and its publish would otherwise be overwritten by a stale
-   * snapshot and the revoked grant would come back. The lock is released by
-   * the kernel when its holder exits, so a killed process leaves nothing stale.
+   * Serialise ledger writes within this process, and across processes (a
+   * daemon and the one taking over from it) by holding the writer lock around
+   * the whole read-modify-write. The lock is released by the kernel when its
+   * holder exits, so a killed process leaves nothing stale.
    */
-  private async mutate<T>(
-    fn: (snapshot: DeviceGrantSnapshot, malformed: number) => Promise<{ next: DeviceGrantSnapshot; result: T }>,
-  ): Promise<T> {
-    const cycle = async (): Promise<T> => {
-      const { snapshot, malformed } = await this.readWithDrops();
-      const { next, result } = await fn(snapshot, malformed);
-      await this.store.persist(next);
-      return result;
+  private async mutateLedger(fn: (snapshot: DeviceGrantSnapshot) => DeviceGrantSnapshot): Promise<void> {
+    const cycle = async (): Promise<void> => {
+      const snapshot = await this.readLedger();
+      const next = fn(snapshot);
+      if (next !== snapshot) await this.store.persist(next);
     };
     const lock = this.writerLockPath;
     const run = this.writeChain.then(() => (lock ? withProcessLock(lock, cycle, { waitMs: GRANT_LOCK_TIMEOUT_MS }) : cycle()));
@@ -284,49 +331,99 @@ export class DeviceGrantStore {
   }
 
   /**
-   * Every grant currently on disk, after dropping malformed and expired ones.
-   * Expired records are filtered here as well as reaped by `sweep()`, so an
-   * expired grant can never be honoured even between sweeps.
+   * Every live grant on the record, unexpired, with this machine's use
+   * counts. An unreadable record lists nothing: no grant is shown as live
+   * that could not be checked.
    */
   async list(): Promise<readonly DeviceCapabilityGrant[]> {
-    const snapshot = await this.read();
+    const view = this.authority.view();
+    if (!view) return [];
     const now = this.now();
-    return snapshot.grants.filter((grant) => grant.expiresAt > now);
+    const { usage } = await this.readLedger();
+    return this.liveOnRecord(view).live
+      .filter(({ grant }) => grant.expiresAt > now)
+      .map(({ grant }) => {
+        const used = usage[grant.id];
+        return used ? { ...grant, lastUsedAt: used.lastUsedAt, useCount: used.useCount } : grant;
+      });
   }
 
   /** The audit ledger, newest last. */
   async listAudit(limit = 100): Promise<readonly DeviceGrantAuditRecord[]> {
-    const snapshot = await this.read();
+    const snapshot = await this.readLedger();
     return snapshot.audit.slice(-Math.max(1, limit));
   }
 
   /**
    * Find a live grant authorising this capability on this node, or null.
    *
-   * Returns null for anything revoked (the record is gone), expired, or scoped
-   * to a session that is no longer active, a revoked or expired grant is never
-   * silently honoured.
+   * Null for anything revoked (on any machine of the group), expired, or
+   * scoped to a session that is no longer active, and while the record cannot
+   * be read: a grant that could not be checked is never honoured. A read of
+   * the record's view; no file is read unless the record moved.
    */
   async find(input: {
     readonly nodeId: string;
     readonly capabilityId: DeviceCapabilityId;
     readonly sessionId?: string | undefined;
   }): Promise<DeviceCapabilityGrant | null> {
+    const view = this.authority.view();
+    if (!view) return null;
     const now = this.now();
-    const grants = await this.list();
-    const matches = grants.filter((grant) => grant.nodeId === input.nodeId && grant.capabilityId === input.capabilityId);
-    for (const grant of matches) {
-      if (grant.expiresAt <= now) continue;
+    for (const { grant } of this.liveOnRecord(view).live) {
+      if (grant.nodeId !== input.nodeId || grant.capabilityId !== input.capabilityId || grant.expiresAt <= now) continue;
       if (grant.scope === 'session') {
         if (!input.sessionId || grant.sessionId !== input.sessionId) continue;
-        if (this.ownership.isActiveSession && !this.ownership.isActiveSession(grant.sessionId)) continue;
+        if (this.ownership.isActiveSession && !this.ownership.isActiveSession(grant.sessionId!)) continue;
       }
       return grant;
     }
     return null;
   }
 
-  /** Record an approval. Re-granting an existing pair refreshes it rather than duplicating. */
+  /**
+   * Whether work admitted under `grant` may still run: the grant is live on
+   * the record at the revision it was admitted under, and unexpired. A map
+   * read; an unreadable record answers no.
+   */
+  isCurrent(grant: Pick<DeviceCapabilityGrant, 'id' | 'authorityRev' | 'expiresAt'>): boolean {
+    const view = this.authority.view();
+    if (!view || grant.expiresAt <= this.now()) return false;
+    return view.isCurrent({ key: grantKey(grant.id), authorityRev: grant.authorityRev });
+  }
+
+  /** How a grant stopped being current, in words for a refusal; null when it is current or unknown. */
+  describeEnd(grant: Pick<DeviceCapabilityGrant, 'id' | 'authorityRev' | 'expiresAt'>): string | null {
+    const view = this.authority.view();
+    if (!view) return 'the authority record could not be read';
+    if (grant.expiresAt <= this.now()) return 'it expired';
+    const entry = view.entry('device-grant', grant.id);
+    if (!entry) return null;
+    const revocation: AuthorityRevocation | null = entry.revoked;
+    if (revocation) {
+      return `it was revoked at record revision ${revocation.rev} by ${revocation.by || 'an operator'} on node ${revocation.origin}${revocation.reason ? ` (${revocation.reason})` : ''}`;
+    }
+    if (view.isRevoked(grantKey(grant.id))) return 'what it rested on was revoked';
+    if (entry.authorityRev !== grant.authorityRev) return `it was changed at record revision ${entry.authorityRev}`;
+    return null;
+  }
+
+  /**
+   * Call `listener` whenever the record changes (on this machine, in another
+   * process of this home, or merged from another machine); the caller checks
+   * {@link isCurrent} for the grants it holds. Returns the unsubscribe.
+   */
+  onChange(listener: () => void): () => void {
+    return this.authority.onChange((notice) => {
+      if (notice.keys.some((key) => key.startsWith('device-grant:')) || notice.cascade.length > 0 || !notice.local) listener();
+    });
+  }
+
+  /**
+   * Record an approval on the authority record. Granting an existing pair
+   * again refreshes it (its expiry and who approved it) rather than adding a
+   * second grant; work admitted under it stays current.
+   */
   async record(input: {
     readonly nodeId: string;
     readonly nodeKind: DeviceNodeKind;
@@ -338,26 +435,42 @@ export class DeviceGrantStore {
   }): Promise<DeviceCapabilityGrant> {
     const now = this.now();
     const ttl = input.ttlMs && input.ttlMs > 0 ? input.ttlMs : this.getPolicy().grantTtlMs;
-    return this.mutate(async (snapshot) => {
-      const kept = snapshot.grants.filter((grant) => !(
-        grant.nodeId === input.nodeId
-        && grant.capabilityId === input.capabilityId
-        && grant.scope === input.scope
-        && grant.sessionId === input.sessionId
-      ));
-      const grant: DeviceCapabilityGrant = {
-        id: randomUUID(),
-        nodeId: input.nodeId,
-        nodeKind: input.nodeKind,
-        capabilityId: input.capabilityId,
-        scope: input.scope,
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-        grantedAt: now,
-        expiresAt: now + ttl,
-        useCount: 0,
-        grantedBy: input.grantedBy,
+    const fields = {
+      nodeId: input.nodeId,
+      nodeKind: input.nodeKind,
+      capabilityId: input.capabilityId,
+      scope: input.scope,
+      sessionId: input.sessionId ?? null,
+      expiresAt: now + ttl,
+      grantedBy: input.grantedBy,
+      grantedAt: now,
+    };
+    const written = await this.authority.write((view) => {
+      const existing = this.liveOnRecord(view).live.find(({ grant }) => grant.nodeId === input.nodeId
+        && grant.capabilityId === input.capabilityId && grant.scope === input.scope && grant.sessionId === input.sessionId);
+      if (existing) {
+        return { kind: 'update', key: grantKey(existing.grant.id), patch: fields, narrowsOrWidens: false, value: existing.grant.id };
+      }
+      const id = randomUUID();
+      return {
+        kind: 'issue',
+        value: id,
+        entries: [{
+          kind: 'device-grant',
+          id,
+          // A session grant is good where its session is; an "always" grant on every machine of the group.
+          audience: input.scope === 'session' ? { nodeId: view.nodeId } : 'group',
+          public: fields,
+        }],
       };
-      const audit: DeviceGrantAuditRecord = {
+    });
+    const entry = this.authority.view()?.entry('device-grant', written.value);
+    const grant = entry ? grantFromEntry(entry) : null;
+    if (!grant) throw new Error('The device grant was written to the authority record but could not be read back.');
+    await this.mutateLedger((snapshot) => ({
+      version: 2,
+      usage: snapshot.usage,
+      audit: [...snapshot.audit, {
         id: randomUUID(),
         action: 'granted',
         grantId: grant.id,
@@ -366,38 +479,39 @@ export class DeviceGrantStore {
         at: now,
         actor: input.grantedBy,
         reason: `always-allow (${input.scope})`,
-      };
-      return {
-        next: { version: 1, grants: [...kept, grant], audit: [...snapshot.audit, audit] },
-        result: grant,
-      };
-    });
+      }],
+    }));
+    return grant;
   }
 
-  /** Note a use of a grant (drives "last used" in the grants surface). */
+  /** Note a use of a grant (drives "last used" in the grants surface). Bookkeeping on this machine only. */
   async markUsed(grantId: string): Promise<void> {
     const now = this.now();
-    await this.mutate(async (snapshot) => {
-      const existing = snapshot.grants.find((grant) => grant.id === grantId);
-      if (!existing) return { next: snapshot, result: undefined };
-      const used: DeviceCapabilityGrant = { ...existing, lastUsedAt: now, useCount: existing.useCount + 1 };
-      const grants = snapshot.grants.map((grant) => (grant.id === grantId ? used : grant));
-      const audit: DeviceGrantAuditRecord = {
-        id: randomUUID(),
-        action: 'used',
-        grantId: used.id,
-        nodeId: used.nodeId,
-        capabilityId: used.capabilityId,
-        at: now,
-        actor: used.grantedBy,
+    const entry = this.authority.view()?.entry('device-grant', grantId);
+    const grant = entry ? grantFromEntry(entry) : null;
+    if (!grant) return;
+    await this.mutateLedger((snapshot) => {
+      const previous = snapshot.usage[grantId];
+      return {
+        version: 2,
+        usage: { ...snapshot.usage, [grantId]: { lastUsedAt: now, useCount: (previous?.useCount ?? 0) + 1 } },
+        audit: [...snapshot.audit, {
+          id: randomUUID(),
+          action: 'used',
+          grantId,
+          nodeId: grant.nodeId,
+          capabilityId: grant.capabilityId,
+          at: now,
+          actor: grant.grantedBy,
+        }],
       };
-      return { next: { version: 1, grants, audit: [...snapshot.audit, audit] }, result: undefined };
     });
   }
 
   /**
-   * Revoke grants. The matching records are DELETED, not flagged, there is no
-   * "revoked but present" state a later read could mistake for authority.
+   * Revoke grants on the authority record, on every machine of the group. A
+   * revocation is terminal: no later write, merge or restart brings the grant
+   * back, and work still waiting for the phone under it is withdrawn.
    * Returns the itemised removals for disclosure.
    */
   async revoke(input: {
@@ -407,150 +521,126 @@ export class DeviceGrantStore {
     readonly actor: string;
     readonly note?: string | undefined;
   }): Promise<readonly DeviceGrantRemoval[]> {
+    if (!(input.grantId ?? input.nodeId ?? input.capabilityId)) return [];
     const now = this.now();
-    return this.mutate(async (snapshot) => {
-      const removals: DeviceGrantRemoval[] = [];
-      const kept: DeviceCapabilityGrant[] = [];
-      for (const grant of snapshot.grants) {
-        const matches =
-          (input.grantId ? grant.id === input.grantId : true)
-          && (input.nodeId ? grant.nodeId === input.nodeId : true)
-          && (input.capabilityId ? grant.capabilityId === input.capabilityId : true)
-          && Boolean(input.grantId ?? input.nodeId ?? input.capabilityId);
-        if (!matches) {
-          kept.push(grant);
-          continue;
-        }
-        removals.push({
-          grantId: grant.id,
-          nodeId: grant.nodeId,
-          capabilityId: grant.capabilityId,
-          scope: grant.scope,
-          reason: 'revoked',
-          removedAt: now,
-          ...(input.note ? { note: input.note } : {}),
-        });
-      }
+    const written = await this.authority.write((view) => {
+      const matches = this.liveOnRecord(view).live.filter(({ grant }) =>
+        (input.grantId ? grant.id === input.grantId : true)
+        && (input.nodeId ? grant.nodeId === input.nodeId : true)
+        && (input.capabilityId ? grant.capabilityId === input.capabilityId : true));
+      const removals = matches.map(({ grant }): DeviceGrantRemoval => ({
+        grantId: grant.id,
+        nodeId: grant.nodeId,
+        capabilityId: grant.capabilityId,
+        scope: grant.scope,
+        reason: 'revoked',
+        removedAt: now,
+        ...(input.note ? { note: input.note } : {}),
+      }));
+      if (removals.length === 0) return { kind: 'none', value: removals };
+      const reason = input.note ? `revoked: ${input.note}` : 'revoked';
+      return {
+        kind: 'many',
+        value: removals,
+        changes: matches.map(({ grant }): AuthorityChange<null> => ({ kind: 'revoke', key: grantKey(grant.id), by: input.actor, reason, value: null })),
+      };
+    });
+    await this.recordRemovals(written.value, input.actor);
+    return written.value;
+  }
+
+  private async recordRemovals(removals: readonly DeviceGrantRemoval[], actor: string, extra?: (snapshot: DeviceGrantSnapshot) => Pick<DeviceGrantSnapshot, 'audit'>): Promise<void> {
+    if (removals.length === 0 && !extra) return;
+    const removed = new Set(removals.map((removal) => removal.grantId));
+    await this.mutateLedger((snapshot) => {
+      const usage = Object.fromEntries(Object.entries(snapshot.usage).filter(([id]) => !removed.has(id)));
       const audit = [
         ...snapshot.audit,
-        ...removals.map((removal): DeviceGrantAuditRecord => ({
+        ...removals.filter((removal) => removal.grantId !== '(unreadable)').map((removal): DeviceGrantAuditRecord => ({
           id: randomUUID(),
           action: 'removed',
           grantId: removal.grantId,
           nodeId: removal.nodeId,
           capabilityId: removal.capabilityId,
-          at: now,
-          actor: input.actor,
-          reason: 'revoked',
+          at: removal.removedAt,
+          actor,
+          reason: removal.reason,
         })),
       ];
-      return { next: { version: 1, grants: kept, audit }, result: removals };
+      return { version: 2, usage, audit, ...(extra ? extra({ version: 2, usage, audit }) : {}) };
     });
   }
 
   /**
-   * One housekeeping pass. Safe at recovery, safe on a timer, safe concurrently
-   *, it recomputes every removal from the file it just read and writes the
-   * result atomically, so running it twice removes nothing extra.
+   * One housekeeping pass. Safe at recovery, safe on a timer, safe on every
+   * machine at once: it judges the record as it reads it under the record's
+   * writer lock, and revoking an already revoked grant changes nothing.
    */
   async sweep(): Promise<DeviceGrantSweepReport> {
     const now = this.now();
     // Read once for the whole pass, so the caps and cutoffs one sweep applies
     // are internally consistent even if the configuration changes mid-sweep.
     const policy = this.getPolicy();
-    return this.mutate(async (snapshot, malformedCount) => {
+    const written = await this.authority.write((view) => {
+      const { live, malformed } = this.liveOnRecord(view);
       const removals: DeviceGrantRemoval[] = [];
-      if (malformedCount > 0) {
-        removals.push({
-          grantId: '(unreadable)',
-          nodeId: '(unknown)',
-          capabilityId: '(unknown)',
-          scope: '(unknown)',
-          reason: 'malformed',
-          removedAt: now,
-          note: `${malformedCount} grant record(s) failed content validation and were dropped`,
-        });
+      const revoke: { id: string; reason: DeviceGrantRemovalReason }[] = [];
+      const remove = (grant: { id: string; nodeId: string; capabilityId: string; scope: string }, reason: DeviceGrantRemovalReason, note?: string): void => {
+        removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason, removedAt: now, ...(note ? { note } : {}) });
+        revoke.push({ id: grant.id, reason });
+      };
+      for (const entry of malformed) {
+        const fields = entry.public as Readonly<Record<string, unknown>>;
+        remove({ id: entry.id, nodeId: String(fields['nodeId'] ?? '(unknown)'), capabilityId: String(fields['capabilityId'] ?? '(unknown)'), scope: String(fields['scope'] ?? '(unknown)') },
+          'malformed', 'the grant failed content validation and was never honoured');
       }
-
       const surviving: DeviceCapabilityGrant[] = [];
-      for (const grant of snapshot.grants) {
-        if (grant.expiresAt <= now) {
-          removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason: 'expired', removedAt: now });
-          continue;
-        }
-        if (this.ownership.isKnownNode && !this.ownership.isKnownNode(grant.nodeId)) {
-          removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason: 'node-gone', removedAt: now });
-          continue;
-        }
-        if (grant.scope === 'session' && grant.sessionId && this.ownership.isActiveSession && !this.ownership.isActiveSession(grant.sessionId)) {
-          removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason: 'session-gone', removedAt: now });
-          continue;
-        }
+      for (const { grant, entry } of live) {
+        if (grant.expiresAt <= now) { remove(grant, 'expired'); continue; }
+        if (this.ownership.isKnownNode && !this.ownership.isKnownNode(grant.nodeId)) { remove(grant, 'node-gone'); continue; }
+        // Only the machine a session grant belongs to can tell its session is gone.
+        if (grant.scope === 'session' && entry.audience !== 'group' && grant.sessionId && this.ownership.isActiveSession
+          && !this.ownership.isActiveSession(grant.sessionId)) { remove(grant, 'session-gone'); continue; }
         surviving.push(grant);
       }
-
+      // Oldest first, ties by id, so every machine picks the same grants past a cap.
+      const byAge = (a: DeviceCapabilityGrant, b: DeviceCapabilityGrant): number => a.grantedAt - b.grantedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
       const byNode = new Map<string, DeviceCapabilityGrant[]>();
-      for (const grant of surviving) {
-        const bucket = byNode.get(grant.nodeId);
-        if (bucket) bucket.push(grant);
-        else byNode.set(grant.nodeId, [grant]);
-      }
+      for (const grant of surviving) byNode.set(grant.nodeId, [...(byNode.get(grant.nodeId) ?? []), grant]);
       const capped: DeviceCapabilityGrant[] = [];
-      for (const [, bucket] of byNode) {
-        bucket.sort((a, b) => a.grantedAt - b.grantedAt);
+      for (const bucket of byNode.values()) {
+        bucket.sort(byAge);
         const overflow = bucket.length - policy.maxGrantsPerNode;
-        for (let index = 0; index < bucket.length; index += 1) {
-          const grant = bucket[index];
-          if (!grant) continue;
-          if (index < overflow) {
-            removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason: 'per-node-cap', removedAt: now });
-            continue;
-          }
-          capped.push(grant);
-        }
+        bucket.forEach((grant, index) => { if (index < overflow) remove(grant, 'per-node-cap'); else capped.push(grant); });
       }
-      capped.sort((a, b) => a.grantedAt - b.grantedAt);
+      capped.sort(byAge);
       const totalOverflow = capped.length - policy.maxGrantsTotal;
-      const finalGrants: DeviceCapabilityGrant[] = [];
-      for (let index = 0; index < capped.length; index += 1) {
-        const grant = capped[index];
-        if (!grant) continue;
-        if (index < totalOverflow) {
-          removals.push({ grantId: grant.id, nodeId: grant.nodeId, capabilityId: grant.capabilityId, scope: grant.scope, reason: 'total-cap', removedAt: now });
-          continue;
-        }
-        finalGrants.push(grant);
-      }
-
-      const auditCutoff = now - policy.auditRetentionMs;
-      const auditWithRemovals = [
-        ...snapshot.audit,
-        ...removals
-          .filter((removal) => removal.grantId !== '(unreadable)')
-          .map((removal): DeviceGrantAuditRecord => ({
-            id: randomUUID(),
-            action: 'removed',
-            grantId: removal.grantId,
-            nodeId: removal.nodeId,
-            capabilityId: removal.capabilityId,
-            at: now,
-            actor: 'housekeeping',
-            reason: removal.reason,
-          })),
-      ];
-      const auditAged = auditWithRemovals.filter((entry) => entry.at >= auditCutoff);
-      const auditFinal = auditAged.slice(-policy.maxAuditRecords);
-      const auditTrimmed = auditWithRemovals.length - auditFinal.length;
-
+      const retained = capped.filter((grant, index) => {
+        if (index >= totalOverflow) return true;
+        remove(grant, 'total-cap');
+        return false;
+      }).length;
+      const value = { removals, retained };
+      if (revoke.length === 0) return { kind: 'none', value };
       return {
-        next: { version: 1, grants: finalGrants, audit: auditFinal },
-        result: {
-          sweptAt: now,
-          removed: removals,
-          retained: finalGrants.length,
-          auditTrimmed: Math.max(0, auditTrimmed),
-        } satisfies DeviceGrantSweepReport,
+        kind: 'many',
+        value,
+        changes: revoke.map(({ id, reason }): AuthorityChange<null> => ({ kind: 'revoke', key: grantKey(id), by: 'housekeeping', reason, value: null })),
       };
     });
+    let auditTrimmed = 0;
+    const auditCutoff = now - policy.auditRetentionMs;
+    await this.recordRemovals(written.value.removals, 'housekeeping', (snapshot) => {
+      const aged = snapshot.audit.filter((entry) => entry.at >= auditCutoff);
+      const kept = aged.slice(-policy.maxAuditRecords);
+      auditTrimmed = snapshot.audit.length - kept.length;
+      return { audit: kept };
+    });
+    return {
+      sweptAt: now,
+      removed: written.value.removals,
+      retained: written.value.retained,
+      auditTrimmed: Math.max(0, auditTrimmed),
+    };
   }
 }

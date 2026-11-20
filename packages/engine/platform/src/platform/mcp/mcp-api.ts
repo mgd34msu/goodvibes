@@ -108,6 +108,11 @@ export interface McpApi {
    * file, or clear it, and apply it. An allow is the owner's act only.
    */
   storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
+  /**
+   * Keep a server's trust mode or role with its entry in its MCP config file
+   * and apply it, past a restart. A looser trust mode is the owner's act only.
+   */
+  storeServerPolicy?(serverName: string, policy: { readonly trustMode: NonNullable<McpServerConfig['trustMode']> } | { readonly role: NonNullable<McpServerConfig['role']> }, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }

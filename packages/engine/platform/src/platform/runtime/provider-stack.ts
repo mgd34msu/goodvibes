@@ -38,6 +38,8 @@ import type { RuntimeEventBus } from './events/index.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
 import { bindProviderOptimizerConfig } from './provider-optimizer-wiring.js';
 import type { ShellPathService } from './shell-paths.js';
+import type { DiscoveredServer } from '../discovery/scanner.js';
+import { isScannedServerOnThisComputer, loadPersistedProviders } from '../discovery/persisted-providers.js';
 
 /** The registry constructor's own option bag, named so a factory can be typed against it. */
 export type ProviderRegistryConstructionOptions = ConstructorParameters<typeof ProviderRegistry>[0];
@@ -97,8 +99,18 @@ export interface ProviderStackOptions {
   readonly modelDiscovery?: ProviderModelDiscoveryMode | undefined;
   /** Facts a host's own stack lends this one; see {@link ProviderStackHostFacts}. Default: this stack loads its own. */
   readonly hostFacts?: ProviderStackHostFacts | undefined;
+  /**
+   * Which of the local servers a scan saved (`discovered-providers.json` under
+   * the surface root) are registered. Default: servers on this computer only.
+   * A stack built with `hostFacts` registers none: its host copies its own.
+   * Asked only when the saved file lists servers, with this stack's paths.
+   */
+  readonly trustScannedServer?: ((server: DiscoveredServer, shellPaths: ShellPathService) => boolean) | undefined;
   readonly registerDispose?: ((release: () => void) => void) | undefined;
 }
+
+// The default rule for a saved scanned server (one on this computer), owned by the light saved-scan reader.
+export { isScannedServerOnThisComputer };
 
 /** Everything a composition needs to choose and call a model. */
 export interface ProviderStack {
@@ -174,7 +186,13 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     runtimeBus: options.runtimeBus,
     registerDispose: options.registerDispose,
   });
-  providerRegistry.initCustomProviders();
+  // The local servers a scan saved are known to every composition, so a scanned
+  // model saved as the default resolves in every command, not only the
+  // interactive start. One small file read, after the custom providers load.
+  const trustScannedServer = options.trustScannedServer ?? isScannedServerOnThisComputer;
+  providerRegistry.initCustomProviders(hostFacts ? {} : {
+    restoreDiscovered: () => loadPersistedProviders({ homeDirectory: shellPaths.homeDirectory, surfaceRoot }).filter((server) => trustScannedServer(server, shellPaths)),
+  });
   // Default `run`: every composition did this unconditionally before the option
   // existed, so an omitted option changes nothing.
   // The benchmark leaderboard is the same kind of network pass: the route

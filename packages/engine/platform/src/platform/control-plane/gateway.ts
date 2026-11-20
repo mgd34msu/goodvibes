@@ -23,6 +23,7 @@ import {
   clientMayReceiveEventDomain,
   grantAllowsDomain,
   grantAllowsEvent,
+  grantNeedsOwnedSession,
   isEmptyEventGrant,
   resolveEventGrant,
   type EventGrant,
@@ -38,6 +39,7 @@ import {
   DEFAULT_DOMAINS,
   DEFAULT_SERVER_CONFIG,
   createScopedSessionDelivery,
+  frameSessionId,
   hasReplayScope,
   normalizeRuntimeDomains,
   pruneDisconnectedClientRecords,
@@ -182,6 +184,8 @@ export class ControlPlaneGateway {
   private readonly websocketClients = new Map<string, WebSocketControlPlaneClient>();
   /** One controller per principal that has a signal handed out; removed when revoked. */
   private readonly principalRevocations = new Map<string, AbortController>();
+  /** Whether a principal created or joined a session; set by the composition that hosts sessions. Absent: no session is anyone's own. */
+  private sessionOwnedBy: ((sessionId: string, principalId: string) => boolean) | null = null;
   private readonly recentMessages: ControlPlaneSurfaceMessage[] = [];
   private readonly _recentEventsRing: (ScopedControlPlaneRecentEvent | undefined)[];
   private _recentEventsHead = 0;
@@ -359,6 +363,25 @@ export class ControlPlaneGateway {
     return message;
   }
 
+  /**
+   * How the gateway learns which sessions a principal owns, for clients that
+   * watch their own sessions (`read:own-sessions`). One in-memory lookup per
+   * frame, only for such clients.
+   */
+  setSessionOwnership(ownedBy: ((sessionId: string, principalId: string) => boolean) | null): void {
+    this.sessionOwnedBy = ownedBy;
+  }
+
+  /** Whether a frame belongs to a session `principalId` owns; a frame naming no session belongs to none. */
+  private ownsFrame(principalId: string | undefined, sessionId: string | undefined): boolean {
+    if (principalId === undefined || sessionId === undefined || !this.sessionOwnedBy) return false;
+    try {
+      return this.sessionOwnedBy(sessionId, principalId);
+    } catch {
+      return false;
+    }
+  }
+
   publishEvent(event: string, payload: unknown, filter?: {
     readonly clientKind?: LiveControlPlaneClient['kind'] | undefined;
     readonly clientId?: string | undefined;
@@ -376,6 +399,7 @@ export class ControlPlaneGateway {
       if (filter?.routeId && client.routeId !== filter.routeId) continue;
       if (filter?.surfaceId && client.surfaceId !== filter.surfaceId) continue;
       if (!grantAllowsEvent(client.grant, event, addressed)) continue;
+      if (grantNeedsOwnedSession(client.grant, event) && !this.ownsFrame(client.principalId, ownedFrameSessionId(payload))) continue;
       // Domain filter, AND-ed with the grant (null = deliver-all; untagged = delivered).
       if (!clientMayReceiveEventDomain(client.domains, event)) continue;
       client.send(event, payload, record.id);
@@ -583,7 +607,7 @@ export class ControlPlaneGateway {
       transport: 'websocket',
       ...(options.unrecognisedDomains?.length ? { unrecognisedDomains: [...options.unrecognisedDomains] } : {}),
     });
-    replayRecentTraffic(this.recentEventsFor(grant), send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
+    replayRecentTraffic(this.recentEventsFor(grant, options.principalId), send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
     return { clientId, domains: selectedDomains };
   }
 
@@ -652,6 +676,7 @@ export class ControlPlaneGateway {
     for (const domain of nextDomains) {
       if (wsClient.unsubscribers.has(domain)) continue;
       const unsubscribe = this.runtimeBus.onDomain(domain, (envelope) => {
+        if (grantNeedsOwnedSession(liveClient.grant, domain) && !this.ownsFrame(liveClient.principalId, envelope.sessionId)) return;
         this.touchWebSocketClient(clientId, { lastEventType: envelope.type });
         const record = this.rememberRuntimeEvent(domain, envelope);
         liveClient.send(domain, this.liveRuntimePayload(record, wsClient.streamBases), record.id);
@@ -867,6 +892,7 @@ export class ControlPlaneGateway {
         const send = scoped.wrapSend(rawSend);
         const unsubs = selectedDomains.map((domain) => this.runtimeBus!.onDomain(domain, (envelope) => {
           if (!scoped.mayDeliver(envelope.sessionId)) return;
+          if (grantNeedsOwnedSession(grant, domain) && !this.ownsFrame(options.principalId, envelope.sessionId)) return;
           const updated: ControlPlaneClientRecord = {
             ...clientRecord,
             lastSeenAt: Date.now(),
@@ -966,7 +992,7 @@ export class ControlPlaneGateway {
         // A resuming client is told what its position turned into BEFORE any
         // replay lands, so "I asked to resume and received nothing" is a stated
         // outcome rather than something it has to infer from silence.
-        const replayable = this.recentEventsFor(grant);
+        const replayable = this.recentEventsFor(grant, options.principalId);
         rawSend('ready', {
           clientId,
           domains: selectedDomains,
@@ -1011,10 +1037,11 @@ export class ControlPlaneGateway {
   }
 
   /** The replay ring cut to what `grant` covers; an event addressed to one client keeps its own replay scope check. */
-  private recentEventsFor(grant: EventGrant): ScopedControlPlaneRecentEvent[] {
+  private recentEventsFor(grant: EventGrant, principalId?: string): ScopedControlPlaneRecentEvent[] {
     const events = this.recentEvents;
     if (grant.all) return events;
-    return events.filter((entry) => grantAllowsEvent(grant, entry.event, Boolean(entry.replayScope?.clientId || entry.replayScope?.clientIdPrefix)));
+    return events.filter((entry) => grantAllowsEvent(grant, entry.event, Boolean(entry.replayScope?.clientId || entry.replayScope?.clientIdPrefix))
+      && (!grantNeedsOwnedSession(grant, entry.event) || this.ownsFrame(principalId, ownedFrameSessionId(entry.payload))));
   }
 
   renderWebUi(authTokenHint = ''): Response {
@@ -1153,3 +1180,12 @@ export class ControlPlaneGateway {
 
 // Exposes DEFAULT_DOMAINS invariants for direct verification.
 export { DEFAULT_DOMAINS as DEFAULT_DOMAINS_TEST_EXPORT };
+
+/** The session a delivered frame is about: its own `sessionId`, an approval's, or a hosted-session notice's record id. */
+function ownedFrameSessionId(payload: unknown): string | undefined {
+  const named = frameSessionId(payload);
+  if (named !== undefined || !payload || typeof payload !== 'object') return named;
+  const session = (payload as { session?: unknown }).session;
+  const id = session && typeof session === 'object' ? (session as { id?: unknown }).id : undefined;
+  return typeof id === 'string' ? id : undefined;
+}

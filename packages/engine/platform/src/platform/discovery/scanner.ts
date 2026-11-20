@@ -6,10 +6,10 @@ import { logger } from '../utils/logger.js';
 import { discoverContextWindows } from '../providers/context-discovery.js';
 import { WELL_KNOWN_LOCAL_PORTS } from '../providers/well-known-endpoints.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
-import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
-import { capturePersistedProviders, capturePersistedServer } from './persisted-cache.js';
+import { capturePersistedServer } from './persisted-cache.js';
+import { getPersistedProvidersPath, loadPersistedProviders, type DiscoveryRoots } from './persisted-providers.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,34 +49,12 @@ export interface ScanResult {
 // Persistence
 // ---------------------------------------------------------------------------
 
-type DiscoveryRoots = Pick<ShellPathService, 'homeDirectory'> & {
-  readonly surfaceRoot: string;
-};
-
-function getPersistedPath(roots: DiscoveryRoots): string {
-  return resolveSurfaceDirectory(roots.homeDirectory, roots.surfaceRoot, 'discovered-providers.json');
-}
+// The saved-scan reader lives in persisted-providers.ts, light enough for a
+// command that only names the saved servers.
+export { loadPersistedProviders };
 
 interface PersistedServer extends DiscoveredServer {
   lastSeen: number; // Unix ms timestamp
-}
-
-/** Load previously discovered providers from disk. Returns empty array if file doesn't exist. */
-export function loadPersistedProviders(roots: DiscoveryRoots): DiscoveredServer[] {
-  const persistedPath = getPersistedPath(roots);
-  try {
-    if (!existsSync(persistedPath)) return [];
-    const raw = readFileSync(persistedPath, 'utf-8');
-    const captured = capturePersistedProviders(JSON.parse(raw) as unknown);
-    if (captured.invalid) {
-      logger.warn('[Scanner] loadPersistedProviders ignored invalid discovery cache');
-    }
-    return captured.servers;
-  } catch {
-    // JSON parse and filesystem errors can include private cache bytes or paths.
-    logger.warn('[Scanner] loadPersistedProviders failed; using empty discovery cache');
-    return [];
-  }
 }
 
 /**
@@ -113,7 +91,7 @@ function readLiveEntries(persistedPath: string, now: number): PersistedServer[] 
 
 /** Save discovered providers to disk. Merges with existing entries keyed by host:port. */
 export function persistProviders(roots: DiscoveryRoots, servers: DiscoveredServer[]): void {
-  const persistedPath = getPersistedPath(roots);
+  const persistedPath = getPersistedProvidersPath(roots);
   try {
     const now = Date.now();
     let existing: PersistedServer[] = [];
@@ -140,7 +118,7 @@ export function persistProviders(roots: DiscoveryRoots, servers: DiscoveredServe
 /** Remove specific servers from the persisted file (by host:port). */
 export function removePersistedProviders(roots: DiscoveryRoots, toRemove: Array<{ host: string; port: number }>): void {
   if (toRemove.length === 0) return;
-  const persistedPath = getPersistedPath(roots);
+  const persistedPath = getPersistedProvidersPath(roots);
   try {
     if (!existsSync(persistedPath)) return;
     const removeKeys = new Set(toRemove.map(s => `${s.host}:${s.port}`));

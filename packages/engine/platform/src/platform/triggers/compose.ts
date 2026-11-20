@@ -14,6 +14,7 @@ import type { ProcessManager } from '../tools/shared/process-manager.js';
 import { createBunStreamHost, createProcessManagerCommandRunner, createProcessManagerTriggerHost, createTriggerActionExecutor, type TriggerAgentSpawner } from './hosts.js';
 import { TriggerManager, type TriggerManagerConfig } from './manager.js';
 import { createDefaultProbeIo } from './probes.js';
+import type { UnattendedRuns } from '../automation/unattended-runs.js';
 import { ProbeToolHost } from './probe-tools.js';
 
 export interface TriggerSupervisorDeps {
@@ -22,6 +23,8 @@ export interface TriggerSupervisorDeps {
   readonly resolveStorePath: (name: string) => string;
   readonly agents: TriggerAgentSpawner;
   readonly processManager: ProcessManager;
+  /** Where a fired turn's answer goes, and the connected tools (mail, calendar) it gets. */
+  readonly unattendedRuns?: UnattendedRuns | undefined;
   /** False when the session that created a trigger is gone; such triggers are reaped. */
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
 }
@@ -63,7 +66,7 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
     config: () => readTriggerConfig(configManager),
-    actions: createTriggerActionExecutor({ agents: deps.agents, processManager }),
+    actions: createTriggerActionExecutor({ agents: deps.agents, processManager, unattendedRuns: deps.unattendedRuns }),
     processHost: createProcessManagerTriggerHost(processManager),
     streamHost: createBunStreamHost(processManager),
     probeIo: createDefaultProbeIo({

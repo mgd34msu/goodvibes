@@ -277,8 +277,10 @@ unknown sender is not answered; it raises an owner claim in the owner inbox
 the sender. Accepting it puts that sender on the user list and records the
 policy's `ownerId` and `ownerSince`; declining it is remembered, so the same
 sender is not asked about again. At most three claims per surface are open at
-once. For a shared channel, set the surface policy `open: true`: every sender
-is admitted while the lists are empty and no claim is raised. The daemon always
+once. For a shared channel, set the surface policy `open: true`
+(`/channel policy set <surface> --open on`, or `open` on
+`channels.policies.update`): every sender is admitted while the lists are
+empty and no claim is raised, and every sender talks as a guest. The daemon always
 raises claims; only an embedding host without an owner inbox makes the first
 identified sender the owner and records the same two fields.
 
@@ -290,6 +292,18 @@ recorded takes its first allowlisted user as its owner when it loads; when the
 owner is no longer on a non-empty user list, its first entry becomes the owner.
 An approval button pressed by anyone else is refused with the same rule (403,
 `APPROVAL_ANSWER_REFUSED`), and the approval stays pending.
+
+Authority belongs to the person, not the surface. A message from anyone else
+the channel admits (a guest) starts a turn under the guest form of the surface,
+`guest:<surface>`, which carries no authority on any surface, Telegram
+included: the turn may read files inside the allowed directories and answer,
+and every other call is an approval for the owner, in every permission mode and
+with or without a decision model. Its approvals go to the owner's own direct
+conversations (that surface's first), never to the guest's chat, and are listed
+in the owner inbox; the owner answers from any of his direct conversations.
+Work a guest asks for is proposed to the owner the same way, and only his
+answer starts it; the agreed work still runs as the guest's turn. A guest's
+message is never handed to an agent already running in the conversation.
 
 A channel conversation can ask the assistant to read, search and summarize. A
 request that would change something (write a file, run a command, send a

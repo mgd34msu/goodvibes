@@ -21,7 +21,8 @@ export interface ResumeSessionOptions {
   readonly conversation: ConversationManager;
   readonly requestRender: () => void;
   readonly onSessionIdChanged?: (sessionId: string) => void;
-  readonly cancelPendingRecovery?: () => boolean;
+  /** Revokes the replaced session's pending work (command readings). */
+  readonly cancelSessionWork?: () => void;
   readonly sharedSessionBroker: Pick<SharedSessionBroker, 'reopenSession'>;
   /** Fire-and-forget daemon-spine mirror. Reopen (not register) is the
    * ONLY resume-time verb, see the platform session-spine client.ts header doc. */
@@ -112,10 +113,10 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         selectModel: options.selectModel,
         hydrateSessionUsage: options.hydrateSessionUsage,
         canResume: () => !options.isGenerating?.(),
-        // After the last refusal check and before the session is replaced: a
-        // revoked offer must land while it still belongs to the old session, and
-        // a refused resume must leave it standing.
-        beforeRestore: () => options.cancelPendingRecovery?.(),
+        // After the last refusal check and before the session is replaced: revoked
+        // work must land while it still belongs to the old session, and a refused
+        // resume must leave it standing.
+        beforeRestore: () => options.cancelSessionWork?.(),
         agents: call.agents,
       });
       const { meta } = outcome;

@@ -28,7 +28,7 @@ export interface HookEvent {
 
 /** Result returned by a hook handler */
 export interface HookResult {
-  /** For a Pre hook that may deny: `deny` refuses the call or request; `allow` and `ask` have no effect on a tool call. */
+  /** For a Pre hook that may deny: `deny` refuses the call or request; on a tool call `ask` puts it to the owner (in every mode) and `allow` has no effect. */
   decision?: 'allow' | 'deny' | 'ask' | undefined;
   /** Reason for denial */
   reason?: string | undefined;

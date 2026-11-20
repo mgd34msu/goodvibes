@@ -50,6 +50,7 @@ import type {
 
 import { registerAcpGatewayMethods } from '../../platform/src/platform/control-plane/routes/acp.js';
 import { registerApprovalRaiseGatewayMethods } from '../../platform/src/platform/control-plane/routes/approvals-raise.js';
+import { registerAuthorityStatusGatewayMethods } from '../../platform/src/platform/control-plane/routes/authority-status.js';
 import { registerCredentialWriteGatewayMethods } from '../../platform/src/platform/control-plane/routes/credentials-write.js';
 import { registerBrowserGatewayMethods } from '../../platform/src/platform/control-plane/routes/browser.js';
 import { registerCalendarGatewayMethods } from '../../platform/src/platform/control-plane/routes/calendar.js';
@@ -134,6 +135,7 @@ function stubDeps(): never {
 const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodCatalog) => void | Promise<void>]> = [
   ['acp', (catalog) => registerAcpGatewayMethods(catalog, stubDeps())],
   ['approvals-raise', (catalog) => registerApprovalRaiseGatewayMethods(catalog, stubDeps())],
+  ['authority-status', (catalog) => registerAuthorityStatusGatewayMethods(catalog, stubDeps())],
   ['credentials-write', (catalog) => registerCredentialWriteGatewayMethods(catalog, stubDeps())],
   ['browser', (catalog) => registerBrowserGatewayMethods(catalog, stubDeps())],
   ['calendar', (catalog) => registerCalendarGatewayMethods(catalog, stubDeps())],
@@ -168,7 +170,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['push', (catalog) => registerPushGatewayMethods(catalog, stubDeps())],
   // The accessor shape the daemon passes: the controller is built at start and
   // dropped at stop, so the verbs take a function rather than an instance.
-  ['relay', (catalog) => registerRelayGatewayMethods(catalog, () => stubDeps())],
+  ['relay', (catalog) => registerRelayGatewayMethods(catalog, () => stubDeps(), stubDeps())],
   ['rewind', (catalog) => registerRewindGatewayMethods(catalog, stubDeps())],
   // A real broker rather than a stub: it holds no I/O and no timers until a
   // request is raised, and the probe's point is to run the handler the daemon
@@ -206,6 +208,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
 export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerAcpGatewayMethods',
   'registerApprovalRaiseGatewayMethods',
+  'registerAuthorityStatusGatewayMethods',
   'registerBrowserGatewayMethods',
   'registerCalendarGatewayMethods',
   'registerChannelProfilesGatewayMethods',

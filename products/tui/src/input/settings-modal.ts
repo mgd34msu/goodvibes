@@ -571,6 +571,10 @@ export class SettingsModal extends TerminalSettingsModalState<
         setEditBuffer: (v) => {
           this.editBuffer = v;
         },
+        reportMcpTrust: (message) => {
+          this.lastSettingEffectMessage = message;
+          this.requestRender?.();
+        },
       },
       direction,
       step,

@@ -408,6 +408,11 @@
       "text": "RELAY_CHALLENGE_BYTES = 32"
     },
     {
+      "name": "RELAY_CODE_HEADER",
+      "kind": "const",
+      "text": "RELAY_CODE_HEADER = \"x-goodvibes-relay-code\""
+    },
+    {
       "name": "RELAY_CURVE",
       "kind": "const",
       "text": "RELAY_CURVE: \"P-256\""
@@ -545,12 +550,13 @@
       "name": "RelayPairingPayload",
       "kind": "interface",
       "required": [
+        "code",
         "daemonPublicKey",
         "protocol",
         "relayUrl",
         "rid"
       ],
-      "text": "export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
+      "text": "export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly code: string; readonly label?: string; }"
     },
     {
       "name": "RelayPingFrame",
@@ -780,7 +786,7 @@
     {
       "name": "createRelayPairingPayload",
       "kind": "function",
-      "text": "export declare function createRelayPairingPayload(input: { readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }): RelayPairingPayload;"
+      "text": "export declare function createRelayPairingPayload(input: { readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly code: string; readonly label?: string; }): RelayPairingPayload;"
     },
     {
       "name": "decodeControlFrame",

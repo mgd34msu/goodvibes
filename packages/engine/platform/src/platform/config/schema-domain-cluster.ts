@@ -36,6 +36,8 @@ export interface ClusterConfig {
   beaconSeconds: number;
   /** How often the member list is shared with the group, in seconds. */
   rosterGossipSeconds: number;
+  /** How long a removal or revocation is kept on the group's record after every member has it, in minutes. */
+  revocationRetentionMinutes: number;
   /** This machine's name in the group's member list; empty uses a slice of its node id. */
   nodeName: string;
 }
@@ -47,8 +49,11 @@ export const clusterConfigDefaults: { cluster: ClusterConfig } = {
     // it on is the operator asserting that every goodvibes node on this network
     // is theirs, and that assertion is the whole trust boundary.
     enabled: false,
-    heartbeatSeconds: 30,
-    masterTimeoutSeconds: 90,
+    // A crashed holder is noticed only by its silence, so these two set how long
+    // a surface goes unread after a crash: three missed heartbeats. One small
+    // datagram per held surface every 5 seconds on the local network.
+    heartbeatSeconds: 5,
+    masterTimeoutSeconds: 15,
     bootProbeSeconds: 3,
     // Administratively-scoped multicast (RFC 2365, 239.0.0.0/8): a conforming
     // router never forwards it off the local network.
@@ -62,6 +67,7 @@ export const clusterConfigDefaults: { cluster: ClusterConfig } = {
     keyRotationGraceMinutes: 5,
     beaconSeconds: 15,
     rosterGossipSeconds: 60,
+    revocationRetentionMinutes: 43_200,
     nodeName: '',
   },
 };
@@ -72,12 +78,12 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: false,
     description:
-      'Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and after cluster.masterTimeoutSeconds (90 seconds by default) when one crashes. Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger\'s node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way.',
+      'Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and within about 20 seconds when one crashes (cluster.masterTimeoutSeconds, 15 by default, plus a short election). Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger\'s node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way.',
   },
   {
     key: 'cluster.heartbeatSeconds',
     type: 'number',
-    default: 30,
+    default: 5,
     description:
       'How often the responsible node tells the others it is still alive, in seconds. Lower means slightly faster notice that a node is alive and more network chatter; it does not by itself shorten a crash takeover, which waits for cluster.masterTimeoutSeconds.',
     ...intRange(1, 3_600),
@@ -85,7 +91,7 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
   {
     key: 'cluster.masterTimeoutSeconds',
     type: 'number',
-    default: 90,
+    default: 15,
     description:
       'How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Used as at least two heartbeats: a value below that is raised to two heartbeats at runtime.',
     ...intRange(2, 86_400),
@@ -118,7 +124,7 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. Inside a group it is not used: the group key signs every coordination message.',
+      'Optional shared phrase for coordinating machines that are not in a group (no `cluster create` or `cluster join`). When set, their coordination messages are signed with it and any message that does not verify is ignored, so only nodes that know the phrase can take the responsible role; every such node must use the same value. When it names a stored secret that cannot be read, this machine sends and takes no coordination messages at all until it can (rather than run unsigned), and `cluster status` says election traffic is unavailable. Inside a group it is not used: the group key signs every coordination message.',
   },
   {
     key: 'cluster.keyRotationHours',
@@ -149,8 +155,16 @@ const clusterSettingRows: ConfigSettingDefinition[] = [
     type: 'number',
     default: 60,
     description:
-      'How often this machine shares the group\'s member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. The member list is checked on a 30 second timer, so any value below 30 behaves as 30. Higher means changes settle more slowly.',
+      'How often this machine tells the others which revision of the group\'s shared settings and of its record (members, removals, key generations, devices, users) it holds, in seconds. A change is sent to every machine when it is made; this is how a machine that missed one (a lost message, or switched off at the time) notices and takes it. Checked on a 30 second timer, so any value below 30 behaves as 30. Higher means a missed change settles more slowly.',
     ...intRange(10, 3_600),
+  },
+  {
+    key: 'cluster.revocationRetentionMinutes',
+    type: 'number',
+    default: 43_200,
+    description:
+      'How long a removed or revoked entry (a deleted schedule, a revoked device token, user, grant or peer) is kept on the group\'s record before it is dropped, in minutes; 43200 (30 days) by default. A machine that has not heard the group for longer than this, or has never synced with the group it is in, takes the group\'s record as the truth when it returns: what the group no longer holds is dropped on that machine, not brought back, unless that machine made it after it last synced, and `cluster status` lists what was dropped. It must span four gossip rounds: at least 4 x cluster.rosterGossipSeconds (counted as 30 when lower), in minutes rounded up, so 4 with the default gossip; a lower value is refused naming the minimum, and one in a hand-edited file is raised to it. Set the same value on every machine.',
+    ...intRange(1, 525_600),
   },
   {
     key: 'cluster.nodeName',

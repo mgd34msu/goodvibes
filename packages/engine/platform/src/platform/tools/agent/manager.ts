@@ -29,7 +29,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { splitModelRegistryKey } from '../../providers/registry-helpers.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
-import { requireProviderQualifiedModel, normalizeProviderQualifiedModelList } from './model-routing.js';
+import { AgentSpawnInputError, requireProviderQualifiedModel, normalizeProviderQualifiedModelList } from './model-routing.js';
 import { sameProviderCatalog } from '../../providers/provider-aliases.js';
 import { moveAgentRun, type AgentRecord } from './record.js';
 import { splitContractBinding, startContractOwner, type ContractOwnerBinding, type ContractUnitBinding } from './contract-binding.js';
@@ -517,10 +517,10 @@ export class AgentManager {
     const provider = input.provider?.trim() || undefined;
     const model = requireProviderQualifiedModel(input.model, 'Agent model overrides', modelCandidates, provider);
     if (!model && provider) {
-      throw new Error('Agent provider routing requires a provider-qualified model when provider is supplied.');
+      throw new AgentSpawnInputError('Agent provider routing requires a provider-qualified model when provider is supplied.');
     }
     if (model && provider && !sameProviderCatalog(splitModelRegistryKey(model).providerId, provider)) {
-      throw new Error(`Agent model override '${model}' conflicts with provider '${provider}'.`);
+      throw new AgentSpawnInputError(`Agent model override '${model}' conflicts with provider '${provider}'.`);
     }
     const fallbackModels = normalizeProviderQualifiedModelList(input.fallbackModels, 'Agent fallback models', modelCandidates);
     const routingFallbackModels = normalizeProviderQualifiedModelList(input.routing?.fallbackModels, 'Agent routing fallback models', modelCandidates);
@@ -531,10 +531,10 @@ export class AgentManager {
       input.routing?.providerFailurePolicy === 'ordered-fallbacks'
       && !effectiveFallbackModels?.length
     ) {
-      throw new Error('Agent ordered fallback routing requires at least one provider-qualified fallback model.');
+      throw new AgentSpawnInputError('Agent ordered fallback routing requires at least one provider-qualified fallback model.');
     }
     if (input.routing?.providerFailurePolicy === 'fail' && (routingFallbackModels?.length || fallbackModels?.length)) {
-      throw new Error('Agent fail routing cannot include fallback models; use ordered-fallbacks to enable model failover.');
+      throw new AgentSpawnInputError('Agent fail routing cannot include fallback models; use ordered-fallbacks to enable model failover.');
     }
 
     const startsContract = !input.outsideContract && !binding && !ownerBinding;

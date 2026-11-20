@@ -120,6 +120,8 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
   readonly paymentReplies?: import('../payments/reply-inbox.js').PaymentReplyInbox | undefined;
   readonly runtime: ResolvedDaemonFacadeRuntime;
   readonly transportBinding: () => Pick<ResolvedDaemonFacadeRuntime, 'host' | 'port'>;
+  /** The control-plane listener as bound right now, or null while none is bound. */
+  readonly servingListener: () => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | null;
   readonly pendingSurfaceReplies: Map<string, PendingSurfaceReply>;
   readonly authToken: () => string | null;
   readonly settingsLifetime?: (() => object | null) | undefined;
@@ -134,6 +136,7 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
   readonly invokeGatewayMethodCall: (input: {
     readonly authToken: string;
     readonly methodId: string;
+    readonly idempotencyKey?: string | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly query?: Record<string, unknown> | undefined;
     readonly body?: unknown | undefined;
@@ -146,7 +149,7 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
       /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
       readonly connectionId?: string | undefined;
     };
-  }) => Promise<{ status: number; ok: boolean; body: unknown }>;
+  }) => Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }>;
   readonly syncSpawnedAgentTask: (record: import('../tools/agent/index.js').AgentRecord, sessionId?: string) => void;
   readonly syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void;
   readonly surfaceDeliveryEnabled: (surface: 'slack' | 'discord' | 'ntfy' | 'webhook' | 'homeassistant' | 'telegram' | 'google-chat' | 'signal' | 'whatsapp' | 'telephony' | 'imessage' | 'msteams' | 'bluebubbles' | 'mattermost' | 'matrix') => boolean;

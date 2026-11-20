@@ -26,6 +26,7 @@ import type { DaemonHandlerCompositionOptions } from './daemon-handler-compositi
 import { createDaemonNativeWorkExecutionActivation } from './native-work-execution-activation.js';
 import { createBrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 import { createDevicePostureServices } from './device-posture-composition.js';
+import { composeUnattendedRunTools } from './unattended-run-tools.js';
 // Re-exported so the daemon entrypoint reaches the housekeeping sweep through
 // the same module it already imports the runtime graph from. `installDevicePosture`
 // is deliberately NOT re-exported: it registers the phone TOOL into a tool
@@ -189,6 +190,13 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // A surface with no owner yet never takes its first sender as owner: that sender is held
     // as a claim in the owner inbox, and becomes the owner only when the owner accepts it.
     disposalScope.registry.add('channel owner claims', channelPolicy.attachOwnerInbox(ownerInbox));
+    // A scheduled run or trigger turn that names no surface, or whose send failed, leaves its answer here.
+    disposalScope.registry.add('unattended answers to the owner inbox', graph.unattendedRuns.attachOwnerInbox(ownerInbox));
+    // Scheduled runs and trigger turns get the mail and calendar tool once the owner has connected either.
+    const unattendedRunTools = composeUnattendedRunTools({
+      configManager, secretsManager, homeDirectory, artifactStore: graph.artifactStore, gatewayMethods, unattendedRuns: graph.unattendedRuns,
+    });
+    disposalScope.registry.add('unattended run tools', unattendedRunTools.stop);
     // Where the email inbox (built with the handlers) meets the mailbox reader the facade composes later.
     const mailboxReaders = new MailboxReaders();
 
@@ -221,6 +229,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       configManager,
       distributedRuntime,
       approvals: approvalBroker,
+      authority: graph.authorityRecord,
       signal: AbortSignal.any([deviceLifetime.signal, autonomousLifetime.signal]),
       stateDirectory: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'devices'),
       gatewayMethods,
@@ -229,7 +238,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // Which machines on this network are "us", and which of them reads the shared
     // inbox. Both inert until startCluster(), no socket, no key material read;
     // see cluster-group-composition.ts for why they are built together.
-    const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager });
+    const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager,
+      authorityRecord: graph.authorityRecord, setAuthorityPeers: graph.setAuthorityPeers });
     disposalScope.registry.add('cluster group', () => clusterGroup.stop());
     disposalScope.registry.add('cluster coordinator', () => clusterCoordinator.stop('runtime closing'));
     // Browser composition fills this shared holder before async host registration.
@@ -297,10 +307,15 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // A reason the daemon itself cannot send pushes reaches the next attached surface.
       daemonReceipts: daemonReceiptStoreAt(daemonReceiptsPath(configManager)),
       relayAvailable: () => configManager.get('relay.enabled') === true,
-      pairingWebOrigin: () => resolvePairingWebOrigin(configManager).origin,
+      pairingWebOrigin: () => resolvePairingWebOrigin(configManager)?.origin,
       disposal: disposalScope.registry,
       runtimeBus: options.runtimeBus,
       sessionPresence: graph.sessionPresence,
+      // The group's roles and record: the check-in and occasion sweep run where
+      // their role is held, and occasion answers and push registrations are
+      // shared through the record.
+      clusterRoles: graph.clusterRoles,
+      authority: graph.authorityRecord,
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));
@@ -324,6 +339,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // unless a composed workstream is explicitly granted the host (see
       // native-work-execution-activation.ts).
       execContainment: CONVERSATIONAL_CONTAINMENT,
+      // The mail and calendar tool, offered only to a run that names it (a scheduled run or trigger turn).
+      decorateRegistry: (registry: Parameters<typeof unattendedRunTools.decorateRegistry>[0]) => {
+        graph.agentToolDependencies.decorateRegistry?.(registry);
+        unattendedRunTools.decorateRegistry(registry);
+      },
     };
     graph.agentOrchestrator.setDependencies(agentToolDependencies);
     // The same store instance the workspaces.* verbs write through, so this process orders its own readers and writers.
@@ -435,6 +455,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       shellPaths,
       distributedRuntime,
       clusterCoordinator,
+      authorityRecord: graph.authorityRecord,
+      clusterMemberName: (nodeId: string): string | null =>
+        clusterGroup.runtime.groupState?.members.find((member) => member.nodeId === nodeId)?.displayName ?? null,
       checkoutSeam: browserCheckoutSeam.get, channelDeliveryRouter: graph.channelDeliveryRouter, inboxFactory: options.inboxFactory,
       mailboxReaders,
       serviceRegistry: graph.serviceRegistry,

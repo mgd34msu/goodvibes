@@ -1,8 +1,7 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
 import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import { createDaemonProviderDiscovery, onlyLoopbackServers, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
+import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
 import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
@@ -246,12 +245,13 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
 
       phase = 'provider preload';
       observeNativeStartupPhase('provider-preload');
-      // Custom providers finish their tolerant initial load first, so cached
-      // discoveries cannot take their names. Host work owns this admission wait.
+      // Custom providers finish their tolerant initial load first, then the
+      // provider stack registers the saved servers on this computer only (so
+      // cached discoveries cannot take a custom provider's name, and nothing
+      // that answered on another machine becomes a provider prompts are sent
+      // to). Host work owns this admission wait.
       await runtime.providerRegistry.ready();
       fence();
-      const discovered = onlyLoopbackServers(loadPersistedProviders({ homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot }));
-      if (discovered.length > 0) runtime.providerRegistry.registerDiscoveredProviders(discovered);
 
       discovery = createDaemonProviderDiscovery(
         { homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot },

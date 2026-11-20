@@ -49,8 +49,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
   const MCP_ADD_COMMAND_USAGE =
     `/mcp add <name> <command|https-url> [options] [-- <server args>]; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>; everything after -- is passed to the server command as it is`;
-  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>';
-  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>';
+  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>  (kept in the server\'s MCP config; config ends a value set for this session only)';
+  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>  (kept in the server\'s MCP config; config ends a value set for this session only)';
   const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [--keep]  (this session only; --keep keeps it in the server\'s MCP config past a restart; /mcp clear lifts it)';
   const MCP_ALLOW_COMMAND_USAGE = '/mcp allow <server> <tool>  (kept in your global MCP config; lets the tool past the server\'s path and host scope; asks once)';
   const MCP_CLEAR_COMMAND_USAGE = '/mcp clear <server> <tool>  (removes the rule set for the tool: this session\'s denial and the allow or denial kept in the server\'s MCP config; asks once)';
@@ -93,7 +93,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     return { rest };
   }
   function formatMcpTrustMode(mode: McpDisplayTrustMode): string {
-    if (mode === 'ask-on-risk') return 'allow inside scope, deny outside';
+    if (mode === 'ask-on-risk') return 'allow inside scope, ask you outside';
     if (mode === 'allow-all') return 'allow all actions';
     return mode.replace(/[_-]+/g, ' ');
   }
@@ -249,7 +249,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       aliases: [],
       // Env values and request headers carry credentials; the input history keeps neither.
       secretArgs: { flags: ['--env', '--header'] },
-      description: 'Manage MCP servers and their tools; /mcp deny lasts this session, deny --keep and allow are kept in the MCP config, clear removes either',
+      description: 'Manage MCP servers and their tools; /mcp trust, /mcp role, deny --keep and allow are kept in the MCP config, /mcp deny lasts this session, clear removes a tool rule',
       ...(policy.hidden ? { hidden: true } : {}),
       usage: `[servers|review|tools [<server>]|config|add <name> <command|https-url> [--scope project|global] [--role <role>] [--trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}] [--env KEY=VALUE] [--header Name=Value] [-- <server args>]|remove|reload|auth-review|repair [server]|trust|role|quarantine <server> [detail|approve [operatorId]]|deny <server> <tool> [--keep]|allow <server> <tool>|clear <server> <tool>]`,
       argsHint: '[servers|review|tools|config|add|remove]',
@@ -280,6 +280,36 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           print(cleared
             ? `${serverName} is back on its configured MCP ${what}: ${value}.`
             : `${serverName} had no MCP ${what} set for this session; it runs on its configured ${what}: ${value}.`);
+        };
+        /**
+         * Keep a server's trust mode or role with its entry in its MCP config file and apply it.
+         * A server whose entry is in a file this program does not write gets the value for this
+         * session only, and is told why it was not kept.
+         */
+        const storePolicy = async (serverName: string, policy: { readonly trustMode: Exclude<NonNullable<McpServerConfig['trustMode']>, 'allow-all'> } | { readonly role: NonNullable<McpServerConfig['role']> }, label: string): Promise<void> => {
+          const what = 'trustMode' in policy ? 'trust mode' : 'role';
+          const sessionOnly = (why: string): void => {
+            try {
+              if ('trustMode' in policy) mcpApi.setServerTrustMode(serverName, policy.trustMode);
+              else mcpApi.setServerRole(serverName, policy.role);
+            } catch (error) {
+              refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
+            }
+            print(`Updated MCP ${what} for ${serverName} to ${label} for this session only (${why}): it stays through reconnects and config reloads until \`/mcp ${'trustMode' in policy ? 'trust' : 'role'} ${serverName} config\` or a restart.`);
+          };
+          if (!mcpApi.storeServerPolicy) { sessionOnly('this runtime cannot keep it in the MCP config'); return; }
+          let result: McpStoredToolRuleResult;
+          try {
+            result = await mcpApi.storeServerPolicy(serverName, policy, requireShellPaths(ctx));
+          } catch (error) {
+            sessionOnly(summarizeError(error));
+            return;
+          }
+          ctx.renderRequest();
+          const where = `${result.scope} MCP config ${result.path}`;
+          print(result.changed
+            ? `Set the MCP ${what} of ${serverName} to ${label}, kept in ${where}: it applies now and after a restart.`
+            : `${serverName} already has the MCP ${what} ${label} in ${where}; it applies now.`);
         };
         /** The rule kept for a tool in the server's config, from the runtime's record; undefined when none is kept. */
         const keptRule = (serverName: string, toolName: string): 'allow' | 'deny' | undefined =>
@@ -496,12 +526,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               refuse(`The trust mode of ${serverName} was not changed: allow-all is not set by a command.`, `Use /settings → MCP to explicitly enable allow-all for ${serverName}.`);
             }
             if (!knownServer(serverName, 'trust mode')) return;
-            try {
-              mcpApi.setServerTrustMode(serverName, mode);
-            } catch (error) {
-              refuse(`MCP trust mode not changed: ${summarizeError(error)}`);
-            }
-            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only: it stays through reconnects and config reloads until \`/mcp trust ${serverName} config\` or a restart. Edit the server in /mcp to keep it after a restart.`);
+            await storePolicy(serverName, { trustMode: mode }, formatMcpTrustMode(mode));
             return;
           }
           refuse(`Usage: ${MCP_TRUST_COMMAND_USAGE}`, 'Use /settings -> MCP to explicitly enable allow-all.');
@@ -520,12 +545,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             }
             const role = requestedRole;
             if (!knownServer(serverName, 'role')) return;
-            try {
-              mcpApi.setServerRole(serverName, role);
-            } catch (error) {
-              refuse(`MCP role not changed: ${summarizeError(error)}`);
-            }
-            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only: it stays through reconnects and config reloads until \`/mcp role ${serverName} config\` or a restart. Edit the server in /mcp to keep it after a restart.`);
+            await storePolicy(serverName, { role }, formatMcpRole(role));
             return;
           }
           refuse(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);

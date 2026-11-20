@@ -2,10 +2,12 @@
  * relay-pairing.ts, store and read a relay pairing payload for this device.
  *
  * A relay pairing is different from the existing operator-token pairing
- * (see pairing.ts / usePairingHandoff.ts): it carries no identity/auth material at
- * all. It is transport-level bootstrap, a relay URL, an unguessable rendezvous id,
- * and the daemon's pinned public key (@goodvibes-jev/engine/transport-core/relay's
- * `RelayPairingPayload`), that lets this browser reach the daemon through the
+ * (see pairing.ts / usePairingHandoff.ts): it signs nobody in. It is
+ * transport-level bootstrap, a relay URL, an unguessable rendezvous id, the
+ * daemon's pinned public key and this device's own relay code
+ * (@goodvibes-jev/engine/transport-core/relay's `RelayPairingPayload`; the relay
+ * client sends the code on every request, and the daemon owner can revoke it for
+ * this device alone), that lets this browser reach the daemon through the
  * zero-knowledge relay when it cannot reach it directly (off the LAN). The daemon
  * mints this payload and shows it as a QR; scanning it with the device camera opens
  * a link back to this app carrying the encoded payload in the URL FRAGMENT, exactly
@@ -125,6 +127,7 @@ export function getStoredRelayPairing(): RelayPairingPayload | null {
       || typeof (parsed as Record<string, unknown>).relayUrl !== 'string'
       || typeof (parsed as Record<string, unknown>).rid !== 'string'
       || typeof (parsed as Record<string, unknown>).daemonPublicKey !== 'string'
+      || typeof (parsed as Record<string, unknown>).code !== 'string'
     ) {
       console.warn('[relay-pairing] stored relay pairing record has an unrecognized shape, discarding it and treating this device as unpaired.');
       window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
@@ -183,7 +186,8 @@ export function describeRelayPairingForConfirmation(
   const replacesExisting = existing !== null
     && (existing.relayUrl !== payload.relayUrl
       || existing.rid !== payload.rid
-      || existing.daemonPublicKey !== payload.daemonPublicKey);
+      || existing.daemonPublicKey !== payload.daemonPublicKey
+      || existing.code !== payload.code);
   return { relayHost, fingerprint, replacesExisting };
 }
 

@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor, GatewayMethodEffect } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -43,6 +44,10 @@ function homeGraphDescriptor(input: {
   readonly id: string;
   /** Set where a method reaches outside the machine; otherwise read or write follows its scope. */
   readonly effect?: GatewayMethodEffect | undefined;
+  /** What a repeat does; see GatewayMethodDescriptor.repeat. */
+  readonly repeat?: GatewayMethodDescriptor['repeat'];
+  /** A retry key; see GatewayMethodDescriptor.replay. */
+  readonly replay?: GatewayMethodDescriptor['replay'];
   readonly title: string;
   readonly description: string;
   readonly method: 'GET' | 'POST';
@@ -66,6 +71,8 @@ function homeGraphDescriptor(input: {
     scopes: [input.write ? 'write:knowledge' : input.statusOnly ? 'read:knowledge' : 'read:knowledge-content'],
     ...(input.write ? { access: 'admin' as const } : {}),
     ...(input.effect ? { effect: input.effect } : {}),
+    ...(input.repeat ? { repeat: input.repeat } : {}),
+    ...(input.replay ? { replay: input.replay } : {}),
     http: { method: input.method, path: input.path },
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,
@@ -95,6 +102,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.syncHomeGraph',
+    repeat: 'safe',
     title: 'Sync Home Graph',
     description: 'Ingest a Home Assistant registry snapshot into an isolated Home Graph knowledge space.',
     method: 'POST',
@@ -111,6 +119,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.ingestHomeGraphUrl',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest Home Graph URL',
     description: 'Fetch and index a URL as a Home Graph source without writing to the default knowledge space.',
     method: 'POST',
@@ -124,6 +133,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.ingestHomeGraphNote',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest Home Graph Note',
     description: 'Store a Home Assistant note or remember-this fact as a Home Graph source.',
     method: 'POST',
@@ -137,6 +147,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.ingestHomeGraphArtifact',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest Home Graph Artifact',
     description: 'Index an existing artifact reference, JSON path/URI reference, multipart file upload, or raw binary upload as a Home Graph document, receipt, warranty, manual, or photo.',
     method: 'POST',
@@ -165,6 +176,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.linkHomeGraphKnowledge',
+    repeat: 'safe',
     title: 'Link Home Graph Knowledge',
     description: 'Attach a Home Graph source or node to a Home Assistant object.',
     method: 'POST',
@@ -175,6 +187,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.unlinkHomeGraphKnowledge',
+    repeat: 'safe',
     title: 'Unlink Home Graph Knowledge',
     description: 'Remove an active Home Graph source/object link without deleting source history.',
     method: 'POST',
@@ -185,6 +198,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.askHomeGraph',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Ask Home Graph',
     description: 'Search a Home Graph knowledge space and return a source-backed answer.',
@@ -199,6 +213,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.reindex',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Reindex Home Graph Sources',
     description: 'Re-extract already-stored Home Graph artifacts with missing or sparse extraction records.',
     method: 'POST',
@@ -219,6 +234,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.refreshDevicePassport',
+    repeat: 'unsafe',
     title: 'Refresh Device Passport',
     description: 'Generate or refresh the living passport page for one Home Assistant device.',
     method: 'POST',
@@ -229,6 +245,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.generateRoomPage',
+    repeat: 'unsafe',
     title: 'Generate Room Page',
     description: 'Render a Home Graph room/area page and materialize it as markdown.',
     method: 'POST',
@@ -239,6 +256,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.generateHomeGraphPacket',
+    repeat: 'unsafe',
     title: 'Generate Home Graph Packet',
     description: 'Render a scoped Home Graph packet with platform-owned inclusion/exclusion profile rules.',
     method: 'POST',
@@ -261,6 +279,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.reviewHomeGraphFact',
+    repeat: 'safe',
     title: 'Review Home Graph Fact',
     description: 'Accept, reject, resolve, edit, or forget a Home Graph issue, source, or node.',
     method: 'POST',
@@ -333,6 +352,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.refinement.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Home Graph Refinement',
     description: 'Run source-backed Home Graph self-improvement for a space, source list, or specific gaps.',
@@ -352,6 +372,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.refinement.task.cancel',
+    repeat: 'safe',
     title: 'Cancel Home Graph Refinement Task',
     description: 'Mark an open Home Graph refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused, and cancelling an already cancelled task returns it unchanged.',
     method: 'POST',
@@ -420,6 +441,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.import',
+    repeat: 'safe',
     title: 'Import Home Graph Space',
     description: 'Restore a Home Graph knowledge space export into the current daemon knowledge store.',
     method: 'POST',
@@ -430,6 +452,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.reset',
+    repeat: 'safe',
     irreversible: true,
     title: 'Reset Home Graph Space',
     description: 'Clear one Home Assistant Home Graph knowledge space after callers export any diagnostic backup they need.',

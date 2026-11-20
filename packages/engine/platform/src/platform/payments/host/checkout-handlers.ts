@@ -36,6 +36,7 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  * through the catalog.
  */
 import { checkAddress } from '../address.js';
+import { paymentsElsewhereReason } from '../gates.js';
 import type { GateInput } from '../gates.js';
 import type { AddressStore } from '../address.js';
 import { CheckoutRegistry } from '../checkout-registry.js';
@@ -353,6 +354,7 @@ function buildCheckoutService(
     gates: () => ({
       enabled: readPaymentsEnabled(deps.config),
       isPaymentsLeader: deps.isPaymentsLeader(),
+      paymentsHolder: deps.paymentsHolder?.() ?? null,
       hasUsableCard: false, hasShippingAddress: false, isOwnerDirectRequest: false,
     }),
     config: () => readPaymentsServiceConfig(deps.config),
@@ -741,6 +743,11 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     const standingHeld: { current?: { readonly store: DaemonStandingAuthorizations; readonly standingId: string; readonly purchaseId: string } } = {};
     let admittedOperation = false;
     try {
+      // Another machine in the group runs payments: refer the owner there
+      // before anything is read, held or spent here.
+      if (readPaymentsEnabled(deps.config) && !deps.isPaymentsLeader()) {
+        throw new HandlerError(paymentsElsewhereReason(deps.paymentsHolder?.()), 'FAILED_PRECONDITION', 409);
+      }
       const config = readPaymentsServiceConfig(deps.config), confirmEvery = readConfirmEveryPurchase(deps.config);
       const params = asRecord(body), id = checkoutRequestId(params['requestId']);
       const input = parseBeginCheckoutInput(params, { budgetCurrency: config.budgetCurrency, defaultCardId: readDefaultCardId(deps.config) });

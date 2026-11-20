@@ -15,7 +15,7 @@ import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagEntry, McpEntry, SettingEntry } from './settings-modal-types.ts';
-import { buildMcpEntries } from './settings-modal-data.ts';
+import { keepMcpTrustModeFromSettings } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,8 @@ export interface AdjustSelectedContext {
   setMcpAllowAllConfirmationTarget(value: string | null): void;
   setEditingMode(value: boolean): void;
   setEditBuffer(value: string): void;
+  /** Shows where a trust mode was kept (or why it holds for this session only). */
+  reportMcpTrust?(message: string): void;
 }
 
 /** Rows whose value is chosen in a picker (models, voices, themes, choice lists) are changed there, not nudged. */
@@ -66,8 +68,11 @@ export function adjustSelected(ctx: AdjustSelectedContext, direction: 'left' | '
       ctx.setMcpAllowAllConfirmationTarget(entry.name);
       return;
     }
-    ctx.mcpRegistry.setServerTrustMode(entry.name, nextMode);
-    ctx.setMcpEntries(buildMcpEntries(ctx.mcpRegistry));
+    // Applied now and kept in the server's MCP config, so it holds after a restart.
+    keepMcpTrustModeFromSettings(ctx.mcpRegistry, entry.name, nextMode, (message, entries) => {
+      ctx.setMcpEntries(entries);
+      ctx.reportMcpTrust?.(message);
+    });
     ctx.setMcpAllowAllConfirmationTarget(null);
     return;
   }

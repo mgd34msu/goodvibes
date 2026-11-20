@@ -1,4 +1,4 @@
-import { resolveWebBinding } from '../../daemon/host-resolver.js';
+import { resolveWebUiListener } from '../../pairing/web-origin.js';
 import { unobservableRuntime } from '../health.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import type {
@@ -50,8 +50,8 @@ export async function buildBuiltinAccount(
         secrets: [],
         metadata: {
           baseUrl: context.deps.configManager.get('web.publicBaseUrl'),
-          // Anchored to the web binding resolver (validated port, never 0/NaN).
-          port: resolveWebBinding({ hostMode: context.deps.configManager.get('web.hostMode'), host: context.deps.configManager.get('web.host'), port: context.deps.configManager.get('web.port') }).port,
+          // The port the web UI is served on, from the one owner of that address; absent when none is served.
+          ...(() => { const port = resolveWebUiListener(context.deps.configManager)?.port; return port === undefined ? {} : { port }; })(),
         },
       });
     case 'slack': {

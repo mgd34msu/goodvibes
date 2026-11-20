@@ -25,6 +25,9 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
   emitGateDecision,
   emitGateRequested,
+  emitBudgetExceededCost,
+  emitBudgetExceededMs,
+  emitBudgetExceededTokens,
   emitToolCancelled,
   emitToolExecuting,
   emitToolFailed,
@@ -36,6 +39,7 @@ import {
 } from '../runtime/emitters/index.js';
 import { buildSyntheticResult, describeReconciledCalls, detectUnresolvedToolCalls, type ReconciliationReason } from './tool-reconciliation.js';
 import { logger } from '../utils/logger.js';
+import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../runtime/tools/output-policy.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
@@ -109,12 +113,13 @@ async function resolvePermissionCheck(
   signal?: AbortSignal,
   hookOwner?: TurnHookOwner,
   definition?: ToolDefinition,
+  ownerAsk?: string,
 ): Promise<import('../permissions/types.js').PermissionCheckResult> {
   const manager = permissionManager as {
     checkDetailed?: PermissionManager['checkDetailed'];
     check: PermissionManager['check'];
   };
-  const options = { signal, hookOwner, ...(definition ? { definition } : {}) };
+  const options = { signal, hookOwner, ...(definition ? { definition } : {}), ...(ownerAsk !== undefined ? { ownerAsk } : {}) };
   if (typeof manager.checkDetailed === 'function') {
     return manager.checkDetailed(toolName, args, undefined, options);
   }
@@ -251,12 +256,54 @@ export function toolBudgetStoppedResult(callId: string, toolName: string, budget
  * null. Token and cost limits apply only to tools that report `tokenCount` /
  * `costUsd` on their result.
  */
-function describeBudgetBreach(budget: ToolBudget, elapsedMs: number, result: ToolResult): string | null {
+type ToolBudgetBreach =
+  | { readonly kind: 'ms'; readonly limit: number; readonly used: number }
+  | { readonly kind: 'tokens'; readonly limit: number; readonly used: number }
+  | { readonly kind: 'cost'; readonly limit: number; readonly used: number };
+
+/** The first limit a finished call went over, or null. */
+function readBudgetBreach(budget: ToolBudget, elapsedMs: number, result: ToolResult): ToolBudgetBreach | null {
   const reported = result as ToolResult & { readonly tokenCount?: unknown; readonly costUsd?: unknown };
-  if (budget.maxMs !== undefined && elapsedMs > budget.maxMs) return `it ran ${Math.round(elapsedMs)} ms against a limit of ${budget.maxMs} ms (runtime.toolBudget.maxMs)`;
-  if (budget.maxTokens !== undefined && typeof reported.tokenCount === 'number' && reported.tokenCount > budget.maxTokens) return `it used ${reported.tokenCount} tokens against a limit of ${budget.maxTokens} (runtime.toolBudget.maxTokens)`;
-  if (budget.maxCostUsd !== undefined && typeof reported.costUsd === 'number' && reported.costUsd > budget.maxCostUsd) return `it cost ${reported.costUsd} USD against a limit of ${budget.maxCostUsd} (runtime.toolBudget.maxCostUsd)`;
+  if (budget.maxMs !== undefined && elapsedMs > budget.maxMs) return { kind: 'ms', limit: budget.maxMs, used: elapsedMs };
+  if (budget.maxTokens !== undefined && typeof reported.tokenCount === 'number' && reported.tokenCount > budget.maxTokens) return { kind: 'tokens', limit: budget.maxTokens, used: reported.tokenCount };
+  if (budget.maxCostUsd !== undefined && typeof reported.costUsd === 'number' && reported.costUsd > budget.maxCostUsd) return { kind: 'cost', limit: budget.maxCostUsd, used: reported.costUsd };
   return null;
+}
+
+function describeBudgetBreach(budget: ToolBudget, elapsedMs: number, result: ToolResult): string | null {
+  const breach = readBudgetBreach(budget, elapsedMs, result);
+  if (!breach) return null;
+  if (breach.kind === 'ms') return `it ran ${Math.round(breach.used)} ms against a limit of ${breach.limit} ms (runtime.toolBudget.maxMs)`;
+  if (breach.kind === 'tokens') return `it used ${breach.used} tokens against a limit of ${breach.limit} (runtime.toolBudget.maxTokens)`;
+  return `it cost ${breach.used} USD against a limit of ${breach.limit} (runtime.toolBudget.maxCostUsd)`;
+}
+
+/**
+ * Publishes the limit a call went over: BUDGET_EXCEEDED_MS with phase
+ * `executing` when the time limit stopped it, or the event of the first limit
+ * a finished call went over with phase `completed`. Sent before the call's own
+ * TOOL_SUCCEEDED or TOOL_FAILED, which settles its state.
+ */
+function emitToolBudgetBreach(
+  bus: RuntimeEventBus,
+  ctx: ReturnType<EmitterContextFactory>,
+  call: { readonly id: string; readonly name: string },
+  turnId: string,
+  budget: ToolBudget,
+  elapsedMs: number,
+  phase: 'executing' | 'completed',
+  result: ToolResult,
+): void {
+  const base = { callId: call.id, turnId, tool: call.name, phase };
+  if (phase === 'executing') {
+    emitBudgetExceededMs(bus, ctx, { ...base, limitMs: budget.maxMs ?? 0, elapsedMs: Math.round(elapsedMs) });
+    return;
+  }
+  const breach = readBudgetBreach(budget, elapsedMs, result);
+  if (!breach) return;
+  if (breach.kind === 'ms') emitBudgetExceededMs(bus, ctx, { ...base, limitMs: breach.limit, elapsedMs: Math.round(breach.used) });
+  else if (breach.kind === 'tokens') emitBudgetExceededTokens(bus, ctx, { ...base, limitTokens: breach.limit, usedTokens: breach.used });
+  else emitBudgetExceededCost(bus, ctx, { ...base, limitCostUsd: breach.limit, usedCostUsd: breach.used });
 }
 
 /**
@@ -309,6 +356,16 @@ function toCancelledResult(callId: string, settled: ToolResult | null): ToolResu
     ...(settled?.output !== undefined ? { output: settled.output } : {}),
     ...(settled?.decision ? { decision: settled.decision } : {}),
   };
+}
+
+/** The file paths a write or edit call names, once each, in the order given; never file contents. */
+function filePathsOf(args: Record<string, unknown>): string[] {
+  const paths = extractPathArgs(args);
+  const notebook = args['notebook_operations'];
+  if (notebook && typeof notebook === 'object' && typeof (notebook as Record<string, unknown>)['path'] === 'string') {
+    paths.push((notebook as Record<string, unknown>)['path'] as string);
+  }
+  return [...new Set(paths)];
 }
 
 /** A Pre hook's note rides with the call's result, where the model reads it (output on success, error otherwise). */
@@ -417,12 +474,14 @@ async function executeToolCallsInMode(
       appendResult(deferred);
       continue;
     }
-    // The owner's Pre:tool hooks run before admission, on the call the model made: a deny
-    // refuses it with no gate work and no owner prompt; a rewrite is what the gate admits and
-    // what runs; a note reaches the model with this call's result. A hook that fails refuses
-    // the call (the point's contract is fail-closed; the dispatcher applies it).
+    // The owner's Pre:tool hooks run before admission, on the call the model made, in every
+    // permission mode (yolo included): a deny refuses it with no gate work and no owner prompt;
+    // an ask puts it to the owner through the gate; a rewrite is what the gate admits and what
+    // runs; a note reaches the model with this call's result. A hook that fails refuses the call
+    // (the point's contract is fail-closed; the dispatcher applies it).
     let hookNote: string | undefined;
-    if (deps.hookDispatcher && !isYoloExecution()) {
+    let ownerAsk: string | undefined;
+    if (deps.hookDispatcher) {
       const hookStartedAt = Date.now();
       let refusal: string | undefined;
       try {
@@ -441,6 +500,7 @@ async function executeToolCallsInMode(
         } else {
           if (preResult.updatedInput) call = { ...call, arguments: preResult.updatedInput };
           if (preResult.additionalContext) hookNote = preResult.additionalContext;
+          if (preResult.decision === 'ask') ownerAsk = `Your Pre:tool:${call.name} hook asks you about this call${preResult.reason ? `: ${preResult.reason}` : '.'}`;
         }
       } catch (hookErr) {
         // Cancellation is not a hook failure; it ends the turn.
@@ -548,7 +608,7 @@ async function executeToolCallsInMode(
           let permittedRevisionIds: readonly string[] | undefined;
           while (true) {
             const currentPrepared = prepared;
-            admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
+            admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, ...(ownerAsk !== undefined ? { ownerAsk } : {}), consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
             assertTurnActive();
             permittedRevisionIds ??= admission.revisionIds;
             checkResult = admission.result;
@@ -563,7 +623,7 @@ async function executeToolCallsInMode(
           }
         } else {
           checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner,
-            typeof deps.toolRegistry.definitionOf === 'function' ? deps.toolRegistry.definitionOf(call.name) : undefined);
+            typeof deps.toolRegistry.definitionOf === 'function' ? deps.toolRegistry.definitionOf(call.name) : undefined, ownerAsk);
         }
       } catch (error) {
         // A requested call whose admission threw still gets its decision event, so no reader
@@ -645,6 +705,8 @@ async function executeToolCallsInMode(
       const callSignal = callSignals.length > 1 ? AbortSignal.any(callSignals) : callSignals[0];
       // The time limit, not the person or the turn, stopped this call.
       const stoppedByBudget = () => deadline?.aborted === true && turnSignal?.aborted !== true && perCallSignal?.aborted !== true;
+      // Which budget event this call publishes, if any: `executing` when its time limit stopped it.
+      let budgetOutcome: { readonly phase: 'executing' | 'completed'; readonly elapsedMs: number; readonly result: ToolResult } | undefined;
       try {
         assertTurnActive();
         callSignal?.throwIfAborted();
@@ -680,19 +742,24 @@ async function executeToolCallsInMode(
         )));
         if (stoppedByBudget()) {
           // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.
+          const elapsedMs = Math.max(performance.now() - executeStartedAt, (budget!.maxMs ?? 0) + 1);
+          budgetOutcome = { phase: result.success ? 'completed' : 'executing', elapsedMs, result };
           result = result.success
-            ? applyToolBudget(budget, call.name, Math.max(performance.now() - executeStartedAt, (budget!.maxMs ?? 0) + 1), result)
+            ? applyToolBudget(budget, call.name, elapsedMs, result)
             : toolBudgetStoppedResult(call.id, call.name, budget!, result);
         } else if (callSignal?.aborted) {
           // The user cancelled THIS call mid-flight: the model sees a structured
           // cancelled result and the turn continues.
           result = toCancelledResult(call.id, result);
         } else if (budget && result.success) {
-          result = applyToolBudget(budget, call.name, performance.now() - executeStartedAt, result);
+          const elapsedMs = performance.now() - executeStartedAt;
+          budgetOutcome = { phase: 'completed', elapsedMs, result };
+          result = applyToolBudget(budget, call.name, elapsedMs, result);
         }
       } catch (err) {
         assertDecisionAvailable(err);
         const stopped = stoppedByBudget() ? toolBudgetStoppedResult(call.id, call.name, budget!, null) : undefined;
+        if (stopped) budgetOutcome = { phase: 'executing', elapsedMs: performance.now() - executeStartedAt, result: stopped };
         const message = stopped ? stopped.error!
           : callSignal?.aborted
           ? TOOL_CALL_CANCELLED_MESSAGE
@@ -724,6 +791,9 @@ async function executeToolCallsInMode(
         }
       } finally {
         if (!earlyCallSignal) deps.toolCallSignals?.close(call.id);
+      }
+      if (budget && budgetOutcome && deps.runtimeBus) {
+        emitToolBudgetBreach(deps.runtimeBus, deps.emitterContext(turnId), call, turnId, budget, budgetOutcome.elapsedMs, budgetOutcome.phase, budgetOutcome.result);
       }
 
       // A plain allow by code or rule is not reported; one Jev or the owner made is (with Jev's decision log id).
@@ -768,8 +838,10 @@ async function executeToolCallsInMode(
 
       assertTurnActive();
       if (deps.hookDispatcher && (call.name === 'write' || call.name === 'edit')) {
-        const filePath = typeof call.arguments['path'] === 'string' ? call.arguments['path'] :
-          (Array.isArray(call.arguments['files']) ? JSON.stringify(call.arguments['files']) : '');
+        // The paths the call wrote (or tried to), never their contents: `files[].path` of a write,
+        // `edits[].path` and a notebook operation's `path` of an edit, as the arguments that ran name them.
+        const ran = prepared?.args ?? checkResult.modifiedArgs ?? call.arguments;
+        const paths = filePathsOf(ran);
         const phase = result.success ? 'Post' : 'Fail';
         await fireObservingHook(deps.hookDispatcher, {
           path: `${phase}:file:${call.name}` as HookEventPath,
@@ -778,7 +850,7 @@ async function executeToolCallsInMode(
           specific: call.name,
           sessionId: deps.sessionId,
           timestamp: Date.now(),
-          payload: { tool: call.name, path: filePath, callId: call.id, ...(result.success ? {} : { error: result.error }) },
+          payload: { tool: call.name, path: paths[0] ?? '', paths, callId: call.id, ...(result.success ? {} : { error: result.error }) },
         });
         // A cancellation during dispatch cannot admit another tool or continue
         // the turn, including when the hook rejected and was logged above.

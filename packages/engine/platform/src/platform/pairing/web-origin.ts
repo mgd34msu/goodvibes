@@ -4,8 +4,10 @@
  *
  * An explicit public URL is authoritative. The bundled WebUI shares the
  * control-plane listener: its fallback must use that binding, not the declared
- * web port, which has no separate bundle listener. Other web surfaces retain
- * their declared endpoint fallback. Every mode treats the exact shipped public
+ * web port, which has no separate bundle listener. `web.host`/`web.port` are
+ * the development server's listener only and never an origin here: with the
+ * bundle not served and no public URL, there is no web UI and no origin.
+ * Every mode treats the exact shipped public
  * URL placeholder like an empty value: nothing listens on it, so a link built
  * from it would point a phone at its own loopback.
  */
@@ -153,29 +155,67 @@ export function controlPlaneOriginUsesStableHost(configManager: Pick<ConfigManag
  * the host probes before it shows a link.
  */
 export function pairingOriginUsesStableHost(configManager: Pick<ConfigManager, 'get'>): boolean {
-  if (explicitPublicBaseUrl(configManager)) return false;
-  const host = configManager.get('controlPlane.webui.serve') === true
-    ? declaredControlPlaneBinding(configManager).host
-    : webBinding(configManager).host;
-  return isWildcardBindHost(host);
+  if (explicitPublicBaseUrl(configManager) || configManager.get('controlPlane.webui.serve') !== true) return false;
+  return isWildcardBindHost(declaredControlPlaneBinding(configManager).host);
 }
 
+/**
+ * The listener on this machine that serves the web UI, the one owner of that
+ * address: the control-plane listener while the daemon serves the bundle
+ * (`controlPlane.webui.serve`; `bound` is the listener as bound, when known).
+ * Null otherwise. `web.host`/`web.port` are never this address: they are
+ * where the web UI's development server listens (it reads them through
+ * `goodvibes-daemon webui status --json`), and nothing else binds them.
+ */
+export function resolveWebUiListener(
+  configManager: Pick<ConfigManager, 'get'>,
+  boundControlPlane?: BoundListener,
+): { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | null {
+  if (configManager.get('controlPlane.webui.serve') !== true) return null;
+  const binding = boundControlPlane ?? declaredControlPlaneBinding(configManager);
+  return { host: binding.host, port: binding.port, scheme: boundControlPlane?.scheme ?? controlPlaneScheme(configManager) };
+}
+
+/**
+ * The origin to open the web UI at: its listener ({@link resolveWebUiListener})
+ * through the stable-name ladder, or, for a web UI this daemon does not serve,
+ * a user-set `web.publicBaseUrl` naming where it runs. Null when no web UI is
+ * served anywhere the settings name.
+ */
+export function resolveWebUiOrigin(
+  configManager: Pick<ConfigManager, 'get'>,
+  probe?: () => StableHostInputs,
+  boundControlPlane?: BoundListener,
+): PairingWebOrigin | null {
+  if (configManager.get('controlPlane.webui.serve') === true) return derivedPairingWebOrigin(configManager, probe, boundControlPlane);
+  const publicBaseUrl = explicitPublicBaseUrl(configManager);
+  return publicBaseUrl ? publicOrigin(publicBaseUrl) : null;
+}
+
+/**
+ * The web-app origin a link read on another device opens (a pairing deep
+ * link, a notification): a user-set `web.publicBaseUrl` (a tunnel, a proxy, a
+ * Tailscale serve), otherwise where the web UI is served
+ * ({@link resolveWebUiOrigin}). Null when there is no web UI to open.
+ */
 export function resolvePairingWebOrigin(
   configManager: Pick<ConfigManager, 'get'>,
   probe?: () => StableHostInputs,
   /** Settled listener observation, only used for bundled serving fallback. */
   boundControlPlane?: BoundListener,
-): PairingWebOrigin {
+): PairingWebOrigin | null {
   const publicBaseUrl = explicitPublicBaseUrl(configManager);
-  if (publicBaseUrl) {
-    return {
-      origin: publicBaseUrl,
-      resolvedHost: { host: hostnameOf(publicBaseUrl), kind: 'public-url', stable: true },
-      httpOnLan: isHttpOnLan(publicBaseUrl),
-      fromPublicBaseUrl: true,
-    };
-  }
-  return derivedPairingWebOrigin(configManager, probe, boundControlPlane);
+  if (publicBaseUrl) return publicOrigin(publicBaseUrl);
+  return resolveWebUiOrigin(configManager, probe, boundControlPlane);
+}
+
+function publicOrigin(publicBaseUrl: string): PairingWebOrigin {
+  return {
+    origin: publicBaseUrl,
+    resolvedHost: { host: hostnameOf(publicBaseUrl), kind: 'public-url', stable: true },
+    httpOnLan: isHttpOnLan(publicBaseUrl),
+    fromPublicBaseUrl: true,
+  };
 }
 
 /** The web origin this daemon derives for itself, whatever `web.publicBaseUrl` holds. */
@@ -240,7 +280,8 @@ function hostnameOf(origin: string): string {
 /**
  * Persist web.publicBaseUrl once, from the stable-name resolution, and only when
  * it is empty AND the resolution produced a stable name (a DHCP-bound address is
- * not worth freezing into config). Returns the resolved origin either way. Never
+ * not worth freezing into config). Returns the resolved origin either way, or
+ * null (and writes nothing) when no web UI is served. Never
  * overwrites a stored value, the shipped placeholder included: other surfaces
  * (notifications, channels) read that setting as a public URL, and pairing does
  * not decide that a LAN name should become one.
@@ -249,8 +290,9 @@ export function ensurePublicBaseUrl(
   configManager: Pick<ConfigManager, 'get' | 'setDynamic'>,
   probe?: () => StableHostInputs,
   boundControlPlane?: BoundListener,
-): PairingWebOrigin {
+): PairingWebOrigin | null {
   const resolved = resolvePairingWebOrigin(configManager, probe, boundControlPlane);
+  if (resolved === null) return null;
   if (!String(configManager.get('web.publicBaseUrl') ?? '').trim() && !resolved.fromPublicBaseUrl && resolved.resolvedHost.stable) {
     configManager.setDynamic('web.publicBaseUrl', resolved.origin);
     return { ...resolved, fromPublicBaseUrl: true };

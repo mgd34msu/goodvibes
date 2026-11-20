@@ -41,6 +41,7 @@ import {
   type RelayKeyPair,
   type RelayPairingPayload,
   type TunnelHeader,
+  RELAY_CODE_HEADER,
 } from '@goodvibes-jev/engine/transport-core/relay';
 
 /** Structural client WebSocket the daemon uses to dial the relay. */
@@ -193,8 +194,15 @@ export interface RelayDaemonRegistration {
   readonly lastConfirmedAt: number | null;
   /** The relay's last refusal of this registration, cleared when it registers. */
   readonly lastRefusal: RelayRegistrationRefusal | null;
-  /** Mint a pairing payload a surface can scan to reach this daemon. */
-  mintPairing(label?: string): Promise<RelayPairingPayload>;
+  /** A pairing payload carrying `code`, the device's relay code the daemon just issued. */
+  mintPairing(code: string, label?: string): Promise<RelayPairingPayload>;
+  /**
+   * End every relay connection (pipe) that presented a relay code `revoked`
+   * now answers true for: its streams get a `stream-close` naming `reason`, its
+   * in-flight requests are aborted, and the relay is told to close the pipe.
+   * Returns how many pipes were closed.
+   */
+  closePipesPresenting(revoked: (code: string) => boolean, reason: string): Promise<number>;
   /** Retained-context footprint, for ops visibility and cap regression tests. */
   stats(): RelayRegistrationStats;
 }
@@ -406,6 +414,17 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   const channels = new Map<string, RelaySecureChannel>();
   // Per-pipe live event subscriptions: pipeKey -> (streamId -> record).
   const pipeStreams = new Map<string, Map<string, DaemonStreamRecord>>();
+  // The relay codes each pipe presented (bounded per pipe), so revoking one
+  // ends the connections it opened. Dropped with the pipe.
+  const pipeCodes = new Map<string, Set<string>>();
+  const MAX_CODES_PER_PIPE = 4;
+  function notePipeCode(pipeKey: string, headers: ReadonlyArray<readonly [string, string]>): void {
+    const code = headers.find(([name]) => name.toLowerCase() === RELAY_CODE_HEADER)?.[1];
+    if (!code) return;
+    const codes = pipeCodes.get(pipeKey) ?? new Set<string>();
+    if (codes.size < MAX_CODES_PER_PIPE || codes.has(code)) codes.add(code);
+    pipeCodes.set(pipeKey, codes);
+  }
   // Unary requests remain owned until dispatch/body buffering actually drain.
   const pipeRequests = new Map<string, Map<string, OwnedRequest>>();
   const outgoing = new WeakMap<RelaySecureChannel, FrameQueue>();
@@ -427,7 +446,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     const attached = () => !stopped && socket === ws && channels.get(pipeKey) === channel;
     const retire = () => {
       if (!attached()) return;
-      channels.delete(pipeKey); abortPipeRequests(pipeKey); closePipeStreams(pipeKey);
+      channels.delete(pipeKey); abortPipeRequests(pipeKey); void closePipeStreams(pipeKey);
       ws.send(encodeControlFrame({ t: 'pipe-close', pipe: pipeKey, reason: 'send-failed' }));
     };
     if (!attached() || !wanted()) return Promise.resolve();
@@ -479,7 +498,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       if (oldest === undefined) break;
       channels.delete(oldest);
       abortPipeRequests(oldest);
-      closePipeStreams(oldest);
+      void closePipeStreams(oldest);
       socket?.send(encodeControlFrame({ t: 'pipe-close', pipe: oldest }));
       droppedPipes += 1;
       logger.warn('relay pipe cap exceeded, evicted coldest pipe', {
@@ -490,18 +509,22 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     }
   }
 
-  function closePipeStreams(pipeKey: string): void {
+  /** Settles once every stream's close notice was handed to the channel. */
+  function closePipeStreams(pipeKey: string, reason = 'pipe-closed'): Promise<unknown> {
+    pipeCodes.delete(pipeKey);
     const streams = pipeStreams.get(pipeKey);
-    if (!streams) return;
+    if (!streams) return Promise.resolve();
     // Retire the exact map before abort/cancel can call back into the daemon.
     pipeStreams.delete(pipeKey);
     const records = [...streams.values()];
     streams.clear();
+    const notices: Promise<void>[] = [];
     for (const record of records) {
-      void record.pump.close('pipe-closed', true);
+      notices.push(record.pump.close(reason, true).catch(() => {}));
       record.abort.abort();
       void record.reader?.cancel().catch(() => {});
     }
+    return Promise.all(notices);
   }
 
   function setStatus(next: RelayRegistrationStatus): void {
@@ -543,8 +566,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     stopKeepalive();
     socket = null;
     abortAllRequests();
-    for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+    for (const pipeKey of [...pipeStreams.keys()]) void closePipeStreams(pipeKey);
     channels.clear();
+    pipeCodes.clear();
     try {
       ws.close();
     } catch {
@@ -565,8 +589,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     stopKeepalive();
     socket = null;
     abortAllRequests();
-    for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+    for (const pipeKey of [...pipeStreams.keys()]) void closePipeStreams(pipeKey);
     channels.clear();
+    pipeCodes.clear();
     try {
       ws.close();
     } catch {
@@ -599,6 +624,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       const { keys, message2 } = await respondToHandshake(options.identity, ridBytes, payload);
       if (stopped || socket !== ws) return;
       channels.set(pipeKey, new RelaySecureChannel(keys, 'daemon'));
+      pipeCodes.delete(pipeKey);
       enforcePipeCap();
       ws.send(framePipePayload(pipeIdBytes, message2));
       return;
@@ -607,7 +633,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     const admission = admissions.get(existing) ?? { tail: Promise.resolve(), queued: 0, bytes: 0 };
     // Reserve control-frame headroom even when the request admission cap is one.
     if (admission.queued >= maxInFlightRequests + maxStreamsPerPipe + 1 || admission.bytes + payload.byteLength > MAX_QUEUED_FRAME_BYTES) {
-      channels.delete(pipeKey); abortPipeRequests(pipeKey); closePipeStreams(pipeKey);
+      channels.delete(pipeKey); abortPipeRequests(pipeKey); void closePipeStreams(pipeKey);
       logger.warn('relay pipe frame admission cap exceeded');
       ws.send(encodeControlFrame({ t: 'pipe-close', pipe: pipeKey, reason: 'frame-limit' }));
       return;
@@ -649,6 +675,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       framed = joined;
     }
     const header = framed.header;
+    if (header.kind === 'request' || header.kind === 'stream-open') notePipeCode(pipeKey, header.headers);
     if (header.kind === 'request') {
       void serveTunneledRequest(pipeKey, header, framed.body, channel, pipeIdBytes, ws).catch((error: unknown) => {
         logger.error('relay request handling failed', { error: String(error) });
@@ -911,8 +938,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     reconnectTimer = null;
     setStatus(attempt === 0 ? 'connecting' : 'reconnecting');
     abortAllRequests();
-    for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+    for (const pipeKey of [...pipeStreams.keys()]) void closePipeStreams(pipeKey);
     channels.clear();
+    pipeCodes.clear();
     let ws: RelayClientWebSocket;
     try {
       ws = makeSocket(options.relayUrl);
@@ -957,7 +985,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
             } else if (frame.t === 'pipe-close') {
               channels.delete(frame.pipe);
               abortPipeRequests(frame.pipe);
-              closePipeStreams(frame.pipe);
+              void closePipeStreams(frame.pipe);
             } else if (frame.t === 'error') {
               logger.warn('relay error frame', { code: frame.code, message: frame.message });
               // Before `registered`, an unscoped error means the relay refused this registration;
@@ -996,8 +1024,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       stopKeepalive();
       socket = null;
       abortAllRequests();
-      for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+      for (const pipeKey of [...pipeStreams.keys()]) void closePipeStreams(pipeKey);
       channels.clear();
+      pipeCodes.clear();
       if (!stopped) scheduleReconnect();
     });
     ws.addEventListener('error', () => {
@@ -1022,8 +1051,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       clearRegistrationTimer();
       stopKeepalive();
       abortAllRequests();
-      for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+      for (const pipeKey of [...pipeStreams.keys()]) void closePipeStreams(pipeKey);
       channels.clear();
+      pipeCodes.clear();
       try {
         socket?.close();
       } catch {
@@ -1044,13 +1074,29 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     get lastRefusal(): RelayRegistrationRefusal | null {
       return lastRefusal;
     },
-    async mintPairing(label?: string): Promise<RelayPairingPayload> {
+    async mintPairing(code: string, label?: string): Promise<RelayPairingPayload> {
       return createRelayPairingPayload({
         relayUrl: options.relayUrl,
         rid: await ridReady,
         daemonPublicKey: await relayIdentityPublicKeyBase64Url(options.identity),
+        code,
         ...(label !== undefined ? { label } : {}),
       });
+    },
+    async closePipesPresenting(revoked: (code: string) => boolean, reason: string): Promise<number> {
+      const closing: Promise<unknown>[] = [];
+      for (const [pipeKey, codes] of [...pipeCodes]) {
+        if (![...codes].some(revoked)) continue;
+        abortPipeRequests(pipeKey);
+        // Each stream gets its stream-close naming the reason before the pipe goes.
+        const ws = socket;
+        closing.push(closePipeStreams(pipeKey, reason).then(() => {
+          channels.delete(pipeKey);
+          try { ws?.send(encodeControlFrame({ t: 'pipe-close', pipe: pipeKey, reason })); } catch { /* the socket is already gone */ }
+        }));
+      }
+      await Promise.all(closing);
+      return closing.length;
     },
     stats(): RelayRegistrationStats {
       return {

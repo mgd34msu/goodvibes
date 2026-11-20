@@ -43,3 +43,10 @@ export function readConfigBoolean(context: CommandContext, key: string, fallback
   }
   return fallback;
 }
+
+/** `provider.fallbackModels` as one line: the entries in order, or `none`. */
+export function readFallbackOrderText(context: CommandContext, failures?: Map<string, string>): string {
+  const value = readConfigValue(context, 'provider.fallbackModels', failures);
+  const entries = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
+  return entries.length > 0 ? entries.join(', ') : 'none';
+}

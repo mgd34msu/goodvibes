@@ -247,6 +247,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'voice.local.install',
+    repeat: 'safe',
     title: 'Install the Managed Local-Voice Runtime',
     description:
       'Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The install ends by speaking a test phrase and reading it back: the transcript is compared word by word in code, allowing one differing word, and the receipt carries the transcript and the comparison. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
@@ -260,6 +261,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'voice.setup',
+    repeat: 'safe',
     title: 'Set Up Voice',
     description:
       'Sets voice up for what was asked: intent wake (this surface listens for the wake word; implies speech-to-text), stt, '
@@ -309,6 +311,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'voice.wake.provision',
+    repeat: 'safe',
     title: 'Download the Wake-Word Models',
     description:
       'Download and checksum-verify the pinned wake-word classifier in both runtime formats (onnx and tflite), the '

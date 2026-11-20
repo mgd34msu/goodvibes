@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -458,7 +458,106 @@ function parseMultipartPartHeaders(headerText: string): MultipartPartHeaders {
   return output;
 }
 
+/** Where one multipart upload's file part goes as it is read: a spool file, or a hash. */
+interface UploadFileSink {
+  write(chunk: Buffer): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface ParsedMultipartUpload {
+  readonly filename?: string | undefined;
+  readonly mimeType?: string | undefined;
+  readonly sizeBytes: number;
+  readonly fields: ArtifactUploadFieldMap;
+}
+
 async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promise<MultipartUploadSpool> {
+  let tempDir: string | undefined;
+  let filePath: string | undefined;
+  const cleanup = async (originalError?: unknown): Promise<void> => {
+    if (tempDir !== undefined) await cleanupTempDir(tempDir, originalError);
+  };
+  try {
+    const parsed = await parseMultipartUpload(req, maxFileBytes, async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'goodvibes-upload-'));
+      filePath = join(tempDir, `${randomUUID()}.upload`);
+      const handle = await open(filePath, 'wx');
+      return { write: async (chunk) => { await handle.write(chunk); }, close: () => handle.close() };
+    });
+    return { filePath: filePath!, ...parsed, cleanup: () => cleanup() };
+  } catch (error) {
+    await cleanup(error);
+    throw error;
+  }
+}
+
+/** What identifies an upload, whatever its wire encoding: its fields and its file's content hash. */
+export interface ArtifactUploadDescription {
+  readonly encoding: 'multipart' | 'raw';
+  readonly fields: ArtifactUploadFieldMap;
+  readonly file: {
+    readonly sha256: string;
+    readonly sizeBytes: number;
+    readonly filename?: string | undefined;
+    readonly mimeType?: string | undefined;
+  };
+}
+
+/**
+ * Read an upload request (multipart or raw body) the way the artifact routes
+ * read it, keeping its fields and a SHA-256 of its file part instead of the
+ * bytes: two encodings of the same upload (another multipart boundary, another
+ * field order) describe the same. Reads the body once, a chunk at a time.
+ * Refuses (throws) what the routes refuse: a malformed body or a file over
+ * `maxFileBytes`.
+ */
+export async function describeArtifactUpload(req: Request, maxFileBytes?: number): Promise<ArtifactUploadDescription> {
+  const contentType = req.headers.get('content-type') ?? '';
+  if (contentType.toLowerCase().includes('multipart/form-data')) {
+    const hash = createHash('sha256');
+    const parsed = await parseMultipartUpload(req, maxFileBytes, async () => ({
+      write: async (chunk) => { hash.update(chunk); },
+      close: async () => {},
+    }));
+    return {
+      encoding: 'multipart',
+      fields: parsed.fields,
+      file: { sha256: hash.digest('hex'), sizeBytes: parsed.sizeBytes, ...(parsed.filename ? { filename: parsed.filename } : {}), ...(parsed.mimeType ? { mimeType: parsed.mimeType } : {}) },
+    };
+  }
+  if (!req.body) throw artifactUploadError('Raw artifact upload requires a request body.');
+  const fields = readFieldsFromSearchParams(new URL(req.url).searchParams);
+  const hash = createHash('sha256');
+  let sizeBytes = 0;
+  const reader = req.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sizeBytes += value.byteLength;
+      if (typeof maxFileBytes === 'number' && sizeBytes > maxFileBytes) {
+        await drainReader(reader);
+        throw artifactSizeError(maxFileBytes);
+      }
+      hash.update(value);
+    }
+  } finally {
+    releaseReaderLock(reader);
+  }
+  const filename = req.headers.get('x-goodvibes-filename')?.trim() || filenameFromContentDisposition(req.headers.get('content-disposition'));
+  const mimeType = contentType.split(';')[0]?.trim();
+  return {
+    encoding: 'raw',
+    fields,
+    file: { sha256: hash.digest('hex'), sizeBytes, ...(filename ? { filename } : {}), ...(mimeType ? { mimeType } : {}) },
+  };
+}
+
+async function parseMultipartUpload(
+  req: Request,
+  maxFileBytes: number | undefined,
+  openFile: () => Promise<UploadFileSink>,
+): Promise<ParsedMultipartUpload> {
   const boundary = multipartBoundary(req.headers.get('content-type') ?? '');
   if (!boundary) throw artifactUploadError('Multipart upload is missing a boundary.');
   if (!req.body) throw artifactUploadError('Multipart upload requires a request body.');
@@ -472,8 +571,6 @@ async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promis
     throw artifactSizeError(maxFileBytes);
   }
 
-  const tempDir = await mkdtemp(join(tmpdir(), 'goodvibes-upload-'));
-  const filePath = join(tempDir, `${randomUUID()}.upload`);
   const fields: ArtifactUploadFieldMap = {};
   const firstBoundary = Buffer.from(`--${boundary}`);
   const bodyBoundary = Buffer.from(`\r\n--${boundary}`);
@@ -484,7 +581,6 @@ async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promis
   let filename: string | undefined;
   let mimeType: string | undefined;
   let sizeBytes = 0;
-
   const readMore = async (): Promise<boolean> => {
     const { done, value } = await reader.read();
     if (done) return false;
@@ -570,21 +666,21 @@ async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promis
   };
 
   const readFilePart = async (headers: MultipartPartHeaders): Promise<BoundaryState> => {
-    const handle = await open(filePath, 'wx');
+    const sink = await openFile();
     try {
       const state = await readPart(async (chunk) => {
         sizeBytes += chunk.byteLength;
         if (typeof maxFileBytes === 'number' && sizeBytes > maxFileBytes) {
           throw artifactSizeError(maxFileBytes);
         }
-        await handle.write(chunk);
+        await sink.write(chunk);
       });
       fileSeen = true;
       filename = headers.filename;
       mimeType = headers.contentType;
       return state;
     } finally {
-      await handle.close();
+      await sink.close();
     }
   };
 
@@ -603,14 +699,10 @@ async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promis
     }
     if (!fileSeen) throw artifactUploadError('Multipart upload requires a file field.');
     return {
-      filePath,
       ...(filename ? { filename } : {}),
       ...(mimeType ? { mimeType } : {}),
       sizeBytes,
       fields,
-      cleanup: async () => {
-        await cleanupTempDir(tempDir);
-      },
     };
   } catch (error) {
     // Any early exit here (size cap, malformed boundary, truncated part, …)
@@ -618,7 +710,6 @@ async function spoolMultipartUpload(req: Request, maxFileBytes?: number): Promis
     // connection stays healthy for reuse instead of stalling the caller's
     // next request, see drainReader's doc comment.
     await drainReader(reader);
-    await cleanupTempDir(tempDir, error);
     throw error;
   } finally {
     releaseReaderLock(reader);

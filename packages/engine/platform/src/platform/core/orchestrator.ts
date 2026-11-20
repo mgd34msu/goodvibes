@@ -20,7 +20,7 @@ import type { ConversationManager } from './conversation.js';
 import { resolveCompactionStrategy } from './conversation-compaction.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
-import { AppError, ProviderError, isNonTransientProviderFailure } from '../types/errors.js';
+import { AppError, ProviderError } from '../types/errors.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
 import { formatError, readFormattedError, summarizeError } from '../utils/error-display.js';
 import type { ModelDefinition } from '../providers/registry.js';
@@ -37,6 +37,7 @@ import {
   type TurnFlagSources,
 } from './orchestrator-turn-flags.js';
 import { appendPlanModeInstruction } from '../permissions/plan-mode-instructions.js';
+import { describePermissionModeInForce } from '../permissions/decision-model-readiness.js';
 import type { AcpManager } from '../acp/manager.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { estimateConversationTokens } from './context-compaction.js';
@@ -91,7 +92,7 @@ import {
   type ChatResponseWithReasoning,
   prepareConversationForTurn,
 } from './orchestrator-turn-helpers.js';
-import { executeOrchestratorTurnLoop, openVerificationStore } from './orchestrator-turn-loop.js';
+import { executeOrchestratorTurnLoop, openVerificationStore, type TurnFailoverMove } from './orchestrator-turn-loop.js';
 import type { VerificationStore } from './verification/store.js';
 import { recordTurnInjection, type TurnInjectionRecord } from '../agents/turn-knowledge-injection.js';
 import { permissionModeLine } from '../agents/orchestrator-prompts.js';
@@ -330,6 +331,9 @@ export class Orchestrator {
 
   /** True when the turn failed (set in catch; read in finally for markComplete vs markFailed). */
   private _turnFailed = false;
+  /** The failover move in force for the running turn (providers/failover.ts), cleared when the turn ends. */
+  private turnFailover: { readonly configuredRegistryKey: string; readonly servingRegistryKey: string } | null = null;
+  private readonly turnFailoverListeners = new Set<(move: TurnFailoverMove) => void>();
 
   private readonly runtimeBus: RuntimeEventBus | null;
   private readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
@@ -730,6 +734,21 @@ export class Orchestrator {
    * @param content - Optional ContentPart[] for multimodal messages.
    * @param options - Optional origin metadata for external surfaces.
    */
+  /**
+   * The failover in force for the running turn: the model it started on and
+   * the one answering now, or null. A display reads it each frame to name the
+   * model that answers; it is cleared when the turn ends.
+   */
+  public turnFailoverInForce(): { readonly configuredRegistryKey: string; readonly servingRegistryKey: string } | null {
+    return this.turnFailover;
+  }
+
+  /** Told of each failover move inside a turn, after the engine's [Failover] line. Returns the unsubscribe. */
+  public onTurnFailover(listener: (move: TurnFailoverMove) => void): () => void {
+    this.turnFailoverListeners.add(listener);
+    return () => { this.turnFailoverListeners.delete(listener); };
+  }
+
   public async handleUserInput(
     text: string,
     content?: ContentPart[],
@@ -959,10 +978,16 @@ export class Orchestrator {
     if (use.failure !== undefined) {
       if (told.failingSince === use.failure.since) return;
       this.decisionModelTold = { failingSince: use.failure.since };
-      this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'error', kind: 'operational' });
+      // The first failure also changes the mode in force: jev-decides asks the owner until the model answers again.
+      const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
+      const flipped = inForce.chosen === 'jev-decides' && inForce.mode === 'ask-me'
+        ? ' Permission mode in force: ask-me (calls Jev would decide ask you) until it answers again.' : '';
+      this.conversation.addNotice(`[Decision model] ${use.line}${flipped}`, { level: 'error', kind: 'operational' });
     } else if (told.failingSince !== undefined) {
       this.decisionModelTold = {};
-      this.conversation.addNotice('[Decision model] The decision model is answering again.', { level: 'info', kind: 'operational' });
+      const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
+      const restored = inForce.chosen === 'jev-decides' && inForce.mode === 'jev-decides' ? ' Permission mode in force: jev-decides again.' : '';
+      this.conversation.addNotice(`[Decision model] The decision model is answering again.${restored}`, { level: 'info', kind: 'operational' });
     } else if (!use.inUse && use.reason !== 'unavailable' && !told.noneInUse) {
       this.decisionModelTold = { noneInUse: true };
       this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'info', kind: 'operational' });
@@ -1049,7 +1074,7 @@ export class Orchestrator {
       await hookOwner.closeAndDrain();
       // Set before TURN_ERROR so a failover observer of that event reads this fence.
       if (nativeTurn) failNativeConversationTurn(nativeTurn, err instanceof ProviderError && !this.abortController?.signal.aborted && nativeConversationTurnCanRetry());
-      await this.handleTurnError(err, turnId, configManager, providerRegistry);
+      await this.handleTurnError(err, turnId, providerRegistry);
     } finally {
       this.turnHookOwner = null;
       // A user turn sent after the failure completed: the failed prompt is no longer offered again.
@@ -1184,6 +1209,13 @@ export class Orchestrator {
       setLastRequestInputTokens: (value) => { this.lastRequestInputTokens = value; },
       setLastInputTokens: (value) => { this.lastInputTokens = value; },
       markTurnFailed: () => { this._turnFailed = true; },
+      onFailover: (move) => {
+        // The selection the turn started on stays the configured one across a second move.
+        this.turnFailover = { configuredRegistryKey: this.turnFailover?.configuredRegistryKey ?? move.fromRegistryKey, servingRegistryKey: move.toRegistryKey };
+        for (const listener of [...this.turnFailoverListeners]) {
+          try { listener(move); } catch (error) { logger.warn('Orchestrator: a failover listener failed', { error: summarizeError(error) }); }
+        }
+      },
       noteModelContextWindowWarning: (details) => {
         this.modelContextWarning = details;
         logger.warn('Orchestrator: model reported context window exhaustion - forcing compaction at next opportunity', details);
@@ -1289,7 +1321,6 @@ export class Orchestrator {
   private async handleTurnError(
     err: unknown,
     turnId: string,
-    configManager: ReturnType<typeof requireConfigManager>,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
   ): Promise<void> {
     // Close a stream left open by the throw, aborted or not, so this turn does
@@ -1330,16 +1361,8 @@ export class Orchestrator {
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
     this.conversation.addNotice(msg, { level: 'error' });
     this.requestRender();
-    // When the provider fails non-transiently, name the next model of the person's own
-    // fallback order (providers/failover.ts); a model is never suggested by list position.
-    const autoSwitch = configManager.get('behavior.suggestAlternativeOnProviderFail') as boolean;
-    if (!judgmentFailed && autoSwitch && await isNonTransientProviderFailure(err, 'core.orchestrator.suggest-alternative')) {
-      const currentModel = providerRegistry.getCurrentModel();
-      const choice = providerRegistry.chooseFailover(currentModel.registryKey);
-      if (choice.kind === 'switch') {
-        this.conversation.addNotice(`[Provider] ${currentModel.displayName} failed on ${currentModel.provider}. Next in your fallback order: ${choice.displayName} (${choice.provider}). Use /model to switch.`, { level: 'info' });
-      }
-    }
+    // The person's fallback order was already tried inside the turn (providers/failover.ts),
+    // and its [Failover] line said which models answered or why the turn stopped.
     this._turnFailed = true;
     this.turnCancellation.end(turnId);
     if (this.runtimeBus) {
@@ -1389,6 +1412,8 @@ export class Orchestrator {
       this._turnFailed = false;
     }
     this.turnCancellation.end(turnId);
+    // A failover lasts for its turn only; the next turn starts on the selected model.
+    this.turnFailover = null;
     // stopThinking() calls product render callbacks; a throw there must not
     // leave this orchestrator occupied by a turn that has ended.
     // The turn's whole phase ends here, whatever a stream or compaction left open. A native

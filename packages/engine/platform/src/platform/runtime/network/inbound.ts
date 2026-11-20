@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { resolveHostBinding } from '../../daemon/host-resolver.js';
 import { getDefaultInboundCertPaths, inspectPrivateKeyPermissions, resolvePathFromGoodVibesRoot } from './shared.js';
 
 export type InboundTlsMode = 'off' | 'proxy' | 'direct';
@@ -44,14 +45,21 @@ function readTrustProxy(configManager: InboundTlsConfigReader, surface: InboundS
   return configManager.get(`${surface}.trustProxy`) === true;
 }
 
+/** The address the settings bind, through the one resolver the listeners use (hostMode decides the host). */
+function readBinding(configManager: InboundTlsConfigReader, surface: InboundServerSurface): { readonly host: string; readonly port: number } {
+  const mode = configManager.get(`${surface}.hostMode`);
+  const host = configManager.get(`${surface}.host`);
+  const port = configManager.get(`${surface}.port`);
+  return resolveHostBinding(typeof mode === 'string' ? mode : 'local', typeof host === 'string' ? host.trim() : '',
+    typeof port === 'number' ? port : Number(port ?? 0), surface);
+}
+
 function readHost(configManager: InboundTlsConfigReader, surface: InboundServerSurface): string {
-  const raw = configManager.get(`${surface}.host`);
-  return typeof raw === 'string' && raw.trim() ? raw.trim() : '127.0.0.1';
+  return readBinding(configManager, surface).host;
 }
 
 function readPort(configManager: InboundTlsConfigReader, surface: InboundServerSurface): number {
-  const raw = configManager.get(`${surface}.port`);
-  return typeof raw === 'number' && Number.isFinite(raw) ? raw : surface === 'controlPlane' ? 3421 : 3422;
+  return readBinding(configManager, surface).port;
 }
 
 function readConfiguredCertPath(configManager: InboundTlsConfigReader, surface: InboundServerSurface): string | null {

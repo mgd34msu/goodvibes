@@ -45,7 +45,7 @@ Every command that talks to an already-running daemon (`status`, `update`, `pair
 | Flag | Default |
 | --- | --- |
 | `--host <name>` | the control plane's configured host (`127.0.0.1` on a default install). Another machine needs its connection type stated: `--host https://<name>` (encrypted) or `--host http://<name>` (the operator token travels unencrypted); a bare name is refused |
-| `--port <n>` | the control plane's configured port |
+| `--port <n>` | the port in a `--host` URL, else that URL's scheme port (443 for `https://`, 80 for `http://`); with a bare host or none, the control plane's configured port |
 | `--token <t>` | this machine's own operator token, read from `<daemon home>/operator-tokens.json` |
 
 Authentication is `Authorization: Bearer <operator token>` against the control plane,

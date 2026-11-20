@@ -133,7 +133,7 @@ goodvibes service restart
 ```
 
 **You should now see** the surfaces reported network-bound.
-`goodvibes web` prints the browser surface URL (e.g. `http://0.0.0.0:3423`)
+`goodvibes web` prints where the web UI is served (the control-plane address, e.g. `http://192.168.0.171:3421`, once the bundle is served)
 and `goodvibes control-plane status` shows the control-plane bind, local
 admin, and token posture.
 
@@ -148,8 +148,10 @@ control plane (port 3421, bearer token over plain `http`) open on the LAN.
 From any browser on the same network:
 
 ```
-http://<server-lan-address>:3423
+http://<server-lan-address>:3421
 ```
+
+(the web UI is served by the daemon on its control-plane port; `3423` is only a development server's port)
 
 Log in with the user from step 3.
 
@@ -167,7 +169,7 @@ sudo tailscale up
 ```
 
 Every device in your tailnet can now reach the box by its Tailscale address or
-MagicDNS name, at the webui address `http://<server-tailscale-name>:3423`,
+MagicDNS name, at the webui address `http://<server-tailscale-name>:3421`,
 still plain `http`.
 
 For TLS (and with it the full webui feature set), serve the browser surface
@@ -175,7 +177,7 @@ through Tailscale's built-in reverse proxy, which terminates HTTPS with a
 certificate for your tailnet hostname:
 
 ```sh
-sudo tailscale serve --bg 3423
+sudo tailscale serve --bg 3421
 ```
 
 **You should now see** `tailscale serve` print the public-to-your-tailnet

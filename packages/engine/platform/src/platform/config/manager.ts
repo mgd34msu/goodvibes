@@ -1459,6 +1459,22 @@ export class ConfigManager {
     if (held) throw new ConfigError(`Setting ${key} is ${held}.`);
   }
 
+  /**
+   * What changing `key` to `value` would loosen (a security, permission,
+   * judgment or payment setting), in words, or null when it would not. Weighed
+   * against the value features act on: an unset setting the owner profile
+   * fills (the zone, the currency) is loosened from that value. With
+   * `toDefault`, the change is a reset to the key's shipped default and
+   * `value` is not read.
+   */
+  describeLoosening(key: string, value: unknown, options: { readonly toDefault?: boolean } = {}): string | null {
+    const facts = configKeyFacts(key);
+    if (!facts.loosens) return null;
+    const next = options.toDefault === true ? SCHEMA_BY_KEY.get(key)?.default : value;
+    const current = resolveWithProfileFallback(key, readDotPath(this.#config, key).value, this.profileFallback);
+    return facts.loosens(current, next) ? (facts.loosening ?? 'loosen security') : null;
+  }
+
   /** Set a config value by dot-path key and auto-save to disk. */
   set<K extends ConfigKey>(key: K, value: ConfigValue<K>, options: ConfigSetOptions = {}): void {
     this.requireWritable();
@@ -1601,7 +1617,7 @@ export class ConfigManager {
       catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
       // Weighed against the value features act on: an unset setting the owner
       // profile fills (the zone, the currency) is loosened from that value.
-      if (by.kind === 'agent' && facts.loosens?.(resolveWithProfileFallback(key, readDotPath(this.#config, key).value, this.profileFallback), value) && !ownerSettled(by.decision)) {
+      if (by.kind === 'agent' && this.describeLoosening(key, value) !== null && !ownerSettled(by.decision)) {
         return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
           next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
       }
@@ -1854,6 +1870,14 @@ export class ConfigManager {
   /** Return a deep-cloned snapshot of a config category. */
   getCategory<C extends keyof GoodVibesConfig>(category: C): Readonly<GoodVibesConfig[C]> {
     return structuredClone(this.#config[category]);
+  }
+
+  /**
+   * A key's value as the settings files and defaults hold it, under any runtime
+   * override (a session's Shift+Tab mode, a `--config` flag). One path read.
+   */
+  getSavedValue(key: ConfigKey): unknown {
+    return structuredClone(readDotPath(this.runtimeState.nonRuntime, key).value);
   }
 
   /** Return a deep-cloned snapshot of the live config (read-only consumers). */

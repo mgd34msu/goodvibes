@@ -37,6 +37,7 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import {
   buildManagedDaemonServiceManager,
+  listProductServiceNames,
   readDefinitionWorkingDirectory,
   readManagedDefinitionOwner,
   type ManagedDefinitionOwner,
@@ -276,7 +277,7 @@ export function serviceStatusExitCode(status: ManagedServiceStatus): number {
  * definition at `path` (`definitionOwner`, see `ManagedDefinitionOwner`) when
  * known, plus the code.
  */
-export function serviceStatusJson(status: ManagedServiceStatus, owner?: ManagedDefinitionOwner): string {
+export function serviceStatusJson(status: ManagedServiceStatus, owner?: ManagedDefinitionOwner, productServices?: readonly string[]): string {
   return JSON.stringify(
     {
       ok: true,
@@ -291,6 +292,9 @@ export function serviceStatusJson(status: ManagedServiceStatus, owner?: ManagedD
         ...(status.pid === undefined ? {} : { pid: status.pid }),
         ...(status.logPath === undefined ? {} : { logPath: status.logPath }),
         ...(status.lingerNote === undefined ? {} : { lingerNote: status.lingerNote }),
+        // Every daemon service GoodVibes wrote for this user, this one and any
+        // other daemon's (its own service.serviceName): what an upgrade restarts.
+        ...(productServices === undefined ? {} : { productServices }),
         suggestedCommands: status.suggestedCommands,
         exitCode: serviceStatusExitCode(status),
       },
@@ -403,6 +407,26 @@ function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceMa
   return { ok: true, exitCode: 0, status: written, lines };
 }
 
+/**
+ * An explicit install or uninstall is the owner's choice of whether this
+ * machine has a daemon service: `service.enabled` (daemon-owned, read by the
+ * daemon's boot promotion and by doctor in every program) records it, so a
+ * hand-started daemon never installs a service the owner removed, and doctor
+ * does not ask for one. An installed service starts at login and a removed one
+ * does not, so `service.autostart` is recorded with it (the install's start
+ * reads it to enable the unit). Best effort: the service command already succeeded.
+ */
+function recordServiceChoice(input: DaemonServiceCliInput, enabled: boolean): void {
+  setServiceKey(input, 'service.enabled', enabled);
+  setServiceKey(input, 'service.autostart', enabled);
+}
+
+function setServiceKey(input: DaemonServiceCliInput, key: 'service.enabled' | 'service.autostart', value: boolean): void {
+  if (!input.configManager || input.configManager.get(key) === value) return;
+  try { input.configManager.setDynamic(key, value); }
+  catch { /* a read-only or locked setting keeps its value; the service itself is as reported */ }
+}
+
 /** Dispatch a daemon service subcommand to the platform's `PlatformServiceManager`. */
 export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
   input.assertCurrent?.();
@@ -412,8 +436,17 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
       const existing = manager.status();
       const owner = definitionOwner(existing);
       if (owner === 'other' || owner === 'unreadable') return notOurs('install', owner, existing);
+      // An installed service starts at login: the setting is recorded before the
+      // definition is written, since a LaunchAgent's RunAtLoad and the start's
+      // `enable` are read from it, and put back when the install fails.
+      const autostartBefore = input.configManager?.get('service.autostart') === true;
+      if (!autostartBefore) setServiceKey(input, 'service.autostart', true);
       const installed = manager.install();
-      if (installed.actionError) return failed('install', installed);
+      if (installed.actionError) {
+        if (!autostartBefore) setServiceKey(input, 'service.autostart', false);
+        return failed('install', installed);
+      }
+      recordServiceChoice(input, true);
       const started = manager.start();
       // A failed start does not undo the write. The unit is installed, but a
       // script must not treat a daemon that is down as installed and started:
@@ -462,6 +495,7 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
           actionError: uninstalled.actionError || 'removal is incomplete: the platform still reports an installed or running service',
         });
       }
+      recordServiceChoice(input, false);
       return ok('uninstall', uninstalled);
     }
     case 'start-service':
@@ -478,7 +512,7 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
         return {
           ok: true,
           exitCode: serviceStatusExitCode(status),
-          lines: [serviceStatusJson(status, owner)],
+          lines: [serviceStatusJson(status, owner, listProductServiceNames(status.platform, input.unitHomeDir))],
           status,
         };
       }

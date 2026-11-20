@@ -135,7 +135,7 @@ export interface AgentOrchestratorRunContext {
   readonly hookDispatcher?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | null | undefined;
   readonly getFullRegistry: () => ToolRegistry;
   readonly buildScopedRegistry: (allowedNames: string[], fullRegistry: ToolRegistry, captureAuthority?: import('../personal-capture/index.js').CaptureAuthorityDecision | undefined) => ToolRegistry;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'getContextWindowForModel' | 'getKnownContextWindowForModel' | 'recordContextWindowRejection' | 'resolveModelPricing'>
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getContextWindowForModel' | 'getKnownContextWindowForModel' | 'recordContextWindowRejection' | 'resolveModelPricing'>
     & Partial<Pick<ProviderRegistry, 'ready'>>;
   readonly providerOptimizer?: Pick<ProviderOptimizer, 'recordFallbackTransition'> | undefined;
   readonly resolveProviderForRecord: (
@@ -143,10 +143,14 @@ export interface AgentOrchestratorRunContext {
     record: AgentRecord,
     currentModel: { id: string; provider: string; registryKey: string },
   ) => { provider: LLMProvider; modelId: string; requestedModelId: string };
-  readonly resolveFallbackModelRoutes: (
-    providerRegistry: Pick<ProviderRegistry, 'listModels' | 'getForModel'>,
+  /**
+   * The order a failed request of this agent moves along (providers/failover.ts): the agent's own
+   * fallback models when it was given some, none when its routing says `fail`, else the person's
+   * `provider.fallbackModels`. Read when a request fails for good.
+   */
+  readonly resolveFallbackOrder: (
+    providerRegistry: Pick<ProviderRegistry, 'listModels'>,
     record: AgentRecord,
     currentModel: { id: string; provider: string; registryKey: string },
-    primaryRequestedModelId: string,
-  ) => Array<{ provider: LLMProvider; modelId: string; requestedModelId: string }>;
+  ) => readonly string[];
 }

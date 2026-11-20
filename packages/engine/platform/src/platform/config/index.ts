@@ -93,6 +93,7 @@ export {
 } from './daemon-config-tier.js';
 export {
   DaemonConfigRejectedError,
+  DaemonConfigOwnerApprovalPendingError,
   DaemonConfigUnreachableError,
   applyConfigWrite,
   applyDaemonConfigWrites,

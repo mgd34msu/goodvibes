@@ -161,10 +161,16 @@ export const NODE_LOCAL_CONFIG_DOMAINS: readonly string[] = [
   'push.',
   // Which decision model this machine calls and the key it calls it with.
   'judgment.',
+  // Whether THIS machine runs the daemon as a service, under which name and
+  // manager: a property of the machine's installation, never of the group.
+  'service.',
 ];
 
 /** Individual daemon-owned keys that are machine-specific despite their domain. */
 const NODE_LOCAL_CONFIG_KEYS: readonly string[] = [
+  // Whether THIS installation updates its own programs: the machine's choice.
+  'update.auto',
+  'update.autoUpdateAtLaunch',
   // Whether THIS installation exposes a raw HTTP listener at all.
   'danger.httpListener',
   // Where the owner profile file lives on THIS machine. The rest of `profile.*`

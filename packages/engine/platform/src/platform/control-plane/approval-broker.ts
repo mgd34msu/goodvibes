@@ -429,14 +429,18 @@ export class ApprovalBroker {
    * and leaving it pending lets the next identical ask coalesce onto it and
    * wait with no prompt at all. A record raised over the wire
    * (`approvals.raise`) belongs to a caller in another process that may still
-   * be watching it, so it stays open for that caller.
+   * be watching it, so it stays open for that caller. A change put to the
+   * owner (owner-act.ts) is cancelled too, deadline or not: the change it
+   * would apply died with the previous process.
    */
   private rearmRestoredTimers(): void {
     const now = Date.now();
     for (const approval of this.approvals.values()) {
       if (approval.status !== 'pending' && approval.status !== 'claimed') continue;
       if (this.pendingResolvers.has(approval.id)) continue;
-      if (approval.expiresAt === undefined) {
+      // A change put to the owner (owner-act.ts) is applied by the process that put it; after a
+      // restart nothing would apply it, so an answer to it is not invited.
+      if (approval.expiresAt === undefined || (approval.metadata['ownerAct'] === true && approval.metadata['raisedVia'] !== 'approvals.raise')) {
         if (approval.metadata['raisedVia'] === 'approvals.raise') {
           this.pendingResolvers.set(approval.id, { resolvers: [], externallyOwned: true });
           continue;

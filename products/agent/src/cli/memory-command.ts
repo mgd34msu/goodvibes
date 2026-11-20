@@ -48,6 +48,7 @@ const VALUE_OPTIONS = new Set([
   'review-state',
   'scope',
   'session',
+  'summary',
   'tags',
   'task',
   'turn',
@@ -202,7 +203,7 @@ function timestamp(value: number): string {
 // Subcommands that change memory. Only these save a local file, and only these
 // are refused when the configured host is another machine that did not answer.
 const WRITING_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  'add', 'create', 'review', 'stale', 'contradict', 'contradicted', 'promote', 'link',
+  'add', 'create', 'edit', 'review', 'stale', 'contradict', 'contradicted', 'promote', 'link',
   'delete', 'remove', 'rm', 'import', 'handoff-import',
 ]);
 
@@ -325,6 +326,7 @@ function usage(): string {
     '  search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]',
     '  add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <state>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>]',
     '  show <id>',
+    '  edit <id> [--summary <text>] [--detail <text>] [--tags a,b] [--scope <scope>] --yes',
     '  queue [limit]',
     '  review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]',
     '  stale <id> <reason>',
@@ -620,6 +622,36 @@ async function handlePromote(runtime: CliCommandRuntime, store: MemoryCommandSto
   );
 }
 
+/** `edit <id>`: corrects a record in place; each option given replaces that field, the rest (class, provenance, links) stay. */
+async function handleEdit(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
+  const options = parseOptions(args);
+  const id = options.positionals[0];
+  const usageLine = 'Usage: goodvibes-agent memory edit <id> [--summary <text>] [--detail <text>] [--tags a,b] [--scope <scope>] --yes';
+  if (!id || options.positionals.length > 1) return failure(runtime, 'invalid_memory_command', usageLine, 2);
+  const summary = optionValue(options, 'summary');
+  const detail = optionValue(options, 'detail');
+  const tags = csvOption(options, 'tags');
+  const scope = optionalScope(optionValue(options, 'scope'));
+  if (summary === undefined && detail === undefined && tags === undefined && scope === undefined) {
+    return failure(runtime, 'invalid_memory_command', `${usageLine}\nGive at least one field to change; memory show <id> shows the record first.`, 2);
+  }
+  if (!hasFlag(options, 'yes'))
+    return failure(runtime, 'confirmation_required', `Refusing to edit memory record ${id} without --yes.`, 2);
+  const record = await store.access.update(id, {
+    ...(summary !== undefined ? { summary } : {}),
+    ...(detail !== undefined ? { detail } : {}),
+    ...(tags !== undefined ? { tags: [...tags] } : {}),
+    ...(scope !== undefined ? { scope } : {}),
+  });
+  if (!record) return failure(runtime, 'memory_not_found', `Memory record not found ${id}`, 1);
+  return success(
+    runtime,
+    'agent.memory.edit',
+    record,
+    ['Agent memory edited', `  id ${record.id}`, `  summary ${record.summary}`, ...(record.tags.length ? [`  tags ${record.tags.join(', ')}`] : []), `  scope ${record.scope}`].join('\n'),
+  );
+}
+
 async function handleLink(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {
   const options = parseOptions(args);
   const [fromId, toId, relation] = options.positionals;
@@ -776,6 +808,7 @@ export async function handleMemoryCommand(runtime: CliCommandRuntime): Promise<C
       if (normalized === 'stale') return handleReviewShortcut(runtime, store, 'stale', rest);
       if (normalized === 'contradict' || normalized === 'contradicted') return handleReviewShortcut(runtime, store, 'contradicted', rest);
       if (normalized === 'promote') return handlePromote(runtime, store, rest);
+      if (normalized === 'edit') return handleEdit(runtime, store, rest);
       if (normalized === 'link') return handleLink(runtime, store, rest);
       if (normalized === 'delete' || normalized === 'remove' || normalized === 'rm') return handleDelete(runtime, store, rest);
       if (normalized === 'export' || normalized === 'handoff-export' || normalized === 'share') return handleExport(runtime, store, rest);

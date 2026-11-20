@@ -305,7 +305,8 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
     setTuiSetting: (key, value) => mergeJson(settingsPath, key, value),
   };
   e2eHome.setTuiSetting('provider.model', 'e2e-stub:stub-model');
-  e2eHome.setTuiSetting('update.autoUpdateAtLaunch', false);
+  // The self-update switch is a daemon setting, read by every program from the daemon's file.
+  mergeJson(join(daemonDir, 'settings.json'), 'update.autoUpdateAtLaunch', false);
   e2eHome.setDaemonPort(daemonPort);
   mergeJson(join(daemonDir, 'settings.json'), 'controlPlane.host', '127.0.0.1');
   // These scenarios exercise terminal/runtime ownership, not remote metadata.

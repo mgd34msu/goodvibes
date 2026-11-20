@@ -152,17 +152,14 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
     result = action === 'undo' ? manager.undo() : manager.redo();
   } catch (failure) {
     const summary = managerStatus(context);
-    const following = action === 'undo' ? summary.nextUndo : undefined;
     if (failure instanceof FileUndoConflictError) {
       return {
         status: 'conflict', done: false,
         recoveryAction: action,
         path: workspacePath(context, failure.path),
-        reason: `The file was changed after that ${failure.direction === 'undo' ? 'edit' : 'undo'}, so restoring it would overwrite the later change. No file was changed and that history entry was dropped.`,
+        reason: `The file was changed after that ${failure.direction === 'undo' ? 'edit' : 'undo'}, so restoring it would overwrite the later change. No file was changed and the history entry is kept.`,
         summary,
-        next: summary[action === 'undo' ? 'undoDepth' : 'redoDepth'] > 0
-          ? `The next ${action} now acts on the entry before it${following ? ` (${String(following.path)}, ${String(following.tool)} at ${String(following.timestamp)})` : ''}; inspect it with execution action:"recovery" before running ${action} again.`
-          : `No further ${action} entries remain; restore the file by hand if the older content is wanted.`,
+        next: `Tell the owner: the entry stays until the file is put back as that ${failure.direction === 'undo' ? 'edit' : 'undo'} left it (then run ${action} again) or the owner drops it with /${action} file drop.`,
       };
     }
     return {

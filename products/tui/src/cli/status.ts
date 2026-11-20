@@ -1,15 +1,16 @@
-import { captureCliStatusFacts, describeCliSignIns, secretPolicyLabel, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { captureCliStatusFacts, describeCliPermissionMode, describeCliSignIns, secretPolicyLabel, type CliModelInUse, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import type { PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell/cli-endpoints';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
+import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
 import type { GoodVibesCliOutputFormat } from '@goodvibes-jev/engine/terminal-shell';
-import { serviceSettingsIssues, type CliServicePosture } from './service-posture.ts';
+import type { CliServicePosture } from './service-posture.ts';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
@@ -27,6 +28,8 @@ export interface CliStatusOptions {
   readonly homeDirectory: string;
   /** How the configured model's provider is signed in and where its model list came from (read from files by the caller). */
   readonly providerSignIn?: CliProviderSignInFacts;
+  /** The model a run would use, resolved by the provider registry (the caller builds it). */
+  readonly modelInUse?: CliModelInUse;
   /** The first-run check marker (per user); absent or `exists: false` when first run was not marked. */
   readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly auth?: CliAuthStatus;
@@ -115,6 +118,8 @@ export interface CliStatusSnapshot {
     readonly provider: string;
     readonly model: string;
     readonly reasoning: string;
+    /** Why the model cannot be used (no registered provider has its name) and how to choose another. */
+    readonly problem?: string | undefined;
     /** Sign-ins in the order requests use them, and the model list's source and age. */
     readonly signIn?: CliProviderSignInFacts | undefined;
     /**
@@ -127,6 +132,8 @@ export interface CliStatusSnapshot {
   };
   readonly auth: {
     readonly permissionMode: unknown;
+    /** The mode in force for a session started now, and why it is not the saved mode. */
+    readonly permissionModeInForce: PermissionModeInForce;
     readonly permissionLabel: string;
     readonly autoApprove: boolean;
     readonly automaticApprovals: boolean;
@@ -146,7 +153,13 @@ export interface CliStatusSnapshot {
     /** `enabled`: the daemon listens (for this machine at least); `servesOtherMachines`: controlPlane.enabled. */
     readonly controlPlane: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown; readonly servesOtherMachines: boolean };
     readonly httpListener: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown };
-    readonly web: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown };
+    /** The listener that serves the web UI (the control plane) while it is served; `developmentEndpoint` is web.*, never exposure. */
+    readonly web: ReturnType<typeof resolveRuntimeEndpointBinding> & {
+      readonly enabled: unknown;
+      readonly served: boolean;
+      readonly networkFacing: boolean;
+      readonly developmentEndpoint: ReturnType<typeof resolveRuntimeEndpointBinding>;
+    };
   };
   readonly onboarding: {
     readonly checked: boolean;
@@ -323,15 +336,19 @@ const EXPOSURE_SURFACES: readonly {
 export function buildCliExposureReport(options: CliStatusOptions): readonly CliExposureSurface[] {
   const config = options.configManager;
   return EXPOSURE_SURFACES.map((surface): CliExposureSurface => {
-    const enabled = surface.enabled(config);
-    const binding = resolveRuntimeEndpointBinding(config, surface.id);
-    const networkFacing = isNetworkFacing(enabled && config.get(surface.exposedKey as never) === true, binding);
+    // The web UI is exposed by the listener that serves it (the control plane), never by web.* settings.
+    const web = surface.id === 'web' ? resolveWebSurfaceExposure(config) : undefined;
+    const enabled = web === undefined ? surface.enabled(config) : surface.enabled(config) && web.served;
+    const binding = web?.binding ?? resolveRuntimeEndpointBinding(config, surface.id);
+    const networkFacing = web === undefined
+      ? isNetworkFacing(enabled && config.get(surface.exposedKey as never) === true, binding)
+      : enabled && web.networkFacing;
     return {
       id: surface.id,
       label: surface.label,
       enabled,
-      bind: formatRuntimeEndpointBinding(binding),
-      reach: binding.recognized ? classifyBindPosture(binding).label : 'Unknown (unrecognized host mode)',
+      bind: web && !web.served ? `not served (web.host/web.port is a development server's: ${formatRuntimeEndpointBinding(binding)})` : formatRuntimeEndpointBinding(binding),
+      reach: web && !web.served ? 'Not served' : binding.recognized ? classifyBindPosture(binding).label : 'Unknown (unrecognized host mode)',
       networkFacing,
       authMode: surfaceAuthMode(networkFacing, options.auth),
       originAllowlist: surfaceOriginAllowlist(surface.id, config),
@@ -342,37 +359,51 @@ export function buildCliExposureReport(options: CliStatusOptions): readonly CliE
 type ServiceFindingText = Pick<CliDoctorFinding, 'cause' | 'impact' | 'action'>;
 
 const SERVICE_FINDING_TEXT: Readonly<Record<string, ServiceFindingText>> = {
-  'service-disabled-for-server-surfaces': {
-    cause: 'One or more daemon, control-plane, listener, or web settings are enabled while service.enabled is false.',
-    impact: 'The configured surfaces may not start automatically or survive restarts.',
-    action: 'Enable service mode or disable the server-backed surfaces you do not want.',
+  'service-not-installed': {
+    cause: 'This machine has no daemon service, and service.enabled does not record that it should run without one.',
+    impact: 'The daemon runs only while it is started by hand or by a program that needs it, and not after a reboot.',
+    action: 'Install the service: goodvibes-daemon install-service. To keep this machine without one: goodvibes-daemon config set service.enabled false',
+  },
+  'service-not-running': {
+    cause: 'The service manager reports the daemon service installed but stopped.',
+    impact: 'The terminal app, the Agent and the web UI have no daemon to connect to until it starts.',
+    action: 'Start it: goodvibes-daemon start-service. If it stops again, read its log: goodvibes-daemon service-status',
   },
   'service-autostart-disabled': {
-    cause: 'A service definition is installed and service.autostart is false.',
-    impact: 'GoodVibes does not start after login or reboot.',
-    action: 'Set service.autostart to true if the daemon, listener or web surfaces should stay available.',
+    cause: 'The service manager reports the daemon service installed but not set to start at login.',
+    impact: 'The daemon does not come back after a login or reboot.',
+    action: 'Enable it again: goodvibes-daemon install-service',
   },
   'service-restart-disabled': {
-    cause: 'service.enabled is true and service.restartOnFailure is false.',
-    impact: 'A crashed daemon or listener stays down until it is started again.',
-    action: 'Set service.restartOnFailure to true, then run goodvibes service install to rewrite the definition.',
+    cause: 'service.restartOnFailure is false.',
+    impact: 'A daemon that crashes stays down until it is started again.',
+    action: 'goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service',
+  },
+  'service-manager-error': {
+    cause: 'The user service manager (systemd --user or launchd) did not answer from this session.',
+    impact: 'Nothing can be said about the daemon service from here; the daemon itself may be running.',
+    action: 'Run goodvibes doctor from a logged-in desktop or SSH session with a user manager. To keep this machine without a service: goodvibes-daemon config set service.enabled false',
+  },
+  'service-log-unreadable': {
+    cause: 'The daemon service log exists but this user cannot read it.',
+    impact: 'A failed start cannot be diagnosed from the log.',
+    action: 'Check the file\'s owner and mode with ls -l on the path named above.',
   },
 };
 
 const SERVICE_FINDING_FALLBACK: ServiceFindingText = {
-  cause: 'The service inspection found a mismatch between the configured service and surface state and what is running.',
-  impact: 'Daemon, control-plane, listener, or web availability may not match the configuration.',
-  action: 'Run goodvibes service check and apply the install, start or setting change it names.',
+  cause: 'The daemon service differs from what this machine\'s settings expect.',
+  impact: 'The daemon or one of its endpoints may not be available.',
+  action: 'Run goodvibes service check; it names the one command that fixes each line.',
 };
 
 export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliDoctorFinding[] {
   const config = options.configManager;
-  const serviceEnabled = config.get('service.enabled') === true;
-  const serviceAutostart = config.get('service.autostart') === true;
-  const restartOnFailure = config.get('service.restartOnFailure') === true;
   const daemonEnabled = resolveDaemonEnabled(config);
   const listenerEnabled = config.get('danger.httpListener') === true;
-  const webEnabled = config.get('web.enabled') === true;
+  // The web UI's exposure is the listener that serves it; web.* is only a development server's.
+  const webExposure = resolveWebSurfaceExposure(config);
+  const webServedToOthers = daemonEnabled && config.get('web.enabled') === true && webExposure.networkFacing;
   // controlPlane.enabled: whether other machines are served; the daemon serves this one whenever it runs.
   const controlPlaneServesOthers = daemonEnabled && config.get('controlPlane.enabled') === true;
   const controlPlaneBinding = resolveRuntimeEndpointBinding(config, 'controlPlane');
@@ -381,11 +412,10 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   const permissionMode = config.get('permissions.mode');
   const secretPolicy = config.get('storage.secretPolicy');
   const marker = effectiveMarker(options.onboardingMarker);
-  const serverBackedEnabled = daemonEnabled || listenerEnabled || webEnabled;
   const networkFacingSurfaces = [
     ['control plane', controlPlaneServesOthers, controlPlaneBinding],
     ['HTTP listener', listenerEnabled, httpListenerBinding],
-    ['web surface', webEnabled, webBinding],
+    ['web surface', webServedToOthers, webExposure.binding],
   ].filter(([, enabled, binding]) => isNetworkFacing(enabled, binding as typeof controlPlaneBinding));
 
   const findings: CliDoctorFinding[] = [];
@@ -406,15 +436,17 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       severity: 'warning',
       summary: `${endpointLabel} hostMode '${endpointBinding.hostMode}' is not a recognized mode.`,
       cause: `${endpointId}.hostMode is set to '${endpointBinding.hostMode}', but only local|network|custom are recognized.`,
-      impact: 'The daemon cannot resolve a binding for this endpoint and will fail to start it; displays cannot show a real bind address.',
+      impact: endpointId === 'web'
+        ? 'Only the web UI\'s development server reads web.hostMode; it falls back to loopback. The daemon does not bind it.'
+        : 'The daemon cannot resolve a binding for this endpoint and will fail to start it; displays cannot show a real bind address.',
       action: `Set ${endpointId}.hostMode to local, network, or custom.`,
     });
   }
 
   // Service facts come from the posture builder under fixed ids; doctor adds
   // only the cause, impact and action for each id.
-  const serviceIssues = options.service?.findings
-    ?? serviceSettingsIssues({ enabled: serviceEnabled, autostart: serviceAutostart, restartOnFailure, serverBackedEnabled });
+  // Without a service reading (no manager asked) nothing observed can be judged.
+  const serviceIssues = options.service?.findings ?? [];
   for (const issue of serviceIssues) {
     const text = SERVICE_FINDING_TEXT[issue.id] ?? SERVICE_FINDING_FALLBACK;
     findings.push({ id: issue.id, area: 'service', severity: 'warning', summary: issue.summary, ...text });
@@ -567,12 +599,10 @@ export function resolveDoctorExitCode(findings: readonly CliDoctorFinding[], str
 
 export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnapshot {
   const config = options.configManager;
-  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel);
+  const common = captureCliStatusFacts(config, effectiveMarker(options.onboardingMarker), options.service, getProviderIdFromModel, options.modelInUse);
 
   const findings = buildCliDoctorFindings(options);
-  const approvalPreset = presetForMode(
-    effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true),
-  );
+  const approvalPreset = presetForMode(common.auth.permissionModeInForce.mode);
   return {
     title: options.doctor ? 'GoodVibes doctor' : 'GoodVibes status',
     crashLog: summarizeCrashLog(surfaceCrashLogPath(options.homeDirectory, GOODVIBES_TUI_SURFACE_ROOT)),
@@ -582,7 +612,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
       ...common.provider,
       ...(options.providerSignIn ? { signIn: options.providerSignIn } : {}),
       reasoningResolved: describeConfiguredEffort(
-        String(config.get('provider.model') ?? ''),
+        common.provider.model,
         String(config.get('provider.reasoningEffort') ?? ''),
       ),
     },
@@ -637,13 +667,11 @@ export function renderCliStatus(options: CliStatusOptions): string {
     `  homeDir: ${options.homeDirectory}`,
     '',
     'Provider:',
-    `  provider: ${getProviderIdFromModel(config.get('provider.model'))}`,
-    `  model: ${String(config.get('provider.model'))}`,
+    `  provider: ${snapshot.provider.provider}`,
+    `  model: ${snapshot.provider.model}`,
+    ...(snapshot.provider.problem ? [`  problem: ${snapshot.provider.problem}`] : []),
     `  reasoning: ${String(config.get('provider.reasoningEffort'))}`,
-    `  reasoning (on this model): ${describeConfiguredEffort(
-      String(config.get('provider.model') ?? ''),
-      String(config.get('provider.reasoningEffort') ?? ''),
-    )}`,
+    `  reasoning (on this model): ${snapshot.provider.reasoningResolved}`,
     ...(snapshot.provider.signIn ? [
       `  sign-in: ${describeCliSignIns(snapshot.provider.signIn)}`,
       `  model list: ${snapshot.provider.signIn.modelList}`,
@@ -654,7 +682,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth:',
-    `  permissions: ${describeConfiguredPermissions(config).label} (${String(config.get('permissions.mode'))})`,
+    ...describeCliPermissionMode(snapshot.auth.permissionModeInForce),
     `    ${describeConfiguredPermissions(config).detail}`,
     `  autoApprove: ${yesNo(snapshot.auth.autoApprove)} (behavior.autoApprove)`,
     `  secretPolicy: ${secretPolicyLabel(config.get('storage.secretPolicy'))} (${String(config.get('storage.secretPolicy'))})`,
@@ -670,16 +698,20 @@ export function renderCliStatus(options: CliStatusOptions): string {
     '',
     'Service:',
     `  enabled: ${yesNo(serviceEnabled)}`,
-    `  autostart: ${yesNo(serviceAutostart)}`,
+    // Whether the installed service starts at login is the service manager's answer, not the setting.
+    options.service && !options.service.managed.actionError && options.service.managed.installed
+      ? `  autostart: ${yesNo(options.service.managed.autostart)} (starts at login, as the service manager reports)`
+      : `  autostart: ${yesNo(serviceAutostart)} (service.autostart)`,
     `  restartOnFailure: ${yesNo(restartOnFailure)}`,
     ...(options.service
       ? [
           `  platform: ${options.service.managed.platform}`,
-          `  installed: ${yesNo(options.service.managed.installed)}`,
-          `  running: ${yesNo(options.service.managed.running)}`,
+          // A manager that did not answer said nothing about the service.
+          `  installed: ${options.service.managed.actionError ? 'unknown (the service manager did not answer)' : yesNo(options.service.managed.installed)}`,
+          `  running: ${options.service.managed.actionError ? 'unknown' : yesNo(options.service.managed.running)}`,
           `  pid: ${options.service.managed.pid ?? 'n/a'}`,
           `  definition: ${options.service.managed.path}`,
-          `  log: ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'missing'})`,
+          `  log: ${options.service.log.path ?? 'n/a'} (${options.service.log.exists ? 'present' : 'not written yet'})`,
         ]
       : []),
     '',
@@ -687,7 +719,10 @@ export function renderCliStatus(options: CliStatusOptions): string {
     bindLine('controlPlane', controlPlaneEnabled, controlPlaneBinding),
     `    servesOtherMachines: ${yesNo(snapshot.surfaces.controlPlane.servesOtherMachines)} (controlPlane.enabled)`,
     bindLine('httpListener', listenerEnabled, httpListenerBinding),
-    bindLine('web', webEnabled, webBinding),
+    snapshot.surfaces.web.served
+      ? bindLine('web', webEnabled, webBinding).replace(/\)$/, ', the control-plane listener)')
+      : '  web: no (no web UI is served: goodvibes-daemon webui enable --bundle-dir <dir>)',
+    `    development server (web.host/web.port, never exposure): ${formatRuntimeEndpointBinding(snapshot.surfaces.web.developmentEndpoint)}`,
     '',
     'Onboarding:',
     `  checked: ${marker?.exists ? 'yes' : 'no'}`,

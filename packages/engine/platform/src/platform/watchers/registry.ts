@@ -25,6 +25,7 @@ import type { AtomicWriteOutcome } from '../utils/atomic-json-store.js';
 import { ownerDeliveryTargetProblem, postToPublicWebhook, PRIVATE_DELIVERY_HOSTS_SETTING } from '../utils/url-safety.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
+import { GroupJobFamily, type GroupJobItem, type GroupWorkLink } from '../cluster/group-work.js';
 
 export interface RegisterWatcherInput {
   readonly id: string;
@@ -138,6 +139,9 @@ interface RegisteredWatcher {
 }
 
 const LIVE_STATES: ReadonlySet<WatcherState> = new Set(['running', 'starting', 'degraded']);
+
+/** What a run or the clock moves on a watcher: kept off the group's record, which carries the last run as its occurrence. */
+const VOLATILE_FIELDS = ['lastHeartbeatAt', 'sourceLagMs', 'sourceStatus', 'degradedReason'] as const;
 
 /**
  * Why a watcher with no run of its own cannot be registered: what its kind
@@ -289,6 +293,10 @@ export class WatcherRegistry {
   private readonly resolveHeaderValue: ((value: string) => Promise<string | null>) | undefined;
   private pendingSave: ReturnType<typeof setTimeout> | null = null;
   private saveFailure: WatcherSnapshotSaveFailure | undefined;
+  /** The group's copy of the url watchers (cluster/group-work.ts), once attached; it acts only while this machine is in a group. */
+  private group: GroupJobFamily | null = null;
+  /** Per shared watcher, when a machine of the group last started a timed run of it. */
+  private readonly groupOccurrences = new Map<string, number>();
 
   constructor(options: WatcherRegistryOptions = {}) {
     this.storePath = resolveWatcherStorePath(options.storePath);
@@ -362,6 +370,178 @@ export class WatcherRegistry {
     if (config.runtimeBus) {
       this.runtimeBus = config.runtimeBus;
     }
+  }
+
+  /**
+   * Keep the url watchers made through the API (webhook and polling, whose
+   * work is in the record) on the group's record (cluster/group-work.ts). In
+   * a group they are listed on every machine and polled only by the machine
+   * holding the automation role. Watchers a component registers with its own
+   * work, and filesystem watchers (they look at this machine's disk), stay
+   * this machine's own. Outside a group this changes nothing.
+   */
+  attachGroupWork(link: GroupWorkLink): void {
+    if (this.group) return;
+    const group = new GroupJobFamily(link, 'watcher');
+    this.group = group;
+    group.onRemoteChange((ids, caughtUp) => {
+      if (ids.length > 0) this.takeFromGroup(ids);
+      if (caughtUp && group.holdsRole()) for (const watcher of this.watchers.values()) if (this.sharedWithGroup(watcher)) this.armShared(watcher.record);
+    });
+    link.roles.onRoleChange('automation', (held) => {
+      if (!held) {
+        this.dropGroupTimers();
+        return;
+      }
+      this.takeFromGroup();
+      for (const watcher of this.watchers.values()) if (this.sharedWithGroup(watcher)) this.armShared(watcher.record);
+    });
+  }
+
+  private sharedWithGroup(watcher: RegisteredWatcher): boolean {
+    return !watcher.ownerRun && watcher.run !== undefined && (watcher.record.kind === 'webhook' || watcher.record.kind === 'polling');
+  }
+
+  /** Whether this machine polls the watcher: always outside a group, else where the automation role is held. */
+  private runsHere(watcher: RegisteredWatcher): boolean {
+    const group = this.group;
+    if (!group || !this.sharedWithGroup(watcher) || !group.shared()) return true;
+    return group.holdsRole();
+  }
+
+  private groupItem(record: WatcherRecord): GroupJobItem {
+    const definition: Record<string, unknown> = { ...record, state: LIVE_STATES.has(record.state) ? 'running' : record.state };
+    for (const field of VOLATILE_FIELDS) delete definition[field];
+    return { id: record.id, definition, lastOccurrenceAt: this.groupOccurrences.get(record.id) ?? 0 };
+  }
+
+  private publishToGroup(): void {
+    const group = this.group;
+    if (!group?.shared()) return;
+    const items = [...this.watchers.values()].filter((watcher) => this.sharedWithGroup(watcher)).map((watcher) => this.groupItem(watcher.record));
+    void group.publish(items).catch((error: unknown) => {
+      logger.warn('Watcher changes could not be written to the group\'s record; the next save tries again', { error: summarizeError(error) });
+    });
+  }
+
+  /**
+   * Take in what the group's record holds: url watchers made, changed,
+   * stopped or removed on another machine. A removal is terminal, so a machine
+   * that slept through one drops the watcher rather than bringing it back.
+   */
+  private takeFromGroup(only?: readonly string[]): void {
+    const group = this.group;
+    if (!group || !group.shared() || !this.isEnabled()) return;
+    this.ensureLoaded();
+    const local = new Map<string, GroupJobItem>();
+    for (const watcher of this.watchers.values()) if (this.sharedWithGroup(watcher)) local.set(watcher.record.id, this.groupItem(watcher.record));
+    const difference = group.difference(local, only);
+    for (const id of difference.remove) {
+      const timer = this.timers.get(id);
+      if (timer) clearInterval(timer);
+      this.timers.delete(id);
+      this.watchers.delete(id);
+      this.groupOccurrences.delete(id);
+      this.runtimeDispatch?.removeWatcher(id, 'watchers.group');
+    }
+    for (const item of difference.adopt) {
+      const definition = item.definition as unknown as WatcherRecord;
+      if (definition.id !== item.id || typeof definition.label !== 'string' || (definition.kind !== 'webhook' && definition.kind !== 'polling') || !definition.source) continue;
+      const existing = this.watchers.get(item.id);
+      // A watcher this machine registers with its own work stays its own.
+      if (existing?.ownerRun) continue;
+      if (item.lastOccurrenceAt > 0) this.groupOccurrences.set(item.id, Math.max(this.groupOccurrences.get(item.id) ?? 0, item.lastOccurrenceAt));
+      const heartbeat = Math.max(existing?.record.lastHeartbeatAt ?? 0, this.groupOccurrences.get(item.id) ?? 0);
+      const record = this.normalizeRecord({ ...definition, ...(heartbeat > 0 ? { lastHeartbeatAt: heartbeat } : {}) });
+      const run = this.buildRunStrategy(record);
+      if (run === undefined) continue;
+      const timer = this.timers.get(item.id);
+      if (timer) clearInterval(timer);
+      this.timers.delete(item.id);
+      this.watchers.set(item.id, { record, run, ownerRun: false });
+      group.adopted(item);
+      this.runtimeDispatch?.syncWatcher(record, 'watchers.group');
+      this.armShared(record);
+    }
+    if (difference.remove.length > 0 || difference.adopt.length > 0) this.persistNow();
+    if (difference.seed.length > 0) {
+      void group.publish(difference.seed).catch((error: unknown) => {
+        logger.warn('This machine\'s watchers could not be written to the group\'s record; the next save tries again', { error: summarizeError(error) });
+      });
+    }
+  }
+
+  /**
+   * Arm a shared watcher on the machine holding the automation role, keeping
+   * the group's rhythm: its next run is one interval after the last run any
+   * machine started, so a new holder neither repeats that run nor waits a
+   * whole interval more.
+   */
+  private armShared(record: WatcherRecord): void {
+    const watcher = this.watchers.get(record.id);
+    if (!watcher || !this.runsHere(watcher) || this.timers.has(record.id)) return;
+    if (!LIVE_STATES.has(watcher.record.state) || watcher.record.kind === 'manual' || Number(watcher.record.intervalMs ?? 0) <= 0) return;
+    const intervalMs = watcher.record.intervalMs ?? 60_000;
+    const last = Math.max(this.groupOccurrences.get(record.id) ?? 0, watcher.record.lastHeartbeatAt ?? 0);
+    this.armInterval(record.id, intervalMs, last > 0 ? Math.max(0, last + intervalMs - now()) : 0);
+  }
+
+  /** The automation role went to another machine: stop polling every shared watcher here. */
+  private dropGroupTimers(): void {
+    for (const watcher of this.watchers.values()) {
+      if (!this.sharedWithGroup(watcher)) continue;
+      const timer = this.timers.get(watcher.record.id);
+      if (timer) clearInterval(timer);
+      this.timers.delete(watcher.record.id);
+    }
+  }
+
+  /**
+   * Arm a watcher's interval. With `firstDelayMs`, the first run comes after
+   * that delay and the interval counts from it (a new holder continuing the
+   * group's rhythm).
+   */
+  private armInterval(id: string, intervalMs: number, firstDelayMs?: number): void {
+    const tick = () => this.runOnTimer(id);
+    if (firstDelayMs === undefined) {
+      const timer = setInterval(tick, intervalMs);
+      timer.unref?.();
+      this.timers.set(id, timer);
+      return;
+    }
+    const first = setTimeout(() => {
+      if (this.timers.get(id) !== first) return;
+      const timer = setInterval(tick, intervalMs);
+      timer.unref?.();
+      this.timers.set(id, timer);
+      tick();
+    }, firstDelayMs);
+    first.unref?.();
+    this.timers.set(id, first);
+  }
+
+  /**
+   * One timed run. A shared watcher runs only where the automation role is
+   * held, and the run is written onto the group's record before it starts, so
+   * the next holder counts its interval from it.
+   */
+  private runOnTimer(id: string, failure = 'Watcher interval run failed'): void {
+    const watcher = this.watchers.get(id);
+    const group = this.group;
+    if (!watcher || !group || !this.sharedWithGroup(watcher) || !group.shared()) {
+      void this.runWatcher(id).catch((error: unknown) => {
+        logger.warn(failure, { watcherId: id, error: summarizeError(error) });
+      });
+      return;
+    }
+    if (!group.holdsRole() || this.inFlight.has(id)) return;
+    const startedAt = now();
+    this.groupOccurrences.set(id, startedAt);
+    void group.publish([this.groupItem(watcher.record)])
+      .then(() => this.runWatcher(id))
+      .catch((error: unknown) => {
+        logger.warn(failure, { watcherId: id, error: summarizeError(error) });
+      });
   }
 
   registerWatcher(input: RegisterWatcherInput): WatcherRecord {
@@ -485,16 +665,12 @@ export class WatcherRegistry {
     }
 
     if (started.kind !== 'manual' && Number(started.intervalMs ?? 0) > 0) {
-      const timer = setInterval(() => {
-        void this.runWatcher(id).catch((error: unknown) => {
-          logger.warn('Watcher interval run failed', { watcherId: id, error: summarizeError(error) });
-        });
-      }, started.intervalMs ?? 60_000);
-      timer.unref?.();
-      this.timers.set(id, timer);
-      void this.runWatcher(id).catch((error: unknown) => {
-        logger.warn('Watcher initial run failed', { watcherId: id, error: summarizeError(error) });
-      });
+      // In a group, a shared watcher is polled by the machine holding the
+      // automation role, which takes the start from the record.
+      const registered = this.watchers.get(id);
+      if (registered && !this.runsHere(registered)) return started;
+      this.armInterval(id, started.intervalMs ?? 60_000);
+      this.runOnTimer(id, 'Watcher initial run failed');
     }
     return started;
   }
@@ -566,12 +742,20 @@ export class WatcherRegistry {
     this.ensureLoaded();
     const watcher = this.watchers.get(id);
     if (!watcher) return false;
+    const shared = this.sharedWithGroup(watcher) && this.group?.shared() === true;
     this.stopWatcher(id, 'removed');
     const removed = this.watchers.delete(id);
     if (removed) {
       this.awaitingRegistration.delete(id);
+      this.groupOccurrences.delete(id);
       this.persistNow();
       this.runtimeDispatch?.removeWatcher(id, 'watchers.remove');
+      // Removed in the group, for good: no machine polls or lists it again.
+      if (shared) {
+        void this.group!.remove(id, 'watchers', 'removed').catch((error: unknown) => {
+          logger.warn('A watcher removal could not be written to the group\'s record', { watcherId: id, error: summarizeError(error) });
+        });
+      }
     }
     return removed;
   }
@@ -607,13 +791,9 @@ export class WatcherRegistry {
           logger.info('Restored watcher waits for its owner to register it again', { watcherId: normalized.id });
           continue;
         }
-        const timer = setInterval(() => {
-          void this.runWatcher(normalized.id).catch((error: unknown) => {
-            logger.warn('Watcher interval run failed', { watcherId: normalized.id, error: summarizeError(error) });
-          });
-        }, normalized.intervalMs ?? 60_000);
-        timer.unref?.();
-        this.timers.set(normalized.id, timer);
+        // In a group, a shared watcher waits for the automation role (armShared).
+        if (!this.runsHere(watcher)) continue;
+        this.armInterval(normalized.id, normalized.intervalMs ?? 60_000);
         this.catchUpAfterRestart(normalized, restoredAt, recoveryWindowMs);
       }
     }
@@ -623,6 +803,7 @@ export class WatcherRegistry {
       const watcher = this.watchers.get(id);
       if (watcher) this.runtimeDispatch?.syncWatcher(watcher.record, 'watchers.restore');
     }
+    this.takeFromGroup();
   }
 
   /**
@@ -892,6 +1073,7 @@ export class WatcherRegistry {
     this.saveFailure = outcome.ok
       ? undefined
       : { filePath: outcome.filePath, ...(outcome.code !== undefined ? { code: outcome.code } : {}), error: outcome.error?.message ?? 'the snapshot write failed' };
+    this.publishToGroup();
     return outcome;
   }
 

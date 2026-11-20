@@ -19,6 +19,7 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { deliveryChannelProblem, parseChannelDeliveryTarget } from '@goodvibes-jev/engine/platform/platform/channels';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeOperatorRpcError, getOperatorRpc, type OperatorRpcAvailable } from './operator-rpc.ts';
@@ -92,7 +93,7 @@ function parseAutomationTarget(raw: string): AutomationSessionTarget {
 
 /** Flags `/schedule add` takes with a value, and the switches it takes alone. Anything else is refused. */
 const VALUE_FLAGS = new Set(['--name', '--model', '--provider', '--template', '--tz', '--timezone', '--stagger', '--target',
-  '--reasoning', '--thinking', '--wake', '--fallback', '--fallbacks', '--tool', '--external-source']);
+  '--reasoning', '--thinking', '--wake', '--fallback', '--fallbacks', '--tool', '--external-source', '--deliver']);
 const SWITCH_FLAGS = new Set(['--allow-unsafe-external-content', '--light-context']);
 
 /** A routine's fields apart from its schedule, in the shape both owners take. */
@@ -141,6 +142,10 @@ function readAddOptions(words: readonly string[]): AddOptions {
   const template = values.get('--template');
   const thinking = values.get('--thinking');
   const externalContentSource = values.get('--external-source');
+  // Where each run's answer goes: a channel as configuration writes one. Without it, the owner inbox.
+  const deliver = values.get('--deliver')?.trim();
+  const deliverProblem = deliver ? deliveryChannelProblem(deliver) : undefined;
+  if (deliverProblem) throw new Error(`--deliver ${deliverProblem}. Write a channel such as telegram or slack:C123, or leave --deliver out to get the answer in the owner inbox.`);
   return {
     prompt: promptWords.join(' ').trim(),
     timezone: values.get('--tz'),
@@ -159,6 +164,7 @@ function readAddOptions(words: readonly string[]): AddOptions {
       ...(tools.length > 0 ? { toolAllowlist: tools } : {}),
       ...(switches.has('--allow-unsafe-external-content') ? { allowUnsafeExternalContent: true } : {}),
       ...(switches.has('--light-context') ? { lightContext: true } : {}),
+      ...(deliver ? { delivery: { mode: 'surface' as const, targets: [parseChannelDeliveryTarget(deliver)] } } : {}),
       enabled: true,
     },
   };
@@ -308,6 +314,7 @@ const USAGE = [
   '  /schedule list | remove <id> | enable <id> | disable <id> | run <id>',
   '  options: --name <name> --model <model> --provider <provider> --template <tmpl> --target main|current|isolated|pinned|background|session:<id>',
   '           --reasoning <level> --thinking <mode> --wake now|next-heartbeat --fallback <a,b> --tool <name> --external-source <kind>',
+  '           --deliver <channel, e.g. telegram or slack:C123> (without it, each answer goes to the owner inbox)',
   '           --allow-unsafe-external-content --light-context',
 ].join('\n');
 
@@ -424,6 +431,7 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
             `  name: ${job.name}`,
             `  schedule: ${formatSchedule(job.schedule)}`,
             `  next run: ${formatTime(job.nextRunAt)} (${owner.runsNote})`,
+            `  answer goes to: ${options.fields.delivery?.targets?.[0]?.surfaceKind ? `${options.fields.delivery.targets[0].surfaceKind}${options.fields.delivery.targets[0].address ? `:${options.fields.delivery.targets[0].address}` : ''}` : 'the owner inbox'}`,
           ].join('\n'));
           return;
         }

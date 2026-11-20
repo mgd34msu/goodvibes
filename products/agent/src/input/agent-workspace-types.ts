@@ -450,7 +450,8 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly reasoningEffort: string;
   readonly helperEnabled: boolean;
   readonly toolLlmEnabled: boolean;
-  readonly providerFailureHints: boolean;
+  /** `provider.fallbackModels`, joined, or `none`. */
+  readonly providerFallbackOrder: string;
   readonly cacheEnabled: boolean;
   readonly cacheStableTtl: string;
   readonly cacheMonitorHitRate: boolean;

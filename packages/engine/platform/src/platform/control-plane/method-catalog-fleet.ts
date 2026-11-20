@@ -20,6 +20,7 @@
  * position, not in reasoning).
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { BOOLEAN_SCHEMA, EMPTY_OBJECT_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, methodDescriptor, objectSchema } from './method-catalog-shared.js';
 import {
   CHECKPOINTS_CREATE_INPUT_SCHEMA,
@@ -127,6 +128,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.archive',
+    repeat: 'safe',
     title: 'Archive Finished Fleet Subtree',
     description: 'Move one FINISHED process subtree (root id + all descendants, every node terminal) out of the live fleet view into the session archive. Honest refusal (archived:false + reason) for an unknown id or a subtree with live members. Archived nodes stay inspectable via fleet.archived.list.',
     category: 'fleet',
@@ -137,6 +139,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.unarchive',
+    repeat: 'safe',
     title: 'Restore Archived Fleet Subtree',
     description: 'Return an archived subtree to the live fleet view. Returns the number of nodes restored (0 when nothing under the id was archived).',
     category: 'fleet',
@@ -147,6 +150,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.archiveFinished',
+    repeat: 'safe',
     title: 'Archive All Finished Fleet Subtrees',
     description: 'Archive every root subtree whose nodes are all terminal (done/failed/killed/interrupted). A finished member of a still-running swarm stays with its parent. Returns the number of nodes archived.',
     category: 'fleet',
@@ -177,6 +181,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.attempts.pick',
+    repeat: 'safe',
     title: 'Pick a Best-of-N Winner',
     description: 'Accept one attempt as the winner of its best-of-N group. Without `confirm: true` nothing is merged or cleaned: the call returns `applied: false` and `requiresConfirm: true` with the group\'s candidates as a preview, so check `applied` before reporting a winner as picked. With `confirm: true` its worktree branch is merged through the existing sequential integration lane and every losing sibling\'s worktree is cleaned. The winner must be a held (passed) candidate of a group whose siblings are all terminal, an unknown/not-ready group or an invalid winner is an honest 409, never a partial merge.',
     category: 'fleet',
@@ -188,6 +193,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.attempts.judge',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Propose a Best-of-N Winner (Model Judgment)',
     description: 'Run the optional judge model over a best-of-N group\'s candidates (a paid model call that also records the proposal on the group) and PROPOSE a winner, with reasons. The output is explicitly model judgment (scoredBy:"model"), it never auto-picks unless the source item opted into auto-accept; a human still confirms via fleet.attempts.pick. An engine with no judge configured returns an honest 501.',
     category: 'fleet',
@@ -198,6 +204,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.observed.steer',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Steer an Observed Foreign Agent',
     description: 'Type text into an externally-launched coding-agent session goodvibes only OBSERVES (a Claude Code / Codex process it did not spawn or host), over the session\'s own control channel (a tmux pane). That agent runs with its own permissions, so every steer is first put to the owner through the approval broker, naming the session, its directory, the exact text and whether it is submitted; "always" for that session holds until the daemon stops. The text is typed only; it is submitted with Enter only when submit is true. queued:false with an honest reason when the owner declines, the row exposes no channel, or a send fails; nothing was sent then. STOP is never offered on an observed row.',
@@ -220,6 +227,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.conflicts.resolve',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Spawn a Conflict-Resolution Session',
     description: 'The conflict row\'s one action: spawn a resolution session INSIDE the kept worktree, seeded with the structured conflict list and tree path (the same seeded-session machinery as the CI fix flow), and stamp the REAL session id back onto the item. When the resolution session ends with success, the merge is retried automatically (also after a daemon restart) and a clean merge reclaims the kept tree; otherwise fleet.conflicts.retry retries it. An item with no unresolved conflict is an honest 409.',
     category: 'fleet',
@@ -230,6 +238,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'fleet.conflicts.retry',
+    repeat: 'unsafe',
     title: 'Retry a Conflicted Merge',
     description: 'Attempt the integration merge of a conflicted item again, for a conflict resolved by hand in the kept worktree or by a resolution session that ended without a clean re-merge. Answers outcome merged (the kept tree is reclaimed), conflict (still conflicted; the row stays) or not-conflicted (nothing to retry). Refused with 409 while that item\'s resolution session is still running.',
     category: 'fleet',
@@ -253,6 +262,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'checkpoints.create',
+    repeat: 'safe',
     title: 'Create Workspace Checkpoint',
     description: 'Create a new workspace checkpoint. Returns checkpoint:null, noop:true (not an error) when the workspace tree is identical to the most recent checkpoint, no commit, ref, or manifest entry is created in that case.',
     category: 'checkpoints',
@@ -273,6 +283,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'checkpoints.restore',
+    repeat: 'safe',
     title: 'Restore Workspace Checkpoint',
     description: 'DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-backed workspace rewrite). Refuses to run unconfirmed: pass confirm:true to execute immediately, OR a confirmToken from checkpoints.restorePreview. An unconfirmed call returns a structured refusal (result:null, refused:true, refusal naming both options), not an error. An unknown/gc\'d checkpoint id (once confirmed) is an honest 404, not a silent no-op.',
     category: 'checkpoints',
@@ -304,6 +315,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'checkpoints.revertHunk',
+    repeat: 'safe',
     title: 'Revert a Single Hunk',
     description: 'DESTRUCTIVE: reverse-apply ONE unified-diff hunk to its file in the live working tree, undoing exactly that hunk and nothing else. The hunk must still apply cleanly in reverse, a stale/drifted hunk is an honest 409 conflict, never a partial write. Refuses to run unconfirmed: pass confirm:true to execute immediately, OR a confirmToken from checkpoints.revertHunkPreview. An unconfirmed call returns a structured refusal (receipt:null, refused:true, refusal naming both options), not an error. Snapshots the whole tree (a manual checkpoint) before writing, so the revert is itself reversible; returns a receipt whose undo block carries that checkpoint id. Emits a HUNK_REVERTED receipt event.',
     category: 'checkpoints',

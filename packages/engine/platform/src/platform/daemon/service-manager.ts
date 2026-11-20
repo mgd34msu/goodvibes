@@ -7,6 +7,9 @@ import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 import { SERVICE_MANAGEMENT_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
 import { currentProcessSignals, resolveDaemonExecInvocation } from './daemon-exec-invocation.js';
+import { buildManagedDaemonServiceDefinition } from './managed-service-definition.js';
+export { MANAGED_SERVICE_DESCRIPTION } from './managed-service-definition.js';
+import { resolveGoodVibesHomeOwnership } from '../config/goodvibes-home.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export type ManagedServicePlatform = 'systemd' | 'launchd' | 'windows' | 'manual';
@@ -34,7 +37,7 @@ export interface ManagedServiceStatus {
   readonly commandPreview: string;
   readonly contents?: string | undefined;
   readonly suggestedCommands: readonly string[];
-  readonly lastAction?: 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status' | undefined;
+  readonly lastAction?: 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status' | 'autostart' | undefined;
   readonly actionError?: string | undefined;
   /**
    * The manager accepted an action that ends the daemon giving this answer
@@ -152,10 +155,22 @@ export interface ManagedServiceManagerOptions extends ManagedServicePaths {
   readonly actionRunner?: ((command: string, args: readonly string[]) => ManagedServiceActionResult) | undefined;
   /** A retained caller restriction checked before native publication and platform actions. */
   readonly assertCurrent?: (() => void) | undefined;
-  readonly binaryBaseName?: string | undefined;
+  /**
+   * What the service launches: the daemon executable and the homes it runs
+   * with. Absent: this process's own executable and the homes its environment
+   * names. Either way the definition comes from `buildManagedDaemonServiceDefinition`.
+   */
+  readonly launch?: ManagedDaemonLaunch | undefined;
   readonly defaultServiceName?: string | undefined;
-  readonly defaultServiceDescription?: string | undefined;
   readonly featureFlags?: FeatureFlagReader | undefined;
+}
+
+/** The executable and homes a managed daemon service runs with. */
+export interface ManagedDaemonLaunch {
+  /** The daemon executable; absent means this process's own. */
+  readonly command?: string | undefined;
+  readonly homeDirectory: string;
+  readonly daemonHomeDirectory?: string | undefined;
 }
 
 /**
@@ -205,29 +220,30 @@ export function detectPlatform(platform: string, hostPlatform: string = process.
 function buildDefaultDefinition(
   configManager: ConfigManager,
   workingDirectory: string,
-  options: Pick<ManagedServiceManagerOptions, 'binaryBaseName' | 'defaultServiceName' | 'defaultServiceDescription'>,
+  unitHomeDirectory: string,
+  options: Pick<ManagedServiceManagerOptions, 'launch' | 'defaultServiceName'>,
 ): ManagedServiceDefinition {
-  const serviceName = resolveServiceName(configManager, options.defaultServiceName);
-  // ExecStart is derived from how THIS process was actually started, a compiled
-  // binary launches itself with its real argv; only a source/dev run yields the
-  // `run <cli.ts>` shape (and that path is never self-promoted, see
-  // facade-lifecycle.promoteToServiceAtBoot). This replaces a dist/-existence
-  // heuristic that wrote a dev command line for a compiled binary running
-  // elsewhere.
-  const invocation = resolveDaemonExecInvocation(currentProcessSignals(), workingDirectory);
-  return {
-    name: serviceName,
-    description: options.defaultServiceDescription?.trim() || `${serviceName} daemon host`,
+  // The executable is this process's own when the caller named none: a
+  // compiled binary is itself; a source run yields the `run <cli.ts>` shape,
+  // which boot promotion never installs (facade-lifecycle.promoteToServiceAtBoot).
+  // Only the executable is taken from how this process started, never its
+  // arguments: the daemon reads its endpoint and settings at every start.
+  const invocation = options.launch?.command === undefined
+    ? resolveDaemonExecInvocation(currentProcessSignals(), workingDirectory)
+    : undefined;
+  const homes = options.launch ?? resolveGoodVibesHomeOwnership();
+  const definition = buildManagedDaemonServiceDefinition({
+    name: resolveServiceName(configManager, options.defaultServiceName),
+    command: options.launch?.command ?? invocation!.command,
+    homeDirectory: homes.homeDirectory,
+    daemonHomeDirectory: homes.daemonHomeDirectory,
+    unitHomeDirectory,
     workingDirectory,
-    command: invocation.command,
-    args: invocation.args,
-    env: {
-      GOODVIBES_DAEMON_TOKEN: process.env.GOODVIBES_DAEMON_TOKEN ?? '',
-      GOODVIBES_HTTP_TOKEN: process.env.GOODVIBES_HTTP_TOKEN ?? '',
-      NODE_ENV: process.env.NODE_ENV ?? 'production',
-    },
-    restartOnFailure: Boolean(configManager.get('service.restartOnFailure')),
-  };
+    restartOnFailure: configManager.get('service.restartOnFailure') !== false,
+  });
+  return invocation !== undefined && !invocation.fromCompiledBinary
+    ? { ...definition, args: [...invocation.args, ...definition.args] }
+    : definition;
 }
 
 function resolveServiceName(configManager: ConfigManager, defaultServiceName?: string): string {
@@ -378,7 +394,13 @@ function xmlText(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
 }
 
-function renderLaunchdPlist(definition: ManagedServiceDefinition): string {
+/**
+ * The LaunchAgent for the daemon. `startAtLogin` (service.autostart) decides
+ * RunAtLoad; with it off, a restart policy is kept as "restart after a
+ * failure" only, because an unconditional KeepAlive would start the job at
+ * login all the same.
+ */
+function renderLaunchdPlist(definition: ManagedServiceDefinition, startAtLogin: boolean): string {
   const envLines = Object.entries(definition.env)
     .filter(([, value]) => value.length > 0)
     .map(([key, value]) => `    <key>${xmlText(key)}</key>\n    <string>${xmlText(value)}</string>`)
@@ -402,9 +424,11 @@ function renderLaunchdPlist(definition: ManagedServiceDefinition): string {
     '  <key>WorkingDirectory</key>',
     `  <string>${xmlText(definition.workingDirectory)}</string>`,
     '  <key>RunAtLoad</key>',
-    '  <true/>',
+    startAtLogin ? '  <true/>' : '  <false/>',
     '  <key>KeepAlive</key>',
-    definition.restartOnFailure ? '  <true/>' : '  <false/>',
+    !definition.restartOnFailure ? '  <false/>'
+      : startAtLogin ? '  <true/>'
+        : '  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>',
     ...(envLines ? ['  <key>EnvironmentVariables</key>', '  <dict>', envLines, '  </dict>'] : []),
     '</dict>',
     '</plist>',
@@ -424,8 +448,8 @@ function windowsCreateArgs(definition: ManagedServiceDefinition): string[] {
 }
 
 /**
- * The definition file carries the daemon's tokens, so status output shows the
- * variable names but never their values.
+ * A GoodVibes definition carries no secret, but one the owner edited may: status
+ * output shows each environment variable's name, never its value.
  */
 function redactDefinitionSecrets(contents: string): string {
   let inLaunchdEnvironment = false;
@@ -506,9 +530,8 @@ export class PlatformServiceManager {
   private readonly stateDirectory: string;
   /** Records left in a legacy location are moved once per manager. */
   private legacyStateAdopted = false;
-  private readonly binaryBaseName?: string | undefined;
+  private readonly launch?: ManagedDaemonLaunch | undefined;
   private readonly defaultServiceName?: string | undefined;
-  private readonly defaultServiceDescription?: string | undefined;
   private readonly featureFlags: FeatureFlagReader;
   private readonly processControl: ManagedServiceProcessControl;
 
@@ -520,9 +543,8 @@ export class PlatformServiceManager {
     this.actionRunner = options.actionRunner;
     this.currentRestriction = options.assertCurrent;
     this.stateDirectory = serviceStateDirectory(this.homeDirectory);
-    this.binaryBaseName = options.binaryBaseName;
+    this.launch = options.launch;
     this.defaultServiceName = options.defaultServiceName;
-    this.defaultServiceDescription = options.defaultServiceDescription;
     this.featureFlags = options.featureFlags ?? null;
     this.processControl = options.processControl ?? {};
   }
@@ -533,6 +555,11 @@ export class PlatformServiceManager {
 
   private isEnabled(): boolean {
     return isFeatureGateEnabled(this.featureFlags, SERVICE_MANAGEMENT_FEATURE_FLAG);
+  }
+
+  /** service.autostart: whether the service is to start on its own at login. */
+  private startsAtLogin(): boolean {
+    return this.configManager.get('service.autostart') === true;
   }
 
   private requireEnabled(operation: string): void {
@@ -598,7 +625,7 @@ export class PlatformServiceManager {
       const definition = this.resolveDefinition();
       const candidates = platform === 'systemd'
         ? [renderSystemdUnit(definition), renderSystemdUnit(definition, 254)]
-        : [platform === 'launchd' ? renderLaunchdPlist(definition)
+        : [platform === 'launchd' ? renderLaunchdPlist(definition, this.startsAtLogin())
           : platform === 'windows' ? renderWindowsCommand(definition)
             : [definition.command, ...definition.args].join(' ')];
       return candidates.some((contents) => actual === `${contents}\n`);
@@ -645,6 +672,52 @@ export class PlatformServiceManager {
 
   restart(): ManagedServiceStatus {
     return this.drive(this.actionFlow('restart', false));
+  }
+
+  /**
+   * Makes the service start on its own at login, or not, as service.autostart
+   * says now: the one place the setting acts, called by the daemon whenever the
+   * value changes, however it was set. On: installs the service when it is not
+   * (systemd enables the unit, a LaunchAgent gets RunAtLoad). Off: the unit is
+   * disabled, or the LaunchAgent rewritten without RunAtLoad; the service stays
+   * installed and a running daemon keeps running. A Windows logon task always
+   * starts at login while installed, which the answer says. Never waits.
+   */
+  applyAutostart(): Promise<ManagedServiceStatus> {
+    return this.driveAsync(this.autostartFlow());
+  }
+
+  private *autostartFlow(): ServiceFlow<ManagedServiceStatus> {
+    this.assertCurrent();
+    this.requireEnabled('change whether the service starts at login');
+    const on = this.startsAtLogin();
+    let status = yield* this.statusFlow();
+    if (status.platform === 'manual') {
+      return { ...status, lastAction: 'autostart', ...(on ? { actionError: 'the manual platform never starts the daemon at login; set service.platform to systemd, launchd or windows' } : {}) };
+    }
+    let lingerNote: string | undefined;
+    if (on && !status.installed) {
+      const installed = yield* this.installFlow();
+      if (installed.actionError) return { ...installed, lastAction: 'autostart' };
+      lingerNote = installed.lingerNote;
+      status = installed;
+    }
+    let actionError: string | undefined;
+    if (status.installed && status.platform === 'systemd') {
+      const result = yield { run: ['systemctl', '--user', on ? 'enable' : 'disable', `${status.serviceName}.service`] };
+      if ((result.status ?? 1) !== 0) actionError = `systemctl --user ${on ? 'enable' : 'disable'} failed: ${commandFailureText(result)}`;
+    } else if (status.installed && status.platform === 'launchd') {
+      // The LaunchAgent's RunAtLoad is written from the setting; a running job keeps running.
+      actionError = (yield* this.installFlow(false)).actionError ?? undefined;
+    } else if (status.installed && status.platform === 'windows' && !on) {
+      actionError = 'a Windows logon task starts the daemon at login while it is installed; goodvibes service uninstall removes it';
+    }
+    return {
+      ...(yield* this.statusFlow()),
+      lastAction: 'autostart',
+      ...(actionError === undefined ? {} : { actionError }),
+      ...(lingerNote ? { lingerNote } : {}),
+    };
   }
 
   /** `status()` without blocking the caller's thread: the daemon's service read. */
@@ -697,7 +770,10 @@ export class PlatformServiceManager {
       serviceName,
       path,
       installed,
-      autostart: Boolean(this.configManager.get('service.autostart')),
+      // systemd's enablement and the LaunchAgent's RunAtLoad follow service.autostart
+      // (applyAutostart, install and start keep them so); a logon task starts at
+      // login while installed; the manual platform never does.
+      autostart: platform === 'manual' ? false : platform === 'windows' ? installed : installed && this.startsAtLogin(),
       running,
       ...(pid !== undefined && running ? { pid } : {}),
       logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.stateDirectory),
@@ -719,15 +795,14 @@ export class PlatformServiceManager {
     const contents = platform === 'systemd'
       ? renderSystemdUnit(definition, yield* this.systemdMajorVersionFlow())
       : platform === 'launchd'
-        ? renderLaunchdPlist(definition)
+        ? renderLaunchdPlist(definition, this.startsAtLogin())
         : platform === 'windows'
           ? renderWindowsCommand(definition)
           : [definition.command, ...definition.args].join(' ');
     this.assertCurrent();
     mkdirSync(dirname(path), { recursive: true });
     this.assertCurrent();
-    // The definition embeds the daemon's tokens: owner-only, and tightened
-    // again because an older install left it world-readable.
+    // Owner-only: the definition names this user's homes and executable.
     writeFileSync(path, `${contents}\n`, { encoding: 'utf-8', mode: 0o600 });
     try { chmodSync(path, 0o600); } catch { /* a platform without POSIX modes */ }
     // Without the reload, systemd keeps acting on the previously loaded unit.
@@ -893,10 +968,9 @@ export class PlatformServiceManager {
   }
 
   private resolveDefinition(): ManagedServiceDefinition {
-    return this.definitionOverride ?? buildDefaultDefinition(this.configManager, this.workingDirectory, {
-      binaryBaseName: this.binaryBaseName,
+    return this.definitionOverride ?? buildDefaultDefinition(this.configManager, this.workingDirectory, this.homeDirectory, {
+      launch: this.launch,
       defaultServiceName: this.defaultServiceName,
-      defaultServiceDescription: this.defaultServiceDescription,
     });
   }
 
@@ -1069,7 +1143,10 @@ export class PlatformServiceManager {
     }
     // Each step is an argv plus a bestEffort flag.
     const steps: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = platform === 'systemd'
-      ? [{ argv: ['systemctl', '--user', action === 'start' ? 'enable' : action, ...(action === 'start' ? ['--now'] : []), `${serviceName}.service`] }]
+      // Starting enables the unit at login only when service.autostart says so.
+      ? [{ argv: action === 'start' && this.startsAtLogin()
+        ? ['systemctl', '--user', 'enable', '--now', `${serviceName}.service`]
+        : ['systemctl', '--user', action, `${serviceName}.service`] }]
       : platform === 'windows'
         ? action === 'restart'
           ? [
@@ -1130,7 +1207,11 @@ export class PlatformServiceManager {
     }
     if (action === 'stop') return undefined;
     const loaded = yield { run: ['launchctl', 'bootstrap', launchdDomain(), path] };
-    return (loaded.status ?? 1) === 0 ? undefined : commandFailureText(loaded);
+    if ((loaded.status ?? 1) !== 0) return commandFailureText(loaded);
+    // Without RunAtLoad (service.autostart off) loading the job does not run it.
+    if (this.startsAtLogin()) return undefined;
+    const kicked = yield { run: ['launchctl', 'kickstart', target] };
+    return (kicked.status ?? 1) === 0 ? undefined : commandFailureText(kicked);
   }
 
   /**

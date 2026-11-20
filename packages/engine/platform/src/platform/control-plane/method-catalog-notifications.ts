@@ -12,6 +12,7 @@ import {
   objectSchema,
   type GatewayMethodDescriptor,
 } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { enumSchema } from './operator-contract-schemas-shared.js';
 
 const DEAD_LETTER_SCHEMA = objectSchema({
@@ -64,6 +65,7 @@ export const builtinGatewayNotificationMethodDescriptors: readonly GatewayMethod
   }),
   methodDescriptor({
     id: 'notifications.deadLetters.replay',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Resend Failed Notifications',
     description: 'Send failed notifications again: those named in `ids`, or all of them when `ids` is absent. Each is queued with a fresh retry budget; the result per id is delivered, retrying (still queued), dead_letter (failed again and back in the list) or not-found. A webhook notification is not sent to a URL that was removed since it failed.',
     category: 'deliveries',

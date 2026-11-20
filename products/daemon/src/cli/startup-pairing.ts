@@ -22,7 +22,9 @@ export function renderDaemonStartupPairing(
       return 'Device pairing link unavailable: the configured WebUI bundle has no readable app shell.';
     }
   }
-  const { origin, alternateOrigin } = resolvePairingWebOrigin(config, undefined, bound);
+  const resolved = resolvePairingWebOrigin(config, undefined, bound);
+  if (resolved === null) return 'Device pairing link unavailable: enable a WebUI bundle or configure its public URL.';
+  const { origin, alternateOrigin } = resolved;
   try {
     const parsed = new URL(origin);
     if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password

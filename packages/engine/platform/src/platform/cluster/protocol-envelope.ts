@@ -369,7 +369,7 @@ export function decodeEnvelope(raw: string, keyring: ClusterKeyring): EnvelopeDe
  * an advertisement, and is treated as one: it can populate a list the operator
  * chooses from, and it can never cause this node to act.
  */
-export function peekEnvelope(raw: string): { groupId: string; type: string; body: Record<string, unknown> } | null {
+export function peekEnvelope(raw: string): { groupId: string; type: string; nodeId: string | null; body: Record<string, unknown> } | null {
   if (raw.length > MAX_ENVELOPE_BYTES) return null;
   let parsed: unknown;
   try {
@@ -385,5 +385,6 @@ export function peekEnvelope(raw: string): { groupId: string; type: string; body
   const body = candidate['body'];
   if (typeof groupId !== 'string' || typeof type !== 'string') return null;
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
-  return { groupId, type, body: body as Record<string, unknown> };
+  const nodeId = candidate['nodeId'];
+  return { groupId, type, nodeId: typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= 128 ? nodeId : null, body: body as Record<string, unknown> };
 }

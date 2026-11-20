@@ -47,6 +47,7 @@ import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
 import { getTurnAnchors, type TurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createConversationRewindPort, type ConversationRewindPort } from '../../runtime/conversation-rewind-port.ts';
 import { shortId } from './checkpoint-runtime.ts';
+import { resolveCheckpointRef, restoreCheckpointFiles } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 
 export type RewindScope = PlatformRewindScope;
 const REWIND_SCOPES: readonly RewindScope[] = ['files', 'conversation', 'both'];
@@ -467,21 +468,6 @@ function renderCheckpointFallbackList(checkpoints: readonly WorkspaceCheckpoint[
   return lines.join('\n');
 }
 
-/** Resolve a user ref ('1'..'N' newest-first, or a checkpoint id / id prefix) to a checkpoint. */
-function resolveCheckpointRef(checkpoints: readonly WorkspaceCheckpoint[], ref: string): WorkspaceCheckpoint | { error: string } {
-  if (/^\d+$/.test(ref)) {
-    const idx = Number(ref) - 1;
-    const cp = checkpoints[idx];
-    return cp ? cp : { error: `No checkpoint #${ref}. Run /rewind to list checkpoints (1–${checkpoints.length}).` };
-  }
-  const exact = checkpoints.find((cp) => cp.id === ref);
-  if (exact) return exact;
-  const prefix = checkpoints.filter((cp) => cp.id.startsWith(ref) || shortId(cp.id).startsWith(ref));
-  if (prefix.length === 1) return prefix[0]!;
-  if (prefix.length > 1) return { error: `Checkpoint ref "${ref}" is ambiguous (${prefix.length} matches). Use the list number instead.` };
-  return { error: `Unknown checkpoint ref "${ref}". Run /rewind to list checkpoints.` };
-}
-
 /**
  * Handles bare `/rewind` and `/rewind <ref>` when this run has recorded no
  * turn anchors at all. Returns true if it handled the invocation (always,
@@ -510,67 +496,16 @@ async function handleCheckpointOnlyRewind(args: string[], ctx: CommandContext): 
     return;
   }
 
-  // A restore under a running turn would interleave with its file writes.
-  if (ctx.isGenerating?.()) {
-    ctx.print(BUSY_MESSAGE('restoring the checkpoint'));
-    return;
-  }
-  const resolved = resolveCheckpointRef(checkpoints, args[0]!);
+  const resolved = resolveCheckpointRef(checkpoints, args[0]!, '/rewind');
   if ('error' in resolved) {
     ctx.print(resolved.error);
     return;
   }
-  const checkpoint = resolved;
-
-  let diff: string | undefined;
-  let note: string | undefined;
-  try {
-    const result = await mgr.diff(checkpoint.id);
-    if (result.unifiedDiff.trim()) diff = result.unifiedDiff;
-    else note = 'The working tree already matches this checkpoint.';
-  } catch {
-    note = 'Could not load the checkpoint diff.';
-  }
-  if (!ctx.previewChanges) {
-    ctx.print('Previewing a restore needs the Changes view, which is not available in this session.');
-    return;
-  }
-
-  ctx.print(`Previewing checkpoint restore: "${checkpoint.label}" (files only; no conversation state this run). Enter or y restores, n or Esc cancels.`);
-  ctx.renderRequest();
-  const confirmed = await ctx.previewChanges({
-    title: checkpoint.label,
-    diff,
-    note,
-    question: { text: `Restore "${checkpoint.label}"? Files only: no conversation state this run.`, confirmLabel: 'Restore', tone: 'warning' },
+  // The same preview, question and restore as /checkpoints restore.
+  await restoreCheckpointFiles(ctx, mgr, resolved, {
+    yes: false,
+    record: (text) => ctx.session.conversationManager.addTypedSystemMessage(text, 'operational'),
   });
-  if (!confirmed) {
-    ctx.print('Restore cancelled: nothing changed.');
-    ctx.renderRequest();
-    return;
-  }
-  // The preview waits on the owner; a turn may have started meanwhile.
-  if (ctx.isGenerating?.()) {
-    ctx.print(BUSY_MESSAGE('restoring the checkpoint'));
-    return;
-  }
-  try {
-    const restored = await mgr.restore(checkpoint.id, { safetyCheckpoint: true });
-    const failed = restored.failedPaths ?? [];
-    if (failed.length > 0) {
-      const names = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
-      ctx.print(`Checkpoint only partly restored (${failed.length} path${failed.length === 1 ? '' : 's'} failed): ${names}. Files only; conversation state is unchanged.`);
-      ctx.renderRequest();
-      return;
-    }
-    ctx.session.conversationManager.addTypedSystemMessage(
-      `[Rewind] Restored files from checkpoint ${shortId(checkpoint.id)} ("${checkpoint.label}"). Files only: no turn anchors exist this run, so conversation state is unchanged.`,
-      'operational',
-    );
-  } catch (err) {
-    ctx.print(`Checkpoint restore failed: ${summarizeError(err)}`);
-  }
-  ctx.renderRequest();
 }
 
 // ---------------------------------------------------------------------------

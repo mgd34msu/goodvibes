@@ -26,6 +26,7 @@
  * (method-catalog-route-reconcile.ts), so it is deliberately omitted.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -82,6 +83,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   }),
   methodDescriptor({
     id: 'push.subscriptions.create',
+    repeat: 'safe',
     title: 'Register Web Push Subscription',
     description: 'Store a browser Push subscription (endpoint capability URL + p256dh/auth keys) for the authenticated operator so the daemon can deliver notifications to that device. When a stable deviceId is supplied the record reconciles on that device identity, a browser whose push endpoint rotated re-registers the same deviceId with a new endpoint and heals the one record in place rather than piling up a stale duplicate; without a deviceId it reconciles on the raw endpoint (legacy). The stored endpoint and keys are never returned over the wire; the response is the redacted subscription view.',
     category: 'push',
@@ -96,6 +98,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   }),
   methodDescriptor({
     id: 'push.subscriptions.reconcile',
+    repeat: 'safe',
     title: 'Reconcile Web Push Subscription',
     description: 'Reconcile-on-open: the client presents its device identity (deviceId) and its CURRENT endpoint + p256dh/auth keys, and the daemon heals the record for that device in place, updating a stale endpoint the daemon had been holding, then reports what drifted (created / endpoint-updated / keys-updated / unchanged) so the client learns whether the daemon was out of date. A live reconcile also clears the bounded-retry failure counter. The stored endpoint and keys are never returned; the response is the redacted subscription view plus the drift discriminant.',
     category: 'push',
@@ -125,8 +128,9 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   }),
   methodDescriptor({
     id: 'push.subscriptions.delete',
+    repeat: 'safe',
     title: 'Delete Web Push Subscription',
-    description: 'Permanently remove one of the authenticated operator\'s push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.',
+    description: 'Permanently remove one of the authenticated operator\'s push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.',
     category: 'push',
     scopes: ['write:push'],
     transport: ['ws'],
@@ -138,6 +142,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   }),
   methodDescriptor({
     id: 'push.subscriptions.verify',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Send Test Web Push',
     description: 'Send a live test notification to one of the authenticated operator\'s subscriptions and return an honest delivery receipt (delivered / pruned / failed). A subscription whose endpoint reports 404/410 gone, or that the push service has now rejected push.subscriptions.failureThreshold times in a row, is pruned as part of the attempt and the receipt says so; a network error, timeout, 408, 413, 429 or 5xx is reported as failed and never counts against the device. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND.',
     category: 'push',

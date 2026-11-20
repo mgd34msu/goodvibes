@@ -1,6 +1,7 @@
 import type { AutomationRunTelemetry } from '../../automation/runs.js';
 import type { PersistentStore } from '../../state/persistent-store.js';
 import type { StoreWriteQueue } from '../../state/store-write-queue.js';
+import type { AuthorityRecordFile } from '../../cluster/authority-record-file.js';
 
 export type DistributedPeerKind = 'node' | 'device';
 export type DistributedPairRequestStatus = 'pending' | 'approved' | 'verified' | 'rejected' | 'expired';
@@ -229,6 +230,12 @@ export interface DistributedWorkAdmissionOwner extends DistributedWorkAdmission 
 
 export interface DistributedRuntimeManagerState {
   readonly store: PersistentStore<DistributedRuntimeSnapshotStore>;
+  /**
+   * The authority record peer tokens live on (cluster/authority-record.ts):
+   * a peer token issued, rotated or revoked on one machine of the group is
+   * accepted, or refused, on every one. Null: this store answers alone.
+   */
+  readonly authority: AuthorityRecordFile | null;
   /**
    * Whole-store writes, one at a time, in call order. See StoreWriteQueue.
    *

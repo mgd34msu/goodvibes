@@ -116,6 +116,34 @@ export class DaemonConfigRejectedError extends Error {
   }
 }
 
+/**
+ * Thrown when the daemon did not apply the write but put it to the owner: the
+ * change loosens a security, permission, judgment or payment setting and this
+ * process holds a token minted for automation. Nothing changed; it is applied
+ * when the owner approves approval `approvalId` from his own app.
+ */
+export class DaemonConfigOwnerApprovalPendingError extends Error {
+  readonly code = 'OWNER_APPROVAL_PENDING';
+  readonly key: string;
+  readonly approvalId: string;
+  constructor(key: string, approvalId: string) {
+    super(`Changing ${key} is waiting for the owner's approval (approval ${approvalId}): it loosens a setting only the owner changes, and this app's credential is a token minted for automation. Nothing has changed yet; it is applied when he approves it from his own app.`);
+    this.name = 'DaemonConfigOwnerApprovalPendingError';
+    this.key = key;
+    this.approvalId = approvalId;
+  }
+}
+
+/** The approval id of a daemon answer that put the write to the owner, or undefined. */
+function pendingOwnerApproval(text: string): string | undefined {
+  try {
+    const parsed = JSON.parse(text) as { readonly code?: unknown; readonly approvalId?: unknown };
+    return parsed.code === 'OWNER_APPROVAL_PENDING' && typeof parsed.approvalId === 'string' ? parsed.approvalId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface DaemonConfigRouterDeps {
   /** True when this process hosts the daemon (so local IS the daemon store). */
   readonly hostsDaemon: boolean;
@@ -545,7 +573,12 @@ export async function applyDaemonConfigWrites(
     const text = await response.text().catch(() => '');
     throw new DaemonConfigRejectedError(keys, response.status, text.slice(0, 400) || response.statusText);
   }
-  await response.body?.cancel().catch(() => undefined);
+  if (response.status === 202) {
+    const approvalId = pendingOwnerApproval(await response.text().catch(() => ''));
+    if (approvalId !== undefined) throw new DaemonConfigOwnerApprovalPendingError(keys, approvalId);
+  } else {
+    await response.body?.cancel().catch(() => undefined);
+  }
   return { appliedBy: 'daemon', persistedTo: route.endpoint.baseUrl, reason: route.reason };
 }
 
@@ -598,6 +631,8 @@ async function postDaemonConfig(
   if (!response.ok) {
     throw new DaemonConfigRejectedError(key, response.status, text.slice(0, 400) || response.statusText);
   }
+  const approvalId = response.status === 202 ? pendingOwnerApproval(text) : undefined;
+  if (approvalId !== undefined) throw new DaemonConfigOwnerApprovalPendingError(key, approvalId);
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>;
     return {

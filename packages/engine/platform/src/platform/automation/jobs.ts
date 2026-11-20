@@ -34,6 +34,12 @@ export interface AutomationJob extends AutomationEntityBase {
   readonly nextRunAt?: number | undefined;
   readonly lastRunAt?: number | undefined;
   readonly lastRunId?: string | undefined;
+  /**
+   * In a group (cluster/group-work.ts): the planned time of the last scheduled
+   * occurrence a machine started, written before the run starts. Absent
+   * outside a group.
+   */
+  readonly lastOccurrenceAt?: number | undefined;
   readonly runCount: number;
   readonly successCount: number;
   readonly failureCount: number;

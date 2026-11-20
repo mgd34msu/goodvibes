@@ -106,7 +106,7 @@ let client: RelayClient | null = null;
 let clientForPairingKey: string | null = null;
 
 function pairingKey(pairing: RelayPairingPayload): string {
-  return `${pairing.relayUrl}|${pairing.rid}|${pairing.daemonPublicKey}`;
+  return `${pairing.relayUrl}|${pairing.rid}|${pairing.daemonPublicKey}|${pairing.code}`;
 }
 
 /** Get (creating if needed) the relay client for the currently-stored pairing, or null if none is stored. */

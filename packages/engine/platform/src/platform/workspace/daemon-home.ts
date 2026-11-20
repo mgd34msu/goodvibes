@@ -11,8 +11,10 @@
  *   - daemon-settings.json
  * Local users (auth-users.json, auth-bootstrap.txt), device tokens
  * (control-plane/pairing-tokens.json) and the daemon's stores are NOT here: they
- * stay under `<tree root>/.goodvibes/tui/`, so moving the daemon home alone does
- * not move them.
+ * live under `<tree root>/.goodvibes/tui/`. The daemon program makes a moved
+ * daemon home its tree root too when `GOODVIBES_HOME` is unset
+ * (products/daemon/src/cli/daemon-home-environment.ts), so for the daemon one
+ * switch moves all of it; a client reading the daemon's files moves only these.
  *
  * Resolution order (first match wins):
  *   1. --daemon-home=<path> CLI arg (passed as daemonHomeArg)

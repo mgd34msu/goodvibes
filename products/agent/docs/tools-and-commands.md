@@ -128,7 +128,7 @@ Routing wording maps to these surfaces before any mutation or live effect:
 - Support-bundle requests route to `support action:"status|bundle"` before bundle export/import/share effects.
 - Saved-session, bookmark, transcript, and continuity requests route to `sessions action:"list|search|get"` before session lifecycle effects.
 - Release readiness, release evidence, verification ledger, and operator/audit requests route to `audit action:"readiness|evidence|item|artifact"`.
-- File undo/redo/recovery requests route to `execution action:"recovery"` before any snapshot is applied.
+- File undo/redo/recovery requests route to `execution action:"recovery"` before any snapshot is applied; the owner can also type `/undo file` and `/redo file`.
 - Media generation requests route to media provider readiness and confirmed `agent_media_generate` saved artifacts.
 - Requests to open, read, or act on a web page route to the `browser` tool.
 - Screen-observation and desktop-control requests, and browser/PWA readiness questions, still route to `computer action:"plan"` before live UI tools are considered.
@@ -406,6 +406,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/brief` | Show a concise Agent operator briefing and next actions. |
 | `/bundle` | Export, inspect, or import redacted Agent support bundles from the TUI. |
 | `/calendar` | Manage a local calendar: list upcoming events, import or export .ics files, and add or remove events. |
+| `/checkpoints` | List the workspace checkpoints, newest first; `/checkpoints restore <n\|id>` shows the files that would change, asks, and restores them (files only; a safety checkpoint of the current files is kept first). |
 | `/channel-profiles` | List, set, or delete per-channel session profile bindings (model, provider, permission mode) on the connected host; mutations require `--yes`. |
 | `/channels` | Inspect channel readiness, delivery receipts, or send one explicitly confirmed delivery message. |
 | `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; mutations require `--yes`. |
@@ -446,13 +447,13 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/payments` | Enter the payment card (masked input: number, expiry, CVV, cardholder name) and the billing/shipping addresses the daemon uses for purchases. Card material is stored at daemon scope and never rendered back; `/payments card remove <id> confirm` deletes a card from the daemon (`/payments status` shows each card's id); `/payments pending` answers purchase windows; `/payments approve <merchant> <item> <maximum>` approves one purchase in advance; `/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]` authorises a purchase a scheduled or triggered run may make without asking (`/payments standing` lists them, `/payments standing remove <id>` withdraws one); budgets, windows and CVV handling live in Settings > Payments. |
 | `/personas` | Manage Agent-local personas. |
 | `/pin` | Pin a model to the favorites list. |
-| `/plugin` | List plugins with their trust tier, and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
+| `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `/plugin disable <name>`, `/plugin reload`, `/plugin quarantine <name> [add\|lift]`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
 | `/prev-error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
 | `/provider` | Switch provider or manage custom providers. |
 | `/qrcode` | Pair a device: the connected host mints a named, separately revocable device token and the Agent shows its link and QR. |
 | `/quit` | Exit the application. |
-| `/redo` | Redo the last undone conversation turn. |
+| `/redo` | Redo the last undone conversation turn; `/redo file` re-applies the last reverted file change. |
 | `/refresh-models` | Refresh model catalog, metadata, and token limits. |
 | `/retry` | Re-send the last user message, optionally with modified text. |
 | `/routines` | Manage Agent-local routines and explicit routine schedule promotion. |
@@ -472,7 +473,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/title` | Show or set the conversation title. |
 | `/trust` | Review trust posture, set this workspace's trust (`/trust workspace trusted\|restricted`), and export portable trust bundles. Until you trust the workspace, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start; the Agent says so once at start. Your own hooks and MCP files are not affected. |
 | `/tts` | Submit a normal prompt and play the assistant response through live TTS. |
-| `/undo` | Undo the last conversation turn. |
+| `/undo` | Undo the last conversation turn; `/undo file` reverts every file the last write/edit call changed. |
 | `/unpin` | Unpin a model from the favorites list. |
 | `/update` | Check for a newer release; for binary installs, verify and apply it or roll back to the kept previous version. |
 | `/vibe` | Inspect, create, show, or import VIBE.md personality files. |

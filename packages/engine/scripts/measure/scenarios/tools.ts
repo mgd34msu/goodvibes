@@ -10,7 +10,7 @@ import { executeToolCalls } from '../../../platform/src/platform/core/orchestrat
 import { createEmitterContext } from '../../../platform/src/platform/core/orchestrator-runtime.ts';
 import { withExecutionMode, withExecutionModeOwner } from '../../../platform/src/platform/gate/execution-context.ts';
 import { buildDurableRuleForDecision } from '../../../platform/src/platform/permissions/approval-rules.ts';
-import { projectIdentity } from '../../../platform/src/platform/permissions/user-rule-store.ts';
+import { ownerPermissionRulesPath, projectIdentity } from '../../../platform/src/platform/permissions/user-rule-store.ts';
 import type { ToolCall, ToolResult } from '../../../platform/src/platform/types/tools.ts';
 import { ConfigManager } from '../../../platform/src/platform/config/manager.ts';
 import { createFloor, seedWorkspace, SURFACE, type Floor } from '../compose.ts';
@@ -21,7 +21,7 @@ import { setSlowReads } from '../instrument.ts';
 const P = 'packages/engine/platform/src/platform';
 
 /** Write `count` remembered rules (one of them allows `echo`) where the floor's rule store reads them. */
-function seedRules(floorConfigDir: string, count: number, workspace: string): void {
+function seedRules(rulesPath: string, count: number, workspace: string): void {
   const now = Date.now();
   const rules = [];
   for (let i = 0; i < count; i++) {
@@ -31,7 +31,7 @@ function seedRules(floorConfigDir: string, count: number, workspace: string): vo
     // Every other rule was remembered in this project: the store keeps it in the one list, keyed by the project root.
     rules.push({ rule, createdAt: now - i, tier: 'command-class', tool: 'exec', ...(i % 2 === 0 ? { project: projectIdentity(workspace) } : {}) });
   }
-  const path = join(floorConfigDir, 'permission-rules.json');
+  const path = rulesPath;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify({ version: 1, rules }, null, 2));
 }
@@ -40,8 +40,8 @@ interface Session { readonly floor: Floor; readonly session: HostedSessionRuntim
 
 async function openSession(env: MeasureEnv, rules: number): Promise<Session> {
   seedWorkspace(env.workspace);
-  // The floor's rule store reads <control-plane config dir>/permission-rules.json.
-  const dir = new ConfigManager({ surfaceRoot: SURFACE, homeDir: env.home, workingDir: env.workspace }).getControlPlaneConfigDir();
+  // The floor's rule store reads the owner's one rules file (ownerPermissionRulesPath).
+  const dir = ownerPermissionRulesPath(new ConfigManager({ surfaceRoot: SURFACE, homeDir: env.home, workingDir: env.workspace }));
   if (rules > 0) seedRules(dir, rules, env.workspace);
   const floor = await createFloor(env);
   await floor.services.permissionManager.prepareAutonomousOwner?.();

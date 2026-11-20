@@ -195,16 +195,6 @@ export function syncServiceSettingToPlatform(
   let keysToRestore: ServiceKeys | undefined;
 
   try {
-    if (change.key === 'service.autostart') {
-      // The change is already saved, so its previous value is the one to restore.
-      keysToRestore = { autostart: change.previousValue, enabled: config.get('service.enabled') };
-      if (change.value === true) {
-        if (config.get('service.enabled') !== true) config.setDynamic('service.enabled', true);
-        return enableSystemService(runtime, manager, options, keysToRestore);
-      }
-      return disableSystemService(runtime, manager, keysToRestore);
-    }
-
     if (change.key === 'service.enabled') {
       const keysBefore = { autostart: config.get('service.autostart'), enabled: change.previousValue };
       if (change.value === false) {

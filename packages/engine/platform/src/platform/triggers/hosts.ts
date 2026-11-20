@@ -20,6 +20,10 @@ import { MANAGED_OUTPUT_WINDOW_BYTES, type ProcessManager } from '../tools/share
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';
 import type { TriggerActionExecutor, TriggerStreamHost } from './manager-types.js';
 import type { TriggerActionGrant } from './types.js';
+import type { AgentRecord } from '../tools/agent/record.js';
+import type { UnattendedRuns } from '../automation/unattended-runs.js';
+import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { ProbeTimeoutError, type ProbeIo } from './probes.js';
 
 /** ProcessManager-backed on-exit host. Binds only to processes we launched. */
@@ -139,9 +143,20 @@ export function createProcessManagerCommandRunner(processManager: ProcessManager
   };
 }
 
-/** What a fired trigger needs in order to actually start an agent turn. */
+/** What a fired trigger needs in order to actually start an agent turn and read its answer. */
 export interface TriggerAgentSpawner {
-  spawn(input: { mode: 'spawn'; task: string; model?: string | undefined }): { id: string };
+  spawn(input: { mode: 'spawn'; task: string; model?: string | undefined; tools?: string[] | undefined }): { id: string };
+  /** Settles once the agent's work (and its cleanup) is done. */
+  join(agentId: string): Promise<void>;
+  getStatus(agentId: string): Pick<AgentRecord, 'status' | 'fullOutput' | 'progress' | 'error'> | null;
+}
+
+/** The answer of a finished trigger turn, as it is delivered. */
+function triggerTurnAnswer(record: Pick<AgentRecord, 'status' | 'fullOutput' | 'progress' | 'error'> | null): string {
+  if (!record) return 'The turn\'s agent is no longer known to this process, so its answer could not be read.';
+  if (record.status === 'completed') return record.fullOutput ?? record.progress ?? '';
+  if (record.status === 'cancelled') return 'The turn was cancelled before it answered.';
+  return `The turn failed${record.error ? `: ${record.error}` : ''}.${record.fullOutput ? `\n\n${record.fullOutput}` : ''}`;
 }
 
 /**
@@ -156,14 +171,37 @@ export function createTriggerActionExecutor(deps: {
   readonly agents: TriggerAgentSpawner;
   readonly processManager: ProcessManager;
   readonly grantTimeoutMs?: number | undefined;
+  /** Where the turn's answer goes and which connected tools (mail, calendar) the turn gets. */
+  readonly unattendedRuns?: UnattendedRuns | undefined;
 }): TriggerActionExecutor {
   return {
     runAgentTurn(input) {
+      const tools = deps.unattendedRuns?.connectedTools() ?? [];
       const record = deps.agents.spawn({
         mode: 'spawn',
         task: input.prompt,
         ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(tools.length > 0 ? { tools: [...tools] } : {}),
       });
+      // The firing is recorded once the turn has started; its answer is
+      // delivered when the turn ends: to the channel the action names, else
+      // (or when that send fails) to the owner inbox.
+      const unattended = deps.unattendedRuns;
+      if (unattended) {
+        void deps.agents.join(record.id)
+          .then(() => unattended.deliver({
+            source: 'trigger',
+            runId: `${input.triggerId}:${record.id}`,
+            ownerId: input.triggerId,
+            title: `Trigger ${input.label ?? input.triggerId}`,
+            body: triggerTurnAnswer(deps.agents.getStatus(record.id)),
+            agentId: record.id,
+            ...(input.deliverTo !== undefined ? { deliverTo: input.deliverTo } : {}),
+          }))
+          .catch((error: unknown) => {
+            logger.warn('Trigger turn answer could not be delivered', { triggerId: input.triggerId, agentId: record.id, error: summarizeError(error) });
+          });
+      }
       return Promise.resolve(`agent:${record.id}`);
     },
 

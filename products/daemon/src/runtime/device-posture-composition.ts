@@ -37,6 +37,7 @@ import type {
   DevicePeerTransport,
   DevicePhoneToolRegistry,
   DevicePostureRuntime,
+  DevicePostureRuntimeOptions,
 } from '@goodvibes-jev/engine/platform/platform/devices';
 import { registerDevicesGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -52,6 +53,8 @@ export interface DevicePostureCompositionOptions {
   /** The runtime devices pair onto; its listPeers/invokePeer are the transport. */
   readonly distributedRuntime: DevicePeerTransport;
   readonly approvals: DeviceApprovalBridge;
+  /** The authority record the durable grants live on, shared with every machine of the group. */
+  readonly authority: DevicePostureRuntimeOptions['authority'] | undefined;
   /** Surface-scoped directory the grants ledger, captures and disclosure live in. */
   readonly stateDirectory: string;
   /**
@@ -92,7 +95,9 @@ function listingEveryPeer(source: DevicePeerTransport): DevicePeerTransport {
 
 /** Build the device posture runtime and bind the device verbs to it. */
 export function createDevicePostureServices(options: DevicePostureCompositionOptions): DevicePostureServices {
+  if (!options.authority) throw new Error('The paired-device feature needs the authority record its grants live on, and this runtime graph has none.');
   const devicePosture = createDevicePostureRuntime({
+    authority: options.authority,
     transport: listingEveryPeer(options.distributedRuntime),
     approvals: options.approvals,
     config: options.configManager,

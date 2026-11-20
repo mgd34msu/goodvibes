@@ -886,7 +886,7 @@ async function operatorMethodsSection(): Promise<string> {
   const methods = [...contract.operator.methods].sort((a, b) => byText(a.id, b.id));
   const categories = [...new Set(methods.map((method) => method.category))].sort(byText);
   const out: string[] = [
-    `A method with no HTTP route is called with ${code(`POST ${GATEWAY_METHOD_INVOKE_PATH}`)} (the method id in place of ${code('{methodId}')}) or over the WebSocket. The invoke request body is an envelope: ${code('{ "body": <method input>, "query": { ... } }')}, where ${code('body')} is required (${code('{}')} for a method that takes none) and ${code('query')} is optional; the response is the method output itself. Access: ${code('public')} needs no credential; ${code('authenticated')} needs any credential that carries every listed scope; ${code('admin')} needs an admin credential (an admin user's session, the daemon's operator token, or a token with no scope list) as well as the scopes; ${code('remote-peer')} is for a paired node or device. Effect: ${code('read')} changes nothing, ${code('write')} changes the daemon's state, ${code('outward')} sends messages, drives a remote host or browser, or runs metered model work. Retry is what the contract declares about sending the same call again after a failure or a lost answer: safe to repeat, safe with a key (the header or body field named, and what a repeat returns), not safe, or not declared when the contract says nothing; a method that is not declared should be treated as not safe unless its effect is ${code('read')}.`,
+    `A method with no HTTP route is called with ${code(`POST ${GATEWAY_METHOD_INVOKE_PATH}`)} (the method id in place of ${code('{methodId}')}) or over the WebSocket. The invoke request body is an envelope: ${code('{ "body": <method input>, "query": { ... } }')}, where ${code('body')} is required (${code('{}')} for a method that takes none) and ${code('query')} is optional; the response is the method output itself. Access: ${code('public')} needs no credential; ${code('authenticated')} needs any credential that carries every listed scope; ${code('admin')} needs an admin credential (an admin user's session, the daemon's operator token, or a token with no scope list) as well as the scopes; ${code('remote-peer')} is for a paired node or device. Effect: ${code('read')} changes nothing, ${code('write')} changes the daemon's state, ${code('outward')} sends messages, drives a remote host or browser, or runs metered model work. Retry is what the method declares (its ${code('repeat')}) about sending the same call again after a failure or a lost answer, read from its handler: safe to repeat, safe with a key (the header or body field named, and what a repeat returns; ${code('Idempotency-Key')} is the shared key explained in "Idempotency and safe retries"), or not safe (a repeat acts again).`,
   ];
   const retryCounts = new Map<string, number>();
   for (const category of categories) {
@@ -895,9 +895,12 @@ async function operatorMethodsSection(): Promise<string> {
       if (method.description.trim() === '') missingDescriptions.add(`operator method ${method.id}`);
       const route = method.http ? code(`${method.http.method} ${method.http.path}`) : 'invoke only';
       const flags = [method.ownerOnly ? 'owner only' : '', method.irreversible ? 'cannot be undone' : '', method.dangerous ? 'dangerous' : ''].filter(Boolean).join(', ');
+      // The shared Idempotency-Key is explained once in "Idempotency and safe retries"; its behaviour is not repeated per row.
       const retry = method.replay
-        ? `safe with the ${method.replay.in} ${code(method.replay.name)}: ${cell(method.replay.behavior)}`
-        : method.idempotent === true ? 'safe to repeat' : method.idempotent === false ? 'not safe' : 'not declared';
+        ? method.replay.in === 'header' && method.replay.name === 'Idempotency-Key' && method.id !== 'contracts.start'
+          ? `safe with the header ${code('Idempotency-Key')}`
+          : `safe with the ${method.replay.in} ${code(method.replay.name)}: ${cell(method.replay.behavior)}`
+        : method.repeat === 'safe' ? 'safe to repeat' : method.repeat === 'unsafe' ? 'not safe' : 'not declared';
       retryCounts.set(retry.startsWith('safe with') ? 'safe with a key' : retry, (retryCounts.get(retry.startsWith('safe with') ? 'safe with a key' : retry) ?? 0) + 1);
       out.push(`| ${code(method.id)} | ${route} | ${method.access} | ${method.scopes.map(code).join(', ') || 'none'} | ${method.effect ?? ''}${flags ? ` (${flags})` : ''} | ${retry} | ${cell(wholeDescription(method.description || method.title))} |`);
     }
@@ -1030,6 +1033,7 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   KNOWLEDGE_REFINEMENT_TASK_REFUSED: 'The knowledge refinement task is unknown or already decided, so it was not changed',
   MEDIA_OUTPUT_UNAVAILABLE: 'No configured media provider makes the requested output, or the named one does not; nothing was sent',
   NOT_A_SESSION_ANSWER: 'The item has no answer to deliver, or its answer goes to an agent, which records taking it',
+  RELAY_CODE_LIMIT: 'The daemon already holds 64 relay codes, so no new device can pair; revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again',
   REROOT_FAILED: 'The new working directory could not be saved to the daemon settings; nothing changed',
   SET_MODEL_FAILED: 'The model could not be made current; the message is the provider registry\'s reason',
   STEP_UP_CHALLENGES_FULL: 'Too many step-up challenges are open; answer one or let it expire, then ask again',

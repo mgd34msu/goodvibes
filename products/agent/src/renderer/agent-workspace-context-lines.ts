@@ -434,7 +434,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: 'Tip: for local models, Ollama first, llama.cpp offline, vLLM for GPU throughput.', fg: PALETTE.muted },
       { text: 'Local servers: endpoint map, model-list smoke checks, and refresh routes before benchmarks.', fg: PALETTE.good },
       { text: 'Benchmark evidence: run local compare, review saved judgments, then apply routes separately.', fg: PALETTE.info },
-      { text: `Cache: ${snapshot.cacheEnabled ? snapshot.cacheStableTtl : 'off'}; monitor ${snapshot.cacheMonitorHitRate ? snapshot.cacheHitRateWarningThreshold : 'off'}; failure hints ${snapshot.providerFailureHints ? 'on' : 'off'}.`, fg: snapshot.cacheEnabled ? PALETTE.info : PALETTE.muted },
+      { text: `Cache: ${snapshot.cacheEnabled ? snapshot.cacheStableTtl : 'off'}; monitor ${snapshot.cacheMonitorHitRate ? snapshot.cacheHitRateWarningThreshold : 'off'}; fallback order: ${snapshot.providerFallbackOrder}.`, fg: snapshot.cacheEnabled ? PALETTE.info : PALETTE.muted },
     );
   } else if (category.id === 'assistant-behavior') {
     base.push(

@@ -22,6 +22,7 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:pa
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveServiceUnitHome } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { serviceStateDirectory } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';
@@ -59,32 +60,46 @@ export interface CliServiceIssue {
   readonly summary: string;
 }
 
-/** The service settings and the one observed fact (installed) the setting rules depend on. */
+/** The service settings and the observed facts the setting rules depend on. */
 export interface CliServiceSettingsFacts {
+  /** `service.enabled`: false is the owner's choice of a machine without a daemon service. */
   readonly enabled: boolean;
+  /** Whether the installed service starts at login, as the service manager reports it. */
   readonly autostart: boolean;
   readonly restartOnFailure: boolean;
   /** The daemon or any server-backed endpoint is switched on. */
   readonly serverBackedEnabled: boolean;
   /** Whether a platform service definition exists; undefined when the caller did not look. */
   readonly installed?: boolean;
+  /** Whether the installed service runs; undefined when the caller did not look. */
+  readonly running?: boolean;
+  /** The service name, for the command each finding names. */
+  readonly serviceName?: string;
 }
 
 /**
- * The service setting rules, stated once. `goodvibes service status`, `doctor`
- * and `listener test` all read these, so a fact is reported once under one id.
+ * The service rules, stated once. `goodvibes service status`, `doctor` and
+ * `listener test` all read these, so a fact is reported once under one id.
+ * They read what the service manager reports, not what a setting says it
+ * should be: an installation made without a service (`--no-service`, which
+ * records `service.enabled` false) and one whose service is installed and
+ * running are both clean, and only a difference a command can fix is a finding.
  */
 export function serviceSettingsIssues(facts: CliServiceSettingsFacts): CliServiceIssue[] {
   const issues: CliServiceIssue[] = [];
-  if (facts.serverBackedEnabled && !facts.enabled) {
-    issues.push({ id: 'service-disabled-for-server-surfaces', summary: 'Server-backed surfaces are enabled but service mode is off.' });
+  if (!facts.enabled) return issues;
+  const unit = facts.serviceName ?? 'goodvibes';
+  if (facts.installed === false && facts.serverBackedEnabled) {
+    issues.push({ id: 'service-not-installed', summary: 'No daemon service is installed, so the daemon runs only while something starts it. Install it with: goodvibes-daemon install-service (or record that this machine runs without one: goodvibes-daemon config set service.enabled false).' });
   }
-  // Autostart is off by default, so it only matters once a service is installed.
-  if (facts.enabled && facts.installed === true && !facts.autostart) {
-    issues.push({ id: 'service-autostart-disabled', summary: 'The service is installed but autostart is off, so it does not start at login.' });
+  if (facts.installed === true && facts.running === false) {
+    issues.push({ id: 'service-not-running', summary: 'The daemon service is installed but not running. Start it with: goodvibes-daemon start-service' });
   }
-  if (facts.enabled && !facts.restartOnFailure) {
-    issues.push({ id: 'service-restart-disabled', summary: 'Service mode is enabled but restart-on-failure is off.' });
+  if (facts.installed === true && !facts.autostart) {
+    issues.push({ id: 'service-autostart-disabled', summary: `The daemon service is installed but does not start at login. Turn that on with: goodvibes-daemon install-service (it re-enables ${unit}).` });
+  }
+  if (facts.installed === true && !facts.restartOnFailure) {
+    issues.push({ id: 'service-restart-disabled', summary: 'The daemon service is not restarted after a failure. Turn that on with: goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service' });
   }
   return issues;
 }
@@ -336,7 +351,8 @@ function reconcileSystemdServiceStatus(
   return {
     ...status,
     installed: loadState === 'loaded' || status.installed,
-    autostart: unitFileState === 'enabled' || unitFileState === 'linked' || status.autostart,
+    // What systemd reports, not the setting: install-service enables the unit.
+    autostart: unitFileState === 'enabled' || unitFileState === 'linked',
     running: activeState === 'active',
     ...(pid === undefined ? {} : { pid }),
   };
@@ -357,7 +373,13 @@ export function createPlatformServiceManager(runtime: CliServiceRuntime): Platfo
     // service manager reads them, whatever tree home this app runs on.
     unitHomeDir: resolveServiceUnitHome(),
     daemonHomeDirectory: getServiceStateRoot(runtime),
-    workingDirectory: runtime.homeDirectory,
+    // The daemon's own working directory, resolved as `goodvibes-daemon` resolves
+    // it (the variable, then its saved setting), so a definition written from
+    // here is the one the daemon's install-service writes. The home stands in
+    // for the daemon's start directory, which is the home when an installer runs it.
+    workingDirectory: (process.env.GOODVIBES_WORKING_DIR?.trim() ? resolve(process.env.GOODVIBES_WORKING_DIR.trim()) : undefined)
+      || readDaemonSetting(getServiceStateRoot(runtime), 'runtime.workingDir')
+      || runtime.homeDirectory,
     configManager: runtime.configManager,
   });
 }
@@ -404,15 +426,14 @@ export async function buildCliServicePosture(
     daemonEnabled: resolveDaemonEnabled(runtime.configManager),
   };
   const serverBackedEnabled = config.daemonEnabled || endpoints.some((endpoint) => endpoint.enabled);
-  const findings: CliServiceIssue[] = serviceSettingsIssues({ ...config, serverBackedEnabled, installed: status.installed });
-  if (config.enabled && !status.installed) {
-    findings.push({ id: 'service-not-installed', summary: 'Service mode is enabled but no platform service definition is installed.' });
-  }
-  if (config.enabled && !status.running) {
-    findings.push({ id: 'service-not-running', summary: 'Service mode is enabled but the managed service is not running.' });
-  }
-  if (status.actionError) {
-    findings.push({ id: 'service-manager-error', summary: `Service manager reported an error: ${status.actionError}` });
+  // A manager that could not be asked says nothing about the service, so the
+  // rules that read its answer wait for one.
+  const findings: CliServiceIssue[] = status.actionError ? [] : serviceSettingsIssues({
+    ...config, autostart: status.autostart, serverBackedEnabled, installed: status.installed, running: status.running,
+    serviceName: status.serviceName,
+  });
+  if (status.actionError && config.enabled) {
+    findings.push({ id: 'service-manager-error', summary: `The ${status.platform} service manager could not be asked about the daemon service (${status.actionError}). Run goodvibes doctor from a logged-in session, or record that this machine runs without a service: goodvibes-daemon config set service.enabled false` });
   }
   findings.push(...endpointIssues(endpoints, options.probe));
   const log = await readServiceLogPosture(status.logPath, options.logTailBytes ?? 4096, { ...options, assertCurrent });

@@ -12,7 +12,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
 export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCatalog, deps: Pick<GatewayVerbGroupDeps,
-  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox' | 'listContracts'>): void {
+  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox' | 'listContracts' | 'clusterRoles'>): void {
   if (deps.channelDeliveryRouter && deps.providerRegistry && deps.automationManager && deps.sessionLister) {
     const channelDeliveryRouter = deps.channelDeliveryRouter;
     const automation = deps.automationManager;
@@ -75,6 +75,8 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
       },
       receipts,
       automation,
+      // In a group, the machine holding the check-in role runs the schedule.
+      ...(deps.clusterRoles ? { runsHere: () => deps.clusterRoles!.holds('checkin') } : {}),
     });
     deps.disposal?.add('check-in evaluation lifetime', () => checkinService.dispose());
     registerCheckinGatewayMethods(catalog, checkinService);

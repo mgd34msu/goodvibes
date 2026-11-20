@@ -18,7 +18,7 @@
  * - `client`, presentation and per-installation lifecycle. Genuinely local and
  *   genuinely different between the TUI, the agent and the web UI: rendering,
  *   theme, transcript display, keybindings, and the "do I run/embed a daemon at
- *   all" switches (`daemon.*`, `service.*`) which are a property of THIS
+ *   all" switches (`daemon.*`) which are a property of THIS
  *   installation, not of the daemon's behavior.
  *
  * Each schema domain states its owner in CONFIG_DOMAIN_OWNERS below, which the
@@ -66,7 +66,6 @@ export type ConfigDomain = DomainOf<ConfigKey | ListConfigKey>;
  *   - `daemon` : "does THIS installation run or embed a daemon"; the agent
  *                answers no and the terminal app yes, and neither answer is
  *                the daemon's to give (`daemon.timezone` is the exception below).
- *   - `service`: per-installation platform-service lifecycle, same shape.
  *   - `voice`  : the wake word listens inside each client process; only the
  *                local speech engines (`voice.local.`) are the daemon's.
  */
@@ -139,7 +138,11 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   runtime: 'client',
   sandbox: 'client',
   security: 'client',
-  service: 'client',
+  // The daemon's service (whether this machine has one, its name, platform and
+  // restart policy): one value the daemon, both terminal apps and the
+  // installers read and write, so a choice recorded by one is the one the
+  // others act on.
+  service: 'daemon',
   storage: 'client',
   telemetry: 'client',
   tools: 'client',
@@ -184,6 +187,14 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // channel webhooks run in the daemon, notification webhooks in every app, and
   // all of them read the one list the owner set, wherever he set it from.
   'network.privateDeliveryHosts',
+  // Whether this installation replaces its own programs (the daemon's and the
+  // Agent's while-running update, the terminal app's and the Agent's update at
+  // launch). An update replaces the whole suite, so it is one choice for the
+  // machine's installation, made once (by the installer's --no-auto-update or
+  // any program) and read by all three. A project's settings file cannot turn
+  // it back on: a daemon key there is left out.
+  'update.auto',
+  'update.autoUpdateAtLaunch',
 ];
 
 /**

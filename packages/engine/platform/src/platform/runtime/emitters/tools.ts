@@ -16,23 +16,7 @@ export function emitToolReceived(
   bus.emit('tools', createEventEnvelope('TOOL_RECEIVED', { type: 'TOOL_RECEIVED', ...data }, ctx));
 }
 
-/** Emit TOOL_VALIDATED when tool arguments pass schema validation. */
-export function emitToolValidated(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { callId: string; turnId: string; tool: string }
-): void {
-  bus.emit('tools', createEventEnvelope('TOOL_VALIDATED', { type: 'TOOL_VALIDATED', ...data }, ctx));
-}
 
-/** Emit TOOL_PREHOOKED after pre-execution hooks have run. */
-export function emitToolPrehooked(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { callId: string; turnId: string; tool: string }
-): void {
-  bus.emit('tools', createEventEnvelope('TOOL_PREHOOKED', { type: 'TOOL_PREHOOKED', ...data }, ctx));
-}
 
 /** Emit TOOL_PERMISSIONED after permission check completes. */
 export function emitToolPermissioned(
@@ -52,23 +36,7 @@ export function emitToolExecuting(
   bus.emit('tools', createEventEnvelope('TOOL_EXECUTING', { type: 'TOOL_EXECUTING', ...data }, ctx));
 }
 
-/** Emit TOOL_MAPPED after the result is mapped for the provider. */
-export function emitToolMapped(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { callId: string; turnId: string; tool: string }
-): void {
-  bus.emit('tools', createEventEnvelope('TOOL_MAPPED', { type: 'TOOL_MAPPED', ...data }, ctx));
-}
 
-/** Emit TOOL_POSTHOOKED after post-execution hooks have run. */
-export function emitToolPosthooked(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: { callId: string; turnId: string; tool: string }
-): void {
-  bus.emit('tools', createEventEnvelope('TOOL_POSTHOOKED', { type: 'TOOL_POSTHOOKED', ...data }, ctx));
-}
 
 /**
  * Convert any tool result (ToolResult, SyntheticToolResult, etc.) to a ToolResultSummary

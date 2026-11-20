@@ -85,6 +85,36 @@ export interface WorkProposalRecord {
    * persisted without the field loads as undelivered.
    */
   readonly delivered: boolean;
+  /**
+   * Set for a proposal raised by a guest (someone the channel admits who is
+   * not its owner): the owner's own conversation the proposal was put to,
+   * which is the only place it can be answered. The guest's conversation
+   * (the fields above) hears the outcome and gets the work's answer, and can
+   * never agree to it; the agreed work runs as the guest's turn.
+   */
+  readonly answerFrom?: WorkProposalAnswerFrom | undefined;
+}
+
+/** The owner's conversation that answers a guest's proposal. */
+export interface WorkProposalAnswerFrom {
+  readonly surfaceKind: string;
+  readonly routeId?: string | undefined;
+  readonly userId?: string | undefined;
+  readonly channelId?: string | undefined;
+  readonly threadId?: string | undefined;
+}
+
+function validateAnswerFrom(value: unknown): WorkProposalAnswerFrom | undefined {
+  if (!isRecord(value)) return undefined;
+  const surfaceKind = optionalString(value.surfaceKind);
+  if (!surfaceKind) return undefined;
+  return {
+    surfaceKind,
+    ...(optionalString(value.routeId) ? { routeId: optionalString(value.routeId) } : {}),
+    ...(optionalString(value.userId) ? { userId: optionalString(value.userId) } : {}),
+    ...(optionalString(value.channelId) ? { channelId: optionalString(value.channelId) } : {}),
+    ...(optionalString(value.threadId) ? { threadId: optionalString(value.threadId) } : {}),
+  };
 }
 
 export interface WorkProposalReapSummary {
@@ -165,6 +195,7 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
       ? { foldedInputIds: value.foldedInputIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0) }
       : {}),
     ...(Number.isSafeInteger(value.requestCount) && (value.requestCount as number) > 1 ? { requestCount: value.requestCount as number } : {}),
+    ...(validateAnswerFrom(value.answerFrom) ? { answerFrom: validateAnswerFrom(value.answerFrom) } : {}),
   };
 }
 
@@ -393,13 +424,14 @@ export class WorkProposalStore {
 
   /**
    * Confirm that the proposal message reached the owner's channel. Only after
-   * this does the proposal become answerable.
+   * this does the proposal become answerable. A guest's proposal names the
+   * owner's conversation it reached (`answerFrom`), the only one that answers it.
    */
-  markDelivered(id: string): WorkProposalRecord | null {
+  markDelivered(id: string, answerFrom?: WorkProposalAnswerFrom): WorkProposalRecord | null {
     if (!this.sweepEnabled) return null;
     const record = this.proposals.get(id);
     if (!record || record.status !== 'pending' || record.delivered) return null;
-    const delivered: WorkProposalRecord = { ...record, delivered: true };
+    const delivered: WorkProposalRecord = { ...record, delivered: true, ...(answerFrom ? { answerFrom } : {}) };
     this.proposals.set(id, delivered);
     void this.persist();
     return delivered;

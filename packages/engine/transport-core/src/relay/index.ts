@@ -85,6 +85,7 @@ export {
 
 export {
   PAIRING_SCHEME,
+  RELAY_CODE_HEADER,
   createRelayPairingPayload,
   encodeRelayPairingString,
   decodeRelayPairingString,

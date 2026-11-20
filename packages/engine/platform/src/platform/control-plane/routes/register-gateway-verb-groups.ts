@@ -15,7 +15,7 @@ import type { TriggerOperatorSupervisor } from '../../triggers/operator.js';
  * operator's registered devices.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import { resolveWebPort } from '../../daemon/host-resolver.js';
+import { resolveWebUiListener } from '../../pairing/web-origin.js';
 import { registerFleetCheckpointsSearchGatewayMethods, type FleetCheckpointsSearchGatewayDeps } from './register-fleet-checkpoints-search.js';
 import { registerPushGatewayMethods } from './push.js';
 import { registerPairingGatewayMethods, type PairingGatewayService } from './pairing.js';
@@ -122,12 +122,20 @@ import type {
   VapidSecretStore,
 } from '../../push/index.js';
 import { createPushService } from './push-composition.js';
+import type { AuthorityRecordFile } from '../../cluster/authority-record-file.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { FleetEvent } from '../../../events/fleet.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 import { sharedWorkspaceRegisterPath } from '../../workspace/registration/shared-register-path.js';
 
 export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps, BrowserCompositionDeps {
+  /**
+   * Which group roles this machine holds. The scheduled check-in and the
+   * occasions sweep run only where their role is held, so a group of machines
+   * runs each once; occasion answers are shared through the record. Absent:
+   * every role is held here.
+   */
+  readonly clusterRoles?: Pick<import('../../cluster/roles.js').ClusterRoles, 'holds' | 'coordinated' | 'onRoleChange'> | undefined;
   readonly triggerSupervisor?: TriggerOperatorSupervisor | undefined;
   /** SecretsManager: VAPID keypair custody (create-once) and the calendar backends' credentials (read). */
   readonly secretsManager: VapidSecretStore & CalendarCompositionDeps['secretsManager'];
@@ -183,6 +191,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * absent → those verbs stay cataloged-but-unhandled (graceful degrade).
    */
   readonly pairingTokens?: PairingGatewayService | undefined;
+  /**
+   * The authority record: browser push registrations live on it, so a device
+   * registered through one machine of the group, or turned off on one, is so
+   * on every machine.
+   */
+  readonly authority?: AuthorityRecordFile | undefined;
   /** Whether the rendezvous relay is available ⇒ the pairing hand-off offers a relay step. */
   readonly relayAvailable?: (() => boolean) | undefined;
   /** The configured web-app origin the pairing QR points at ⇒ hand-off returns a full deep link. */
@@ -210,6 +224,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * session's calls. Absent: the chosen mode is reported.
    */
   readonly modeInForce?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => import('../../gate/presets.js').GatePresetName) | undefined;
+  /** Why the mode in force differs from a chosen mode (the permission manager's describeModeInForce), for sessions.permissionMode.get. */
+  readonly modeInForceReason?: ((chosen: import('../../gate/presets.js').GatePresetName, explicitlyChosen?: boolean) => string | undefined) | undefined;
   /**
    * Runtime store backing sessions.contextUsage.get and the local-session
    * resolution the session-runtime verbs gate on (getState().session.id).
@@ -618,12 +634,14 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       liveTurnHolder: deps.sessionLiveTurnControls,
       channelSessions: deps.sessionIntake,
       modeInForce: deps.modeInForce,
+      modeInForceReason: deps.modeInForceReason,
       channelModeChanged: (sessionId, mode, previousMode) => {
         deps.runtimeBus?.emit('gate', createEventEnvelope('PRESET_CHANGED', {
           type: 'PRESET_CHANGED', mode, previousMode, preset: mode, previousPreset: previousMode,
         }, { sessionId, source: 'channel-execution-mode' }));
       },
     }),
+    deps.approvalRaise,
   );
 
   // The daemon's one PushService: VAPID custody, the subscription store with
@@ -671,7 +689,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   registerTailscaleGatewayMethods(catalog, {
     runner: deps.tailscaleRunner ?? defaultTailscaleRunner(),
     receipts: new TailscaleServeReceiptStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'tailscale-serve-receipts.json')),
-    resolveWebPort: () => resolveWebPort(deps.configManager.get('web.port')),
+    resolveWebUiPort: () => resolveWebUiListener(deps.configManager)?.port ?? null,
     setPublicBaseUrl: (url) => {
       deps.configManager.set('web.publicBaseUrl', url);
     },

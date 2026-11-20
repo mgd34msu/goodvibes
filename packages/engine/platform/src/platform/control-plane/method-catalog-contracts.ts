@@ -11,6 +11,7 @@
  * `write:fleet`.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { methodDescriptor } from './method-catalog-shared.js';
 import {
@@ -106,6 +107,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.dispatch',
+    replay: { in: 'body', name: 'idempotencyKey', behavior: 'A repeat by the same caller with the same `idempotencyKey` returns the first dispatch\'s contract while that contract runs, instead of starting a second one.' },
     title: 'Dispatch Contract Work',
     description: 'Start a contract for `ask` (the person\'s words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon\'s working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon\'s working directory. The contract\'s questions arrive as that session\'s replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch\'s contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).',
     category: 'contracts',
@@ -120,6 +122,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.cancel',
+    repeat: 'safe',
     title: 'Cancel a Contract',
     description: 'Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NATIVE for native work (stop it through its own execution, or answer its open question with `cancel`); 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection.',
     category: 'contracts',
@@ -135,6 +138,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.reply',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     changesContract: true,
     effect: 'outward',
     title: 'Reply to a Contract Escalation',
@@ -154,6 +158,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.remove',
+    repeat: 'safe',
     irreversible: true,
     title: 'Remove an Ended Contract',
     description: 'Delete the record of a contract that has ended (passed, failed or cancelled): its checkpoint and summary. Its branch and worktree, if any, are left to the worktree retention rules. Ended contracts are also removed automatically 30 days after they end, and beyond the newest 100 per project. `removed` is true when it was deleted. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_ENDED while it runs (cancel it first); 409 with CONTRACT_NATIVE for native work, whose record its native execution keeps.',
@@ -170,6 +175,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.retryUnit',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Run One Contract Unit Again',
     description: 'Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, a unit that failed (the contract waits on its retry-or-cancel question, the units depending on it held) runs again with a fresh agent, the same as replying `retry`, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.',
     category: 'contracts',
@@ -186,6 +192,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'contracts.budget',
+    repeat: 'safe',
     changesContract: true,
     title: 'Set a Running Contract\'s Budget',
     description: 'Replace a running contract\'s token and cost ceiling (`maxCostUsd`, `maxTokens`, or both); a limit left out keeps its current value. Each running group\'s remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`, both limits as they now stand. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.',

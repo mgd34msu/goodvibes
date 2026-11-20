@@ -4,9 +4,8 @@ import type { CommandRegistry } from '../command-registry.ts';
 import { describeUncheckedCatalogEntries, installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry, uninstallEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
-import { PLUGIN_TRUST_USAGE, pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
+import { PLUGIN_TRUST_USAGE, pluginTrustConfirmation, runPluginLifecycleSubcommand, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
-import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
 function unknownCatalogEntry(entryId: string): Error {
   return commandRefusal(`Unknown curated plugin entry: ${entryId}`, '/plugin browse lists the catalog entries', 'NOT_FOUND');
@@ -245,70 +244,10 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(`Uninstalled curated plugin ${entryId} from ${result.removedPath}`);
         return;
       }
-      if (sub === 'enable') {
-        const name = args[1];
-        if (!name) throw commandRefusal('Usage: /plugin enable <name>');
-        const result = await pluginManager.enable(name);
-        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not enabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
-        ctx.print(`Plugin '${name}' enabled and activated.`);
-        return;
-      }
-      if (sub === 'disable') {
-        const name = args[1];
-        if (!name) throw commandRefusal('Usage: /plugin disable <name>');
-        const result = await pluginManager.disable(name);
-        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not disabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
-        ctx.print(`Plugin '${name}' disabled.`);
-        return;
-      }
-      if (sub === 'reload') {
-        ctx.print('Reloading plugins...');
-        const summary = await pluginManager.reload();
-        const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
-        for (const { name, reason } of summary.loadFailed ?? []) {
-          lines.push(`  ${name}: did not start, ${reason}`);
-        }
-        for (const name of summary.notDrained) {
-          lines.push(`  ${name}: not reloaded, calls into it were still running; it keeps its current version. Run /plugin reload again once they finish.`);
-        }
-        for (const name of summary.quarantined ?? []) {
-          lines.push(`  ${name}: not loaded, it is quarantined. Run /plugin quarantine ${name} lift, then /plugin reload.`);
-        }
-        for (const name of summary.cleanupFailed ?? []) {
-          lines.push(`  ${name}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
+      // enable, disable, reload: the same lines the Agent's /plugin runs.
+      if (await runPluginLifecycleSubcommand(pluginManager, args, (text) => ctx.print(text))) return;
       // trust, trust-key, verify, capabilities: the same lines the agent app's /plugin runs.
       if (await runPluginTrustSubcommand(pluginManager, args, (text) => ctx.print(text))) return;
-      if (sub === 'quarantine') {
-        const name = args[1];
-        const action = args[2] ?? 'add';
-        if (!name) throw commandRefusal('Usage: /plugin quarantine <name> [add|lift] [reason]');
-        if (action === 'lift') {
-          const result = pluginManager.liftQuarantine(name);
-          if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' quarantine was not lifted.`, undefined, 'NOT_DONE');
-          ctx.print(`Plugin '${name}' quarantine lifted; it can load again. Run /plugin reload to load it.`);
-          return;
-        }
-        const reason = args.slice(2).join(' ') || 'quarantined by operator';
-        const result = pluginManager.quarantine(name, reason);
-        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not quarantined.`, undefined, 'NOT_DONE');
-        try {
-          await result.unloading;
-        } catch (error) {
-          throw new RefusalError(refusal({
-            code: 'PLUGIN_STOP_FAILED',
-            state: `Plugin '${name}' is quarantined and will not load again`,
-            reason: `Stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`,
-            next: ['Restart to clear anything the running instance left behind'],
-          }));
-        }
-        ctx.print(`Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /plugin quarantine ${name} lift and then /plugin reload.`);
-        return;
-      }
-
       throw commandRefusal(
         'Usage: /plugin <subcommand>\n'
         + '  list                       — show installed plugins and their status\n'

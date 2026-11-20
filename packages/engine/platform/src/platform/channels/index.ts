@@ -98,6 +98,7 @@ export type {
 } from './delivery-router.js';
 export { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery-router.js';
 export type { ChannelDeliveryRequest } from './delivery/types.js';
+export { deliveryChannelProblem, parseChannelDeliveryTarget } from './delivery/types.js';
 
 // Host-owned channel/profile assignments; resolution follows explicit owner bindings.
 export { RouteStore, parseChannelId, buildChannelId, toRouteListItem } from './host-routing/route-store.js';

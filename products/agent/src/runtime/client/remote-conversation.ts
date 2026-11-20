@@ -132,6 +132,8 @@ export interface RemoteConversationRouter {
   /** The hosted session this conversation is bound to, if any. */
   hostedSessionId(): string | null;
   executionMode(): GatePresetName | undefined;
+  /** When the host reported its mode in force differs from the session's chosen mode: the chosen mode and why. */
+  executionModeDifference?(): { readonly chosen: GatePresetName; readonly reason: string } | undefined;
   refreshExecutionMode(): Promise<void>;
   setExecutionMode(mode: GatePresetName): Promise<void>;
   /** Request Stop for the observed input only; true means the hosted path owns it. */
@@ -185,6 +187,8 @@ export function createRemoteConversationRouter(
   let hostedId: string | null = null;
   let hostedConnection: Extract<ConnectedHostResolution, { readonly baseUrl: string }> | undefined;
   let hostedMode: GatePresetName | undefined;
+  /** The host's account of why its mode in force is not the chosen one, from the last sessions.permissionMode.get. */
+  let hostedModeDifference: { readonly chosen: GatePresetName; readonly reason: string } | undefined;
   let modeObservation = 0;
   let modeRequest = 0;
   let stopRenewal: (() => void) | null = null;
@@ -232,6 +236,9 @@ export function createRemoteConversationRouter(
         throw new HostedExecutionModeError('The host returned an unconfirmed session execution mode.');
       }
       hostedMode = reply.mode;
+      const chosen = reply.chosenMode;
+      hostedModeDifference = chosen !== undefined && isGatePresetName(chosen) && chosen !== reply.mode && typeof reply.reason === 'string'
+        ? { chosen, reason: reply.reason } : undefined;
       options.requestRender();
     } catch (error) {
       if (revision === modeObservation) { hostedMode = undefined; options.requestRender(); }
@@ -246,16 +253,23 @@ export function createRemoteConversationRouter(
     hostedMode = undefined;
     options.requestRender();
     const operator = createOperatorApiClient({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
+    let pendingApproval: string | undefined;
     try {
       const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode });
+      // A looser mode asked with a token minted for automation is put to the owner, not applied.
+      if ('code' in reply) {
+        pendingApproval = reply.approvalId;
+        throw new HostedExecutionModeError(`The mode change is waiting for the owner's approval (approval ${reply.approvalId}); the session keeps its mode until he approves it.`);
+      }
       const current = currentModeOwner();
       if (revision !== modeRequest || current.id !== owner.id || !sameNativeRemoteConnection(current.connection, owner.connection)) throw new HostedExecutionModeError('The hosted execution owner changed during the mode update.');
       if (reply.sessionId !== owner.id || !isGatePresetName(reply.mode) || reply.mode !== mode) throw new HostedExecutionModeError('The host did not confirm the requested session execution mode.');
       modeObservation++;
       hostedMode = reply.mode;
       options.requestRender();
-    } catch {
+    } catch (error) {
       if (revision === modeRequest) { hostedMode = undefined; modeObservation++; options.requestRender(); }
+      if (pendingApproval !== undefined && error instanceof HostedExecutionModeError) throw error;
       throw new HostedExecutionModeError('The hosted execution mode update is unconfirmed. No local default was changed.');
     } finally { operator.dispose(); }
   };
@@ -476,6 +490,9 @@ export function createRemoteConversationRouter(
     hostedSessionId: () => hostedId,
     executionMode: () => {
       try { currentModeOwner(); return hostedMode; } catch { return undefined; }
+    },
+    executionModeDifference: () => {
+      try { currentModeOwner(); return hostedMode === undefined ? undefined : hostedModeDifference; } catch { return undefined; }
     },
     setExecutionMode: setRemoteExecutionMode,
     refreshExecutionMode,

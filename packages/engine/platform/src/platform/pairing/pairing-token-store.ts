@@ -59,6 +59,7 @@
  * atomically, then publishes its new in-memory index. Native launches hold the
  * same lock across their final authorization/launch boundary.
  */
+import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -126,6 +127,15 @@ interface StoredPairingToken {
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   client?: 'agent' | undefined;
+  /**
+   * `owner-pairing`: the owner paired this device himself, through the
+   * owner's pairing flow (the QR or `pair` command confirmed at his terminal
+   * or an admin sign-in, the relay included). Written when the token is
+   * minted and never changed afterwards. Absent: automation (a token minted
+   * through the API by another token, or with narrowed scopes, or for a named
+   * client), which does not make the owner's own acts.
+   */
+  readonly origin?: 'owner-pairing' | undefined;
   /**
    * Set on an offer minted for a device moving off the shared token: its first
    * use is exempt from `device.nodes.maxPaired`, as its mint was. Cleared by
@@ -240,7 +250,16 @@ export interface PublicPairingToken {
   readonly client?: 'agent' | undefined;
   /** The scopes this device holds when it was paired with a narrower list; absent means full operator authority. */
   readonly scopes?: readonly string[] | undefined;
+  /**
+   * How the token came to exist: `owner-pairing`, a device the owner paired
+   * himself, which makes the owner's own acts; `automation`, a token minted
+   * through the API, with narrowed scopes or for a named client, which does not.
+   */
+  readonly origin: PairingTokenOrigin;
 }
+
+/** How a pairing token came to exist; see {@link PublicPairingToken.origin}. */
+export type PairingTokenOrigin = 'owner-pairing' | 'automation';
 
 /** The result of minting a token, the ONLY time the plaintext secret is exposed. */
 export interface MintedPairingToken {
@@ -276,6 +295,11 @@ export interface MintPairingInput {
    * operator authority; absent (or containing `*`) is full authority.
    */
   readonly scopes?: readonly string[] | undefined;
+  /**
+   * `owner-pairing` only from the owner's own pairing flow. A token with
+   * narrowed scopes or a named client is automation whatever is asked.
+   */
+  readonly origin?: PairingTokenOrigin | undefined;
 }
 
 /**
@@ -365,6 +389,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
       || (record.attemptId !== undefined && (typeof record.attemptId !== 'string' || !PAIRING_ATTEMPT_ID_PATTERN.test(record.attemptId)))
       || (record.client !== undefined && record.client !== 'agent')
+      || (record.origin !== undefined && record.origin !== 'owner-pairing')
       || (record.scopes !== undefined && (!Array.isArray(record.scopes) || record.scopes.some(scope => typeof scope !== 'string' || !scope)))
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
       throw new Error('pairing token store has an invalid or duplicate record');
@@ -426,6 +451,8 @@ export interface AuthenticatedPairingToken {
   readonly client?: 'agent' | undefined;
   /** The scope list the pairing stores, when it was issued a narrower one than full operator authority. */
   readonly scopes?: readonly string[] | undefined;
+  /** True for a device the owner paired himself (see {@link PublicPairingToken.origin}). */
+  readonly ownerDevice?: true | undefined;
 }
 
 /**
@@ -561,6 +588,16 @@ export interface PairingTokenManagerOptions {
    * store, and so this module never has to depend on ConfigManager.
    */
   readonly maxPaired?: (() => number | undefined) | undefined;
+  /**
+   * The authority record (cluster/authority-record-file.ts). A claimed device
+   * token is written to it and its revocation is a terminal record entry, so a
+   * device paired on one machine of a group works on every machine and a
+   * revocation made on any machine holds on all of them. With it, this file is
+   * never the only thing that says yes: a token the record holds as revoked is
+   * refused whatever the file says, and a token the record holds as live is
+   * accepted though this file never saw it.
+   */
+  readonly authority?: AuthorityRecordFile | undefined;
 }
 
 /**
@@ -645,11 +682,28 @@ export class PairingTokenManager {
   /** The file identity native authority last confirmed durable; native reads confirm a new identity once. */
   #durableIdentity: string | undefined;
   readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
+  private readonly authority: AuthorityRecordFile | undefined;
   /** The serving daemon's shared token, while one is bound (see {@link bindSharedTokenCustody}). */
   #sharedCustody: SharedTokenCustody | undefined;
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
     this.filePath = filePath;
+    this.authority = options.authority;
+    // A revocation another machine made (or another process of this home)
+    // reaches whatever holds a session or a connection under that device.
+    this.authority?.onChange((notice) => {
+      if (notice.local && notice.change !== 'revoked') return;
+      const view = this.authority?.view();
+      if (!view) return;
+      const principals = [...notice.keys, ...notice.cascade]
+        .filter((key) => key.startsWith('device-token:') && view.isRevoked(key))
+        .map((key) => pairingPrincipalId(key.slice('device-token:'.length)));
+      if (principals.length === 0) return;
+      for (const listener of [...this.#revocationListeners]) {
+        try { listener(principals); }
+        catch (error) { logger.warn('Pairing revocation listener failed', { error: String(error) }); }
+      }
+    });
     this.continuationOwner = new NativeContinuationOwner(filePath);
     this.readMaxPaired = options.maxPaired ?? null;
     this.nativeDataWriter = options.nativeDataWriter;
@@ -1513,10 +1567,11 @@ export class PairingTokenManager {
    * - Below the cap nothing changes at all, same append, same result.
    * - At the cap, a NEW node is refused with {@link PairingLimitReachedError},
    *   which names the setting, the cap and the live count.
-   * - At the cap, a node that is ALREADY paired (same name) is never refused: it
-   *   supersedes its own record, so re-pairing a phone that is already in the
-   *   list keeps working and the count does not creep past the cap. Nobody
-   *   else's pairing is touched.
+   * - At the cap, a node that is ALREADY paired (same name) is never refused.
+   *   Its working pairing is NOT touched here: the offer supersedes it only at
+   *   its first use (see {@link capAtClaim}), so a code that expires unused, or
+   *   is never used, leaves the device paired and working, and the count does
+   *   not creep past the cap. Nobody else's pairing is touched.
    * - Lowering the cap below the current count unpairs NO ONE: existing tokens
    *   keep authenticating; only the next NEW pairing is refused, until enough
    *   devices are unpaired to fit under the cap again.
@@ -1537,7 +1592,6 @@ export class PairingTokenManager {
       if (input.mintedBy !== undefined && !snapshot.tokens.some(record => record.id === input.mintedBy)) {
         throw new PairingMinterRevokedError();
       }
-      let replacedId: string | undefined;
       const now = Date.now();
       dropExpiredOffers(snapshot, now);
       if (input.replacesOffer !== undefined) {
@@ -1568,26 +1622,25 @@ export class PairingTokenManager {
         const normalized = input.name.trim().toLowerCase();
         const existing = normalized ? paired.find(record => record.name.trim().toLowerCase() === normalized) : undefined;
         if (!existing) throw new PairingLimitReachedError(cap, paired.length);
-        logger.info('Pairing at the device.nodes.maxPaired cap: re-pairing an already paired node', {
+        // The working pairing stays until this offer is first used, which
+        // supersedes it then; an offer that expires unused changes nothing.
+        logger.info('Pairing at the device.nodes.maxPaired cap: an offer to re-pair an already paired node; it replaces that pairing at its first use', {
           name: existing.name, maxPaired: cap, pairedCount: paired.length,
         });
-        snapshot.tokens = snapshot.tokens.filter(record => record.id !== existing.id);
-        replacedId = existing.id;
-        replaced = true;
       }
       const token = generateTokenValue();
       const record: StoredPairingToken = {
         id: `pair-${randomUUID()}`, name: input.name.trim() || 'Unnamed device',
         tokenHash: hashToken(token), createdAt: now, offeredUntil: now + PAIRING_OFFER_LIFETIME_MS,
-        ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
+        ...(input.mintedBy !== undefined ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
+        // The owner's own device only through his pairing flow, never with a narrowed list or a named client.
+        ...(input.origin === 'owner-pairing' && scopes === undefined && input.client === undefined ? { origin: 'owner-pairing' as const } : {}),
         // A migration's mint skipped the cap; its first use does too.
         ...(!options.enforceCap ? { capExempt: true as const } : {}),
         ...(scopes !== undefined ? { scopes } : {}),
       };
-      // A device paired again keeps answering for what its old pairing minted.
-      if (replacedId !== undefined) for (const item of snapshot.tokens) if (item.mintedBy === replacedId) item.mintedBy = record.id;
       snapshot.tokens.push(record);
       return { value: { id: record.id, name: record.name, token, createdAt: record.createdAt }, changed: true };
     }, true, () => !replaced);
@@ -1605,6 +1658,8 @@ export class PairingTokenManager {
    * device pairing for the first time is still bounded.
    */
   mintForMigration(input: MintPairingInput): MintedPairingToken {
+    // `origin` is the caller's to state: pairing.tokens.migrate (a direct API mint) states none,
+    // so its token is automation; the owner's pairing hand-off states owner-pairing.
     return this.mintInternal(input, { enforceCap: false });
   }
 
@@ -1626,10 +1681,24 @@ export class PairingTokenManager {
   authenticate(token: string): AuthenticatedPairingToken | null {
     const normalized = token.trim();
     if (!normalized.startsWith(TOKEN_PREFIX)) return null;
-    if (!this.refreshIfChanged() || this.index.size === 0) return null;
     const hash = hashToken(normalized);
-    let record = this.index.get(hash);
-    if (!record) return null;
+    // The authority record answers first: revoked there is refused here,
+    // whatever this file says; an unreadable record authenticates nothing.
+    const view = this.authority ? this.authority.view() : null;
+    if (this.authority && !view) return null;
+    if (view?.deviceTokenRevoked(hash)) return null;
+    const localReadable = this.refreshIfChanged();
+    let record = localReadable ? this.index.get(hash) : undefined;
+    if (!record) {
+      // Paired on another machine of the group: the record says it is live.
+      const entry = view?.deviceTokenByHash(hash);
+      if (!entry) return null;
+      const extra = entry.public as Record<string, unknown>;
+      return { id: entry.id, name: entry.public.name, principalId: pairingPrincipalId(entry.id),
+        ...(entry.public.client === 'agent' ? { client: 'agent' as const } : {}),
+        ...(entry.public.scopes !== null ? { scopes: Object.freeze([...entry.public.scopes]) } : {}),
+        ...(extra['origin'] === 'owner-pairing' ? { ownerDevice: true as const } : {}) };
+    }
     const now = Date.now();
     const refusal = this.refusalOf(record, now);
     if (refusal) {
@@ -1641,6 +1710,7 @@ export class PairingTokenManager {
     }
     if (record.offeredUntil !== undefined) {
       let superseded = false;
+      let supersededId: string | undefined;
       try {
         // Adds a device (and at the cap may supersede the same node's older record),
         // so a failed claim that replaced nothing is re-verifiable like a mint.
@@ -1666,8 +1736,12 @@ export class PairingTokenManager {
           found.attemptId = undefined;
           found.capExempt = undefined;
           found.lastSeenAt = now;
+          if (replaced) supersededId = replaced.id;
           return { value: found, changed: true };
         }, true, () => !superseded);
+        // The device is paired: it is on the authority record from now on, for
+        // every machine of the group; a record it superseded is revoked there.
+        if (record) this.#publishToRecord(record, supersededId);
       } catch (error) {
         // Unclaimed, the offer would expire under a device that is using it; refuse instead.
         logger.warn('Pairing token first use could not be recorded; the request is refused', { path: this.filePath, error: String(error) });
@@ -1678,14 +1752,31 @@ export class PairingTokenManager {
       this.#stampLastSeen(record, now);
     }
     return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id), ...(record.client === 'agent' ? { client: 'agent' as const } : {}),
-      ...(record.scopes !== undefined ? { scopes: Object.freeze([...record.scopes]) } : {}) };
+      ...(record.scopes !== undefined ? { scopes: Object.freeze([...record.scopes]) } : {}),
+      ...(record.origin === 'owner-pairing' ? { ownerDevice: true as const } : {}) };
   }
 
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
   list(): PublicPairingToken[] {
     // Pick up a mint or revoke made by another process; an unreadable file keeps the last good view.
     this.refreshIfChanged();
-    return this.snapshot.tokens.filter(t => t.offeredUntil === undefined).map((t) => ({
+    const view = this.authority?.view() ?? null;
+    const local = this.snapshot.tokens.filter(t => t.offeredUntil === undefined && !(view?.deviceTokenRevoked(t.tokenHash) ?? false));
+    const localIds = new Set(local.map((t) => t.id));
+    // Devices paired on another machine of the group, live on the record.
+    const elsewhere: PublicPairingToken[] = (view?.list('device-token') ?? [])
+      .filter((entry) => !localIds.has(entry.id) && view!.deviceTokenByHash(entry.public.tokenHash) !== null)
+      .map((entry) => {
+        const extra = entry.public as Record<string, unknown>;
+        return {
+          id: entry.id, name: entry.public.name, createdAt: entry.public.createdAt,
+          ...(typeof extra['mintedBy'] === 'string' ? { mintedBy: extra['mintedBy'] } : {}),
+          ...(entry.public.client === 'agent' ? { client: 'agent' as const } : {}),
+          ...(entry.public.scopes !== null ? { scopes: Object.freeze([...entry.public.scopes]) } : {}),
+          origin: extra['origin'] === 'owner-pairing' ? 'owner-pairing' as const : 'automation' as const,
+        };
+      });
+    return [...local.map((t) => ({
       id: t.id,
       name: t.name,
       createdAt: t.createdAt,
@@ -1693,17 +1784,79 @@ export class PairingTokenManager {
       ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
       ...(t.client === 'agent' ? { client: 'agent' as const } : {}),
       ...(t.scopes !== undefined ? { scopes: Object.freeze([...t.scopes]) } : {}),
-    }));
+      origin: t.origin === 'owner-pairing' ? 'owner-pairing' as const : 'automation' as const,
+    })), ...elsewhere];
   }
 
   /** Rename a token's user-visible label. False when the id is unknown. */
   rename(id: string, name: string): boolean {
-    return this.mutate(snapshot => {
+    const renamed = this.mutate(snapshot => {
       const record = snapshot.tokens.find(item => item.id === id);
       if (!record) return { value: false, changed: false };
       record.name = name.trim() || record.name;
       return { value: true, changed: true };
     });
+    const entry = this.authority?.view()?.entry('device-token', id);
+    if (entry && !entry.revoked && name.trim()) {
+      // A rename does not move authority: work admitted under the device stays current.
+      void this.authority!.write(() => ({ kind: 'update', key: `device-token:${id}`, patch: { name: name.trim() }, narrowsOrWidens: false, value: null }))
+        .catch((error: unknown) => logger.warn('A paired device rename could not be written to the authority record', { error: String(error) }));
+      return true;
+    }
+    return renamed;
+  }
+
+  /**
+   * Revoke a device everywhere: here, and on the authority record, so every
+   * machine of the group refuses it and a machine that was away refuses it
+   * when it returns. Resolves once the revocation is durable here; `alsoRevoked`
+   * names what it minted, which the record revokes with it.
+   */
+  async revokeEverywhere(id: string): Promise<{ readonly revoked: boolean; readonly alsoRevoked: readonly string[] }> {
+    const local = this.revokeWithMinted(id);
+    if (!this.authority) return local;
+    const result = await this.authority.write((view) => {
+      const entry = view.entry('device-token', id);
+      if (!entry || entry.revoked) return { kind: 'none', value: false };
+      return { kind: 'revoke', key: `device-token:${id}`, by: 'owner', reason: 'revoked by the owner', value: true };
+    });
+    const view = this.authority.view();
+    // Devices it minted (a relay code or a push subscription revoked with it is not a device).
+    const cascade = view ? view.descendants(`device-token:${id}`).filter((key) => key.startsWith('device-token:')).map((key) => key.slice('device-token:'.length)) : [];
+    return { revoked: local.revoked || result.value, alsoRevoked: [...new Set([...local.alsoRevoked, ...cascade])] };
+  }
+
+  /** Write a newly paired device to the authority record; failures are logged, the device keeps working here. */
+  #publishToRecord(record: StoredPairingToken, supersededId: string | undefined): void {
+    const authority = this.authority;
+    if (!authority) return;
+    void authority.write((view) => {
+      const changes: AuthorityChange<null>[] = [];
+      if (!view.entry('device-token', record.id)) {
+        changes.push({ kind: 'issue', value: null, entries: [{
+          kind: 'device-token', id: record.id,
+          parent: record.mintedBy !== undefined && view.entry('device-token', record.mintedBy) ? `device-token:${record.mintedBy}` : null,
+          public: {
+            name: record.name, tokenHash: record.tokenHash, createdAt: record.createdAt,
+            client: record.client === 'agent' ? 'agent' : 'device', scopes: record.scopes ?? null, rotationIssuedAt: record.createdAt,
+            ...(record.origin === 'owner-pairing' ? { origin: 'owner-pairing' } : {}),
+            ...(record.mintedBy !== undefined ? { mintedBy: record.mintedBy } : {}),
+          },
+        }] });
+      }
+      if (supersededId !== undefined && view.entry('device-token', supersededId) && !view.entry('device-token', supersededId)!.revoked) {
+        // What the old pairing minted moves to the new one first, in the same
+        // write, so revoking the old pairing does not revoke them with it.
+        const oldKey = `device-token:${supersededId}` as const;
+        for (const child of view.list('device-token')) {
+          if (child.parent === oldKey && child.id !== record.id && !view.isRevoked(`device-token:${child.id}`)) {
+            changes.push({ kind: 'update', key: `device-token:${child.id}`, patch: {}, narrowsOrWidens: false, parent: `device-token:${record.id}`, value: null });
+          }
+        }
+        changes.push({ kind: 'revoke', key: oldKey, by: 'owner', reason: 'paired again', value: null });
+      }
+      return changes.length === 0 ? { kind: 'none', value: null } : { kind: 'many', changes, value: null };
+    }).catch((error: unknown) => logger.warn('A paired device could not be written to the authority record; it works on this machine only until it is', { tokenId: record.id, error: String(error) }));
   }
 
   /** Revoke one pairing and every pairing it minted. A persistence failure throws instead of reporting success. */

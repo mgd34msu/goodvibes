@@ -227,6 +227,14 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
     : flags.port === undefined ? undefined
       : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port: flags.port };
   const origin = resolvePairingWebOrigin(input.configManager, undefined, bound);
+  if (origin === null) {
+    // No web UI is served (and no public URL names one), so a link would open nothing.
+    return failure(
+      'no web UI is served by this daemon and web.publicBaseUrl names none, so a pairing link would open nothing',
+      'serve the web UI first: goodvibes-daemon webui enable --bundle-dir <dir> (or set web.publicBaseUrl to where it runs), then pair again',
+      flags.json,
+    );
+  }
   const fromFiles = answer.kind === 'absent'
     ? [`no daemon answered at ${answer.baseUrl}; this link is built from the settings and the token file, and works once the daemon runs with them.`,
       'a daemon started on another port is found with: goodvibes-daemon pair --port <port>']
@@ -372,7 +380,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   // This machine's own daemon resolves its origin from the same settings and
   // host facts as this process, so the routable fallback is known here; a
   // remote daemon's is not, and is never guessed.
-  const localOrigin = local ? resolvePairingWebOrigin(input.configManager) : undefined;
+  const localOrigin = local ? resolvePairingWebOrigin(input.configManager) ?? undefined : undefined;
   const banner = renderPairingBanner({
     version: local ? input.version : `remote build at ${target.baseUrl}`,
     origin,

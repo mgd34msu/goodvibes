@@ -9,8 +9,12 @@
 // as pairing a phone by scanning a code.
 //
 // Delivering this payload over a trusted channel (QR on the same LAN, a copied
-// string) is what bootstraps trust. Whoever holds a valid pairing payload can
-// reach the daemon through the relay; treat it like a credential.
+// string) is what bootstraps trust. Each payload carries its own relay code, a
+// per-device secret the daemon issued with it: every request tunneled through
+// the relay presents it (RELAY_CODE_HEADER), and the daemon refuses one whose
+// code it did not issue or has revoked. Whoever holds a valid pairing payload
+// can reach the daemon through the relay until its code is revoked; treat it
+// like a credential.
 
 import { fromBase64Url, toBase64Url, decodeUtf8, encodeUtf8 } from './crypto.js';
 import { RELAY_PROTOCOL_VERSION, type RendezvousId } from './protocol.js';
@@ -18,6 +22,13 @@ import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 
 /** Self-describing prefix so a scanner can recognize a relay pairing string. */
 export const PAIRING_SCHEME = 'gvrelay1';
+
+/**
+ * The header a relayed request carries its device's relay code in. The client
+ * transport sets it from the pairing on every tunneled request; the daemon
+ * checks it against the codes it issued and has not revoked.
+ */
+export const RELAY_CODE_HEADER = 'x-goodvibes-relay-code';
 
 /** The decoded contents of a pairing payload. */
 export interface RelayPairingPayload {
@@ -29,6 +40,8 @@ export interface RelayPairingPayload {
   readonly rid: RendezvousId;
   /** Daemon static public key (raw uncompressed P-256), base64url. */
   readonly daemonPublicKey: string;
+  /** This device's relay code: listed and revocable on the daemon (`relay.codes.*`), sent on every relayed request. */
+  readonly code: string;
   /** Optional human-facing label for the daemon (shown in the surface UI). */
   readonly label?: string;
 }
@@ -38,6 +51,7 @@ interface WirePairing {
   readonly u: string;
   readonly r: string;
   readonly k: string;
+  readonly c: string;
   readonly l?: string;
 }
 
@@ -46,6 +60,7 @@ export function createRelayPairingPayload(input: {
   readonly relayUrl: string;
   readonly rid: RendezvousId;
   readonly daemonPublicKey: string;
+  readonly code: string;
   readonly label?: string;
 }): RelayPairingPayload {
   return {
@@ -53,6 +68,7 @@ export function createRelayPairingPayload(input: {
     relayUrl: input.relayUrl,
     rid: input.rid,
     daemonPublicKey: input.daemonPublicKey,
+    code: input.code,
     ...(input.label !== undefined ? { label: input.label } : {}),
   };
 }
@@ -64,6 +80,7 @@ export function encodeRelayPairingString(payload: RelayPairingPayload): string {
     u: payload.relayUrl,
     r: payload.rid,
     k: payload.daemonPublicKey,
+    c: payload.code,
     ...(payload.label !== undefined ? { l: payload.label } : {}),
   };
   return `${PAIRING_SCHEME}.${toBase64Url(encodeUtf8(JSON.stringify(wire)))}`;
@@ -93,9 +110,13 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     typeof (wire as WirePairing).p !== 'number' ||
     typeof (wire as WirePairing).u !== 'string' ||
     typeof (wire as WirePairing).r !== 'string' ||
-    typeof (wire as WirePairing).k !== 'string'
+    typeof (wire as WirePairing).k !== 'string' ||
+    typeof (wire as WirePairing).c !== 'string'
   ) {
-    throw new GoodVibesError('Relay pairing string is missing required fields.', { category: 'bad_request', source: 'transport', recoverable: false });
+    throw new GoodVibesError('Relay pairing string is missing required fields.', {
+      category: 'bad_request', source: 'transport', recoverable: false,
+      next: ['Pair again from /relay pair (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
+    });
   }
   const w = wire as WirePairing;
   assertPairingProtocol(w.p);
@@ -104,6 +125,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     relayUrl: w.u,
     rid: w.r,
     daemonPublicKey: w.k,
+    code: w.c,
     ...(typeof w.l === 'string' ? { label: w.l } : {}),
   };
 }
@@ -116,6 +138,12 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
 export function resolveRelayPairing(pairing: RelayPairingPayload | string): RelayPairingPayload {
   if (typeof pairing === 'string') return decodeRelayPairingString(pairing);
   assertPairingProtocol(pairing.protocol);
+  if (typeof pairing.code !== 'string' || pairing.code.length === 0) {
+    throw new GoodVibesError('This relay pairing carries no relay code.', {
+      category: 'bad_request', source: 'transport', recoverable: false, state: 'not connected',
+      next: ['Pair again from /relay pair (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
+    });
+  }
   return pairing;
 }
 

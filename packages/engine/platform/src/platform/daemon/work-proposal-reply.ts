@@ -50,8 +50,9 @@ export interface WorkProposalReplyDeps {
 /**
  * Match an inbound message against the pending proposals for its surface.
  *
- * Only one delivered pending proposal on the exact source is answerable.
- * Owner, channel and thread are deterministic boundaries; ambiguity or a
+ * Only one delivered pending proposal on the exact source is answerable: the
+ * conversation it was raised in, or for a guest's proposal the owner's
+ * conversation it was put to. Owner, channel and thread are deterministic boundaries; ambiguity or a
  * different identity cannot be resolved by falling back to a recent proposal.
  * ntfy alone authenticates a topic rather than exposing a sender identity.
  * Its userless replies require the same exact nonempty topic on both sides.
@@ -64,10 +65,19 @@ export function findProposalForReply(
   // cannot answer someone else's proposal. Topic-authenticated surfaces may
   // omit user IDs only when both sides omit them and the exact channel matches.
   if (!input.userId && (input.surface !== 'ntfy' || !input.channelId)) return null;
-  const candidates = pending.filter(record => record.surfaceKind === input.surface
-    && record.userId === input.userId
-    && record.threadId === input.threadId
-    && (record.channelId ?? record.externalId) === input.channelId);
+  // A guest's proposal is answered only from the owner's conversation it was
+  // put to (`answerFrom`); the guest who asked can never agree to it.
+  const candidates = pending.filter(record => {
+    const answering = record.answerFrom;
+    if (answering) {
+      return answering.surfaceKind === input.surface && answering.userId === input.userId
+        && answering.threadId === input.threadId && answering.channelId === input.channelId;
+    }
+    return record.surfaceKind === input.surface
+      && record.userId === input.userId
+      && record.threadId === input.threadId
+      && (record.channelId ?? record.externalId) === input.channelId;
+  });
   return candidates.length === 1 ? candidates[0]! : null;
 }
 
@@ -98,7 +108,8 @@ export function proposalReplyTarget(
   // Explicit authenticated button wire tokens are not conversational replies.
   if ((input.surface === 'slack' || input.surface === 'discord') && input.metadata?.interactive === true
     && /^gv:(?:approval:(?:approve|deny|claim)|run:(?:cancel|retry)):.+$/.test(input.text ?? '')) return undefined;
-  return findProposalForReply(input, proposals.listPending({ surfaceKind: input.surface })) ?? undefined;
+  // Not narrowed by surface: a guest's proposal may be answered from the owner's conversation on another one.
+  return findProposalForReply(input, proposals.listPending()) ?? undefined;
 }
 
 const AGREE = /^(?:yes|y|yep|yeah|ok|okay|sure|go|go ahead|do it|start|start it|approve|approved|accept|agreed)$/;

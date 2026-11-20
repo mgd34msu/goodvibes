@@ -35,7 +35,7 @@ import type { ClusterLogger, ClusterTransport, ClusterTransportDescription } fro
 
 /** Envelope types the group layer handles itself rather than passing down. */
 const GROUP_OWNED_TYPES: ReadonlySet<string> = new Set([
-  'BEACON', 'ROSTER', 'REKEY',
+  'BEACON', 'ROSTER',
   // Config replication rides the same signed channel. Anything not listed here
   // is handed to the election, so a type added to the group layer and forgotten
   // here arrives at the wrong state machine and is silently ignored.
@@ -79,12 +79,15 @@ export interface GroupWireRouterOptions {
   /** A beacon from a DIFFERENT group. Advertisement only; never acted on. */
   readonly onForeignBeacon: (groupId: string, body: Record<string, unknown>, version: string) => void;
   /**
-   * A datagram claimed a key generation this machine does not hold: the group
-   * has probably rotated while this machine was not listening. Unauthenticated
-   * (the signature could not be checked), so it may only prompt a verified
-   * catch-up, never act on the datagram.
+   * A datagram claimed a key generation this machine does not hold or does
+   * not accept yet, or was signed under a generation it holds with a key that
+   * did not verify (another minter's key for that generation won on the
+   * group's record): the group moved on while this machine was not listening.
+   * Unauthenticated (the signature could not be checked), so it may only
+   * prompt a verified catch-up, never act on the datagram. `generation` and
+   * `fromNodeId` are what the datagram claimed (hints, not facts).
    */
-  readonly onGenerationNotHeld?: (() => void) | undefined;
+  readonly onGenerationNotHeld?: ((generation: number | null, fromNodeId: string | null, cause: 'generation' | 'signature') => void) | undefined;
   /**
    * Why this machine holds no group key, when it holds none: it is in no group,
    * or its stored membership could not be confirmed. Absent means "no group".
@@ -315,7 +318,9 @@ export class GroupWireRouter {
     const decoded = decodeEnvelope(raw, this.options.keyring);
     if (!decoded.envelope) {
       this.countRejection(decoded.rejected);
-      if (this.claimsNewerGeneration(raw, decoded.rejected)) this.options.onGenerationNotHeld?.();
+      const claimed = this.claimedNewerGeneration(raw, decoded.rejected);
+      if (claimed !== undefined) this.options.onGenerationNotHeld?.(claimed, peeked?.nodeId ?? null, 'generation');
+      else if (decoded.rejected === 'signature-did-not-verify' && peeked?.nodeId) this.options.onGenerationNotHeld?.(null, peeked.nodeId, 'signature');
       if (
         decoded.rejected === 'other-group'
         && peeked?.type === 'BEACON'
@@ -346,18 +351,22 @@ export class GroupWireRouter {
   }
 
   /**
-   * A generation we do not hold, or one ahead of ours (a rotation we missed).
-   * A generation BEHIND ours is the sender being stale, which is not our gap.
+   * A generation we do not hold, or one ahead of ours (a rotation we missed):
+   * the generation claimed, or null when it could not be read. Undefined when
+   * the datagram claims nothing newer: a generation BEHIND ours is the sender
+   * being stale, which is not our gap.
    */
-  private claimsNewerGeneration(raw: string, rejection: EnvelopeRejection | null): boolean {
-    if (rejection === 'generation-not-held') return true;
-    if (rejection !== 'generation-not-accepted') return false;
+  private claimedNewerGeneration(raw: string, rejection: EnvelopeRejection | null): number | null | undefined {
+    if (rejection !== 'generation-not-held' && rejection !== 'generation-not-accepted') return undefined;
+    let claimed: unknown;
     try {
-      const claimed = (JSON.parse(raw) as Record<string, unknown>)['keyGen'];
-      return typeof claimed === 'number' && claimed > this.options.keyring.currentGeneration;
+      claimed = (JSON.parse(raw) as Record<string, unknown>)['keyGen'];
     } catch {
-      return false;
+      claimed = undefined;
     }
+    const generation = typeof claimed === 'number' && Number.isSafeInteger(claimed) && claimed >= 0 ? claimed : null;
+    if (rejection === 'generation-not-held') return generation === null || generation > this.options.keyring.currentGeneration ? generation : undefined;
+    return generation !== null && generation > this.options.keyring.currentGeneration ? generation : undefined;
   }
 
   private countRejection(rejection: EnvelopeRejection | null): void {

@@ -14,6 +14,7 @@
  * delete is a real hard delete offered only when the daemon has the verb and
  * reconciled against a fresh list before it reports success.
  */
+import { OwnerApprovalPendingError } from '../../lib/owner-approval';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, MoreHorizontal } from 'lucide-react';
@@ -81,11 +82,18 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
   });
   const notLocal = modeQuery.isError && isSessionNotLocalError(modeQuery.error);
   const mode = modeQuery.data?.mode ?? '';
+  // When the mode in force is not the one chosen (or saved), the daemon says which was chosen and why.
+  const chosenMode = modeQuery.data?.chosenMode;
+  const reason = modeQuery.data?.reason;
   const setMode = useMutation({
     mutationFn: (nextMode: SettableGatePresetName) => platformClient.operator.sessions.permissionMode.set(sessionId, nextMode),
     onSuccess: async () => {
       setSheetOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionPermissionMode(sessionId) });
+    },
+    // A looser mode put to the owner waits for his approval (OwnerApprovalNotices says so); the mode shown stays the one in force.
+    onError: (error: unknown) => {
+      if (error instanceof OwnerApprovalPendingError) setSheetOpen(false);
     },
   });
 
@@ -99,6 +107,9 @@ function PermissionModeFact({ sessionId }: { sessionId: string }) {
   return (
     <span className="work-inline-action">
       {mode ? gatePresetLabel(mode) : modeQuery.isLoading ? 'Loading…' : 'Unknown'}
+      {mode && chosenMode && chosenMode !== mode && reason
+        ? <span className="text-muted-foreground" role="note">{` (in force; ${gatePresetLabel(chosenMode)} chosen, but ${reason})`}</span>
+        : null}
       <Button size="sm" variant="ghost" onClick={() => setSheetOpen(true)} disabled={!mode} aria-label="Change permission mode">
         Change
       </Button>

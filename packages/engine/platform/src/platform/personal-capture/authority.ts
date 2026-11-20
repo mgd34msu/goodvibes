@@ -57,6 +57,11 @@ export interface CaptureChannelIdentity {
    * came from", and not knowing is a refusal.
    */
   readonly routed?: boolean | undefined;
+  /**
+   * The sender is admitted by the channel but is not its owner. Nothing they
+   * say is the owner speaking, whatever `profile.ownerChannels` lists.
+   */
+  readonly guest?: boolean | undefined;
 }
 
 export interface CaptureAuthorityInput {
@@ -155,6 +160,16 @@ export function resolveCaptureAuthority(
       canCapture: true,
       source: 'local-surface',
       reason: 'This turn came from a surface you are using directly, so it carries your authority.',
+    };
+  }
+
+  if (input.channel?.guest === true) {
+    return {
+      authority: 'channel-message',
+      surface: 'agent',
+      canCapture: false,
+      source: 'unlisted-channel',
+      reason: `This message came from someone on ${kind} who is not the channel's owner, so nothing was recorded to your profile.`,
     };
   }
 

@@ -343,6 +343,11 @@
       "text": "export declare function createTransportPaths(baseUrl: string): TransportPaths;"
     },
     {
+      "name": "exemptLoopbackFromProxy",
+      "kind": "function",
+      "text": "export declare function exemptLoopbackFromProxy(hostname?: string): void;"
+    },
+    {
       "name": "firstJsonSchemaFailure",
       "kind": "function",
       "text": "export declare function firstJsonSchemaFailure(schema: Record<string, unknown>, value: unknown, path?: string, root?: Record<string, unknown>, _depth?: number): JsonSchemaValidationFailure | undefined; ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
@@ -376,6 +381,11 @@
       "name": "isLinearSchemaPattern",
       "kind": "function",
       "text": "export declare function isLinearSchemaPattern(source: string): boolean;"
+    },
+    {
+      "name": "isLoopbackHost",
+      "kind": "function",
+      "text": "export declare function isLoopbackHost(hostname: string): boolean;"
     },
     {
       "name": "isPrivateNetworkHost",
@@ -1117,6 +1127,16 @@
       "name": "createTransportPaths",
       "kind": "function",
       "text": "export declare function createTransportPaths(baseUrl: string): TransportPaths;"
+    },
+    {
+      "name": "exemptLoopbackFromProxy",
+      "kind": "function",
+      "text": "export declare function exemptLoopbackFromProxy(hostname?: string): void;"
+    },
+    {
+      "name": "isLoopbackHost",
+      "kind": "function",
+      "text": "export declare function isLoopbackHost(hostname: string): boolean;"
     },
     {
       "name": "isPrivateNetworkHost",

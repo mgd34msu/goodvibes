@@ -1,3 +1,4 @@
+import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import { randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
@@ -16,6 +17,13 @@ export interface AuthUser {
    * its role's default set (`*` is the whole set). Absent: the role's set.
    */
   scopes?: string[] | undefined;
+  /**
+   * The password is the one generated at first start and written to the
+   * bootstrap credential file. It signs in only while that file still holds
+   * it: deleting or clearing the file withdraws it. Setting a password drops
+   * this mark.
+   */
+  bootstrap?: true | undefined;
 }
 
 export interface AuthSession {
@@ -23,6 +31,8 @@ export interface AuthSession {
   token: string;
   username: string;
   expiresAt: number;
+  /** Signed in with the bootstrap credential: the session ends when that file no longer names its user. */
+  viaBootstrapCredential?: true | undefined;
 }
 
 /** The accounts and signed-in sessions of a manager, copied so later changes do not alter it. */
@@ -62,6 +72,15 @@ interface UserAuthConfig {
   scryptParams?: ScryptParams | undefined;
   /** Injectable clock for testing. Defaults to Date.now. */
   nowFn?: (() => number) | undefined;
+  /**
+   * The authority record (cluster/authority-record-file.ts). A user added,
+   * changed or deleted here is written to it, and a user the record holds
+   * replaces the local copy of that name: a user added on one machine of a
+   * group signs in on every machine, and a password changed or a user deleted
+   * on any machine ends that user's sessions on all of them. Users the record
+   * has never named stay this machine's own.
+   */
+  authority?: AuthorityRecordFile | undefined;
 }
 
 /**
@@ -153,6 +172,12 @@ export type AuthenticateResult =
      * that private file can trigger this, so the caller may say so.
      */
     readonly staleBootstrapCredential?: true;
+    /**
+     * The password matched a generated bootstrap password whose credential
+     * file was deleted or cleared, which withdraws it. Only someone who knew
+     * that password can trigger this, so the caller may say so.
+     */
+    readonly withdrawnBootstrapCredential?: true;
   };
 
 /**
@@ -381,6 +406,7 @@ function loadOrBootstrapUsers(filePath: string, credentialPath: string, observed
       username,
       passwordHash: hashPassword(initialPassword, params),
       roles: ['admin'],
+      bootstrap: true,
     },
   ];
   writeBootstrapUsers(filePath, users);
@@ -473,8 +499,16 @@ export class UserAuthManager {
   #revision = 0;
   readonly #revisionSource = revisionSource('local auth', () => this.#revision);
   readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
+  readonly #authority: AuthorityRecordFile | undefined;
+  readonly #publishing = new Set<Promise<void>>();
+
+  /** Resolves once every user change has been written to the authority record (a command line exits after it). */
+  async settled(): Promise<void> {
+    while (this.#publishing.size > 0) await Promise.allSettled([...this.#publishing]);
+  }
 
   constructor(config: UserAuthConfig) {
+    this.#authority = config.authority;
     if (!config.bootstrapFilePath) throw new Error('UserAuthManager requires an explicit bootstrapFilePath.');
     if (!config.bootstrapCredentialPath) throw new Error('UserAuthManager requires an explicit bootstrapCredentialPath.');
     this.sessionTtlMs = config.sessionTtlMs ?? OPERATOR_SESSION_TTL_MS;
@@ -500,6 +534,81 @@ export class UserAuthManager {
     // No password is derived at start: a bootstrap file that fell behind the
     // store is explained at the failed sign-in that runs into it.
     if (this.persistUsers) this.rememberStore(this.users.values());
+    this.users = this.#overlay(this.users);
+    this.#authority?.onChange(() => this.#applyRecord());
+  }
+
+  /**
+   * The users in force: this machine's file, with every user the authority
+   * record names taken from the record (its live incarnation, or removed when
+   * every incarnation was deleted).
+   */
+  #overlay(local: Map<string, AuthUser>): Map<string, AuthUser> {
+    const view = this.#authority?.view();
+    if (!view) return local;
+    const next = new Map(local);
+    const named = new Set(view.list('user').map((entry) => entry.public.username));
+    // Owner decision D2: a name held by separate accounts made on different
+    // machines is never overwritten here; this machine keeps its own account
+    // (authority.status and cluster status report the difference).
+    const conflicted = new Set(view.userConflicts().map((conflict) => conflict.username.toLowerCase()));
+    for (const username of named) {
+      if (conflicted.has(username.toLowerCase()) && local.has(username)) continue;
+      const live = view.user(username);
+      if (!live) { next.delete(username); continue; }
+      const hash = live.private?.passwordHash;
+      if (!hash) continue;
+      const current = next.get(username);
+      const roles = [...live.public.roles];
+      const scopes = live.public.scopes === null ? undefined : [...live.public.scopes];
+      if (current && current.passwordHash === hash && JSON.stringify(current.roles ?? []) === JSON.stringify(roles)
+        && JSON.stringify(current.scopes) === JSON.stringify(scopes)) continue;
+      next.set(username, { username, passwordHash: hash, roles, ...(scopes !== undefined ? { scopes } : {}) });
+    }
+    return next;
+  }
+
+  /** The record changed (here, in another process, or on another machine): take it in, ending sessions it made stale. */
+  #applyRecord(): void {
+    const next = this.#overlay(this.users);
+    const changed = [...new Set([...this.users.keys(), ...next.keys()])]
+      .filter((username) => !sameUser(this.users.get(username), next.get(username)));
+    if (changed.length === 0) return;
+    const ended = changed.filter((username) => this.users.get(username)?.passwordHash !== next.get(username)?.passwordHash);
+    this.users = next;
+    this.#revision++;
+    for (const username of ended) this.revokeSessionsForUser(username);
+  }
+
+  /** Write a user change to the authority record; logged on failure, the change stands here. */
+  #publish(username: string, change: 'upsert' | 'delete', narrows: boolean): void {
+    const authority = this.#authority;
+    if (!authority) return;
+    const user = this.users.get(username);
+    const work = authority.write((view) => {
+      // A name held by separate accounts on different machines: a change here
+      // must not land on another machine's account. It stays on this machine.
+      if (view.userConflicts().some((conflict) => conflict.username.toLowerCase() === username.toLowerCase())) {
+        logger.warn('This user exists as separate accounts made on different machines of the group; the change stays on this machine', { username });
+        return { kind: 'none', value: null };
+      }
+      const live = view.user(username);
+      if (change === 'delete') {
+        return live ? { kind: 'revoke', key: `user:${live.id}`, by: 'owner', reason: 'user deleted', value: null } : { kind: 'none', value: null };
+      }
+      if (!user) return { kind: 'none', value: null };
+      const scopes = user.scopes === undefined ? null : [...user.scopes];
+      if (live) {
+        return { kind: 'update', key: `user:${live.id}`, value: null, narrowsOrWidens: narrows,
+          patch: { roles: [...(user.roles ?? [])], scopes, epoch: live.public.epoch + (narrows ? 1 : 0) },
+          privatePart: { passwordHash: user.passwordHash } };
+      }
+      return { kind: 'issue', value: null, entries: [{ kind: 'user', id: `u-${randomUUID()}`,
+        public: { username, roles: [...(user.roles ?? [])], scopes, epoch: 1, createdAt: this.nowFn() },
+        private: { passwordHash: user.passwordHash } }] };
+    }).then(() => undefined, (error: unknown) => logger.warn('A user change could not be written to the authority record; it holds on this machine only until it is', { username, error: String(error) }));
+    this.#publishing.add(work);
+    void work.finally(() => this.#publishing.delete(work));
   }
 
   /** Local accounts and their sessions as a revision source. */
@@ -531,7 +640,7 @@ export class UserAuthManager {
     if (identity === this.storedIdentity) return;
     const onDisk = readBootstrapUsers(this.userStorePath);
     if (!onDisk) return;
-    const next = new Map(onDisk.map(user => [user.username, user]));
+    const next = this.#overlay(new Map(onDisk.map(user => [user.username, user])));
     for (const username of this.foreignlyChangedUsers(next)) this.revokeSessionsForUser(username);
     this.users = next;
     this.#revision++;
@@ -662,7 +771,13 @@ export class UserAuthManager {
     const updated = { ...stored, passwordHash };
     // The login itself is already verified; a failed upgrade write only keeps the old hash.
     // A password another writer changed while the scrypt check ran is theirs: the upgrade is dropped, never written over it.
-    try { if (this.persist(new Map(this.users).set(username, updated), { username, passwordHash: stored.passwordHash })) return updated; }
+    try {
+      if (this.persist(new Map(this.users).set(username, updated), { username, passwordHash: stored.passwordHash })) {
+        // The same password under a stronger hash: no session ends anywhere.
+        if (this.#authority?.view()?.user(username)) this.#publish(username, 'upsert', false);
+        return updated;
+      }
+    }
     catch (error) { logger.warn('Password hash upgrade could not be saved; the login continues', { username, error: String(error) }); }
     return stored;
   }
@@ -691,12 +806,22 @@ export class UserAuthManager {
     return { ...failed, staleBootstrapCredential: true };
   }
 
-  private completeAttempt(attempt: { readonly username: string; readonly lockKey: string }, password: string, user: AuthUser): AuthenticateResult {
+  private completeAttempt(
+    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number },
+    password: string,
+    user: AuthUser,
+  ): AuthenticateResult {
     // Whether this login used the bootstrap credential (the password is already confirmed correct).
     const bootstrapCred = readBootstrapCredentialFile(this.bootstrapCredentialPath);
     const usedBootstrapCredential = bootstrapCred !== null
       && bootstrapCred.username === attempt.username
       && bootstrapCred.password === password;
+    // A generated password lives only as long as the file that holds it.
+    if (user.bootstrap === true && !usedBootstrapCredential) {
+      this._recordLoginFailure(attempt.lockKey, attempt.now);
+      if (attempt.network) this.recordUsernameFailure(attempt.username, attempt.now);
+      return { ok: false, withdrawnBootstrapCredential: true };
+    }
     this.accountLocks.delete(attempt.lockKey);
     return { ok: true, user, usedBootstrapCredential };
   }
@@ -800,7 +925,11 @@ export class UserAuthManager {
     return user ? userRecord(user) : null;
   }
 
-  createSession(username: string): AuthSession {
+  /**
+   * `viaBootstrapCredential`: the sign-in used the bootstrap credential, so the
+   * session ends once that file no longer names the user.
+   */
+  createSession(username: string, options: { readonly viaBootstrapCredential?: boolean | undefined } = {}): AuthSession {
     this.pruneExpiredSessions();
     if (this.sessions.size >= this.maxSessions) {
       // Evict the session with the earliest expiry to make room.
@@ -822,6 +951,7 @@ export class UserAuthManager {
       token,
       username,
       expiresAt: this.nowFn() + this.sessionTtlMs,
+      ...(options.viaBootstrapCredential === true ? { viaBootstrapCredential: true as const } : {}),
     };
     this.sessions.set(token, session);
     this.#revision++;
@@ -835,6 +965,12 @@ export class UserAuthManager {
     if (!session) return null;
     const now = this.nowFn();
     if (now > session.expiresAt) {
+      this.sessions.delete(token);
+      this.#revision++;
+      return null;
+    }
+    if (session.viaBootstrapCredential === true && this.bootstrapCredentialUsername(now) !== session.username) {
+      // The bootstrap file was deleted or cleared: what it let in ends with it.
       this.sessions.delete(token);
       this.#revision++;
       return null;
@@ -950,6 +1086,7 @@ export class UserAuthManager {
       ...(scopes !== undefined ? { scopes: normalizeScopeList(scopes) } : {}),
     };
     this.persist(new Map(this.users).set(normalized, user));
+    this.#publish(normalized, 'upsert', true);
     return userRecord(user);
   }
 
@@ -965,6 +1102,7 @@ export class UserAuthManager {
     const { scopes: _previous, ...rest } = existing;
     const next: AuthUser = scopes === null ? rest : { ...rest, scopes: normalizeScopeList(scopes) };
     this.persist(new Map(this.users).set(normalized, next));
+    this.#publish(normalized, 'upsert', true);
     return userRecord(next);
   }
 
@@ -983,6 +1121,7 @@ export class UserAuthManager {
     const next = new Map(this.users);
     next.delete(normalized);
     this.persist(next);
+    this.#publish(normalized, 'delete', true);
     this.revokeSessionsForUser(normalized);
     return true;
   }
@@ -997,10 +1136,13 @@ export class UserAuthManager {
     const existing = this.users.get(normalized);
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
     if (!nextPassword || nextPassword.length < 8) throw new Error('Password must be at least 8 characters.');
+    // A chosen password is the user's own: no longer tied to the bootstrap file.
+    const { bootstrap: _generated, ...rest } = existing;
     this.persist(new Map(this.users).set(normalized, {
-      ...existing,
+      ...rest,
       passwordHash: hashPassword(nextPassword, this.scryptParams),
     }));
+    this.#publish(normalized, 'upsert', true);
     this.revokeSessionsForUser(normalized);
     if (readBootstrapCredentialFile(this.bootstrapCredentialPath)?.username === normalized) {
       // The file now holds a password that no longer signs in; failing to delete it exposes nothing that works.
@@ -1055,7 +1197,32 @@ export class UserAuthManager {
   clearBootstrapCredentialFile(): boolean {
     if (!existsSync(this.bootstrapCredentialPath)) return false;
     rmSync(this.bootstrapCredentialPath, { force: true });
+    this.bootstrapCredentialSeen = null;
     return true;
+  }
+
+  /**
+   * Delete the bootstrap credential file only when nothing signs in with it
+   * any more: the user it names is gone or has a password of its own. A file
+   * still holding a live generated password is the owner's only copy of it and
+   * is kept, whoever else signs in. Returns whether a file was deleted.
+   */
+  retireStaleBootstrapCredential(): boolean {
+    const credential = readBootstrapCredentialFile(this.bootstrapCredentialPath);
+    if (credential === null) return false;
+    if (this.users.get(credential.username)?.bootstrap === true) return false;
+    return this.clearBootstrapCredentialFile();
+  }
+
+  /** The bootstrap file's last reading: the user it names (null: no usable file), read at most once a second. */
+  private bootstrapCredentialSeen: { readonly at: number; readonly username: string | null } | null = null;
+
+  private bootstrapCredentialUsername(now: number): string | null {
+    const seen = this.bootstrapCredentialSeen;
+    if (seen !== null && now - seen.at < DISK_CHECK_INTERVAL_MS) return seen.username;
+    const username = readBootstrapCredentialFile(this.bootstrapCredentialPath)?.username ?? null;
+    this.bootstrapCredentialSeen = { at: now, username };
+    return username;
   }
 
   getBootstrapCredentialPath(): string {

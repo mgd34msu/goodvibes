@@ -9,10 +9,16 @@ import type { SpawnAutomationTaskInput } from './manager-runtime-helpers.js';
  * trusted source and cancel signal), so it runs under the owner the automation
  * recorded rather than asking the person at the terminal. An empty
  * tool allowlist means no restriction, the same as no allowlist: a job is
- * restricted only by a list that names at least one tool.
+ * restricted only by a list that names at least one tool. An unrestricted run
+ * also gets the tools the owner has connected (mail and calendar), under the
+ * same permission gate as every other call of the run.
  */
-export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spawn'>): (input: SpawnAutomationTaskInput) => string {
+export function createAutomationSpawnTask(
+  agentManager: Pick<AgentManager, 'spawn'>,
+  connectedTools: () => readonly string[] = () => [],
+): (input: SpawnAutomationTaskInput) => string {
   return (input) => {
+    const extra = input.toolAllowlist?.length ? [] : connectedTools();
     const record = agentManager.spawn({
       mode: 'spawn',
       task: input.prompt,
@@ -23,7 +29,7 @@ export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spaw
       ...(input.executionIntent ? { executionIntent: input.executionIntent } : {}),
       ...(input.template ? { template: input.template } : {}),
       ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
-      ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
+      ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : extra.length > 0 ? { tools: [...extra] } : {}),
       ...(input.context ? { context: input.context } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     }, automationActionBinding(input));
@@ -36,13 +42,16 @@ export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spaw
  * starts its agent, how it reads that agent's status to settle the run, and
  * how it stops the agent to cancel the run or end it at its timeout.
  */
-export function createAutomationAgentControls(agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>): {
+export function createAutomationAgentControls(
+  agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>,
+  connectedTools?: () => readonly string[],
+): {
   readonly spawnTask: (input: SpawnAutomationTaskInput) => string;
   readonly agentStatusProvider: Pick<AgentManager, 'getStatus'>;
   readonly cancelTask: (agentId: string) => void;
 } {
   return {
-    spawnTask: createAutomationSpawnTask(agentManager),
+    spawnTask: createAutomationSpawnTask(agentManager, connectedTools),
     agentStatusProvider: agentManager,
     cancelTask: (agentId) => { agentManager.cancel(agentId); },
   };

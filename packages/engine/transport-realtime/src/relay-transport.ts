@@ -33,6 +33,7 @@ import {
   finishInitiatorHandshake,
   fragmentTunnelFrame,
   fromBase64Url,
+  RELAY_CODE_HEADER,
   RELAY_DEFAULT_MAX_MESSAGE_BYTES,
   RELAY_PROTOCOL_VERSION,
   relayErrorAdvice,
@@ -509,7 +510,9 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     const activeSocket = socket;
     const url = new URL(request.url, 'http://relay.local');
     const headers: Array<[string, string]> = [];
-    request.headers.forEach((value, key) => headers.push([key, value]));
+    request.headers.forEach((value, key) => { if (key.toLowerCase() !== RELAY_CODE_HEADER) headers.push([key, value]); });
+    // This device's relay code, on every tunneled request: the daemon refuses one it did not issue or has revoked.
+    headers.push([RELAY_CODE_HEADER, pairing.code]);
     const body = request.method === 'GET' || request.method === 'HEAD' ? new Uint8Array(0) : new Uint8Array(await whileActive(request.arrayBuffer(), request.signal));
     request.signal.throwIfAborted();
     // A request whose caller wants a streamed answer is opened as a tunneled

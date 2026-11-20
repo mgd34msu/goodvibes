@@ -25,6 +25,7 @@ export const builtinGatewayNativeWorkSubmissionMethodDescriptors: readonly Gatew
   }),
   methodDescriptor({
     id: 'workLedger.submission.get', title: 'Read Native Work Submission', category: 'work-ledger',
+    repeat: 'safe',
     description: 'Look up an immutable native submission receipt by the original request ID on the selected authoritative host. Use after a lost submit response. Does not submit, retry, resume, or start execution.',
     access: 'admin', scopes: ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE],
     http: { method: 'POST', path: '/api/work-ledger/submissions/get' },

@@ -4,8 +4,8 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `636`
-- Events: `36`
+- Methods: `640`
+- Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
 - Methods catalog path: `/api/control-plane/methods`
@@ -542,7 +542,7 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
 
 #### `approvals.approve`
 
-Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).
+Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).
 
 - Title: `Approve Approval`
 - Source: `builtin`
@@ -2358,7 +2358,7 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
 
 #### `approvals.deny`
 
-Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).
+Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).
 
 - Title: `Deny Approval`
 - Source: `builtin`
@@ -4543,7 +4543,7 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
 
 #### `inbox.answer`
 
-Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner's own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon's own machine or a paired device, admin, with write:payments), else 403.
+Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner's own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon's own machine or a paired device, admin, with write:payments), else 403. An approval that puts a change to the owner (metadata `ownerAct`) is not answered with a token minted for automation: 403 OWNER_ONLY.
 
 - Title: `Answer Owner Inbox Item`
 - Source: `builtin`
@@ -4601,7 +4601,8 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {
@@ -4871,7 +4872,8 @@ The asking session reports what became of the answer to a question it posted: `d
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {
@@ -5117,7 +5119,8 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
           "claim",
           "purchase",
           "queued-action",
-          "decision"
+          "decision",
+          "report"
         ]
       }
     },
@@ -5154,7 +5157,8 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
               "claim",
               "purchase",
               "queued-action",
-              "decision"
+              "decision",
+              "report"
             ]
           },
           "status": {
@@ -5413,7 +5417,8 @@ Leave the owner a question or a queued action from a process that is not the dae
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {
@@ -5615,7 +5620,8 @@ Take back an open item this caller posted, because the answer is no longer neede
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {
@@ -6830,6 +6836,131 @@ Give a local auth user a narrower list of operator scopes, or return it to its r
   },
   "required": [
     "user"
+  ],
+  "additionalProperties": false
+}
+```
+
+### authority
+
+#### `authority.status`
+
+Return the head of this daemon's authority record: the record every machine of a group answers "is this device token, user, grant or peer token current" from. revision and digest are equal on every machine that holds the same record; behind is true when another group member has gossiped a newer one, and behindOn names the members whose record differs. kinds counts the live and revoked entries of each kind. userConflicts names each username held by separate accounts made on different machines before they joined one group: neither is overwritten, each machine keeps its own, and changes to it stay on that machine. Never returns a credential or a hash. readable false means the record file exists and cannot be read: nothing authenticates from it until it can.
+
+- Title: `Authority Record Status`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/authority/status`
+- Scopes: `read:config`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "readable": {
+      "type": "boolean"
+    },
+    "nodeId": {
+      "type": "string"
+    },
+    "groupId": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "digest": {
+      "type": "string"
+    },
+    "revocationFloor": {
+      "type": "number"
+    },
+    "kinds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "live": {
+            "type": "number"
+          },
+          "revoked": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "live",
+          "revoked"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "behindOn": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "behind": {
+      "type": "boolean"
+    },
+    "userConflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "number"
+          },
+          "madeOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "username",
+          "accounts",
+          "madeOn"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "readable",
+    "nodeId",
+    "groupId",
+    "revision",
+    "digest",
+    "revocationFloor",
+    "kinds",
+    "behindOn",
+    "behind",
+    "userConflicts"
   ],
   "additionalProperties": false
 }
@@ -27060,6 +27191,9 @@ Apply allowlist additions or removals for a channel surface.
             "additionalProperties": false
           }
         },
+        "open": {
+          "type": "boolean"
+        },
         "updatedAt": {
           "type": "number"
         },
@@ -29636,6 +29770,9 @@ Return ingress policy configuration for channels.
               "additionalProperties": false
             }
           },
+          "open": {
+            "type": "boolean"
+          },
           "updatedAt": {
             "type": "number"
           },
@@ -29698,7 +29835,7 @@ Return ingress policy configuration for channels.
 
 #### `channels.policies.update`
 
-Update ingress policy configuration for a channel surface.
+Update ingress policy configuration for a channel surface. `open` makes it a shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised (off by default, so the first unknown sender raises a claim the owner accepts or declines). Anyone admitted who is not the channel's owner talks as a guest: their turn may read and answer, and every change it asks for is put to the owner.
 
 - Title: `Update Channel Policy`
 - Source: `builtin`
@@ -29720,6 +29857,9 @@ Update ingress policy configuration for a channel surface.
       "type": "string"
     },
     "enabled": {
+      "type": "boolean"
+    },
+    "open": {
       "type": "boolean"
     },
     "requireMention": {
@@ -30038,6 +30178,9 @@ Update ingress policy configuration for a channel surface.
         ],
         "additionalProperties": false
       }
+    },
+    "open": {
+      "type": "boolean"
     },
     "updatedAt": {
       "type": "number"
@@ -38288,7 +38431,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set).
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -38321,59 +38464,118 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "success": {
-      "type": "boolean"
-    },
-    "key": {
-      "type": "string"
-    },
-    "value": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "success": {
           "type": "boolean"
         },
-        {
-          "type": "null"
+        "key": {
+          "type": "string"
         },
-        {
-          "type": "object",
-          "additionalProperties": {}
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
         },
-        {
-          "type": "array",
-          "items": {}
+        "persistedTo": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "daemonOwned": {
+          "type": "boolean"
         }
-      ]
+      },
+      "required": [
+        "success",
+        "key"
+      ],
+      "additionalProperties": true
     },
-    "persistedTo": {
-      "type": "string"
-    },
-    "tier": {
-      "type": "string"
-    },
-    "daemonOwned": {
-      "type": "boolean"
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "success",
-    "key"
-  ],
-  "additionalProperties": true
+  ]
 }
 ```
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -38618,59 +38820,118 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "success": {
-      "type": "boolean"
-    },
-    "key": {
-      "type": "string"
-    },
-    "value": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "success": {
           "type": "boolean"
         },
-        {
-          "type": "null"
+        "key": {
+          "type": "string"
         },
-        {
-          "type": "object",
-          "additionalProperties": {}
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
         },
-        {
-          "type": "array",
-          "items": {}
+        "persistedTo": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "daemonOwned": {
+          "type": "boolean"
         }
-      ]
+      },
+      "required": [
+        "success",
+        "key"
+      ],
+      "additionalProperties": true
     },
-    "persistedTo": {
-      "type": "string"
-    },
-    "tier": {
-      "type": "string"
-    },
-    "daemonOwned": {
-      "type": "boolean"
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "success",
-    "key"
-  ],
-  "additionalProperties": true
+  ]
 }
 ```
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -38740,69 +39001,128 @@ Write several config values on the daemon as one update: `{ entries: [{ key, val
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "success": {
-      "type": "boolean"
-    },
-    "revision": {
-      "type": "number"
-    },
-    "entries": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
                 "type": "string"
               },
-              {
-                "type": "number"
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
               },
-              {
+              "persistedTo": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string"
+              },
+              "daemonOwned": {
                 "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
               }
-            ]
-          },
-          "persistedTo": {
+            },
+            "required": [
+              "key"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "success",
+        "revision",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
             "type": "string"
-          },
-          "tier": {
-            "type": "string"
-          },
-          "daemonOwned": {
-            "type": "boolean"
           }
         },
-        "required": [
-          "key"
-        ],
-        "additionalProperties": false
-      }
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "success",
-    "revision",
-    "entries"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -73273,6 +73593,14 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                     ],
                     "additionalProperties": false
                   },
+                  "repeat": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "keyed",
+                      "unsafe"
+                    ]
+                  },
                   "errorCodes": {
                     "type": "array",
                     "items": {
@@ -74160,6 +74488,14 @@ Return a single gateway method descriptor.
           ],
           "additionalProperties": false
         },
+        "repeat": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "keyed",
+            "unsafe"
+          ]
+        },
         "errorCodes": {
           "type": "array",
           "items": {
@@ -74421,6 +74757,14 @@ Return the gateway method catalog.
               "behavior"
             ],
             "additionalProperties": false
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "keyed",
+              "unsafe"
+            ]
           },
           "errorCodes": {
             "type": "array",
@@ -75014,9 +75358,129 @@ Open the web app on the approval (`approval`) or session (`session`) the link na
 }
 ```
 
+#### `relay.codes.list`
+
+List the relay codes this daemon issued, one per device paired through the relay (relay.pairing.mint), as redacted views: id, name, created time and, when the device has used it, the last time a relayed request presented it. The code itself is never stored in listable form and is never returned.
+
+- Title: `List Relay Codes`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "codes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "lastSeenAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "codes"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `relay.codes.revoke`
+
+Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.
+
+- Title: `Revoke Relay Code`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "revoked": {
+      "type": "boolean"
+    },
+    "closedConnections": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "revoked",
+    "closedConnections"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `relay.pairing.mint`
 
-Return the pairing payload a surface scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, and the daemon's static public key. `pairing` is null, not an error, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet, and is the same value the in-process capability returns. Minting does not create a second identity or a second registration; it describes the one that exists.
+Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.
 
 - Title: `Mint A Relay Pairing Payload`
 - Source: `builtin`
@@ -75033,7 +75497,11 @@ Return the pairing payload a surface scans to reach this daemon through the rela
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "name": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -75061,6 +75529,9 @@ Return the pairing payload a surface scans to reach this daemon through the rela
             "daemonPublicKey": {
               "type": "string"
             },
+            "code": {
+              "type": "string"
+            },
             "label": {
               "type": "string"
             }
@@ -75069,7 +75540,8 @@ Return the pairing payload a surface scans to reach this daemon through the rela
             "protocol",
             "relayUrl",
             "rid",
-            "daemonPublicKey"
+            "daemonPublicKey",
+            "code"
           ],
           "additionalProperties": false
         },
@@ -75089,6 +75561,12 @@ Return the pairing payload a surface scans to reach this daemon through the rela
         "refused",
         "stopped"
       ]
+    },
+    "codeId": {
+      "type": "string"
+    },
+    "codeName": {
+      "type": "string"
     }
   },
   "required": [
@@ -125555,7 +126033,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -125581,6 +126059,9 @@ Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisf
       "items": {
         "type": "string"
       }
+    },
+    "fromSharedToken": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -125802,7 +126283,7 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -125945,7 +126426,7 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did) and scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority). The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself through the pairing flow (pairing.handoff.create or the pairing screen, from the operator token, an admin sign-in, an app on his machine or another owner device, with full authority), which makes the owner's own acts (loosening a security, permission, judgment or payment setting; answering a change put to him), or `automation` for every other token (pairing.tokens.create, pairing.tokens.migrate, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which does not. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
@@ -125998,12 +126479,20 @@ none
             "items": {
               "type": "string"
             }
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "owner-pairing",
+              "automation"
+            ]
           }
         },
         "required": [
           "id",
           "name",
-          "createdAt"
+          "createdAt",
+          "origin"
         ],
         "additionalProperties": false
       }
@@ -126022,7 +126511,7 @@ none
 
 #### `pairing.tokens.migrate`
 
-A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
+A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once. A token minted here is automation (origin automation), for a script; the owner's own browser or app moves off the shared token with pairing.handoff.create and `fromSharedToken: true`, which makes it an owner device. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).
 
 - Title: `Migrate Off The Shared Token`
 - Source: `builtin`
@@ -126150,7 +126639,7 @@ Change the user-visible name of a paired device token. An unknown id is a 404 PA
 
 #### `pairing.tokens.revokeShared`
 
-Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Idempotent.
+Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
 
 - Title: `Revoke The Legacy Shared Token`
 - Source: `builtin`
@@ -128819,7 +129308,8 @@ List the durable user-origin permission rules written by remembered approval dec
               "exact",
               "command-class",
               "path",
-              "tool"
+              "tool",
+              "never-run"
             ]
           },
           "tool": {
@@ -132595,7 +133085,7 @@ Store a browser Push subscription (endpoint capability URL + p256dh/auth keys) f
 
 #### `push.subscriptions.delete`
 
-Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.
+Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.
 
 - Title: `Delete Web Push Subscription`
 - Source: `builtin`
@@ -138034,7 +138524,7 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
 
 #### `tailscale.serve.run`
 
-The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon's web surface at its https MagicDNS URL. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.
+The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.
 
 - Title: `Set Up Tailscale Serve For The Daemon`
 - Source: `builtin`
@@ -140630,7 +141120,7 @@ Return one retained capture's bytes, base64-encoded, for a caller that is not ru
 
 #### `devices.capability.request`
 
-Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is re-read from disk (never cached), a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.
+Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is read from the authority record every machine of the group shares, so a grant revoked on any of them is not honoured; work waiting for the phone under a grant that is then revoked is withdrawn (refusal grant-revoked-before-claim), and work the phone had already picked up answers grant-revoked-after-claim saying what took effect; a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.
 
 - Title: `Request a Capability From a Paired Device`
 - Source: `builtin`
@@ -140982,7 +141472,7 @@ The durable "always allow" grants a person gave, per capability and per device, 
 
 #### `devices.grants.revoke`
 
-Delete durable grants by grant id, by device, by capability, or any combination. Revoked grants are removed rather than flagged, so the next request for that capability asks the person again. Returns exactly what was removed.
+Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.
 
 - Title: `Revoke a Device Capability Grant`
 - Source: `builtin`
@@ -145536,7 +146026,7 @@ Join a hosted session and receive its transcript so far, so a client that was ne
 
 #### `sessions.hosted.create`
 
-Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
+Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown, ambiguous or unselectable id is refused here, 400 MODEL_NOT_FOUND, MODEL_AMBIGUOUS or MODEL_NOT_SELECTABLE, rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused (429 HOSTED_SESSION_LIMIT_REACHED) with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
 
 - Title: `Create a Daemon-Hosted Session`
 - Source: `builtin`
@@ -145887,6 +146377,228 @@ Leave a hosted session. When other clients are still attached, nothing else happ
   },
   "required": [
     "session"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `sessions.hosted.history`
+
+Return a hosted session's record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or attached to, else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.
+
+- Title: `Read a Daemon-Hosted Session's Transcript`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:transcripts`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nativeConversation": {
+          "type": "boolean",
+          "const": true
+        },
+        "workspaceRoot": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "running",
+            "terminated"
+          ]
+        },
+        "detachPolicy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "kill",
+                "survive"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveDetachPolicy": {
+          "type": "string",
+          "enum": [
+            "kill",
+            "survive"
+          ]
+        },
+        "attachedClients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "turnCount": {
+          "type": "number"
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "lastTurnAt": {
+          "type": "number"
+        },
+        "terminatedAt": {
+          "type": "number"
+        },
+        "terminatedReason": {
+          "type": "string"
+        },
+        "restoredFromDisk": {
+          "type": "boolean"
+        },
+        "originSurface": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
+            "yolo",
+            "plan"
+          ]
+        },
+        "contractIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "saveError": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceRoot",
+        "title",
+        "status",
+        "detachPolicy",
+        "effectiveDetachPolicy",
+        "attachedClients",
+        "createdAt",
+        "updatedAt",
+        "turnCount",
+        "messageCount",
+        "restoredFromDisk",
+        "contractIds"
+      ],
+      "additionalProperties": false
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "system",
+              "tool"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "at": {
+            "type": "number"
+          },
+          "toolCalls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "arguments": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "arguments"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "callId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "session",
+    "history"
   ],
   "additionalProperties": false
 }
@@ -148575,7 +149287,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.
+Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -148622,6 +149334,19 @@ Return the effective session execution mode: ask-me, jev-decides, just-vibes, yo
         "yolo",
         "plan"
       ]
+    },
+    "chosenMode": {
+      "type": "string",
+      "enum": [
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
+        "yolo",
+        "plan"
+      ]
+    },
+    "reason": {
+      "type": "string"
     }
   },
   "required": [
@@ -148634,7 +149359,7 @@ Return the effective session execution mode: ask-me, jev-decides, just-vibes, yo
 
 #### `sessions.permissionMode.set`
 
-Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.
+Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -148678,38 +149403,97 @@ Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only p
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "sessionId": {
-      "type": "string"
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
+            "yolo",
+            "plan"
+          ]
+        },
+        "previousMode": {
+          "type": "string",
+          "enum": [
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
+            "yolo",
+            "plan"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "mode",
+        "previousMode"
+      ],
+      "additionalProperties": false
     },
-    "mode": {
-      "type": "string",
-      "enum": [
-        "ask-me",
-        "jev-decides",
-        "just-vibes",
-        "yolo",
-        "plan"
-      ]
-    },
-    "previousMode": {
-      "type": "string",
-      "enum": [
-        "ask-me",
-        "jev-decides",
-        "just-vibes",
-        "yolo",
-        "plan"
-      ]
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "sessionId",
-    "mode",
-    "previousMode"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -151701,7 +152485,7 @@ Cancel an in-flight runtime task.
 
 #### `tasks.create`
 
-Submit a task to the daemon or a shared session.
+Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), or 409 with `mode` `rejected` and `acknowledged: false`. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing's `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.
 
 - Title: `Create Task`
 - Source: `builtin`
@@ -151956,7 +152740,7 @@ Submit a task to the daemon or a shared session.
 
 #### `tasks.get`
 
-Return a single runtime task record.
+Return a single runtime task record, as `{ task }`.
 
 - Title: `Get Runtime Task`
 - Source: `builtin`
@@ -152398,7 +153182,7 @@ Return the integration snapshot for runtime tasks. `limit` returns only the newe
 
 #### `tasks.retry`
 
-Retry a runtime task through the task action endpoint.
+Retry a failed or cancelled agent task: a new agent runs the same task on the model, provider, tools, routing (fallback models, provider selection and failure policy, reasoning effort), execution limits and contract settings the task was started with, in the session that started it. The task keeps its id and its `owner` becomes the new agent, returned as `agentId`. When the record of the agent that ran it is no longer held, nothing is started (409 TASK_SETTINGS_UNAVAILABLE).
 
 - Title: `Retry Runtime Task`
 - Source: `builtin`
@@ -152605,7 +153389,7 @@ Retry a runtime task through the task action endpoint.
 
 #### `tasks.status`
 
-Return lightweight runtime task status by agent id.
+Return lightweight runtime task status by agent id. `status` is pending, running, completed, failed or cancelled.
 
 - Title: `Get Task Status`
 - Source: `builtin`
@@ -157577,7 +158361,7 @@ Cancel a trigger; a command an on-exit trigger supervises is stopped.
 
 #### `watchers.triggers.create`
 
-Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.
+Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn, whose answer goes to the channel its deliverTo names (telegram, slack:C123) or else to the owner inbox; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.
 
 - Title: `Create a trigger`
 - Source: `builtin`
@@ -181451,6 +182235,23 @@ Workspace swap lifecycle events (start, complete, refuse).
 }
 ```
 
+### sessions
+
+#### `control.own_session_activity`
+
+What a credential without the admin role holding `read:own-sessions` receives of the sessions its own principal created or attached to (sessions.hosted.create, sessions.hosted.attach): their `turn`, `tools`, `gate` and `session` runtime frames (streamed text, tool calls and results, permission decisions, turn transitions), their `approval-update` events and their `hosted-session-update` notices. Frames of every other session, and frames naming no session, are withheld; the admin-only domains stay admin-only for everything else. Open the stream with `?domains=turn,tools,gate,session` (or subscribe to those domains on the socket) and filter on the session id. Ownership is saved with the session, so it holds across a daemon restart.
+
+- Title: `Own Session Activity`
+- Source: `builtin`
+- Transport: `sse`, `ws`
+- Scopes: `read:own-sessions`
+- Domains: none
+- Wire events: none
+
+##### Payload schema
+
+none
+
 ### transport
 
 #### `control.approval_update`
@@ -182209,7 +183010,8 @@ A question, claim, purchase window or queued action in the owner inbox was poste
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {

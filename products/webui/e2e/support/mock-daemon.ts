@@ -202,15 +202,18 @@ export function describeOriginPostureForMock(origin: string): {
  * token keeps working untouched. Create with createMockPairingStore(); pass to
  * installMockDaemon via { pairingStore }.
  */
+/** How a token was minted, as pairing.tokens.list reports it: the owner's own device, or automation. */
+export type MockTokenOrigin = 'owner-pairing' | 'automation';
+
 export interface MockPairingStore {
-  tokens: { id: string; name: string; token: string; createdAt: number; lastSeenAt?: number }[];
+  tokens: { id: string; name: string; token: string; createdAt: number; lastSeenAt?: number; origin?: MockTokenOrigin }[];
   legacySharedRevoked: boolean;
   /** Raw token VALUES (not ids) that pairing.tokens.delete has revoked, checked on every request. */
   revokedTokenValues: Set<string>;
 }
 
 export function createMockPairingStore(
-  seed: readonly { id: string; name: string; token: string; createdAt: number; lastSeenAt?: number }[] = [],
+  seed: readonly { id: string; name: string; token: string; createdAt: number; lastSeenAt?: number; origin?: MockTokenOrigin }[] = [],
 ): MockPairingStore {
   return { tokens: [...seed], legacySharedRevoked: false, revokedTokenValues: new Set() };
 }
@@ -289,9 +292,12 @@ export interface MockDaemonOptions {
    * answers a real, mutable config.get()/config.set() round-trip seeded from
    * configGetResponse(); 'admin-required' answers the daemon's real 403
    * admin-scope refusal (system-routes.ts's requireAdmin), matching
-   * credentials' 'admin-required' shape.
+   * credentials' 'admin-required' shape. 'owner-approval' answers the daemon's
+   * 202 OWNER_APPROVAL_PENDING for every write, as for a token minted for
+   * automation changing a setting that loosens security: nothing is written,
+   * and a pending approval joins the approvals list for the owner to answer.
    */
-  config?: 'ok' | 'admin-required';
+  config?: 'ok' | 'admin-required' | 'owner-approval';
   /**
    * knowledge.packet response shape. 'complete' (default) answers a real, untruncated
    * packet (truncated: false, droppedCount: 0, budgetExhausted: false), the every-
@@ -331,6 +337,10 @@ export interface MockDaemonOptions {
    * exec-prompt ask (EXEC_PROMPT_APPROVAL) to drive the answerable card.
    */
   approvals?: readonly Record<string, unknown>[];
+  /** Seed for relay.codes.list: the relay codes paired devices hold (default none). */
+  relayCodes?: readonly OperatorMethodOutput<'relay.codes.list'>['codes'][number][];
+  /** Seed for inbox.list: questions, decisions and reports in the owner inbox (default empty). */
+  ownerInbox?: readonly OperatorMethodOutput<'inbox.list'>['items'][number][];
   /**
    * Seed for the durable approval-rule store (permissions.rules.list/.delete).
    * Default []. Approving with a durable rememberTier also appends here, and
@@ -1037,6 +1047,11 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // approvals.list() sees (WEBUI-FLEET-DEPTH), a fresh copy per installMockDaemon
   // call so tests never leak state into each other.
   const approvals: Record<string, unknown>[] = (options.approvals ?? [PENDING_APPROVAL]).map((a) => ({ ...a }));
+  // Changes put to the owner (config: 'owner-approval') join the approvals above.
+  let ownerApprovalCounter = 0;
+  // relay.codes.*, revocable one at a time; the owner inbox, read-only here.
+  let relayCodes = (options.relayCodes ?? []).map((code) => ({ ...code }));
+  const ownerInbox = (options.ownerInbox ?? []).map((item) => ({ ...item }));
   // Durable rules (permissions.rules.*), same fresh-copy-per-install policy.
   const permissionRules: Record<string, unknown>[] = (options.permissionRules ?? []).map((r) => ({ ...r }));
   let ruleCounter = 0;
@@ -1326,6 +1341,17 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
     if (request.method() === 'POST') {
       const body = (request.postDataJSON?.() ?? {}) as { key?: string; value?: unknown };
       if (!body.key) return json(route, { error: 'Missing or invalid key' }, 400);
+      if (config === 'owner-approval') {
+        ownerApprovalCounter += 1;
+        const approvalId = `appr-owner-${ownerApprovalCounter}`;
+        approvals.push({
+          id: approvalId, callId: approvalId, status: 'pending', createdAt: Date.now(),
+          request: { callId: approvalId, tool: 'config.set', args: { key: body.key, value: body.value }, category: 'settings',
+            analysis: { classification: 'settings', riskLevel: 'high', summary: `Change ${body.key}`, reasons: ['Loosens a security setting'] } },
+          metadata: { ownerAct: true, key: body.key },
+        });
+        return json(route, { success: false, code: 'OWNER_APPROVAL_PENDING', approvalId, key: body.key, keys: [body.key], state: 'pending', next: ['The owner approves or denies it in the approvals queue.'] }, 202);
+      }
       setDotPath(configState, body.key, body.value);
       return json(route, { success: true, key: body.key, value: body.value });
     }
@@ -2282,7 +2308,8 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       //    "device"'s Authorization bearer on a second page/context. ──────────
       if (methodId === 'pairing.tokens.list') {
         return json(route, {
-          tokens: pairingStore.tokens.map(({ id, name, createdAt, lastSeenAt }) => ({ id, name, createdAt, lastSeenAt })),
+          // A seeded device without an origin is one the owner paired himself.
+          tokens: pairingStore.tokens.map(({ id, name, createdAt, lastSeenAt, origin }) => ({ id, name, createdAt, lastSeenAt, origin: origin ?? 'owner-pairing' })),
           legacySharedRevoked: pairingStore.legacySharedRevoked,
         });
       }
@@ -2296,7 +2323,8 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
           token: `e2e-pairing-token-${pairingIdCounter}`,
           createdAt: Date.now(),
         };
-        pairingStore.tokens = [...pairingStore.tokens, minted];
+        // A token minted through the API by another token is automation, as the daemon records it.
+        pairingStore.tokens = [...pairingStore.tokens, { ...minted, origin: 'automation' }];
         return json(route, { token: minted });
       }
       if (methodId === 'pairing.tokens.rename') {
@@ -2331,12 +2359,17 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       //    `failed` server-side (those are exercised as CLIENT-side ceremony
       //    failures in PairingHandoffOffers.test.tsx). ─────────────────────
       if (methodId === 'pairing.handoff.create') {
-        const body = (route.request().postDataJSON?.() ?? {}) as { body?: { name?: string; offers?: string[] } };
+        const body = (route.request().postDataJSON?.() ?? {}) as { body?: { name?: string; offers?: string[]; fromSharedToken?: unknown } };
         const name = body.body?.name ?? 'Paired device';
         const offers = body.body?.offers ?? ['notifications', 'relay', 'passkey'];
+        // `fromSharedToken`: the owner's own client moving off the shared token, as the daemon validates it.
+        if (body.body?.fromSharedToken !== undefined && typeof body.body.fromSharedToken !== 'boolean') {
+          return json(route, { error: 'fromSharedToken must be true or false', code: 'INVALID_ARGUMENT', field: 'fromSharedToken' }, 400);
+        }
         pairingIdCounter += 1;
         const minted = { id: `pairing_e2e_${pairingIdCounter}`, name, token: `e2e-handoff-token-${pairingIdCounter}`, createdAt: Date.now() };
-        pairingStore.tokens = [...pairingStore.tokens, minted];
+        // The owner's pairing flow makes an owner device.
+        pairingStore.tokens = [...pairingStore.tokens, { ...minted, origin: 'owner-pairing' }];
         return json(route, {
           token: minted,
           offers: offers.map((kind) => (kind === 'notifications' ? { kind, available: true, vapidPublicKey: pushVapidKey } : { kind, available: true })),
@@ -2365,6 +2398,37 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         const body = (route.request().postDataJSON?.() ?? {}) as { body?: { origin?: string } };
         const origin = body.body?.origin ?? 'http://127.0.0.1:4318';
         return json(route, { posture: describeOriginPostureForMock(origin) });
+      }
+      // ── Relay codes (relay.codes.*, relay.pairing.mint): every relay pairing
+      //    carries a code of its own, listed by id and name (never the code),
+      //    revoked one at a time. The mock daemon's relay is off, so a mint
+      //    answers the daemon's honest `pairing: null` and keeps no code. ─────
+      if (methodId === 'relay.codes.list') {
+        return json(route, { codes: relayCodes.map((code) => ({ ...code })) });
+      }
+      if (methodId === 'relay.codes.revoke') {
+        const body = (route.request().postDataJSON?.() ?? {}) as { body?: { id?: string } };
+        const id = body.body?.id ?? '';
+        const found = relayCodes.some((code) => code.id === id);
+        relayCodes = relayCodes.filter((code) => code.id !== id);
+        return json(route, { id, revoked: found, closedConnections: 0 });
+      }
+      if (methodId === 'relay.pairing.mint') {
+        return json(route, { pairing: null, status: 'disabled' });
+      }
+      // ── Owner inbox (inbox.list): questions, Jev's decisions and reports (the
+      //    answer of a scheduled run or a trigger's turn that named no
+      //    surface), filtered by kind and status as the daemon filters them. ──
+      if (methodId === 'inbox.list') {
+        const body = (route.request().postDataJSON?.() ?? {}) as { body?: { status?: 'all' | 'open' | 'closed'; kinds?: string[]; limit?: number } };
+        const wanted = body.body ?? {};
+        const status = wanted.status ?? 'open';
+        const items = ownerInbox
+          .filter((item) => !wanted.kinds || wanted.kinds.includes(item.kind))
+          .filter((item) => status === 'all' || (status === 'open') === (item.status === 'open'))
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .slice(0, wanted.limit ?? 50);
+        return json(route, { items, revision: ownerInbox.length });
       }
       // ── Tailscale one-action https (tailscale.get / tailscale.serve.run,
       //    platform 1.8.0). get is read-only; serve.run is the one state-changing

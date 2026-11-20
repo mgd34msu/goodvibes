@@ -5,8 +5,9 @@
  * The relay is a DAEMON capability: the reachability controller is composed
  * inside the platform's `DaemonServer` and is the process that registers with
  * the relay and can mint a pairing payload. This terminal is a client, so it
- * asks the daemon through the two operator verbs that serve that controller,
- * `relay.reachability.get` and `relay.pairing.mint` (one request per `/relay`).
+ * asks the daemon through the operator verbs that serve that controller,
+ * `relay.reachability.get` and `relay.pairing.mint`, and the per-device relay
+ * codes, `relay.codes.list` and `relay.codes.revoke` (one request per `/relay`).
  *
  * `'unavailable'` is kept for exactly one case: the daemon could not be asked
  * (disabled, unreachable, refused). It is deliberately NOT `'disabled'`, which is
@@ -46,11 +47,32 @@ export interface RelayStatusReading {
   readonly refusal?: RelayRefusal;
 }
 
-/** A minted pairing payload, in both the structured and the scannable form. */
+/** A minted pairing payload, in both the structured and the scannable form, with the relay code it carries. */
 export interface RelayPairingMint {
   readonly payload: RelayPairingPayload;
   readonly encoded: string;
+  /** The id and name of the device's relay code, for /relay codes and /relay revoke. */
+  readonly codeId?: string;
+  readonly codeName?: string;
 }
+
+/** One relay code as the daemon lists it (never the code itself). */
+export interface RelayCodeView {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: number;
+  readonly lastSeenAt?: number;
+}
+
+/** The daemon's relay codes, or why it could not be asked. */
+export type RelayCodesReading =
+  | { readonly codes: readonly RelayCodeView[] }
+  | { readonly codes: null; readonly reason: string };
+
+/** The outcome of revoking one relay code. */
+export type RelayCodeRevokeReading =
+  | { readonly revoked: true; readonly id: string }
+  | { readonly revoked: false; readonly reason: string };
 
 /** The outcome of asking the daemon for a pairing payload. */
 export type RelayPairingReading =
@@ -62,7 +84,10 @@ export type RelayPairingReading =
 
 export interface RelayReadAccessors {
   relayStatus(): Promise<RelayStatusReading>;
-  mintRelayPairing(): Promise<RelayPairingReading>;
+  /** Mint a pairing for one device; `name` labels its relay code. */
+  mintRelayPairing(name?: string): Promise<RelayPairingReading>;
+  listRelayCodes(): Promise<RelayCodesReading>;
+  revokeRelayCode(id: string): Promise<RelayCodeRevokeReading>;
 }
 
 function failureReason(error: unknown): string {
@@ -92,7 +117,14 @@ function isPairingPayload(value: unknown): value is RelayPairingPayload {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record.protocol === 'number' && typeof record.relayUrl === 'string'
-    && typeof record.rid === 'string' && typeof record.daemonPublicKey === 'string';
+    && typeof record.rid === 'string' && typeof record.daemonPublicKey === 'string' && typeof record.code === 'string';
+}
+
+function relayCodeOf(value: unknown): RelayCodeView | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== 'string' || typeof record.name !== 'string' || typeof record.createdAt !== 'number') return null;
+  return { id: record.id, name: record.name, createdAt: record.createdAt, ...(typeof record.lastSeenAt === 'number' ? { lastSeenAt: record.lastSeenAt } : {}) };
 }
 
 /** The two relay accessors, spread into `externalServices` from bootstrap.ts. */
@@ -108,15 +140,36 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
         return { status: 'unavailable', reason: failureReason(error) };
       }
     },
-    async mintRelayPairing() {
+    async mintRelayPairing(name) {
       try {
-        const answer = await verbs.invoke<{ pairing?: unknown; status?: unknown }>('relay.pairing.mint', {});
+        const answer = await verbs.invoke<{ pairing?: unknown; status?: unknown; codeId?: unknown; codeName?: unknown }>('relay.pairing.mint', name ? { name } : {});
         if (isPairingPayload(answer?.pairing)) {
-          return { minted: { payload: answer.pairing, encoded: encodeRelayPairingString(answer.pairing) } };
+          return { minted: {
+            payload: answer.pairing, encoded: encodeRelayPairingString(answer.pairing),
+            ...(typeof answer.codeId === 'string' ? { codeId: answer.codeId } : {}),
+            ...(typeof answer.codeName === 'string' ? { codeName: answer.codeName } : {}),
+          } };
         }
         return { minted: null, status: statusOf(answer?.status) };
       } catch (error) {
         return { minted: null, status: 'unavailable', reason: failureReason(error) };
+      }
+    },
+    async listRelayCodes() {
+      try {
+        const answer = await verbs.invoke<{ codes?: unknown }>('relay.codes.list', {});
+        const codes = Array.isArray(answer?.codes) ? answer.codes.map(relayCodeOf).filter((code): code is RelayCodeView => code !== null) : [];
+        return { codes };
+      } catch (error) {
+        return { codes: null, reason: failureReason(error) };
+      }
+    },
+    async revokeRelayCode(id) {
+      try {
+        await verbs.invoke('relay.codes.revoke', { id });
+        return { revoked: true, id };
+      } catch (error) {
+        return { revoked: false, reason: failureReason(error) };
       }
     },
   };

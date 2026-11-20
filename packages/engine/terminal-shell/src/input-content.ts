@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { basename, relative } from 'node:path';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -39,10 +39,67 @@ function capReferenceText(content: string, label: string): string {
 function referenceFailure(reference: string, error: unknown): PromptReferenceFailure {
     const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : '';
     const reason = code === 'ENOENT' ? 'no such file' : code === 'EACCES' || code === 'EPERM' ? 'permission denied'
-        : code === 'EISDIR' ? 'it is a folder' : summarizeError(error);
+        : code === 'EISDIR' ? 'it is a folder' : error instanceof BinaryReferenceError ? error.message : summarizeError(error);
     return { reference, reason };
 }
-function readContextFileBlock(reference: string, projectRoot: string, failures: PromptReferenceFailure[]): string | null {
+/** An image the user typed a reference to; it is sent as an image part, never as text. */
+interface ReferencedImage {
+    readonly data: string;
+    readonly mediaType: string;
+    readonly name: string;
+    readonly bytes: number;
+}
+type AttachReferencedImage = (image: ReferencedImage) => string;
+class BinaryReferenceError extends Error {
+}
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
+/** The image type of a file's bytes, judged from its leading bytes alone; undefined for anything else. */
+export function imageMediaType(bytes: Buffer): string | undefined {
+    for (const { magic, mediaType, extraCheck } of BINARY_IMAGE_MAGIC) {
+        if (bytes.length >= magic.length && magic.every((b, i) => bytes[i] === b) && (!extraCheck || extraCheck(bytes)))
+            return mediaType;
+    }
+    return undefined;
+}
+/**
+ * Reads a file the user referenced in the prompt. An image (by its bytes, not
+ * its name) is handed to `attachImage` and its marker returned; any other file
+ * that is not UTF-8 text is refused: its bytes never reach the model as text.
+ */
+/** Whether the file at a referenced path is an image, read from its first bytes only. */
+export function isImageFile(resolvedPath: string): boolean {
+    let fd: number | undefined;
+    try {
+        fd = openSync(resolvedPath, 'r');
+        const head = Buffer.alloc(12);
+        return imageMediaType(head.subarray(0, readSync(fd, head, 0, 12, 0))) !== undefined;
+    }
+    catch {
+        return false;
+    }
+    finally {
+        if (fd !== undefined)
+            closeSync(fd);
+    }
+}
+function readReferencedFile(resolvedPath: string, attachImage: AttachReferencedImage): { readonly kind: 'text'; readonly text: string } | { readonly kind: 'image'; readonly marker: string } {
+    const bytes = readFileSync(resolvedPath);
+    const mediaType = imageMediaType(bytes);
+    if (mediaType) {
+        if (bytes.length > MAX_IMAGE_ATTACH_BYTES)
+            throw new BinaryReferenceError(`an image larger than ${formatFileSize(MAX_IMAGE_ATTACH_BYTES)} is not sent`);
+        return { kind: 'image', marker: attachImage({ data: bytes.toString('base64'), mediaType, name: basename(resolvedPath), bytes: bytes.length }) };
+    }
+    if (bytes.subarray(0, 8192).includes(0))
+        throw new BinaryReferenceError('a binary file is not sent as text; images are PNG, JPEG, WebP or GIF');
+    try {
+        return { kind: 'text', text: UTF8_STRICT.decode(bytes) };
+    }
+    catch {
+        throw new BinaryReferenceError('the file is not UTF-8 text and is not sent');
+    }
+}
+function readContextFileBlock(reference: string, projectRoot: string, failures: PromptReferenceFailure[], attachImage: AttachReferencedImage): string | null {
     let resolvedPath: string;
     try {
         resolvedPath = resolveAndValidatePath(reference, projectRoot);
@@ -64,9 +121,12 @@ function readContextFileBlock(reference: string, projectRoot: string, failures: 
         }
         if (!stat.isFile())
             return null;
+        const file = readReferencedFile(resolvedPath, attachImage);
+        if (file.kind === 'image')
+            return file.marker;
         return [
             `<context-file path="${label}" bytes="${stat.size}">`,
-            capReferenceText(readFileSync(resolvedPath, 'utf-8'), 'File'),
+            capReferenceText(file.text, 'File'),
             '</context-file>',
         ].join('\n');
     }
@@ -91,17 +151,20 @@ const TYPED_REFERENCE_REGEX = /(^|\s)(!@|@)(\S+)/g;
 /**
  * Expand the references the user typed, in one pass over the typed text:
  * `!@path` becomes the file's text and, when `contextReferences` is on,
- * `@path` becomes a context block and `@https://...` a URL note. Replaced
+ * `@path` becomes a context block and `@https://...` a URL note. A referenced
+ * image becomes an image marker (sent as an image part); another binary file
+ * is a failure, never text. Replaced
  * content is never scanned again, so a file cannot pull in other files. An
  * `!@` file that cannot be read, or an `@` path that exists but cannot be
  * read, is returned as a failure; an `@word` that names nothing stays text.
  */
-function expandTypedReferences(text: string, projectRoot: string, contextReferences: boolean, failures: PromptReferenceFailure[]): string {
+function expandTypedReferences(text: string, projectRoot: string, contextReferences: boolean, failures: PromptReferenceFailure[], attachImage: AttachReferencedImage): string {
     return text.replace(TYPED_REFERENCE_REGEX, (full: string, prefix: string, marker: string, rawReference: string): string => {
         if (marker === '!@') {
             try {
                 const resolvedPath = resolveAndValidatePath(rawReference, projectRoot);
-                return `${prefix}${capReferenceText(readFileSync(resolvedPath, 'utf-8'), 'File')}`;
+                const file = readReferencedFile(resolvedPath, attachImage);
+                return `${prefix}${file.kind === 'image' ? file.marker : capReferenceText(file.text, 'File')}`;
             }
             catch (error) {
                 failures.push(referenceFailure(`!@${rawReference}`, error));
@@ -116,7 +179,7 @@ function expandTypedReferences(text: string, projectRoot: string, contextReferen
         if (URL_REFERENCE_REGEX.test(core)) {
             return `${prefix}${buildContextUrlBlock(core)}${suffix}`;
         }
-        const fileBlock = readContextFileBlock(core, projectRoot, failures);
+        const fileBlock = readContextFileBlock(core, projectRoot, failures, attachImage);
         if (!fileBlock)
             return full;
         return `${prefix}${fileBlock}${suffix}`;
@@ -155,7 +218,7 @@ export const BINARY_IMAGE_MAGIC: {
     { magic: [0x89, 0x50, 0x4E, 0x47], mediaType: 'image/png' },
     { magic: [0xFF, 0xD8, 0xFF], mediaType: 'image/jpeg' },
     { magic: [0x52, 0x49, 0x46, 0x46], mediaType: 'image/webp', extraCheck: (b: Buffer) => b.length > 11 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 },
-    { magic: [0x47, 0x49, 0x46], mediaType: 'image/gif' },
+    { magic: [0x47, 0x49, 0x46, 0x38], mediaType: 'image/gif' },
 ];
 export const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 export function formatFileSize(bytes: number): string {
@@ -277,7 +340,15 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
     // a collapsed paste is spliced in (a `!@path` inside an eight-line-plus
     // paste was never seen or chosen), and an expanded file is not rescanned.
     const failures: PromptReferenceFailure[] = [];
-    let expanded = expandTypedReferences(text, projectRoot, contextReferences, failures);
+    // A referenced image takes an id no pasted image can hold (`imgrN`), so the
+    // registry's own counter, which the host owns, is left alone.
+    let referencedImages = 0;
+    const attachImage: AttachReferencedImage = (image) => {
+        const id = `imgr${++referencedImages}`;
+        imageRegistry.set(id, { data: image.data, mediaType: image.mediaType });
+        return `[IMAGE: ${id}, ${image.name}, ${formatFileSize(image.bytes)}]`;
+    };
+    let expanded = expandTypedReferences(text, projectRoot, contextReferences, failures, attachImage);
     if (failures.length > 0) {
         const named = failures.map((failure) => `${failure.reference} (${failure.reason})`).join(', ');
         throw new RefusalError(refusal({
@@ -288,7 +359,7 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
         }));
     }
     expanded = expandTextPastes(pasteRegistry, expanded);
-    const imageMarkerRegex = /\[IMAGE: (img\d+), [^\]]+\]/g;
+    const imageMarkerRegex = /\[IMAGE: (imgr?\d+), [^\]]+\]/g;
     const imageMarkers: {
         marker: string;
         index: number;

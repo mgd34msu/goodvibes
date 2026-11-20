@@ -32,6 +32,9 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
       access: 'admin', scopes: ['read:work-ledger', 'write:fleet'],
       // Starting or resuming an attempt runs metered model work.
       ...(operation === 'start' || operation === 'resume' ? { effect: 'outward' as const } : {}),
+      ...(operation === 'start' || operation === 'resume'
+        ? { replay: { in: 'body' as const, name: 'attemptId', behavior: 'One attempt (workId, attemptId and expectedRevision) runs once: an exact repeat returns the same execution identity instead of starting a second run; launch-claimed effects are never replayed.' } }
+        : { repeat: 'safe' as const }),
       http: { method: 'POST', path: `/api/work-ledger/execution/${operation}` },
       inputSchema: json(nativeWorkExecutionRequestSchema),
       outputSchema: json(nativeWorkExecutionSnapshotSchema),

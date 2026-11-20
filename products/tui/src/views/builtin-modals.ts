@@ -206,8 +206,10 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   const ui = deps.uiServices;
   const configManager = deps.configManager;
   // Freeze a stable web origin once (never clobbering a user-set value).
+  // Null when no web UI is served: the offer is still minted, as the bare `#pair=` fragment.
   const webOrigin = ensurePublicBaseUrl(configManager);
-  const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
+  const url = webOrigin === null ? 'no web UI is served (goodvibes-daemon webui enable --bundle-dir <dir>)'
+    : webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
   const held = request.held;
   // Reopening shows the same offer while nobody has used it and it has not
   // expired: no new credential, no write. Otherwise the new offer replaces it.
@@ -224,7 +226,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
     pairingTokens: ui.platform.pairingTokens,
     name: defaultPairingTokenName(),
     offers,
-    webOrigin: webOrigin.origin,
+    webOrigin: webOrigin?.origin,
     replacesOffer: held?.tokenId,
   });
   return {

@@ -35,6 +35,7 @@
  */
 import {
   ClusterCoordinator,
+  clusterRoleGate,
   inboxSurface,
   ntfySurface,
   readClusterSettings,
@@ -166,6 +167,22 @@ export function buildDaemonClusterCoordinator(
   // runtime. Wired here rather than in facade.ts because this is already the
   // one place the daemon's cluster wiring lives.
   if (config.clusterGroupVerbs) collaborators.httpRouter.setClusterGroupVerbs(config.clusterGroupVerbs);
+  // The work a group runs once (cluster/roles.ts): the scheduled check-in and
+  // the occasion reminders ask the runtime's role holder before they act, and
+  // it answers from this coordinator. Every machine contests both roles; the
+  // election gives each to one of them and moves it when that one stops.
+  runtime.runtimeServices.clusterRoles?.bind(coordinator);
+  if (coordinator.enabled) {
+    coordinator.register(clusterRoleGate('checkin'));
+    coordinator.register(clusterRoleGate('occasions'));
+    // The group's schedules, reminders and url watchers (on its record) run on
+    // the machine holding this role: taking it arms their timers from the
+    // record, giving it up drops them before the next holder takes over.
+    const roles = runtime.runtimeServices.clusterRoles;
+    coordinator.register(clusterRoleGate('automation',
+      async () => { roles?.announce('automation', true); },
+      async () => { roles?.announce('automation', false); }));
+  }
   // Per-surface registration, which supersedes the whole-node gates: the
   // provider runtime, Telegram ingress, and the consumer-conflict route are all
   // registered per surface inside registerDaemonClusterSurfaces, so a conflict

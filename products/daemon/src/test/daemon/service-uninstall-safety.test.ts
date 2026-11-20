@@ -11,7 +11,8 @@ function fixture(platform: 'systemd' | 'launchd' = 'systemd') {
   const root = makeOwnedTempDir('service-uninstall-safety');
   const homeDir = join(root, 'state');
   const unitHomeDir = join(root, 'login');
-  const settings = join(homeDir, '.goodvibes', 'tui', 'settings.json');
+  // The service settings are the daemon's: only its settings file sets them.
+  const settings = join(homeDir, '.goodvibes', 'daemon', 'settings.json');
   mkdirSync(dirname(settings), { recursive: true });
   writeFileSync(settings, JSON.stringify({ service: { platform, serviceName: 'owned-service' } }));
   const unit = platform === 'systemd'

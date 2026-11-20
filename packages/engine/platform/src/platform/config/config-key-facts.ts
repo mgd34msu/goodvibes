@@ -142,9 +142,8 @@ const OPENING_SWITCHES: readonly string[] = [
 ];
 
 /**
- * Safety-gate keys outside the ones with their own rule above. The judgment
- * keys are left out: a project legitimately picks its own judgment backend, and
- * the loader already retains the last admitted chain.
+ * Safety-gate keys outside the ones with their own rule. The judgment keys
+ * have theirs below (a change to which decision model decides is the owner's).
  */
 const PINNED_SAFETY_GATE: readonly string[] = SAFETY_GATE_CONFIG_PREFIXES.filter(prefix =>
   !prefix.startsWith('judgment.') && prefix !== 'provider.decisionRouter'
@@ -229,6 +228,11 @@ declareLoosening('network.privateDeliveryHosts', addsToList('let a delivery reac
 declareLoosening('relay.requireStepUpForMutations', STEP_UP);
 declareLoosening('sandbox.judgment', { loosening: 'let a model approve sandbox escalations', loosens: becomes('auto-approve') });
 declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell commands before they run', loosens: becomes('flat') });
+// The decision model decides tool calls in jev-decides; which model answers, where, and with
+// which credential is the owner's choice, so any change to it counts.
+for (const key of ['judgment.endpoint', 'judgment.model', 'judgment.backend', 'judgment.fallbacks', 'judgment.keySource', 'judgment.keyName']) {
+  declareLoosening(key, { loosening: 'change which decision model decides for you', loosens: changes });
+}
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
 // Each names a program the host runs or a token variable it hands over when a secret reference resolves.
 declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });

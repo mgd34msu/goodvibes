@@ -47,6 +47,54 @@ function shortId(id: string): string {
   return id.length > SHORT_ID_CHARS ? id.slice(0, SHORT_ID_CHARS) : id;
 }
 
+/** A period `/decisions` shows: from `from` (inclusive) to `to` (exclusive), in local time, and how it was named. */
+interface DecisionWindow {
+  readonly from: number;
+  readonly to: number;
+  readonly label: string;
+}
+
+const DAY_MS = 86_400_000;
+const DURATION_UNITS: Readonly<Record<string, number>> = { m: 60_000, h: 3_600_000, d: DAY_MS, w: 7 * DAY_MS };
+
+/** Local midnight of the day `ms` falls on. */
+function startOfDay(ms: number): number {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/** `YYYY-MM-DD` as local midnight, or undefined. */
+function parseDay(value: string): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]) ? date.getTime() : undefined;
+}
+
+/**
+ * The period a `/decisions` line names: `today`, `yesterday`, a day
+ * (`2026-11-19`), or `since <day | 30m | 2h | 3d | 1w>`. Undefined when the
+ * words name no period; a string when they name one wrongly.
+ */
+function decisionWindow(words: readonly string[], now: number): DecisionWindow | string | undefined {
+  const first = (words[0] ?? '').toLowerCase();
+  if (first === 'today') return { from: startOfDay(now), to: now + 1, label: 'today' };
+  if (first === 'yesterday') {
+    const today = startOfDay(now);
+    return { from: startOfDay(today - 1), to: today, label: 'yesterday' };
+  }
+  const day = parseDay(first);
+  if (day !== undefined) return { from: day, to: startOfDay(day + DAY_MS + 3_600_000), label: `on ${first}` };
+  if (first !== 'since') return undefined;
+  const value = (words[1] ?? '').toLowerCase();
+  const since = parseDay(value);
+  if (since !== undefined) return { from: since, to: now + 1, label: `since ${value}` };
+  const duration = /^(\d+)([mhdw])$/.exec(value);
+  if (duration) return { from: now - Number(duration[1]) * DURATION_UNITS[duration[2]!]!, to: now + 1, label: `in the last ${value}` };
+  return 'Usage: /decisions since <YYYY-MM-DD | 30m | 2h | 3d | 1w>';
+}
+
 function when(ms: number): string {
   return new Date(ms).toLocaleString();
 }
@@ -234,11 +282,11 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
   const decisions: TerminalSlashCommand<Context> = {
     name: 'decisions',
     description: 'What was decided for you: calls Jev decided (undo, never, always, ask, keep) and every answered inbox item',
-    usage: '[list] [<count>] | <keep|undo|never|always|ask> <id>',
+    usage: '[list] [<count>] | today | yesterday | <YYYY-MM-DD> | since <YYYY-MM-DD|30m|2h|3d|1w> | <keep|undo|never|always|ask> <id>',
     argsHint: '[list|keep|undo|never|always|ask]',
     // Listing reads; a choice on a decision changes files or standing rules and is the owner's (the handler checks).
     effect: 'mixed',
-    readVerbs: ['', 'list'],
+    readVerbs: ['', 'list', 'today', 'yesterday', 'since'],
     async handler(args, context) {
       // Read before the first await: a model running this command must not choose for the owner.
       const owner = policy.isOwner(context, 'decisions');
@@ -275,28 +323,38 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
         return;
       }
 
-      if (sub !== '' && sub !== 'list' && !/^\d+$/.test(sub)) {
-        say(context, 'Usage: /decisions [list] [<count>] | <keep|undo|never|always|ask> <id>');
+      // A period: today, yesterday, a day, or since a day or a duration; filtered here from the newest 500 of each list.
+      const window = decisionWindow(sub === 'list' ? args.slice(1) : args, Date.now());
+      if (typeof window === 'string') { say(context, window); return; }
+      if (window === undefined && sub !== '' && sub !== 'list' && !/^\d+$/.test(sub)) {
+        say(context, 'Usage: /decisions [list] [<count>] | today | yesterday | <YYYY-MM-DD> | since <YYYY-MM-DD|30m|2h|3d|1w> | <keep|undo|never|always|ask> <id>');
         return;
       }
       const count = Number(sub === 'list' ? args[1] : args[0]);
-      const limit = Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
+      const limit = window !== undefined ? 500 : Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
       try {
-        const [open, closed] = await Promise.all([
+        const [allOpen, allClosed] = await Promise.all([
           inbox.list({ status: 'open', kinds: ['decision'], limit }),
           inbox.list({ status: 'closed', limit }),
         ]);
-        if (open.length === 0 && closed.length === 0) { say(context, '[inbox] Nothing has been decided yet.'); return; }
+        const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
+        const open = allOpen.filter((item) => inWindow(item.createdAt));
+        const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt));
+        if (open.length === 0 && closed.length === 0) {
+          say(context, window === undefined ? '[inbox] Nothing has been decided yet.' : `[inbox] Nothing was decided ${window.label}.`);
+          return;
+        }
+        const period = window === undefined ? '' : ` ${window.label}`;
         say(context, [
           ...(open.length > 0 ? [
-            `Jev decided, and you can still change (${open.length}, newest first):`,
+            `Jev decided${period}, and you can still change (${open.length}, newest first):`,
             ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),
             '',
             'Change one: /decisions <keep|undo|never|always|ask> <id>   (undo restores the files the call changed; never, always and ask set a standing rule for calls like it)',
             '',
           ] : []),
           ...(closed.length > 0 ? [
-            `Decided (${closed.length}, newest first):`,
+            `Decided${period} (${closed.length}, newest first):`,
             ...closed.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`),
             '',
           ] : []),

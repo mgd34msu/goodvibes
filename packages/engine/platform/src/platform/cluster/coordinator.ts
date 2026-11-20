@@ -27,6 +27,7 @@ import { createSystemClusterClock } from './clock.js';
 import { clusterElectionTiming } from './settings.js';
 import { resolveNodeIdentity } from './identity.js';
 import { surfaceIdFor, surfaceLabel, type ClusterSurfaceKey } from './surface-id.js';
+import { CLUSTER_ROLE_NAMES, clusterRoleSurface, type ClusterRoleName } from './roles.js';
 import { UdpClusterTransport } from './udp-transport.js';
 import type {
   ClusterClock,
@@ -121,6 +122,27 @@ export class ClusterCoordinator {
   }
 
   /**
+   * True when this machine runs the role now (see roles.ts). With clustering
+   * off, or when coordination could not be established, every role is held
+   * here: there is nobody else to run it.
+   */
+  holdsRole(role: ClusterRoleName): boolean {
+    if (!this.options.settings.enabled || this.ungatedFallback) return true;
+    return this.election?.surfaceRole(surfaceIdFor(clusterRoleSurface(role))) === 'master';
+  }
+
+  /**
+   * The node id of the machine that runs the role, as this machine's election
+   * last heard it, or null when nobody is known to hold it (an election is
+   * under way, or clustering is off and this machine holds it).
+   */
+  roleHolder(role: ClusterRoleName): string | null {
+    if (!this.options.settings.enabled || this.ungatedFallback) return null;
+    const surfaceId = surfaceIdFor(clusterRoleSurface(role));
+    return this.election?.status().surfaces.find((surface) => surface.surfaceId === surfaceId)?.holderNodeId ?? null;
+  }
+
+  /**
    * The surfaces this node is currently consuming, and why, the answer
    * `ClusterGroupRuntimeOptions.surfaceHoldings` asks for.
    *
@@ -145,12 +167,16 @@ export class ClusterCoordinator {
     if (!election) return null;
     return election.status().surfaces
       .filter((surface) => surface.role === 'master')
-      .map((surface) => ({
-        surfaceId: surface.surfaceId,
-        reason: surface.consuming
-          ? `elected for ${surface.kind} (${surface.label})`
-          : `elected for ${surface.kind} (${surface.label}), consumer not yet running`,
-      }));
+      .map((surface) => {
+        const role = CLUSTER_ROLE_NAMES.find((name) => surfaceIdFor(clusterRoleSurface(name)) === surface.surfaceId);
+        if (role) return { surfaceId: surface.surfaceId, reason: `elected for the ${role} role` };
+        return {
+          surfaceId: surface.surfaceId,
+          reason: surface.consuming
+            ? `elected for ${surface.kind} (${surface.label})`
+            : `elected for ${surface.kind} (${surface.label}), consumer not yet running`,
+        };
+      });
   }
 
   /**
@@ -453,6 +479,7 @@ export class ClusterCoordinator {
       consumersRunning: this.ungatedRunning,
       heldSurfaceCount: this.ungatedRunning ? surfaces.length : 0,
       signed: false,
+      electionAuthentication: this.options.settings.secret.state === 'unavailable' ? 'unavailable' : 'none',
       surfaces,
       peers: [],
       transport: { mode: 'in-memory', group: '', port: 0, peers: [] },

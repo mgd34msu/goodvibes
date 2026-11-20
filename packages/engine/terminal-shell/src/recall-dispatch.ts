@@ -16,6 +16,7 @@ export function createRecallDispatch<Context>(ports: {
   readonly link: (args: string[], context: Context) => unknown;
   readonly list: (args: string[], context: Context) => unknown;
   readonly remove: (args: string[], context: Context) => unknown;
+  readonly edit: (args: string[], context: Context) => unknown;
   readonly export: (args: string[], context: Context) => unknown;
   readonly import: (args: string[], context: Context) => unknown;
   readonly handoffExport: (args: string[], context: Context) => unknown;
@@ -46,6 +47,7 @@ export function createRecallDispatch<Context>(ports: {
     ['link', ports.link],
     ['list', ports.list],
     ['ls', ports.list],
+    ['edit', ports.edit],
     ['remove', ports.remove],
     ['delete', ports.remove],
     ['rm', ports.remove],

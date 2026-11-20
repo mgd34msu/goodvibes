@@ -6,6 +6,7 @@
  */
 import { createOneShotServices } from '@goodvibes-jev/engine/terminal-shell/cli-one-shot-services';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { agentTrustsScannedServer } from '../runtime/lan-scan-consent-store.ts';
 
 export type {
   OneShotProviderOptions,
@@ -13,4 +14,6 @@ export type {
   OneShotSessionServices,
 } from '@goodvibes-jev/engine/terminal-shell/cli-one-shot-services';
 
-export const { withProviderServices, withSessionServices } = createOneShotServices(GOODVIBES_AGENT_SURFACE_ROOT);
+export const { withProviderServices, withSessionServices } = createOneShotServices(GOODVIBES_AGENT_SURFACE_ROOT, {
+  trustScannedServer: (server, paths) => agentTrustsScannedServer(server, paths, GOODVIBES_AGENT_SURFACE_ROOT),
+});

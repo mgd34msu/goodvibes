@@ -32,7 +32,7 @@ const relayed = (path: string, method: string, assertion?: string): Request =>
 
 /** The real catalog and the facts the daemon builds from it (daemon/facade.ts). */
 const facts = relayRequestFactsFrom(new GatewayMethodCatalog(), () => ({ principal: { principalId: 'pairing:phone' } }));
-const gate = { relayEnabled: () => true, requireStepUp: () => true, rendezvousId: () => 'rid-1' };
+const gate = { relayEnabled: () => true, requireStepUp: () => true, rendezvousId: () => 'rid-1', relayCodeAdmits: () => true };
 
 function dispatcher(verdict: Awaited<ReturnType<StepUpAssertionVerifier>>) {
   let ran = 0;

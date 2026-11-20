@@ -1,3 +1,7 @@
+import type { ApprovalBroker } from '../approval-broker.js';
+import { putToOwner } from '../owner-act.js';
+import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { configKeyFacts } from '../../config/config-key-facts.js';
 import type { TurnCancellationResult } from '../../core/turn-cancellation.js';
 /**
  * routes/session-runtime.ts
@@ -154,6 +158,12 @@ export class SessionLiveTurnControlsHolder {
 export interface SessionRuntimeControls {
   isLocalSession(sessionId: string): boolean;
   getPermissionMode(sessionId?: string): PermissionMode;
+  /**
+   * The mode the session chose (or the saved one) beside the mode in force,
+   * with why they differ. Absent on controls that cannot say; the get verb then
+   * reports the mode in force alone.
+   */
+  getPermissionModeReport?(sessionId?: string): { readonly chosen: PermissionMode; readonly mode: PermissionMode; readonly reason?: string | undefined };
   setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void>;
   getContextUsage(sessionId: string): SessionContextUsage;
   /**
@@ -185,16 +195,49 @@ function requireLocalSessionId(controls: SessionRuntimeControls, params: Record<
 export function createSessionPermissionModeGetHandler(controls: SessionRuntimeControls): GatewayMethodHandler {
   return (invocation) => {
     const sessionId = requireLocalSessionId(controls, readInvocationParams(invocation));
-    return { sessionId, mode: toOperatorPermissionMode(controls.getPermissionMode(sessionId)) };
+    const report = controls.getPermissionModeReport?.(sessionId);
+    if (!report) return { sessionId, mode: toOperatorPermissionMode(controls.getPermissionMode(sessionId)) };
+    // The mode in force, and when it is not the chosen one, the chosen mode and why (no decision model set, none answering, ...).
+    return { sessionId, mode: toOperatorPermissionMode(report.mode), chosenMode: toOperatorPermissionMode(report.chosen),
+      ...(report.reason !== undefined && report.mode !== report.chosen ? { reason: report.reason } : {}) };
   };
 }
 
-export function createSessionPermissionModeSetHandler(controls: SessionRuntimeControls): GatewayMethodHandler {
-  return (invocation) => {
+export function createSessionPermissionModeSetHandler(
+  controls: SessionRuntimeControls,
+  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval'> | undefined,
+): GatewayMethodHandler {
+  return async (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
     const nextMode = toConfigPermissionMode(typeof params.mode === 'string' ? params.mode : '');
     const previousMode = toOperatorPermissionMode(controls.getPermissionMode(sessionId));
+    // A looser mode is the owner's own act. A token minted for automation does
+    // not make it (a device the owner paired himself does): it is put to the owner,
+    // and the mode changes when he approves it from his own app.
+    const loosens = configKeyFacts('permissions.mode').loosens?.(controls.getPermissionMode(sessionId), nextMode) === true;
+    if (loosens && isAutomationCredential(invocation.context)) {
+      if (!ownerApprovals) {
+        throw new GatewayVerbError(`Setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} would loosen the permission mode, which only the owner does; a token minted for automation cannot. Nothing was changed.`, 'OWNER_ONLY', 403, 'mode');
+      }
+      const { approvalId } = await putToOwner(ownerApprovals, {
+        summary: `An automation token asks to set session ${sessionId} to ${toOperatorPermissionMode(nextMode)}`,
+        reasons: [`Changing the permission mode from ${previousMode} to ${toOperatorPermissionMode(nextMode)} loosens it.`],
+        tool: 'sessions.permissionMode.set',
+        args: { sessionId, mode: toOperatorPermissionMode(nextMode) },
+        requestedBy: invocation.context.principalId ?? 'an automation token',
+        apply: () => controls.setPermissionMode(nextMode, sessionId),
+      });
+      return Response.json({
+        sessionId,
+        code: 'OWNER_APPROVAL_PENDING',
+        approvalId,
+        mode: previousMode,
+        requestedMode: toOperatorPermissionMode(nextMode),
+        state: `nothing was changed yet; setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode, which only the owner does, so it was put to him and changes when he approves it`,
+        next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
+      }, { status: 202 });
+    }
     const changed = controls.setPermissionMode(nextMode, sessionId);
     const result = {
       sessionId,
@@ -353,8 +396,22 @@ export function createSessionRuntimeControls(deps: {
    * decides the session's calls. Absent: the chosen mode is reported.
    */
   readonly modeInForce?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => GatePresetName) | undefined;
+  /** Why the mode in force differs from a chosen mode (PermissionManager.describeModeInForce); absent: no reason is given. */
+  readonly modeInForceReason?: ((chosen: GatePresetName, explicitlyChosen?: boolean) => string | undefined) | undefined;
 }): SessionRuntimeControls {
   const inForce = (chosen: GatePresetName, explicitlyChosen = false): GatePresetName => deps.modeInForce?.(chosen, explicitlyChosen) ?? chosen;
+  /** The chosen mode of a session (or the saved one) and whether it was chosen for that session rather than read from settings. */
+  const chosenMode = (sessionId?: string): { readonly mode: GatePresetName; readonly explicitlyChosen: boolean } => {
+    const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
+    if (hosted) {
+      if (!hosted.getPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
+      return { mode: hosted.getPermissionMode(), explicitlyChosen: hosted.isPermissionModeChosen?.() ?? true };
+    }
+    const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
+    // A channel's mode is the one its profile chose for it.
+    if (channel && channel.channelPermissionMode !== undefined) return { mode: channel.channelPermissionMode, explicitlyChosen: true };
+    return { mode: effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true), explicitlyChosen: false };
+  };
   const LOCAL_RUNTIME_ALIAS = 'runtime';
   return {
     isLocalSession(sessionId: string): boolean {
@@ -376,15 +433,14 @@ export function createSessionRuntimeControls(deps: {
         ? deps.liveTurnHolder?.get() ?? null : null;
     },
     getPermissionMode(sessionId?: string): PermissionMode {
-      const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
-      if (hosted) {
-        if (!hosted.getPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
-        return inForce(hosted.getPermissionMode(), hosted.isPermissionModeChosen?.() ?? true);
-      }
-      const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
-      // A channel's mode is the one its profile chose for it.
-      if (channel && channel.channelPermissionMode !== undefined) return inForce(channel.channelPermissionMode, true);
-      return inForce(effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true));
+      const chosen = chosenMode(sessionId);
+      return inForce(chosen.mode, chosen.explicitlyChosen);
+    },
+    getPermissionModeReport(sessionId?: string) {
+      const chosen = chosenMode(sessionId);
+      const mode = inForce(chosen.mode, chosen.explicitlyChosen);
+      const reason = mode === chosen.mode ? undefined : deps.modeInForceReason?.(chosen.mode, chosen.explicitlyChosen);
+      return { chosen: chosen.mode, mode, ...(reason !== undefined ? { reason } : {}) };
     },
     setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void> {
       const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
@@ -463,10 +519,11 @@ export function readSessionContextUsage(
 export function registerSessionRuntimeGatewayMethods(
   catalog: GatewayMethodCatalog,
   controls: SessionRuntimeControls,
+  ownerApprovals?: Pick<ApprovalBroker, 'raiseApproval'> | undefined,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('sessions.permissionMode.get', createSessionPermissionModeGetHandler(controls));
-  attach('sessions.permissionMode.set', createSessionPermissionModeSetHandler(controls));
+  attach('sessions.permissionMode.set', createSessionPermissionModeSetHandler(controls, ownerApprovals));
   attach('sessions.contextUsage.get', createSessionContextUsageGetHandler(controls));
   attach('sessions.turns.cancel', createSessionTurnCancelHandler(controls));
   attach('sessions.toolCalls.cancel', createSessionToolCallCancelHandler(controls));

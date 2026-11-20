@@ -13,6 +13,8 @@ import type { SerializedRelayIdentity } from '@goodvibes-jev/engine/transport-co
 import { isRelayTunneledRequest } from '@goodvibes-jev/engine/daemon-api';
 import { refusal, refusalErrorBody } from '@goodvibes-jev/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
+import type { RelayCodeStore } from './relay-codes.js';
+import { RELAY_CODE_HEADER } from '@goodvibes-jev/engine/transport-core/relay';
 import type { StepUpService } from './step-up-service.js';
 import {
   STEP_UP_ASSERTION_HEADER,
@@ -29,6 +31,11 @@ export interface StepUpGateState {
   requireStepUp(): boolean;
   /** The rendezvous id of the live relay registration, when there is one. */
   rendezvousId(): string | null;
+  /**
+   * Whether the relay code a relayed request presented is one this daemon
+   * issued and has not revoked (relay-codes.ts). Absent: every relayed request is refused.
+   */
+  relayCodeAdmits?(code: string | null): boolean;
 }
 
 /**
@@ -121,6 +128,17 @@ export function wrapDispatchWithStepUp(
         retryable: false,
       })), 503);
     }
+    // Each paired device presents its own relay code; a revoked or unknown one is refused before anything runs.
+    if (gate.relayCodeAdmits?.(req.headers.get(RELAY_CODE_HEADER)) !== true) {
+      return jsonResponse(refusalErrorBody(refusal({
+        code: 'relay-code-revoked',
+        state: 'this device\'s relay access is revoked or was never issued',
+        reason: 'This call arrived over the relay with a relay code this daemon did not issue or has revoked.',
+        next: ['Pair this device with the relay again from the home network: /relay pair in the terminal app, or goodvibes-agent relay pair.'],
+        status: 401,
+        retryable: false,
+      })), 401);
+    }
     if (!gate.requireStepUp()) return dispatch(req);
     const pathname = new URL(req.url).pathname;
     // Minting a challenge is the prerequisite for producing an assertion, so it
@@ -202,12 +220,14 @@ export function buildDaemonRelayReachability(
   verifyStepUp: StepUpAssertionVerifier,
   requestFacts?: RelayRequestFacts,
   stepUpCredentials?: StepUpCredentialCount,
+  relayCodes?: Pick<RelayCodeStore, 'verify'>,
 ): RelayReachability {
   if (stepUpCredentials) admitStepUpRequirement(configManager, stepUpCredentials);
   const gate: StepUpGateState = {
     relayEnabled: () => reachability.isEnabled(),
     requireStepUp: () => configManager.get('relay.requireStepUpForMutations'),
     rendezvousId: () => reachability.rendezvousId,
+    relayCodeAdmits: (code) => relayCodes?.verify(code) != null,
   };
   const reachability: RelayReachability = createRelayReachability({
     // Read when needed, not once here, so a changed setting applies on the next

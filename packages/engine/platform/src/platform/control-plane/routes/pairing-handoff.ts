@@ -17,6 +17,7 @@
  *   result, and a declined/omitted offer is reported as declined, never
  *   silently half-applied.
  */
+import { isAutomationCredential } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
@@ -42,7 +43,7 @@ import { mintedPairingScopes } from './pairing.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
-  readonly tokens: Pick<PairingTokenManager, 'mint'>;
+  readonly tokens: Pick<PairingTokenManager, 'mint' | 'mintForMigration'>;
   /** The push service, VAPID key for the notifications offer + subscription registration. */
   readonly push: Pick<PushGatewayService, 'getPublicKey' | 'subscribe'>;
   /** WebAuthn step-up; present ⇒ the passkey offer is available. */
@@ -82,6 +83,16 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const name = requireStringValue(params.name, 'name');
+    // `fromSharedToken`: the calling client (a browser or app signed in with the shared
+    // operator token) is pairing itself onto its own token. Only a caller on the shared
+    // token may say so.
+    const fromSharedToken = params.fromSharedToken === true;
+    if (params.fromSharedToken !== undefined && typeof params.fromSharedToken !== 'boolean') {
+      throw new GatewayVerbError('fromSharedToken must be true or false', 'INVALID_ARGUMENT', 400, 'fromSharedToken');
+    }
+    if (fromSharedToken && invocation.context.credentialKind !== 'shared-token' && invocation.context.credentialKind !== 'local') {
+      throw new GatewayVerbError('fromSharedToken is for a client signed in with the shared operator token; this credential is not.', 'INVALID_ARGUMENT', 400, 'fromSharedToken');
+    }
     const available = availableOffers(deps);
     const offers = requestedOffers(params.offers).filter((kind) => available.has(kind));
 
@@ -103,7 +114,18 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
         const scopes = mintedPairingScopes(invocation.context, undefined);
-        return deps.tokens.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId), ...(scopes !== undefined ? { scopes } : {}) });
+        // The owner's pairing flow: a device paired from the owner's own credential (the
+        // operator token, an admin sign-in, an app on his machine, a device he paired himself)
+        // with full authority is his device. From an automation or Agent credential, or
+        // narrowed, it is automation. Recorded at the mint and never changed afterwards.
+        const ownerPairing = scopes === undefined && invocation.context.admin === true
+          && invocation.context.credentialKind !== 'agent' && !isAutomationCredential(invocation.context);
+        const input = { name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+          ...(scopes !== undefined ? { scopes } : {}), ...(ownerPairing ? { origin: 'owner-pairing' as const } : {}) };
+        // A client moving off the shared token pairs ITSELF through this flow: it already
+        // uses this daemon, so its mint is exempt from device.nodes.maxPaired as
+        // pairing.tokens.migrate's is.
+        return fromSharedToken ? deps.tokens.mintForMigration(input) : deps.tokens.mint(input);
       } catch (error) {
         if (error instanceof PairingLimitReachedError) {
           throw new GatewayVerbError(error.message, error.code, 409);

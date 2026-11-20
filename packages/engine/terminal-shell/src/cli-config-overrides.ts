@@ -71,7 +71,13 @@ export function announceSettingsIngestionNotices(
   configManager: Pick<ConfigManager, 'getIngestionQuarantine' | 'subscribeIngestionNotices'>,
   show: (line: string, level: NoticeLevel) => void,
 ): () => void {
+  // Each notice once per session: a later load (a daemon attaching, a settings
+  // reload) reports the same stray setting again, and saying it twice reads as two problems.
+  const shown = new Set<string>();
   const announce = (notice: SettingsIngestionNotice): void => {
+    const id = `${notice.action} ${notice.key} ${notice.file}`;
+    if (shown.has(id)) return;
+    shown.add(id);
     show(describeIngestionNotice(notice), notice.action === 'mapped' ? 'info' : 'warning');
   };
   for (const notice of configManager.getIngestionQuarantine()) announce(notice);

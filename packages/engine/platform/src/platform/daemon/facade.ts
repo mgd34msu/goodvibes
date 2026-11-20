@@ -5,10 +5,12 @@ import { channelProfileForSession, withChannelExecutionMode } from '../channel-p
 import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
 import { applyAssignedChannelProfile, assignedChannelProfile, spawnModelOpen } from './channel-profile-assignment.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
-import { withTurnSurfaceId } from '../security/turn-boundary.js';
+import { channelTurnSurfaceId, withTurnSurfaceId } from '../security/turn-boundary.js';
 import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
+import { ModelReferenceError } from '../providers/model-id-resolution.js';
+import { AgentSpawnInputError } from '../tools/agent/model-routing.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DaemonLifecycleRuntime, type NativeHandover, createDaemonOwnerAlerter, registerDaemonHeartbeatWatcher, runDaemonSessionStoreBoot } from './facade-lifecycle.js';
 import { registerUpdateGatewayMethods } from '../control-plane/routes/update.js';
@@ -72,6 +74,8 @@ import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/as
 import type { McpServerConfig } from '../mcp/config.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
 import { buildDaemonRelayReachability, relayRequestFactsFrom } from '../relay/daemon-wiring.js';
+import { RelayCodeStore } from '../relay/relay-codes.js';
+import { join } from 'node:path';
 import type { RelayReachability } from '../relay/reachability.js';
 import {
   readAutomationReasoningEffort,
@@ -81,7 +85,8 @@ import {
 } from './helpers.js';
 import type { DaemonConfig, DaemonDangerConfig, PendingSurfaceReply } from './types.js';
 import { requirePortAvailable } from './port-check.js';
-import { resolveHostBinding } from './host-resolver.js';
+import { listenerWithinConfiguredHost, resolveHostBinding } from './host-resolver.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import { createJudgmentRuntimeScope, runInJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
@@ -222,6 +227,22 @@ export class DaemonServer {
   private readonly companionChatManager: CompanionChatManager;
   private readonly hostedSessions: HostedSessionManager | null;
   private relayReachability: RelayReachability | null = null;
+  /** One relay code per device paired through the relay, listed and revoked like a device token (relay/relay-codes.ts). */
+  private relayCodeStore: RelayCodeStore | null = null;
+  private get relayCodes(): RelayCodeStore {
+    if (this.relayCodeStore) return this.relayCodeStore;
+    const store = new RelayCodeStore(join(this.configManager.getControlPlaneConfigDir(), 'relay-codes.json'),
+      { authority: this.runtimeServices.authorityRecord });
+    // A relay code revoked on the authority record (itself, or with the device it
+    // was issued to, here or on another machine of the group) ends the relay
+    // connections presenting it at once, as a local revoke does.
+    this.stopRelayRevocationWatch = store.onRecordRevocation(() => {
+      void this.relayReachability?.closeConnectionsPresenting?.((code) => !store.holds(code), 'relay-code-revoked')
+        .catch((error: unknown) => logger.warn('DaemonServer: relay connections of a revoked code could not be closed', { error: summarizeError(error) }));
+    });
+    return this.relayCodeStore = store;
+  }
+  private stopRelayRevocationWatch: (() => void) | null = null;
   private agentTaskAdapter: import('../runtime/tasks/adapters/agent-adapter.js').AgentTaskAdapter | null = null;
   private agentTaskAdapterUnsub: (() => void) | null = null;
   /** Detaches the background-process task rows from the process manager. */
@@ -327,6 +348,11 @@ export class DaemonServer {
       paymentReplies: config.paymentReplies,
       runtime: resolved,
       transportBinding: () => this.acceptedTransportBinding ?? { host: this.boundHost, port: this.boundPort },
+      servingListener: () => {
+        const server = this.server;
+        if (server === null) return null;
+        return { host: server.hostname ?? this.host, port: this.boundPort, scheme: this.boundScheme };
+      },
       pendingSurfaceReplies: this.pendingSurfaceReplies,
       authToken: () => this.authToken,
       settingsLifetime: () => this.settingsLifetime,
@@ -409,7 +435,7 @@ export class DaemonServer {
     // Relay reachability read through the SAME controller getRelayReachability()
     // returns, so an in-process surface and a client over the wire cannot
     // disagree about whether this daemon is reachable, see routes/relay.ts.
-    registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability);
+    registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability, this.relayCodes);
     this.httpRouter.setDaemonStatusProviders({
       // Update/crash receipts, and which node currently reads the inbox.
       peekReceipts: () => this.peekDaemonReceipts(),
@@ -821,6 +847,7 @@ export class DaemonServer {
         this.runtimeServices.stepUpService.createVerifier(),
         relayRequestFactsFrom(this.gatewayMethods, (req) => this.controlPlaneHelper.authenticateRequest(req)),
         this.runtimeServices.stepUpService,
+        this.relayCodes,
       );
       void this.relayReachability.start().catch((error: unknown) =>
         logger.warn('DaemonServer: relay reachability failed to start', { error: summarizeError(error) }),
@@ -913,6 +940,15 @@ export class DaemonServer {
       || this.configManager.getConfigurationIncarnation() !== incarnation) return false;
     const self = this;
     const lifetime = {};
+    // The host this listener binds. A loopback listener is within every
+    // setting, so only a wider one reads the configured host per request.
+    const listenerHost = this.host;
+    const listenerIsLoopback = isLoopbackHost(listenerHost);
+    const outsideConfiguredHost = (): string | undefined => {
+      if (listenerIsLoopback) return undefined;
+      const configured = self.configuredControlPlaneBinding().host;
+      return listenerWithinConfiguredHost(listenerHost, configured) ? undefined : configured;
+    };
     this.settingsLifetime = lifetime;
     const withdrawLifetime = (): void => {
       if (this.settingsLifetime !== lifetime) return;
@@ -940,6 +976,7 @@ export class DaemonServer {
             streamMode: readControlPlaneStreamingMode(self.configManager.get('controlPlane.streamMode')),
             peerAddress,
             clientAddress,
+            outsideConfiguredHost: outsideConfiguredHost(),
           });
           if (unserved) return unserved;
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
@@ -1027,15 +1064,20 @@ export class DaemonServer {
     const fallback = this.acceptedTransportBinding ?? (this.server !== null ? { host: this.host, port: this.boundPort } : null);
     while (current()) {
       this.restartCycle.takeDirty();
-      // A different host or port is bound BEFORE the serving listener is
-      // released, so a binding that cannot be used never takes the API down.
-      // The same address (a TLS or mode change) cannot be bound twice, so that
-      // case still releases first and falls back if the new bind fails.
+      // A different port is bound BEFORE the serving listener is released, so
+      // a binding that cannot be used never takes the API down, but only while
+      // the serving listener is itself within the new setting: a listener the
+      // setting now refuses (every interface after a change to loopback) is
+      // never kept serving while its replacement binds. The same port cannot
+      // be bound twice (0.0.0.0:P and 127.0.0.1:P collide), so a host change on
+      // the same port, and a TLS or mode change, release first and fall back
+      // only to what the new setting allows if the new bind fails.
       const swapFrom = this.server;
       let incarnation = this.configManager.getConfigurationIncarnation();
       let binding = this.configuredControlPlaneBinding();
       // The served port, not the configured one: a listener bound to port 0 serves on an assigned port, and naming that port is the same address.
-      const swap = swapFrom !== null && !(binding.host === this.host && binding.port === this.boundPort);
+      const swap = swapFrom !== null && binding.port !== this.boundPort
+        && listenerWithinConfiguredHost(this.host, binding.host);
       if (swap && swapFrom !== null) {
         const previous = { host: this.host, port: this.port, tlsState: this.tlsState, lifetime: this.settingsLifetime };
         try {
@@ -1103,7 +1145,10 @@ export class DaemonServer {
     const reason = summarizeError(error);
     const wanted = `${attempted.host}:${attempted.port}`;
     if (fallback !== null) {
-      this.host = fallback.host;
+      // The previous address only while the new setting still allows it;
+      // otherwise this machine alone on the previous port, so the API stays
+      // reachable for a correction and nothing the setting refuses is served.
+      this.host = listenerWithinConfiguredHost(fallback.host, attempted.host) ? fallback.host : '127.0.0.1';
       this.port = fallback.port;
       const tlsState = resolveInboundTlsContext(this.configManager, 'controlPlane');
       this.tlsState = tlsState;
@@ -1248,6 +1293,9 @@ export class DaemonServer {
     this.surfaceEventsDetach = null;
     this.relayReachability?.stop();
     this.relayReachability = null;
+    this.stopRelayRevocationWatch?.();
+    this.stopRelayRevocationWatch = null;
+    this.relayCodeStore = null;
     this.httpRouter.dispose();
     this.controlPlaneHelper.dispose();
     this.unbindSharedToken?.();
@@ -1397,6 +1445,7 @@ export class DaemonServer {
   private async invokeGatewayMethodCall(input: {
     readonly authToken: string;
     readonly methodId: string;
+    readonly idempotencyKey?: string | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly query?: Record<string, unknown> | undefined;
     readonly body?: unknown | undefined;
@@ -1409,7 +1458,7 @@ export class DaemonServer {
       /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
       readonly connectionId?: string | undefined;
     };
-  }): Promise<{ status: number; ok: boolean; body: unknown }> {
+  }): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
     return await this.controlPlaneHelper.invokeGatewayMethodCall(input);
   }
 
@@ -1507,7 +1556,7 @@ export class DaemonServer {
         : channelProfiled;
       // An agent started for a session belongs to it: that session's listings and reports carry it.
       const spawnInput = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
-      const record = withTurnSurfaceId(triggerSurface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
+      const record = withTurnSurfaceId(channelTurnSurfaceId(triggerSurface), () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.
       if (this.agentTaskAdapter) {
@@ -1533,6 +1582,11 @@ export class DaemonServer {
           },
           { status: 429, headers: { 'Retry-After': '5' } },
         );
+      }
+      // A model or routing the request named that cannot run is the caller's
+      // input: a 400 with its code, which a retry rule does not repeat.
+      if (err instanceof ModelReferenceError || err instanceof AgentSpawnInputError) {
+        return Response.json({ error: err.message, code: err.code, category: 'bad_request', recoverable: false, status: 400 }, { status: 400 });
       }
       return jsonErrorResponse(err, { status: 500, fallbackMessage: 'Failed to spawn agent' });
     }

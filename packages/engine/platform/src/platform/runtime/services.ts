@@ -1,4 +1,7 @@
 import type { ConfigManager } from '../config/manager.js';
+import type { ClusterRoles } from '../cluster/roles.js';
+import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import type { AuthorityStatusPeers } from '../control-plane/routes/authority-status.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { SubscriptionManager } from '../config/subscriptions.js';
@@ -95,7 +98,7 @@ import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
 import type { ShellPathService } from './shell-paths.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
-import type { ProviderModelDiscoveryMode, ProviderRegistryFactory } from './provider-stack.js';
+import type { ProviderModelDiscoveryMode, ProviderRegistryFactory, ProviderStackOptions } from './provider-stack.js';
 import type { PolicyRuntimeState } from './permissions/policy-runtime.js';
 import type { KeybindingsManagerLike, PanelManagerLike } from './host-ui.js';
 import type { WorkflowServices } from '../tools/workflow/index.js';
@@ -233,6 +236,8 @@ export interface HostSeams {
   readonly providerRegistryFactory?: ProviderRegistryFactory | undefined;
   /** `skip` for a composition that will not outlive model discovery's unawaited write. Default: `run`. */
   readonly modelDiscovery?: ProviderModelDiscoveryMode | undefined;
+  /** Which saved scanned local servers are registered; see ProviderStackOptions.trustScannedServer. Default: this computer's only. */
+  readonly trustScannedServer?: ProviderStackOptions['trustScannedServer'];
   /** Agents this process owns beyond its agent runs (native work, hosted floors); they count against `fleet.maxSize`. */
   readonly additionalFleetOwnership?: (() => readonly AgentFleetOwnership[]) | undefined;
   /** The running session, exempt from crash-residue reaping. */
@@ -507,6 +512,16 @@ export interface RuntimeServices {
    */
   dispose(): void;
   close(): Promise<void>;
+  /** Which group roles this machine holds (cluster/roles.ts); the daemon binds it to its coordinator. Absent: every role is held here. */
+  readonly clusterRoles?: ClusterRoles | undefined;
+  /**
+   * The authority record (cluster/authority-record-file.ts): the one answer to
+   * whether a device token, user, grant or peer token is current, shared by
+   * every process of this home and, in a group, carried to every member.
+   */
+  readonly authorityRecord?: AuthorityRecordFile | undefined;
+  /** The group layer reports which members' records differ from this one, for authority.status. */
+  readonly setAuthorityPeers?: ((peers: AuthorityStatusPeers | null) => void) | undefined;
 }
 
 export {
@@ -544,6 +559,12 @@ export interface ComposedRuntimeServices extends RuntimeServices {
   readonly acpHost: AcpHostService;
   /** The tool dependencies the agent orchestrator was given; a product extends them and sets them again. */
   readonly agentToolDependencies: Parameters<AgentOrchestrator['setDependencies']>[0];
+  /**
+   * What a run nobody watches (a scheduled run, a trigger's turn) gets from the
+   * host: its answer goes to the surface it names, else the owner inbox the host
+   * attaches here; and the connected mail and calendar tools the host reads.
+   */
+  readonly unattendedRuns: import('../automation/unattended-runs.js').UnattendedRuns;
   /** The late-bound owner-profile capture port the gateway verb groups fill. */
   readonly personalCapture: PersonalCaptureHolder;
   /** The announce-once notices (default-on feature receipts, settings fallbacks) every surface drains on attach. */

@@ -1,3 +1,4 @@
+import { putToOwner } from '../../control-plane/owner-act.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type {
   ChannelDirectoryScope,
@@ -217,6 +218,8 @@ export function buildSystemRouteContext(input: {
   return {
     approvalBroker: input.approvalBroker,
     configManager: input.configManager,
+    configLoosening: (key, value, options) => input.configManager.describeLoosening(key, value, options),
+    putToOwner: (request) => putToOwner(input.approvalBroker, request),
     settingsPrecondition: input.settingsPrecondition,
     settingsImportPrecondition: input.settingsImportPrecondition,
     credentialStatus: input.credentialStatus,

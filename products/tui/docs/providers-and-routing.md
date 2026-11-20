@@ -143,7 +143,7 @@ When every backend for a free synthetic model is exhausted and cooldowns are too
 
 ### Paid and subscription exhaustion
 
-Paid and subscription models do not switch to a model you did not choose, because the choice of model was deliberate and cost-conscious. When every backend of a paid synthetic model is exhausted, the turn stops and shows recovery options instead:
+Paid and subscription models do not switch to a model you did not choose, because the choice of model was deliberate and cost-conscious. When every backend of a paid synthetic model is exhausted, the turn moves to your own `provider.fallbackModels` (see below); with none left, it stops and shows recovery options instead:
 
 - wait a few minutes for the rate limit to reset and retry
 - switch model with `/model`
@@ -162,18 +162,16 @@ A provider whose endpoint did not return its model list during the startup model
 Besides the backend rotation inside a single synthetic model described above, a failed model never moves to a model you did not choose:
 
 1. The same model on another sign-in of the same provider comes first, inside the request: OpenAI asks the API key after the subscription fails. The turn says once which sign-in answered and why.
-2. Only when every sign-in of the provider has failed does the turn move to another model, and then only by your own fallback order, `provider.fallbackModels` (a list of provider-qualified ids, for example `["anthropic:claude-sonnet-5"]`): the first entry not yet tried this turn whose provider is signed in. The TUI switches to it and resubmits the turn.
+2. Only when every sign-in of the provider has failed, and the request's retries are spent, does the turn move to another model, and then only by your own fallback order, `provider.fallbackModels` (a list of provider-qualified ids, for example `["anthropic:claude-sonnet-5"]`; the provider half matches by id or display name, any case): the first entry not yet tried this turn whose provider is signed in. The engine's turn loop sends the failed request again to it, and the rest of the turn, tool calls already made included, continues there; nothing is resubmitted and no tool runs twice. The same rule runs in the TUI, `goodvibes run`, the Agent, the daemon's hosted sessions and its agents.
 3. With no fallback order set, or every entry tried, the turn stops and says so: `[Failover] Stopped:` with why nothing else was tried and what to do next. No model is picked by list position, tier or age.
 
-A turn that failed for another reason (a hook denied the call, for example), or in which a tool had already started, is not resubmitted: the error is shown instead, because a second run would repeat the tool's side effects.
-
-When this happens, the transcript shows a notice naming both the source and destination providers alongside the full user-facing error description (the same message-and-action text a plain `[Error]` line would show). If the catalog contains per-1M-token pricing for both models, the notice also includes the cost delta in the form:
+Each move adds a line naming both models, the position in your order and the error, with the cost delta when the catalog prices both models per 1M tokens, and the model that answers:
 
 ```
-[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]
+[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]. claude-sonnet-5 answers the rest of this turn; the next turn starts on openai:gpt-6.1-sol again.
 ```
 
-If pricing data is unavailable for either model, the notice says `[cost data unavailable]` instead of fabricating a number. The error class in the notice comes from what the error itself carries (an HTTP 401 or 429, a connection error code), so the switch and the resubmission start the moment the turn fails, without waiting on any model. A second line follows once the providers' declared setup has been read, naming the billing class the switch left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`; a side whose setup is not established says `Unknown`. When nothing is left to try, the transcript shows the error and `[Failover] Stopped:` with the reason and the next step, and the model selection reverts to what you had configured for the next turn.
+If pricing data is unavailable for either model, the line says `[cost data unavailable]` instead of fabricating a number. In the TUI a second line follows once the providers' declared setup has been read, naming the billing class the move left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`; a side whose setup is not established says `Unknown`. While the move is in force the header and footer name the model answering, marked `failover from <your model>`. The model selection itself never changes, so the next turn starts on what you chose.
 
 ### Chain visibility in the model picker
 

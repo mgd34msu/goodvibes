@@ -34,7 +34,9 @@ import {
   getDistributedRuntimePeer,
   startDistributedRuntime,
   persistDistributedRuntime,
+  applyDistributedPeerTokenRevocations,
 } from './distributed-runtime-store.js';
+import type { AuthorityRecordFile } from '../../cluster/authority-record-file.js';
 import {
   approveDistributedPairRequest,
   authenticateDistributedPeerToken,
@@ -105,11 +107,20 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
   automationBridge: DistributedAutomationBridge | null = null;
   eventPublisher: ((event: string, payload: unknown) => void) | null = null;
   loaded = false;
+  readonly authority: AuthorityRecordFile | null;
 
-  constructor(storeOrPath: PersistentStore<DistributedRuntimeSnapshotStore> | string) {
+  constructor(storeOrPath: PersistentStore<DistributedRuntimeSnapshotStore> | string, options: { readonly authority?: AuthorityRecordFile | undefined } = {}) {
     this.store = typeof storeOrPath === 'string'
       ? new PersistentStore<DistributedRuntimeSnapshotStore>(storeOrPath)
       : storeOrPath;
+    this.authority = options.authority ?? null;
+    // A peer token revoked on another machine of the group (or by another
+    // process of this home) is marked revoked here too, so the peer list and
+    // the work admitted for it say what the record says.
+    this.authority?.onChange((notice) => {
+      if (!this.loaded || ![...notice.keys, ...notice.cascade].some((key) => key.startsWith('peer-token:'))) return;
+      void applyDistributedPeerTokenRevocations(this).catch((error: unknown) => logger.warn('A peer token revocation from the authority record could not be applied here', { error: String(error) }));
+    });
   }
 
   attachRuntime(input: {

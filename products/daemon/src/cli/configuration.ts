@@ -9,6 +9,7 @@ import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership }
 import { readDaemonSetting } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { GOODVIBES_DAEMON_SETTINGS_ROOT, GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { DaemonCliFlags } from './types.js';
+import { daemonHomeEnvironment } from './daemon-home-environment.js';
 
 export function resolveDaemonCliOwnership(
   flags: Pick<DaemonCliFlags, 'daemonHome' | 'workingDir'>,
@@ -16,12 +17,7 @@ export function resolveDaemonCliOwnership(
   cwd = process.cwd(),
 ) {
   // Resolve flags without mutating the parent environment or process cwd.
-  const homes = resolveGoodVibesHomeOwnership({
-    ...env,
-    ...(env.GOODVIBES_HOME?.trim() ? { GOODVIBES_HOME: resolve(cwd, env.GOODVIBES_HOME.trim()) } : {}),
-    ...(flags.daemonHome !== undefined ? { GOODVIBES_DAEMON_HOME: resolve(cwd, flags.daemonHome) }
-      : env.GOODVIBES_DAEMON_HOME?.trim() ? { GOODVIBES_DAEMON_HOME: resolve(cwd, env.GOODVIBES_DAEMON_HOME.trim()) } : {}),
-  });
+  const homes = resolveGoodVibesHomeOwnership(daemonHomeEnvironment(flags, env, cwd));
   // Working dir: flag > env > the daemon's saved setting (a working-directory
   // change saved through POST /config, applied at this start) > cwd.
   const workingDirectoryOverride = flags.workingDir !== undefined ? '--working-dir'

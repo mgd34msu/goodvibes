@@ -235,7 +235,9 @@ export class ClusterElection {
       uptimeMs: this.uptimeMs(),
       consumersRunning: surfaces.some((surface) => surface.consuming),
       heldSurfaceCount: held.length,
-      signed: this.options.transport.groupKeyed === true || this.options.settings.secret.length > 0,
+      signed: this.options.transport.groupKeyed === true || this.options.settings.secret.state === 'set',
+      electionAuthentication: this.options.transport.groupKeyed === true ? 'group-key'
+        : this.options.settings.secret.state === 'set' ? 'secret' : this.options.settings.secret.state,
       surfaces,
       peers: [...this.peers.values()].map((peer) => ({
         nodeId: peer.nodeId,
@@ -365,10 +367,22 @@ export class ClusterElection {
    * otherwise split the election while the group looks healthy.
    */
   private get electionSecret(): string {
-    return this.options.transport.groupKeyed === true ? '' : this.options.settings.secret;
+    if (this.options.transport.groupKeyed === true) return '';
+    const secret = this.options.settings.secret;
+    return secret.state === 'set' ? secret.value : '';
+  }
+
+  /**
+   * `cluster.secret` names a stored secret that could not be read: outside a
+   * group this machine neither sends nor takes election traffic, rather than
+   * run unsigned when signing was asked for.
+   */
+  private get electionRefused(): boolean {
+    return this.options.transport.groupKeyed !== true && this.options.settings.secret.state === 'unavailable';
   }
 
   private receive(datagram: string | Readonly<Record<string, unknown>>): void {
+    if (this.electionRefused) return;
     // A group-keyed datagram was authenticated and clock-checked by the group layer.
     const { message, rejected } = typeof datagram === 'string'
       ? decodeMessage(datagram, this.electionSecret, this.options.transport.groupKeyed === true ? undefined : this.options.clock.now())
@@ -516,6 +530,7 @@ export class ClusterElection {
   }
 
   private async send(type: ClusterMessageType, surfaceId: string | null): Promise<void> {
+    if (this.electionRefused) return;
     this.seq += 1;
     const message: ClusterMessage = {
       v: CLUSTER_PROTOCOL_VERSION,

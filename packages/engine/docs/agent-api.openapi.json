@@ -49,7 +49,7 @@
    "post": {
     "operationId": "approvals.approve",
     "summary": "Approve Approval",
-    "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).",
+    "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
     "tags": [
      "approvals"
     ],
@@ -95,6 +95,23 @@
     },
     "x-scopes": [
      "write:approvals"
+    ],
+    "x-error-codes": [
+     {
+      "code": "INVALID_ARGUMENT",
+      "status": 400,
+      "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+     },
+     {
+      "code": "APPROVAL_NOT_FOUND",
+      "status": 404,
+      "meaning": "No approval has that id; nothing was answered."
+     },
+     {
+      "code": "OWNER_ONLY",
+      "status": 403,
+      "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -179,7 +196,7 @@
    "post": {
     "operationId": "approvals.cancel",
     "summary": "Cancel Approval",
-    "description": "Cancel a pending approval. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state. A surface that raised the ask through approvals.raise and is leaving passes `release: true`: the ask is cancelled only when no other surface that raised the same ask is still waiting, otherwise it stays pending for them and the response reads `applied: false`. Pass the `holdId` that approvals.raise returned so a retried release is harmless instead of giving up another surface's hold.",
+    "description": "Cancel a pending approval. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state. A surface that raised the ask through approvals.raise and is leaving passes `release: true`: the ask is cancelled only when no other surface that raised the same ask is still waiting, otherwise it stays pending for them and the response reads `applied: false`. Pass the `holdId` that approvals.raise returned so a retried release is harmless instead of giving up another surface's hold.\n\nReplay key: body field `holdId`. A surface releasing an ask it raised (`release: true`) passes the `holdId` approvals.raise returned: a repeat of that release gives up nothing more, even when another surface holds the same ask. A plain cancel of an ended approval is answered `applied: false`.",
     "tags": [
      "approvals"
     ],
@@ -225,6 +242,18 @@
     },
     "x-scopes": [
      "write:approvals"
+    ],
+    "x-replay-key": {
+     "in": "body",
+     "name": "holdId",
+     "behavior": "A surface releasing an ask it raised (`release: true`) passes the `holdId` approvals.raise returned: a repeat of that release gives up nothing more, even when another surface holds the same ask. A plain cancel of an ended approval is answered `applied: false`."
+    },
+    "x-error-codes": [
+     {
+      "code": "APPROVAL_NOT_FOUND",
+      "status": 404,
+      "meaning": "No approval has that id; nothing was answered."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -310,6 +339,13 @@
     "x-scopes": [
      "write:approvals"
     ],
+    "x-error-codes": [
+     {
+      "code": "APPROVAL_NOT_FOUND",
+      "status": 404,
+      "meaning": "No approval has that id; nothing was answered."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -335,7 +371,7 @@
    "post": {
     "operationId": "approvals.deny",
     "summary": "Deny Approval",
-    "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).",
+    "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
     "tags": [
      "approvals"
     ],
@@ -381,6 +417,23 @@
     },
     "x-scopes": [
      "write:approvals"
+    ],
+    "x-error-codes": [
+     {
+      "code": "INVALID_ARGUMENT",
+      "status": 400,
+      "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+     },
+     {
+      "code": "APPROVAL_NOT_FOUND",
+      "status": 404,
+      "meaning": "No approval has that id; nothing was answered."
+     },
+     {
+      "code": "OWNER_ONLY",
+      "status": 403,
+      "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+     }
     ],
     "requestBody": {
      "required": true,
@@ -995,7 +1048,7 @@
    "post": {
     "operationId": "contracts.reply",
     "summary": "Reply to a Contract Escalation",
-    "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract's failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.",
+    "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract's failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
     "tags": [
      "contracts"
     ],
@@ -1084,6 +1137,11 @@
     "x-scopes": [
      "write:fleet"
     ],
+    "x-replay-key": {
+     "in": "header",
+     "name": "Idempotency-Key",
+     "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+    },
     "x-error-codes": [
      {
       "code": "CONTRACT_NOT_FOUND",
@@ -2780,7 +2838,7 @@
    "get": {
     "operationId": "sessions.permissionMode.get",
     "summary": "Get Session Permission Mode",
-    "description": "Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
+    "description": "Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2814,6 +2872,19 @@
             "yolo",
             "plan"
            ]
+          },
+          "chosenMode": {
+           "type": "string",
+           "enum": [
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
+            "yolo",
+            "plan"
+           ]
+          },
+          "reason": {
+           "type": "string"
           }
          },
          "required": [
@@ -2848,7 +2919,7 @@
    "post": {
     "operationId": "sessions.permissionMode.set",
     "summary": "Set Session Permission Mode",
-    "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
+    "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
     "tags": [
      "sessions"
     ],
@@ -2868,38 +2939,97 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "sessionId": {
-           "type": "string"
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "sessionId": {
+             "type": "string"
+            },
+            "mode": {
+             "type": "string",
+             "enum": [
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
+              "yolo",
+              "plan"
+             ]
+            },
+            "previousMode": {
+             "type": "string",
+             "enum": [
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
+              "yolo",
+              "plan"
+             ]
+            }
+           },
+           "required": [
+            "sessionId",
+            "mode",
+            "previousMode"
+           ],
+           "additionalProperties": false
           },
-          "mode": {
-           "type": "string",
-           "enum": [
-            "ask-me",
-            "jev-decides",
-            "just-vibes",
-            "yolo",
-            "plan"
-           ]
-          },
-          "previousMode": {
-           "type": "string",
-           "enum": [
-            "ask-me",
-            "jev-decides",
-            "just-vibes",
-            "yolo",
-            "plan"
-           ]
+          {
+           "type": "object",
+           "properties": {
+            "success": {
+             "type": "boolean",
+             "const": false
+            },
+            "code": {
+             "type": "string",
+             "const": "OWNER_APPROVAL_PENDING"
+            },
+            "approvalId": {
+             "type": "string"
+            },
+            "key": {
+             "type": "string"
+            },
+            "keys": {
+             "type": "array",
+             "items": {
+              "type": "string"
+             }
+            },
+            "reasons": {
+             "type": "array",
+             "items": {
+              "type": "string"
+             }
+            },
+            "sessionId": {
+             "type": "string"
+            },
+            "mode": {
+             "type": "string"
+            },
+            "requestedMode": {
+             "type": "string"
+            },
+            "state": {
+             "type": "string"
+            },
+            "next": {
+             "type": "array",
+             "items": {
+              "type": "string"
+             }
+            }
+           },
+           "required": [
+            "code",
+            "approvalId",
+            "state"
+           ],
+           "additionalProperties": true
           }
-         },
-         "required": [
-          "sessionId",
-          "mode",
-          "previousMode"
-         ],
-         "additionalProperties": false
+         ]
         }
        }
       }
@@ -2926,6 +3056,11 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-replay-key": {
+     "in": "header",
+     "name": "Idempotency-Key",
+     "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+    },
     "requestBody": {
      "required": true,
      "content": {
@@ -3794,6 +3929,13 @@
     "x-scopes": [
      "write:tasks"
     ],
+    "x-error-codes": [
+     {
+      "code": "TASK_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runtime task has that id."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -3819,7 +3961,7 @@
    "post": {
     "operationId": "tasks.create",
     "summary": "Create Task",
-    "description": "Submit a task to the daemon or a shared session.",
+    "description": "Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), or 409 with `mode` `rejected` and `acknowledged: false`. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing's `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
     "tags": [
      "tasks"
     ],
@@ -3897,6 +4039,11 @@
     "x-scopes": [
      "write:tasks"
     ],
+    "x-replay-key": {
+     "in": "header",
+     "name": "Idempotency-Key",
+     "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+    },
     "x-error-codes": [
      {
       "code": "SESSION_NOT_FOUND",
@@ -3912,6 +4059,31 @@
       "code": "SESSION_AGENT_BIND_FAILED",
       "status": 500,
       "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+     },
+     {
+      "code": "INVALID_ARGUMENT",
+      "status": 400,
+      "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+     },
+     {
+      "code": "INVALID_JSON",
+      "status": 400,
+      "meaning": "The body is not JSON; nothing was started."
+     },
+     {
+      "code": "MODEL_NOT_FOUND",
+      "status": 400,
+      "meaning": "No registered model answers to the model (or a fallback model) named; nothing was started. Name a model this daemon holds."
+     },
+     {
+      "code": "MODEL_AMBIGUOUS",
+      "status": 400,
+      "meaning": "The bare model id is served by several providers; nothing was started. Name it provider-qualified, as the message lists."
+     },
+     {
+      "code": "CAPACITY_EXCEEDED",
+      "status": 429,
+      "meaning": "The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds."
      }
     ],
     "requestBody": {
@@ -4008,7 +4180,7 @@
    "get": {
     "operationId": "tasks.get",
     "summary": "Get Runtime Task",
-    "description": "Return a single runtime task record.",
+    "description": "Return a single runtime task record, as `{ task }`.",
     "tags": [
      "tasks"
     ],
@@ -4060,6 +4232,13 @@
     },
     "x-scopes": [
      "read:transcripts"
+    ],
+    "x-error-codes": [
+     {
+      "code": "TASK_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runtime task has that id."
+     }
     ]
    }
   },
@@ -4166,7 +4345,7 @@
    "post": {
     "operationId": "tasks.retry",
     "summary": "Retry Runtime Task",
-    "description": "Retry a runtime task through the task action endpoint.",
+    "description": "Retry a failed or cancelled agent task: a new agent runs the same task on the model, provider, tools, routing (fallback models, provider selection and failure policy, reasoning effort), execution limits and contract settings the task was started with, in the session that started it. The task keeps its id and its `owner` becomes the new agent, returned as `agentId`. When the record of the agent that ran it is no longer held, nothing is started (409 TASK_SETTINGS_UNAVAILABLE).\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
     "tags": [
      "tasks"
     ],
@@ -4213,6 +4392,43 @@
     "x-scopes": [
      "write:tasks"
     ],
+    "x-replay-key": {
+     "in": "header",
+     "name": "Idempotency-Key",
+     "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+    },
+    "x-error-codes": [
+     {
+      "code": "TASK_NOT_FOUND",
+      "status": 404,
+      "meaning": "No runtime task has that id."
+     },
+     {
+      "code": "TASK_NOT_RETRYABLE",
+      "status": 400,
+      "meaning": "Only a failed or cancelled agent task can be retried; nothing was started."
+     },
+     {
+      "code": "TASK_SETTINGS_UNAVAILABLE",
+      "status": 409,
+      "meaning": "The record of the agent that ran the task is no longer held, so the model, tools and routing it ran with are unknown; nothing was started. Create the task again."
+     },
+     {
+      "code": "MODEL_NOT_FOUND",
+      "status": 400,
+      "meaning": "No registered model answers to the model (or a fallback model) named; nothing was started. Name a model this daemon holds."
+     },
+     {
+      "code": "MODEL_AMBIGUOUS",
+      "status": 400,
+      "meaning": "The bare model id is served by several providers; nothing was started. Name it provider-qualified, as the message lists."
+     },
+     {
+      "code": "CAPACITY_EXCEEDED",
+      "status": 429,
+      "meaning": "The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds."
+     }
+    ],
     "requestBody": {
      "required": true,
      "content": {
@@ -4238,7 +4454,7 @@
    "get": {
     "operationId": "tasks.status",
     "summary": "Get Task Status",
-    "description": "Return lightweight runtime task status by agent id.",
+    "description": "Return lightweight runtime task status by agent id. `status` is pending, running, completed, failed or cancelled.",
     "tags": [
      "tasks"
     ],
@@ -4346,6 +4562,13 @@
     },
     "x-scopes": [
      "read:transcripts"
+    ],
+    "x-error-codes": [
+     {
+      "code": "AGENT_NOT_FOUND",
+      "status": 404,
+      "meaning": "No agent with that id is held."
+     }
     ]
    }
   },
@@ -4381,6 +4604,7 @@
         "sessions.hosted.attach",
         "sessions.hosted.create",
         "sessions.hosted.detach",
+        "sessions.hosted.history",
         "sessions.hosted.kill",
         "sessions.hosted.list",
         "sessions.hosted.workspaces",
@@ -4445,6 +4669,7 @@
      "sessions.hosted.attach",
      "sessions.hosted.create",
      "sessions.hosted.detach",
+     "sessions.hosted.history",
      "sessions.hosted.kill",
      "sessions.hosted.list",
      "sessions.hosted.workspaces",
@@ -4479,7 +4704,7 @@
     }
    },
    "BadRequest": {
-    "description": "The request was malformed or failed validation; nothing was changed. Codes declared: INVALID_ARGUMENT, INVALID_MESSAGE_ID, INVALID_KIND.",
+    "description": "The request was malformed or failed validation; nothing was changed. Codes declared: INVALID_ARGUMENT, INVALID_MESSAGE_ID, MODEL_NOT_FOUND, MODEL_AMBIGUOUS, MODEL_NOT_SELECTABLE, INVALID_KIND, INVALID_JSON, TASK_NOT_RETRYABLE.",
     "content": {
      "application/json": {
       "schema": {
@@ -4519,7 +4744,7 @@
     }
    },
    "Conflict": {
-    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_ENDED, CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
+    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_ENDED, CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, HOSTED_SESSION_UNAVAILABLE, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE, TASK_SETTINGS_UNAVAILABLE.",
     "content": {
      "application/json": {
       "schema": {
@@ -4560,10 +4785,13 @@
       "description": "A stable code. Known values are listed in `x-known-codes`; treat any other as opaque.",
       "x-known-codes": [
        "AGENT_FAILED",
+       "AGENT_NOT_FOUND",
        "AGENT_TIMEOUT",
+       "APPROVAL_NOT_FOUND",
        "AUTH_REQUIRED",
        "CANCELLED",
        "CANCEL_NOT_ALLOWED",
+       "CAPACITY_EXCEEDED",
        "CONFLICT",
        "CONTRACT_ENDED",
        "CONTRACT_MISMATCH",
@@ -4575,20 +4803,29 @@
        "ENGINE_CONTRACT_ERROR",
        "ENGINE_HTTP_STATUS_ERROR",
        "ESCALATION_NOT_OPEN",
+       "HOSTED_SESSION_LIMIT_REACHED",
+       "HOSTED_SESSION_NOT_OWNED",
        "HOSTED_SESSION_STILL_RUNNING",
+       "HOSTED_SESSION_UNAVAILABLE",
+       "HOSTED_SURFACE_FORBIDDEN",
        "IDEMPOTENCY_KEY_REUSED",
        "INPUT_NOT_CLAIMABLE",
        "INPUT_NOT_DELIVERABLE",
        "INTERNAL_ERROR",
        "INVALID_ARGUMENT",
+       "INVALID_JSON",
        "INVALID_KIND",
        "INVALID_MESSAGE_ID",
        "METHOD_NOT_FOUND",
        "MISSING_SCOPE",
+       "MODEL_AMBIGUOUS",
+       "MODEL_NOT_FOUND",
+       "MODEL_NOT_SELECTABLE",
        "NETWORK_UNREACHABLE",
        "NOT_FOUND",
        "NOT_HOSTING",
        "NOT_INVOKABLE",
+       "OWNER_ONLY",
        "PAYMENT_REQUIRED",
        "PERMISSION_DENIED",
        "PROTOCOL_ERROR",
@@ -4600,6 +4837,9 @@
        "SESSION_NOT_FOUND",
        "SESSION_NOT_LIVE",
        "SESSION_NOT_OWNED",
+       "TASK_NOT_FOUND",
+       "TASK_NOT_RETRYABLE",
+       "TASK_SETTINGS_UNAVAILABLE",
        "TIMEOUT",
        "TOKEN_EXPIRED",
        "TOOL_EXEC_FAILED",
@@ -10036,6 +10276,9 @@
    "domains": [
     "workspace"
    ]
+  },
+  {
+   "id": "control.own_session_activity"
   },
   {
    "id": "control.approval_update",

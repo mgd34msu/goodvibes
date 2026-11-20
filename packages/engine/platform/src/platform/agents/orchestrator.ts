@@ -53,6 +53,7 @@ import {
 import { findModelDefinition, findModelDefinitionForProvider } from '../providers/registry-models.js';
 import { CATALOG_PROVIDER_NAME_ALIASES, sameProviderCatalog } from '../providers/provider-aliases.js';
 import { resolveModelReference } from '../providers/model-id-resolution.js';
+import { readFallbackOrder } from '../providers/failover.js';
 import { runAgentTask, type AgentOrchestratorRunContext } from './orchestrator-runner.js';
 export { summarizeToolArgs } from './orchestrator-utils.js';
 
@@ -818,37 +819,16 @@ export class AgentOrchestrator {
     throw new Error(`Model '${requestedModelId}' is not in registry.`);
   }
 
-  private resolveFallbackModelRoutes(
-    providerRegistry: Pick<ProviderRegistry, 'listModels' | 'getForModel'>,
+  private resolveFallbackOrder(
+    providerRegistry: Pick<ProviderRegistry, 'listModels'>,
     record: AgentRecord,
     currentModel: ActiveModelRef,
-    primaryRequestedModelId: string,
-  ): Array<{ provider: LLMProvider; modelId: string; requestedModelId: string }> {
+  ): readonly string[] {
     const routing = this.resolveProviderRouting(record, currentModel, providerRegistry.listModels());
-    if (routing.providerFailurePolicy !== 'ordered-fallbacks' || routing.fallbackModels.length === 0) {
-      return [];
-    }
-    const seen = new Set([primaryRequestedModelId]);
-    const routes: Array<{ provider: LLMProvider; modelId: string; requestedModelId: string }> = [];
-    const modelRegistry = providerRegistry.listModels();
-    for (const rawFallback of routing.fallbackModels) {
-      // routing.fallbackModels entries are already resolved/qualified by resolveProviderRouting().
-      const requestedModelId = this.normalizeRequestedModelId(rawFallback);
-      if (!requestedModelId || seen.has(requestedModelId)) continue;
-      seen.add(requestedModelId);
-      const fallbackDef = findModelDefinition(requestedModelId, modelRegistry);
-      if (!fallbackDef) {
-        throw new Error(`Agent fallback model '${requestedModelId}' is not in registry.`);
-      }
-      const fallbackProvider = routing.providerOverride && sameProviderCatalog(fallbackDef.provider, routing.providerOverride)
-        ? routing.providerOverride : fallbackDef.provider;
-      routes.push({
-        provider: providerRegistry.getForModel(requestedModelId, fallbackProvider),
-        modelId: this.resolveChatModelId(providerRegistry, requestedModelId, fallbackProvider),
-        requestedModelId,
-      });
-    }
-    return routes;
+    if (routing.providerFailurePolicy === 'ordered-fallbacks') return routing.fallbackModels;
+    // `fail` set on purpose stops at the first provider failure; left unset, the person's order applies.
+    if (record.routing?.providerFailurePolicy === 'fail') return [];
+    return readFallbackOrder(this.toolDeps?.configManager?.get('provider.fallbackModels'));
   }
 
   /**
@@ -1057,8 +1037,8 @@ export class AgentOrchestrator {
           this.buildScopedRegistry(allowedNames, fullRegistry, captureAuthority),
         resolveProviderForRecord: (providerRegistry, record, currentModel) =>
           this.resolveProviderForRecord(providerRegistry, record, currentModel),
-        resolveFallbackModelRoutes: (providerRegistry, record, currentModel, primaryRequestedModelId) =>
-          this.resolveFallbackModelRoutes(providerRegistry, record, currentModel, primaryRequestedModelId),
+        resolveFallbackOrder: (providerRegistry, record, currentModel) =>
+          this.resolveFallbackOrder(providerRegistry, record, currentModel),
       };
     } catch (error) {
       try { if (beforeRunSettlement) await beforeRunSettlement(); else disposeInputs(); }

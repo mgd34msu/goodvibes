@@ -1,6 +1,7 @@
 /**
- * routes/relay.ts, the handlers behind `relay.reachability.get` and
- * `relay.pairing.mint`.
+ * routes/relay.ts, the handlers behind `relay.reachability.get`,
+ * `relay.pairing.mint` and the per-device relay codes (`relay.codes.list`,
+ * `relay.codes.revoke`).
  *
  * Both read the SAME controller the facade's `getRelayReachability()` hands
  * back, so an in-process surface and a client over the wire cannot disagree
@@ -10,6 +11,9 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import type { RelayCodeStore } from '../../relay/relay-codes.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
+import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The controller surface these verbs need, declared rather than imported whole. */
 export interface RelayReachabilityService {
@@ -18,7 +22,10 @@ export interface RelayReachabilityService {
   readonly rendezvousId?: string | null | undefined;
   /** The relay's last refusal of the registration, with what is true and what to do. */
   readonly lastRefusal?: RelayRefusalReading | null | undefined;
-  mintPairing(): Promise<unknown>;
+  /** A pairing payload carrying `code`, or null when there is no live registration. */
+  mintPairing(code: string): Promise<unknown>;
+  /** End every relay connection that presented a code `revoked` answers true for. */
+  closeConnectionsPresenting?(revoked: (code: string) => boolean, reason: string): Promise<number>;
 }
 
 /** A relay refusal as the verbs report it. */
@@ -60,27 +67,70 @@ export function createRelayReachabilityHandler(accessor: RelayReachabilityAccess
   };
 }
 
-export function createRelayPairingMintHandler(accessor: RelayReachabilityAccessor): GatewayMethodHandler {
-  return async () => {
+/** The relay codes the verbs issue, list and revoke (relay/relay-codes.ts). */
+export type RelayCodes = Pick<RelayCodeStore, 'mint' | 'list' | 'revoke' | 'holds'>;
+
+function optionalName(params: Record<string, unknown>): string | undefined {
+  const raw = params.name;
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') throw new GatewayVerbError('name must be a string', 'INVALID_ARGUMENT', 400);
+  return raw;
+}
+
+export function createRelayPairingMintHandler(accessor: RelayReachabilityAccessor, codes: RelayCodes): GatewayMethodHandler {
+  return async (invocation) => {
     const service = accessor();
+    const name = optionalName(readInvocationParams(invocation));
     // Null rather than a refusal, and the status alongside it: "there is
     // nothing to pair against yet" is an answer a caller renders, and the
     // status is what tells them whether to wait or to turn the relay on.
-    const pairing = service ? (await service.mintPairing()) ?? null : null;
-    return { pairing, status: statusOf(service) };
+    if (!service) return { pairing: null, status: statusOf(service) };
+    // Each pairing carries a relay code of its own, so one device's relay
+    // access can be revoked without touching any other's.
+    // A paired device asking for its own relay code: revoking that device revokes the code with it.
+    const principal = invocation.context.principalId ?? '';
+    const deviceTokenId = principal.startsWith('pairing:') ? principal.slice('pairing:'.length) : undefined;
+    let minted: ReturnType<RelayCodes['mint']>;
+    try { minted = codes.mint(name, deviceTokenId); }
+    catch (error) {
+      const status = (error as { status?: unknown }).status;
+      if (status === 409) throw new GatewayVerbError((error as Error).message, 'RELAY_CODE_LIMIT', 409);
+      throw error;
+    }
+    const pairing = (await service.mintPairing(minted.code)) ?? null;
+    // No live registration to pair against: the code is withdrawn, so no unused code is left listed.
+    if (pairing === null) codes.revoke(minted.id);
+    return { pairing, status: statusOf(service), ...(pairing !== null ? { codeId: minted.id, codeName: minted.name } : {}) };
+  };
+}
+
+export function createRelayCodesListHandler(codes: RelayCodes): GatewayMethodHandler {
+  return () => ({ codes: codes.list() });
+}
+
+export function createRelayCodeRevokeHandler(codes: RelayCodes, accessor?: RelayReachabilityAccessor): GatewayMethodHandler {
+  return async (invocation) => {
+    const id = requireStringValue(readInvocationParams(invocation).id, 'id');
+    if (!codes.revoke(id)) throw new GatewayVerbError('Unknown relay code', 'RELAY_CODE_NOT_FOUND', 404);
+    // Every connection the code opened ends now: its streams get their close, its requests stop.
+    const closedConnections = await accessor?.()?.closeConnectionsPresenting?.((code) => !codes.holds(code), 'relay-code-revoked') ?? 0;
+    return { id, revoked: true, closedConnections };
   };
 }
 
 /** Every verb this module owns. */
-export const RELAY_METHOD_IDS: readonly string[] = ['relay.reachability.get', 'relay.pairing.mint'];
+export const RELAY_METHOD_IDS: readonly string[] = ['relay.reachability.get', 'relay.pairing.mint', 'relay.codes.list', 'relay.codes.revoke'];
 
 export function registerRelayGatewayMethods(
   catalog: GatewayMethodCatalog,
   accessor: RelayReachabilityAccessor,
+  codes: RelayCodes,
 ): void {
   const handlers: Readonly<Record<string, GatewayMethodHandler>> = {
     'relay.reachability.get': createRelayReachabilityHandler(accessor),
-    'relay.pairing.mint': createRelayPairingMintHandler(accessor),
+    'relay.pairing.mint': createRelayPairingMintHandler(accessor, codes),
+    'relay.codes.list': createRelayCodesListHandler(codes),
+    'relay.codes.revoke': createRelayCodeRevokeHandler(codes, accessor),
   };
   for (const id of RELAY_METHOD_IDS) {
     const descriptor = catalog.get(id);

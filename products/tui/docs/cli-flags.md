@@ -323,7 +323,7 @@ goodvibes auth add-user alice --password-stdin --role admin
 goodvibes auth rotate-password alice --password-stdin
 ```
 
-`auth` runs in its own short-lived process and writes the user store. A running daemon or TUI re-reads the user file at its next sign-in or session check, so a deleted user or rotated password takes effect there within a few seconds and ends that user's sessions, with no restart; a write the host makes meanwhile keeps the change instead of undoing it. Sessions live in memory in the running host: `auth sessions` lists only this process's (normally none), and `auth revoke-session` / `auth revoke-sessions` cannot end a running host's other sessions. Restart the host to end them all.
+`auth` runs in its own short-lived process and writes the user store. A running daemon or TUI re-reads the user file at its next sign-in or session check, so a deleted user or rotated password takes effect there within a few seconds and ends that user's sessions, with no restart; a write the host makes meanwhile keeps the change instead of undoing it. Sessions live in memory in the running daemon: `auth sessions`, `auth revoke-session` and `auth revoke-sessions` ask the daemon on this machine (its loopback address, this machine's operator token) and act on its sessions at once.
 
 ## Headless `run`
 

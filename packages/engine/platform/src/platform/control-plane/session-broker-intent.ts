@@ -93,6 +93,8 @@ export interface HandleSharedSessionIntentDeps {
    * the failure mode of gating is an answer instead of a contract.
    */
   readonly conversationGateConfig?: ConversationGateConfigReader | undefined;
+  /** Whether a channel sender is someone the channel admits who is not its owner (their message never directs a running agent). */
+  readonly senderIsGuest?: ((surfaceKind: string, userId: string | undefined) => boolean) | undefined;
 }
 
 /**
@@ -301,12 +303,14 @@ export async function handleSharedSessionIntent(
       session = bound ?? undefined;
     }
   }
-  // A steer or follow-up names the session it is about. Minting a new session
-  // for an id nobody holds would answer a typo or a stale id with a fresh empty
-  // conversation, and with spawn fallback start an agent in it. A route binding
-  // is different: it is the thing that may create its own session.
-  if (!session && !binding && input.sessionId && intent !== 'submit') {
-    throw Object.assign(new Error(`Unknown shared session ${JSON.stringify(input.sessionId)}. Nothing was recorded; list the sessions and send the ${intent} to one that exists.`), { code: 'SESSION_NOT_FOUND', status: 404 });
+  // A message, task, steer or follow-up that names a session is about that
+  // session. Minting a new one for an id nobody holds would answer a typo or a
+  // stale id with a fresh empty conversation and start paid work in it, so the
+  // id is refused and nothing is recorded or started. A new session is asked
+  // for by naming none (or with sessions.create). A route binding is different:
+  // it is the thing that may create its own session.
+  if (!session && !binding && input.sessionId) {
+    throw Object.assign(new Error(`Unknown shared session ${JSON.stringify(input.sessionId)}. Nothing was recorded or started; list the sessions and send to one that exists, or leave sessionId out to start a new session.`), { code: 'SESSION_NOT_FOUND', status: 404 });
   }
   if (!session) {
     const participant: SharedSessionParticipant = {
@@ -432,7 +436,9 @@ export async function handleSharedSessionIntent(
     }
     // Only the handover is withheld. Every other decision in this block,
     // notably the steer rejection below, keeps its exact previous behavior.
-    const sent = handover.startsContract
+    // A guest's message never directs a running agent, whoever started it.
+    const fromGuest = () => input.surfaceKind !== undefined && deps.senderIsGuest?.(input.surfaceKind, input.userId) === true;
+    const sent = handover.startsContract && !fromGuest()
       && deps.messageSender.send('orchestrator', activeAgentId, input.body, { kind: 'directive' });
     if (sent) {
       const delivered = moveSharedSessionInputOrKeep(deps.sessionInputStore(), updatedSession.id, queuedInput.id, 'delivered',

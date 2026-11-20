@@ -11,10 +11,9 @@
  *   neither:  `<origin>/`
  *
  * The origin is the daemon's own reachable address when it serves the web app
- * (`controlPlane.webui.serve`), otherwise the web app's address: a user-set
- * `web.publicBaseUrl`, or the declared web endpoint (`web.host`/`web.port`)
- * while `web.enabled` says a web app is served there. With none of the three
- * there is no web app to link to, and no link is built.
+ * (`controlPlane.webui.serve`), otherwise a user-set `web.publicBaseUrl`
+ * naming where the web app runs. With neither there is no web app to link to,
+ * and no link is built.
  */
 import type { ConfigManager } from '../config/manager.js';
 import { resolvePairingWebOrigin } from '../pairing/web-origin.js';
@@ -56,10 +55,9 @@ export function webAppLink(
     const base = resolveReachableBaseUrl(config, 'off-host');
     return base ? `${base.replace(/\/+$/, '')}${path}` : undefined;
   }
+  // Not served by this daemon: a web app is known only at a user-set public URL.
   const resolved = resolvePairingWebOrigin(config);
-  // Not served by this daemon: a web app is known only at a user-set public
-  // URL, or at the declared web endpoint while web.enabled says one runs there.
-  if (!resolved.fromPublicBaseUrl && config.get('web.enabled') !== true) return undefined;
+  if (resolved === null) return undefined;
   const origin = resolved.origin.replace(/\/+$/, '');
   if (offHost) {
     let host: string;

@@ -15,6 +15,9 @@ export const builtinGatewayNativeHostedTurnMethodDescriptors: readonly GatewayMe
   access: 'admin', scopes: [...NATIVE_HOSTED_TURN_SCOPES],
   // Starting a turn runs metered model work.
   ...(operation === 'start' || operation === 'startAgent' ? { effect: 'outward' as const } : {}),
+  ...(operation === 'start' || operation === 'startAgent'
+    ? { replay: { in: 'body' as const, name: 'inputId', behavior: 'An admitted input (inputId with its sourceRevision) is delivered at most once: a repeat joins or reports the first dispatch instead of starting a second turn. An ambiguous dispatch is never replayed; read it with workLedger.turn.status.' } }
+    : { repeat: 'safe' as const }),
   http: { method: 'POST', path: `/api/work-ledger/turn/${operation}` },
   inputSchema: json(operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema), outputSchema: json(nativeHostedTurnLookupSchema),
 })), methodDescriptor({

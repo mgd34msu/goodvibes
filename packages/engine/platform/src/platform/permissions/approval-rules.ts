@@ -334,6 +334,10 @@ export function matchDurableRules(
         // checkDetailed before this matcher runs.
         matched = false;
         break;
+      case 'never-run':
+        // The gate matches never-run rules itself, before this matcher and in every mode.
+        matched = false;
+        break;
     }
     if (matched) {
       if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
@@ -419,6 +423,10 @@ async function matchRuleList(
         // Mode-constraint rules are mode-layer policy, not approval-derived,
         // no remember tier produces one, and mode handling already lives in
         // checkDetailed before this matcher runs.
+        matched = false;
+        break;
+      case 'never-run':
+        // The gate matches never-run rules itself, before this matcher and in every mode.
         matched = false;
         break;
     }

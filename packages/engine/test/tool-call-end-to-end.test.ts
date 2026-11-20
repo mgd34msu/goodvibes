@@ -23,6 +23,7 @@ import { composeRuntimeServices } from '../platform/src/platform/runtime/service
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.js';
+import { ownerPermissionRulesPath } from '../platform/src/platform/permissions/user-rule-store.js';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import { registerAllTools } from '../platform/src/platform/tools/index.js';
@@ -61,7 +62,7 @@ async function composeApp() {
   const configManager = new ConfigManager({ homeDir: homeDirectory, workingDir, surfaceRoot: SURFACE });
   // A rule the owner saved earlier ("always allow this command"), where the rule store reads it.
   const rule = buildDurableRuleForDecision({ toolName: 'exec', args: { commands: [{ cmd: 'echo remembered' }] }, tier: 'command-class', effect: 'allow', now: Date.now() })!;
-  const rulesPath = join(configManager.getControlPlaneConfigDir(), 'permission-rules.json');
+  const rulesPath = ownerPermissionRulesPath(configManager);
   mkdirSync(dirname(rulesPath), { recursive: true });
   writeFileSync(rulesPath, JSON.stringify({ version: 1, rules: [{ rule, createdAt: Date.now(), tier: 'command-class', tool: 'exec' }], projectRules: [] }));
   await prepareConfiguredProjectContext(configManager, workingDir, undefined, { activate: true });

@@ -86,8 +86,8 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   /** Arm the one-key jump to a spawned CI fix-session (the surface attaches on the jump key; the user never retypes an id). */
   armFixSessionAttach?: (fixSessionId: string) => void;
 
-  /** Revoke only an async failed-turn recovery before replacing session identity/history. */
-  cancelPendingRecovery?: () => boolean;
+  /** Revoke the work that belongs to the session being replaced (pending command readings) before its identity or history changes. */
+  cancelSessionWork?: () => void;
   /** Pending command readings (schedule phrase, gist upload, teamwork listing); revoked by Escape, a new submission, session changes and shutdown. */
   commandReadings?: import('./commands/command-readings.ts').CommandReadings;
   /** The running /test, stopped by Esc and Ctrl-C (the cancel path) and killed when the terminal closes. */

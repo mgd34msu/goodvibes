@@ -128,7 +128,7 @@ export const PERMISSION_PROMPT_DECISION_SCHEMA = objectSchema({
 export const PERMISSION_USER_RULE_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   effect: enumSchema(['allow', 'deny', 'ask']),
-  tier: enumSchema(['exact', 'command-class', 'path', 'tool']),
+  tier: enumSchema(['exact', 'command-class', 'path', 'tool', 'never-run']),
   tool: STRING_SCHEMA,
   description: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,

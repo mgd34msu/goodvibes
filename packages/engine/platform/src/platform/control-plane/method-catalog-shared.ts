@@ -16,6 +16,8 @@ export type GatewayEventTransport = 'sse' | 'ws' | 'internal';
  * asks for a send admission on every `outward` method.
  */
 export type GatewayMethodEffect = 'read' | 'write' | 'outward';
+/** What a repeat of a method does; see `GatewayMethodDescriptor.repeat`. */
+export type GatewayMethodRepeat = 'safe' | 'keyed' | 'unsafe';
 
 export interface GatewayHttpBinding {
   readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -62,6 +64,15 @@ export interface GatewayMethodDescriptor {
   readonly recipients?: readonly string[] | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */
   readonly replay?: ContractReplayKey | undefined;
+  /**
+   * What sending the same call twice does, read from its handler: `safe`, the
+   * repeat changes nothing more (it sets what is already set, or finds the
+   * thing already gone); `keyed`, safe when the call carries its `replay` key;
+   * `unsafe`, the repeat acts again (a second record, a second message, a
+   * second run). `methodDescriptor` sets `keyed` for a method with `replay`
+   * and `safe` for a read; every other builtin states it.
+   */
+  readonly repeat?: GatewayMethodRepeat | undefined;
   /** Codes this method's route puts on an error body beyond the shared engine codes. */
   readonly errorCodes?: readonly ContractErrorCode[] | undefined;
   /**
@@ -125,6 +136,11 @@ export interface GatewayMethodInvocationContext {
    * behalf, and the calls it makes are judged by that.
    */
   readonly credentialKind?: CredentialKind | undefined;
+  /**
+   * Set only by the transport: the credential is a device the owner paired
+   * himself through his pairing flow, so it makes the owner's own acts.
+   */
+  readonly ownerDevice?: boolean | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
@@ -223,6 +239,7 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   recipients: arraySchema(STRING_SCHEMA),
   invokable: BOOLEAN_SCHEMA,
   replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
+  repeat: stringEnumSchema(['safe', 'keyed', 'unsafe']),
   errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),
   metadata: JSON_OBJECT_SCHEMA,
 }, ['id', 'title', 'description', 'category', 'source', 'access', 'transport', 'scopes']);
@@ -428,14 +445,33 @@ export function methodDescriptor(input: Omit<GatewayMethodDescriptor, 'source' |
   const access = input.access ?? 'authenticated';
   const dangerous = input.dangerous
     ?? (access === 'admin' && input.scopes.some((scope) => ACCESS_AND_SETTINGS_WRITE_SCOPES.has(scope)) ? true : undefined);
+  const effect = input.effect ?? defaultMethodEffect(input.scopes);
+  const repeat = methodRepeat(input.id, effect, input.repeat, input.replay);
   return {
     source: input.source ?? 'builtin',
     transport: input.transport ?? ['http', 'ws'],
     access,
     ...input,
     ...(dangerous === undefined ? {} : { dangerous }),
-    effect: input.effect ?? defaultMethodEffect(input.scopes),
+    effect,
+    repeat,
   };
+}
+
+/**
+ * A method's repeat declaration: `keyed` exactly when it has a retry key, and
+ * `safe` for a read. A write must state it, or the catalog does not load: a
+ * client deciding whether to send a lost call again has nothing else to go by.
+ */
+function methodRepeat(id: string, effect: GatewayMethodEffect, stated: GatewayMethodRepeat | undefined, replay: ContractReplayKey | undefined): GatewayMethodRepeat {
+  if (replay) {
+    if (stated !== undefined && stated !== 'keyed') throw new Error(`Gateway method ${id} has a retry key, so a repeat of it is keyed, not ${stated}.`);
+    return 'keyed';
+  }
+  if (stated === 'keyed') throw new Error(`Gateway method ${id} is declared keyed but names no retry key (replay).`);
+  if (stated !== undefined) return stated;
+  if (effect === 'read') return 'safe';
+  throw new Error(`Gateway method ${id} changes state but does not declare what a repeat does (repeat: safe or unsafe, or a replay key).`);
 }
 
 export function eventDescriptor(input: Omit<GatewayEventDescriptor, 'source'> & Partial<Pick<GatewayEventDescriptor, 'source'>>): GatewayEventDescriptor {

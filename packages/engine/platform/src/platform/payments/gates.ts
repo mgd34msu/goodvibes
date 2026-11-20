@@ -50,15 +50,29 @@ export interface GateInput {
    */
   readonly standingAuthorizationId?: string | undefined;
   /**
-   * This daemon may serve payments: it is not part of a cluster.
+   * This daemon may serve payments: it runs alone, or it holds the group's
+   * payments role (cluster/roles.ts), which the cluster election gives to
+   * exactly one machine at a time.
    *
-   * Required, never defaulted. Config replication carries the LIMITS to every
-   * opted-in node but not today's SPEND (cluster/config-replication-policy.ts),
-   * so a second node acting would start from a clean daily budget and could
-   * spend it a second time. Until the spend ledger itself replicates, payments
-   * run only on a single, unclustered daemon.
+   * Required, never defaulted: on a clustered install a wrong `true` is two
+   * machines spending at once.
    */
   readonly isPaymentsLeader: boolean;
+  /**
+   * The name of the machine that holds the payments role, when this one does
+   * not; null while the group is still electing one. Named in the refusal so
+   * the owner is referred there.
+   */
+  readonly paymentsHolder?: string | null | undefined;
+}
+
+/** The refusal a machine that does not run payments gives: it names the one that does. */
+export function paymentsElsewhereReason(holder: string | null | undefined): string {
+  return holder
+    ? `Refused: in this group of machines purchases run on one machine at a time, and that is ${holder}. `
+      + 'Ask there (its terminal app, web UI or channels); it buys with its own card, address and daily budget.'
+    : 'Refused: in this group of machines purchases run on one machine at a time, and the group is choosing it '
+      + 'right now. Try again in a few seconds; `goodvibes-daemon cluster status` on any machine shows which one holds payments.';
 }
 
 export interface GateRefusal {
@@ -92,13 +106,7 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
     };
   }
   if (!input.isPaymentsLeader) {
-    return {
-      code: 'disabled',
-      reason:
-        'Refused: purchasing is off on this machine because it is part of a cluster; payments run '
-        + 'only on a single, unclustered daemon today (a second machine would start from a clean '
-        + 'daily budget). Turn clustering off (cluster.enabled false) on the machine that should buy.',
-    };
+    return { code: 'disabled', reason: paymentsElsewhereReason(input.paymentsHolder) };
   }
   if (!input.hasUsableCard && input.cardWithheldByCvvPrompt === true) {
     return {

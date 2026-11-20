@@ -8,6 +8,7 @@
  * now. The scheduled runs ride the automation scheduler as a kind:'checkin' job.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -110,6 +111,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'checkin.config.set',
+    repeat: 'safe',
     title: 'Update Check-in Config',
     description: 'Update the proactive check-in configuration. Absent fields are left unchanged. Enabling syncs the kind:checkin automation job onto the scheduler; disabling stops it. The answer carries `schedule` (scheduled, not-needed, or failed with the reason), because the config is stored even when the scheduler could not install the job.',
     category: 'checkin',
@@ -131,6 +133,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'checkin.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Check-in Now',
     description: 'Trigger one check-in evaluation immediately (a manual run): assemble the briefing, judge whether to contact the user, deliver if so, and record a receipt.',

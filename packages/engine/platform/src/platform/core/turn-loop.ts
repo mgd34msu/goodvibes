@@ -8,6 +8,10 @@
  *
  * - a failed request is retried when its failure is retryable by its own
  *   facts (status, code, Retry-After), with the same waits for every caller;
+ * - a request that failed for good is offered to the caller's failover
+ *   (providers/failover.ts: the person's fallback order), which moves the
+ *   rest of the turn to another model and sends the request again, or stops
+ *   with the error;
  * - the completion check runs after a draft was shown, within a deadline, and
  *   sends back at most `maxRejectedDrafts` drafts; then the draft stands with
  *   a "not verified" note;
@@ -196,6 +200,13 @@ export interface TurnContext {
   onRetry?(attempt: number, delayMs: number, error: unknown, failure: FailureClassification): void;
   /** The retry wait itself; absent: a timer bound to the turn's signal. */
   waitBeforeRetry?(delayMs: number, signal: AbortSignal): Promise<void>;
+  /**
+   * Asked when a request failed for good (not retryable, or its retries
+   * spent): true when the turn moved to another model (createTurnFailover in
+   * providers/failover.ts), and the request is sent again to it with fresh
+   * retries. `shown`: text of the failed attempt already reached the sink.
+   */
+  failOver?(error: unknown, attempt: { readonly shown: boolean }): boolean | Promise<boolean>;
 }
 
 export interface TurnOutcome {
@@ -240,12 +251,22 @@ async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'at
       if (error instanceof TurnEnded) throw error;
       const failure = classifyFailure(error);
       const wait = delays[attempt];
-      if (!failure?.retryable || wait === undefined) throw error;
-      // Text already shown cannot be taken back; a second attempt would show the answer again after it.
-      if (shown) throw error;
-      if ((failure.retryAfterMs ?? 0) > MAX_RETRY_AFTER_MS) throw error;
-      // A spent account is reported under a rate limit by some providers; waiting never clears it.
-      if (failure.category === 'rate_limit' && await isBillingOrCreditError(error, 'core.turn-loop.rate-limit-retry')) throw error;
+      const retryable = failure?.retryable === true && wait !== undefined
+        // Text already shown cannot be taken back; a second attempt would show the answer again after it.
+        && !shown
+        && (failure.retryAfterMs ?? 0) <= MAX_RETRY_AFTER_MS
+        // A spent account is reported under a rate limit by some providers; waiting never clears it.
+        && !(failure.category === 'rate_limit' && await isBillingOrCreditError(error, 'core.turn-loop.rate-limit-retry'));
+      if (!retryable || failure === undefined || wait === undefined) {
+        if (ctx.signal.aborted) throw new TurnCancelled();
+        // The failure is final for this model: the caller's failover moves the turn on, or the error stands.
+        if (ctx.failOver && await ctx.failOver(error, { shown })) {
+          if (ctx.signal.aborted) throw new TurnCancelled();
+          attempt = -1;
+          continue;
+        }
+        throw error;
+      }
       const delayMs = Math.max(wait, failure.retryAfterMs ?? 0);
       ctx.onRetry?.(attempt + 1, delayMs, error, failure);
       try {

@@ -286,6 +286,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/codebase` | Build, inspect, and search the repo source-tree code index |
 | `/workstream` | Start work, or propose a plan, review and edit it, then approve and launch it; inspect, stop, retry a unit, raise the budget, or answer a running workstream |
 | `/checkpoint` | Create a manual workspace checkpoint for forensic retention |
+| `/checkpoints` | List workspace checkpoints, newest first; `/checkpoints restore <n\|id>` previews and restores the files of one |
 | `/editor` | Edit the current composer draft in your `$EDITOR`, then resume with the result |
 
 `/editor` (alias `/ed`) opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.

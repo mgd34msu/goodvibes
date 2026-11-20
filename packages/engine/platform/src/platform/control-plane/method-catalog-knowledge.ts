@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { EMPTY_OBJECT_SCHEMA, STRING_SCHEMA, BOOLEAN_SCHEMA, NUMBER_SCHEMA, arraySchema, objectSchema, bodyEnvelopeSchema, methodDescriptor, runtimeEventId } from './method-catalog-shared.js';
 import { withPathParams } from './method-catalog-path-params.js';
 import { builtinGatewayHomeGraphMethodDescriptors } from './method-catalog-homegraph.js';
@@ -113,6 +114,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.issue.review',
+    repeat: 'safe',
     title: 'Review Knowledge Issue',
     description: 'Record an LLM or user review decision for a knowledge issue and optionally apply semantic facts to the linked source or node.',
     category: 'knowledge',
@@ -169,6 +171,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.url',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest URL Into Knowledge',
     description: 'Fetch, snapshot, and compile a URL into the structured knowledge store.',
     category: 'knowledge',
@@ -189,6 +192,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.bookmarks',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Import Bookmark File',
     description: 'Parse a bookmark export file and ingest its URLs into the structured knowledge store.',
     category: 'knowledge',
@@ -205,6 +209,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.urls',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Import URL List',
     description: 'Parse a URL list file and ingest its entries into the structured knowledge store.',
     category: 'knowledge',
@@ -221,6 +226,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.connector',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest Connector Input',
     description: 'Resolve a knowledge connector against inline input, inline content, or file-backed content.',
     category: 'knowledge',
@@ -232,6 +238,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.artifact',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Ingest Artifact Into Knowledge',
     description: 'Snapshot an existing artifact, daemon-local path, remote URI, multipart file upload, or raw binary upload into the structured knowledge store and run structured extraction.',
     category: 'knowledge',
@@ -259,6 +266,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ingest.browserHistory',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Sync Browser History Into Knowledge',
     description: 'Read local browser history and bookmarks and index them as metadata-first structured knowledge.',
     category: 'knowledge',
@@ -296,6 +304,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.ask',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Ask Knowledge',
     description: 'Search, semantically synthesize, and return a source-backed answer from the structured knowledge/wiki store.',
@@ -396,6 +405,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.candidate.decide',
+    repeat: 'safe',
     title: 'Decide Consolidation Candidate',
     description: 'Accept, reject, or supersede a knowledge consolidation candidate.',
     category: 'knowledge',
@@ -491,6 +501,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.refinement.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Knowledge Refinement',
     description: 'Run source-backed semantic self-improvement for a space, source list, or specific gaps.',
@@ -511,6 +522,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.refinement.task.cancel',
+    repeat: 'safe',
     title: 'Cancel Knowledge Refinement Task',
     description: 'Mark an open semantic refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused with 409, and cancelling an already cancelled task returns it unchanged.',
     category: 'knowledge',
@@ -542,6 +554,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.schedule.save',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Save Knowledge Schedule',
     description: 'Create or update a managed schedule for a knowledge maintenance job.',
     category: 'knowledge',
@@ -560,6 +573,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.schedule.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Knowledge Schedule',
     description: 'Delete a managed knowledge schedule.',
@@ -572,6 +586,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.schedule.enable',
+    repeat: 'safe',
     title: 'Set Knowledge Schedule Enabled',
     description: 'Enable or disable a managed knowledge schedule.',
     category: 'knowledge',
@@ -586,6 +601,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.job.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Run Knowledge Job',
     description: 'Queue or run a structured knowledge maintenance job.',
@@ -599,6 +615,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.job-run.cancel',
+    repeat: 'safe',
     title: 'Cancel Knowledge Job Run',
     description: 'Stop a queued or running knowledge job run this daemon started: it is settled failed with the cancel reason. A finished run, or one another process owns, is refused with 409 and what to do instead.',
     category: 'knowledge',
@@ -611,6 +628,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.lint',
+    repeat: 'safe',
     title: 'Lint Structured Knowledge',
     description: 'Run deterministic knowledge lint checks and return the current issues.',
     category: 'knowledge',
@@ -622,6 +640,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.reindex',
+    repeat: 'safe',
     title: 'Reindex Structured Knowledge',
     description: 'Rebuild derived knowledge relations and sync reviewed memory into the structured knowledge store.',
     category: 'knowledge',
@@ -684,6 +703,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.projection.materialize',
+    repeat: 'unsafe',
     title: 'Materialize Knowledge Projection',
     description: 'Render and persist a markdown/wiki projection as a derived artifact.',
     category: 'knowledge',
@@ -705,6 +725,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'knowledge.graphql.execute',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Execute Knowledge GraphQL',
     description: 'Execute a GraphQL query or mutation against the dedicated knowledge domain endpoint.',
@@ -750,6 +771,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.decisions.record',
+    repeat: 'safe',
     title: 'Record Project Decision',
     description: 'Persist a meaningful project decision record for future TUI and agent context.',
     category: 'knowledge',
@@ -828,6 +850,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.create',
+    replay: { in: 'body', name: 'task.taskId', behavior: 'A create whose task names a `taskId` adds that task once: a repeat is refused because the task already exists, and nothing more is added. Without a taskId each call adds a task.' },
     title: 'Create Project Work Plan Task',
     description: 'Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon planning, or contract correlation.',
     category: 'knowledge',
@@ -844,6 +867,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.update',
+    repeat: 'safe',
     title: 'Update Project Work Plan Task',
     description: 'Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.',
     category: 'knowledge',
@@ -861,6 +885,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.status',
+    repeat: 'safe',
     title: 'Set Project Work Plan Task Status',
     description: 'Set a task\'s status and optional reason.',
     category: 'knowledge',
@@ -880,6 +905,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.tasks.reorder',
+    repeat: 'safe',
     title: 'Reorder Project Work Plan Tasks',
     description: 'Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.',
     category: 'knowledge',
@@ -896,6 +922,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.delete',
+    repeat: 'safe',
     title: 'Delete Project Work Plan Task',
     description: 'Delete a durable project-scoped work-plan task.',
     category: 'knowledge',
@@ -912,6 +939,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'projectPlanning.workPlan.clearCompleted',
+    repeat: 'safe',
     title: 'Clear Completed Project Work Plan Tasks',
     description: 'Remove completed project work-plan tasks. Defaults to clearing status done only.',
     category: 'knowledge',

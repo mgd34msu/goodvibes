@@ -41,6 +41,8 @@ export type { CheckoutOperationOwnership } from './checkout-ownership.js';
 export type { DayKey } from './day.js';
 
 export { BudgetLedger, RESERVATION_TTL_MS, MAX_RESERVATIONS } from './budget.js';
+export type { GroupSpendSource } from './budget.js';
+export { recordGroupSpend, GroupSpendUnavailableError } from './group-spend.js';
 export type {
   BudgetLimits,
   BudgetReservation,

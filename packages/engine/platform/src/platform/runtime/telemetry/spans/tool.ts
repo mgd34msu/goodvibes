@@ -2,8 +2,7 @@
  * Tool execution span helpers.
  *
  * Creates child spans under a turn span to track the full tool execution
- * pipeline: TOOL_RECEIVED → TOOL_VALIDATED → TOOL_PREHOOKED →
- * TOOL_PERMISSIONED → TOOL_EXECUTING → TOOL_SUCCEEDED | TOOL_FAILED | TOOL_CANCELLED
+ * pipeline: TOOL_RECEIVED → TOOL_PERMISSIONED → TOOL_EXECUTING → TOOL_SUCCEEDED | TOOL_FAILED | TOOL_CANCELLED
  */
 import type { Span, SpanAttributes } from '../types.js';
 import { SpanKind, SpanStatusCode } from '../types.js';
@@ -27,12 +26,8 @@ export interface ToolSpanContext {
 
 /** Phase transition events that can be recorded on a tool span. */
 export type ToolPhase =
-  | 'validated'
-  | 'prehooked'
   | 'permissioned'
-  | 'executing'
-  | 'mapped'
-  | 'posthooked';
+  | 'executing';
 
 /** Result context supplied when ending a tool span. */
 export interface ToolSpanEndContext {

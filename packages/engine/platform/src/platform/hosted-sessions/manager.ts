@@ -105,6 +105,11 @@ export interface HostedSessionEventPublisher {
    * over `listClients`, which also lists clients that disconnected recently.
    */
   isClientConnected?(clientId: string): boolean;
+  /**
+   * Told which sessions a principal owns, when the publisher is the gateway:
+   * a client holding `read:own-sessions` receives those sessions' frames only.
+   */
+  setSessionOwnership?(ownedBy: ((sessionId: string, principalId: string) => boolean) | null): void;
 }
 
 /** The live settings this engine reads. Read on every use, never cached. */
@@ -302,7 +307,9 @@ export class HostedSessionManager {
 
   /** Where lifecycle notices go. Wired by the composition that owns the gateway. */
   setEventPublisher(publisher: HostedSessionEventPublisher | null): void {
+    this.publisher?.setSessionOwnership?.(null);
     this.publisher = publisher;
+    publisher?.setSessionOwnership?.((sessionId, principalId) => this.isOwnedBy(sessionId, principalId));
   }
 
   /**
@@ -1074,24 +1081,38 @@ export class HostedSessionManager {
 
   private history(live: LiveSession): readonly HostedSessionHistoryMessage[] {
     const conversation = live.runtime?.conversation;
-    if (!conversation) return [];
-    return conversation.getMessageSnapshot().map((message): HostedSessionHistoryMessage => {
-      const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
-      // A mirror or resumed copy keeps the model's tool history: which calls an
-      // assistant turn made and which call each tool result answers.
-      if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
-        return { role: message.role, content,
-          toolCalls: message.toolCalls.map((call) => ({ id: call.id, name: call.name, arguments: call.arguments })) };
-      }
-      if (message.role === 'tool') return { role: message.role, content, callId: message.callId };
-      return { role: message.role, content };
-    });
+    if (conversation) return historyFromMessages(conversation.getMessageSnapshot());
+    // Restored from disk and not composed yet: its transcript is the payload it came back with.
+    return historyFromConversation(live.restoredConversation);
   }
 
   /** Read a hosted session's history without attaching. */
   historyOf(sessionId: string): readonly HostedSessionHistoryMessage[] {
     const live = this.sessions.get(sessionId);
     return live ? this.history(live) : [];
+  }
+
+  /**
+   * Whether `principalId` started or joined this session (its identified
+   * owners, which are saved with it and outlive its end and a restart).
+   */
+  isOwnedBy(sessionId: string, principalId: string | undefined): boolean {
+    if (principalId === undefined) return false;
+    return this.sessions.get(sessionId)?.attached.identifiedOwners().includes(principalId) === true;
+  }
+
+  /**
+   * A session's record and transcript, live or ended. An ended session's
+   * transcript is read from the file the store keeps until
+   * `hostedSessions.terminatedRetentionMs` retires it, so its reply stays
+   * readable after its last client left, its lease lapsed or the daemon
+   * restarted. One file read, only for an ended session.
+   */
+  async readHistory(sessionId: string): Promise<{ readonly session: HostedSessionRecord; readonly history: readonly HostedSessionHistoryMessage[] }> {
+    const live = this.requireKnown(sessionId);
+    const session = this.refreshEffective(live);
+    if (live.runtime || live.restoredConversation) return { session, history: this.history(live) };
+    return { session, history: historyFromConversation(await this.options.store.readConversation(sessionId)) };
   }
 
   /** Compose a restored session's loop on first use, replaying its transcript. */
@@ -1621,4 +1642,41 @@ function defaultTitle(input: CreateHostedSessionInput, workspaceRoot: string): s
   if (prompt) return prompt.length > 60 ? `${prompt.slice(0, 57)}...` : prompt;
   const leaf = workspaceRoot.replace(/\/+$/, '').split('/').pop();
   return leaf ? `Hosted session in ${leaf}` : 'Hosted session';
+}
+
+/** One message of a stored or live conversation as a client renders it; anything unreadable is left out. */
+function historyFromMessages(messages: readonly unknown[]): HostedSessionHistoryMessage[] {
+  const history: HostedSessionHistoryMessage[] = [];
+  for (const entry of messages) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const message = entry as { readonly role?: unknown; readonly content?: unknown; readonly toolCalls?: unknown; readonly callId?: unknown };
+    const role = message.role;
+    if (role !== 'user' && role !== 'assistant' && role !== 'system' && role !== 'tool') continue;
+    const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
+    // A mirror or resumed copy keeps the model's tool history: which calls an
+    // assistant turn made and which call each tool result answers.
+    if (role === 'assistant' && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
+      const toolCalls = message.toolCalls.flatMap((call: unknown) => {
+        if (typeof call !== 'object' || call === null) return [];
+        const { id, name, arguments: args } = call as { readonly id?: unknown; readonly name?: unknown; readonly arguments?: unknown };
+        if (typeof id !== 'string' || typeof name !== 'string') return [];
+        return [{ id, name, arguments: typeof args === 'object' && args !== null ? args as Readonly<Record<string, unknown>> : {} }];
+      });
+      history.push({ role, content, toolCalls });
+      continue;
+    }
+    if (role === 'tool' && typeof message.callId === 'string') {
+      history.push({ role, content, callId: message.callId });
+      continue;
+    }
+    history.push({ role, content });
+  }
+  return history;
+}
+
+/** The history held in a `ConversationManager.toJSON()` payload; an unknown shape has none. */
+function historyFromConversation(conversation: unknown): HostedSessionHistoryMessage[] {
+  if (typeof conversation !== 'object' || conversation === null) return [];
+  const messages = (conversation as { readonly messages?: unknown }).messages;
+  return Array.isArray(messages) ? historyFromMessages(messages) : [];
 }

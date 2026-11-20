@@ -19,9 +19,13 @@ import type { TriggerActionGrant } from './types.js';
 export interface TriggerActionExecutor {
   runAgentTurn(input: {
     readonly triggerId: string;
+    /** The trigger's label, for the delivered answer's title. */
+    readonly label?: string | undefined;
     readonly prompt: string;
     readonly sessionId?: string | undefined;
     readonly model?: string | undefined;
+    /** Where the turn's answer goes (a channel); absent: the owner inbox. */
+    readonly deliverTo?: string | undefined;
   }): Promise<string>;
   runGrant(input: {
     readonly triggerId: string;

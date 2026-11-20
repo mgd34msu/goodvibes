@@ -30,6 +30,7 @@
  * number, because that payload is what reaches a message channel.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -466,6 +467,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.propose',
+    repeat: 'safe',
     title: 'Propose An Important Date',
     description: 'Work out what would be written for a date heard in conversation, and return the one-line confirmation to put to the owner. WRITES NOTHING. When no kind was given, needsKind is true and the confirmation asks for it in the same breath, the kind is the owner\'s choice and is never inferred, because no rule that reads a label tells a birthday from a death anniversary. Any date already recorded for the same name that disagrees comes back in conflictsWith.',
     category: 'occasions',
@@ -476,6 +478,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.confirm',
+    repeat: 'unsafe',
     access: 'admin',
     title: 'Record A Confirmed Important Date',
     description: 'Write the confirmed occasion as one line in the owner profile, under Important dates, carrying its provenance. self:true marks the owner\'s own date (written as for me), so a remember-only one is never pushed at them. This is the ONE confirmation: nothing re-confirms at nudge time, because for an annual date a silent write means the mistake surfaces up to eleven months later. Refused without a kind rather than defaulting one. Goes through the owner-profile write gate, so authority, surface and a verbatim quote of what the owner said are all required.',
@@ -487,6 +490,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.remove',
+    repeat: 'safe',
     irreversible: true,
     access: 'admin',
     title: 'Remove An Important Date',
@@ -500,6 +504,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.update',
+    repeat: 'safe',
     access: 'admin',
     title: 'Change An Important Date',
     description: 'Change one recorded occasion in place: any of date, kind, person, recurrence, leadDays (null returns to the default) and self; a field left out keeps its value. The occasion keeps its id, so its answers, gift history and calendar mirrors stay attached. A new title is accepted only when it names the same occasion (spelling or case); a different name is refused, add it as a new occasion and remove this one. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required). An occasion recorded with two dates is refused until occasions.conflict.resolve settles it.',
@@ -511,6 +516,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.answer',
+    repeat: 'safe',
     access: 'admin',
     title: 'Answer An Occasion Nudge',
     description: 'Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge); on an occurrence already answered yes or no it changes nothing and ok is false with the reason.',
@@ -522,6 +528,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.acknowledge',
+    repeat: 'safe',
     access: 'admin',
     title: 'Acknowledge An Occasion',
     description: 'Record that the owner has one occurrence in hand, so nothing is pushed at them about it again. This is not a yes and not a no: the open item STAYS OPEN and stays enumerable, so occasions.pending still lists it, under acknowledged[] rather than in the nudge, and asking what is coming up still answers with it. Only the push stops. The record expires with its occurrence, so next year asks fresh. An occurrence already answered yes or no is left as it is: changed is false and reply says so. source names how it was recorded: conversation when the owner said so in a reply, explicit when a surface offered the action, gift-flow when the owner is already answering gift questions about it.',
@@ -543,6 +550,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.interview.answer',
+    repeat: 'safe',
     access: 'admin',
     title: 'Answer A Gift Interview Question',
     description: 'Record one answer and return the next question, if there is one. The interview guides the owner to their own idea and never recommends a gift, that judgement is the owner\'s, which is also why the outcome recorded is what the owner landed on rather than what was suggested.',
@@ -554,6 +562,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.interview.record',
+    repeat: 'safe',
     access: 'admin',
     title: 'Record What The Owner Landed On',
     description: 'Close the interview with what the owner settled on and write it to the gift history. Recording the outcome rather than merely that the owner said yes is the point: "said yes in 2026" cannot stop year three steering where year one did.',
@@ -585,6 +594,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.sweep',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     access: 'admin',
     title: 'Run The Approach Sweep Now',
     description: 'Run one pass immediately: reap expired and orphaned state, find the occasions entering their lead window, batch them into a single message, mirror to the calendar if that is on, and deliver. Delivery goes to every destination in occasions.nudgeChannel, a comma-separated list, so Telegram and the agent both get it, and each is attempted independently, with deliveries[] naming per destination what landed and what did not. Housekeeping runs first and unconditionally, so a machine with nudging turned off still reaps. Returns hold:"quiet-hours" or hold:"disabled" when it deliberately said nothing, nothing is dropped, it waits. It runs the same with or without a decision model; with decision models off, provenance:"classic" says who each date is about was taken from the line\'s own for-me marker only. A push a destination accepted is recorded as sent even if settings or the profile changed during the send, so it is not pushed again next pass.',
@@ -596,6 +606,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.conflict.resolve',
+    repeat: 'safe',
     access: 'admin',
     title: 'Resolve A Date Conflict',
     description: 'Apply the owner\'s answer to "which date is right?": keep names the date to keep, the other lines for that title are removed from the owner profile through the profile write gate (so authority is required with keep), answers and gift history stay, and the conflict is not raised again. Without keep nothing changes and dates lists what is recorded, to put to the owner. A conflict is never resolved automatically: only the owner knows which date was right. When the file already holds one date (the owner fixed it by hand) the reminder is closed and resolved is true.',
@@ -617,6 +628,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.propose',
+    repeat: 'safe',
     title: 'Propose A Plan',
     description: 'Work out what would be written for a plan heard in conversation, and return the one-line confirmation. Writes nothing. Away is opt-in rather than assumed: "the kitchen is being redone, 3rd to the 10th" is a real dated range that is not the owner leaving the house.',
     category: 'occasions',
@@ -627,6 +639,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.confirm',
+    repeat: 'unsafe',
     access: 'admin',
     title: 'Record A Confirmed Plan',
     description: 'Write the confirmed plan as one line in the owner profile, under Plans, carrying its provenance and every entry of details (a confirmation number, flights and times, who is travelling), which occasions.plans.list returns in extras. Same one-confirmation rule and the same owner-profile write gate as an occasion.',
@@ -638,6 +651,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.update',
+    repeat: 'safe',
     access: 'admin',
     title: 'Change A Plan',
     description: 'Change one recorded plan in place, chosen by planId (its normalised title) and planFrom when two plans share a name: any of title, from, to, away, destination and details (details replaces the list); a field left out keeps its value. With confirmed:false nothing is written and proposal carries the exact line and the sentence to put to the owner; with confirmed:true the new line is written and the old one removed, through the owner-profile write gate (authority, surface and said required).',
@@ -649,6 +663,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
   }),
   methodDescriptor({
     id: 'occasions.plans.remove',
+    repeat: 'safe',
     irreversible: true,
     access: 'admin',
     title: 'Remove A Plan',

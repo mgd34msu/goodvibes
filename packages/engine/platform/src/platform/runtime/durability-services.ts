@@ -29,10 +29,9 @@
  *    the same subscribe() pipeline an in-process set() uses, no restart. The
  *    underlying watchers are unref'd, so this never pins the event loop.
  */
-import { join } from 'node:path';
 import { AppendOnlyRetentionScheduler, runStartupAppendOnlySweep } from './retention/append-only-registry.js';
 import { StoreSnapshotScheduler } from '../state/store-snapshots.js';
-import { UserPermissionRuleStore } from '../permissions/user-rule-store.js';
+import { ownerPermissionRulesPath, UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { startDurabilityHousekeeping } from './durability-housekeeping.js';
@@ -42,6 +41,7 @@ import type { SessionSurface } from './session-surface.js';
 export interface DurabilityServicesInput {
   readonly configManager: {
     getControlPlaneConfigDir(): string;
+    getHomeDirectory(): string | null;
     get(key: never): unknown;
     watchConfigFiles(options?: { intervalMs?: number }): () => void;
   };
@@ -168,7 +168,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
     stopConfigFileWatch();
   };
 
-  const userPermissionRuleStore = new UserPermissionRuleStore(join(configManager.getControlPlaneConfigDir(), 'permission-rules.json'));
+  const userPermissionRuleStore = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager));
   void userPermissionRuleStore.init().catch((error) => logger.warn('user permission rule store init failed; asks will prompt', { error: summarizeError(error) }));
 
   return { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch };

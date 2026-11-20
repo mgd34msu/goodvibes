@@ -206,24 +206,46 @@ export const AUTOMATION_RUN_OUTCOMES: readonly ["success", "partial", "failed", 
 export const AUTOMATION_SCHEDULE_KINDS: readonly ["at", "every", "cron"];
 
 // @public (undocumented)
-export type AutomationEvent = {
+export type AutomationEvent =
+/**
+* A scheduled job was created. `name` is its display name, `scheduleKind`
+* how it repeats (`at` once, `every` an interval, `cron` an expression), and
+* `enabled` whether it will run.
+*/
+    {
     type: 'AUTOMATION_JOB_CREATED';
     jobId: string;
     name: string;
     scheduleKind: AutomationScheduleKind;
     enabled: boolean;
-} | {
+}
+/**
+* A scheduled job's definition changed; `changedFields` names the fields
+* that differ. A change of `enabled` is also announced by
+* AUTOMATION_JOB_ENABLED or AUTOMATION_JOB_DISABLED.
+*/
+| {
     type: 'AUTOMATION_JOB_UPDATED';
     jobId: string;
     changedFields: string[];
-} | {
+}
+/** A scheduled job was turned on and will run at its next due time. */
+| {
     type: 'AUTOMATION_JOB_ENABLED';
     jobId: string;
-} | {
+}
+/** A scheduled job was turned off; `reason` is why it was paused (`disabled` when none was given). */
+| {
     type: 'AUTOMATION_JOB_DISABLED';
     jobId: string;
     reason: string;
-} | {
+}
+/**
+* A run of a scheduled job began. `runId` names the run, `startedAt` is its
+* start time (milliseconds since the epoch) and `attempt` counts retries of
+* the same run, from 1.
+*/
+| {
     type: 'AUTOMATION_RUN_STARTED';
     jobId: string;
     runId: string;
@@ -255,7 +277,13 @@ export type AutomationEvent = {
     failedAt: number;
     error: string;
     retryable: boolean;
-} | {
+}
+/**
+* A run failed and its job turned itself off after too many failures in a
+* row: `consecutiveFailures` is the count and `reason` why it was paused
+* (`failure-threshold-reached` unless the job gave its own).
+*/
+| {
     type: 'AUTOMATION_JOB_AUTO_DISABLED';
     jobId: string;
     reason: string;
@@ -435,7 +463,15 @@ export type CommandResult = {
 };
 
 // @public (undocumented)
-export type CommunicationEvent = {
+export type CommunicationEvent =
+/**
+* An agent sent a message to another agent (`scope: 'direct'`, `toId` the
+* recipient) or to every agent (`scope: 'broadcast'`, `toId` `*`). `kind`
+* says what it is (a directive, a question, a finding, a handoff...), and
+* `content` is its text. Role, cohort, contract and parent fields carry the
+* routing the message was sent under.
+*/
+    {
     type: 'COMMUNICATION_SENT';
     messageId: string;
     fromId: string;
@@ -448,14 +484,25 @@ export type CommunicationEvent = {
     cohort?: string | undefined;
     contractId?: string | undefined;
     parentAgentId?: string | undefined;
-} | {
+}
+/**
+* The recipient took a sent message into one of its turns. A message
+* waiting for a long turn to end has been sent, not yet delivered.
+*/
+| {
     type: 'COMMUNICATION_DELIVERED';
     messageId: string;
     fromId: string;
     toId: string;
     scope: CommunicationScope;
     kind: CommunicationKind;
-} | {
+}
+/**
+* A message was not sent: the sender is not a registered agent, the
+* recipient is unknown, or the communication policy refused it (an agent
+* may only talk along its communication lane). `reason` says which.
+*/
+| {
     type: 'COMMUNICATION_BLOCKED';
     messageId: string;
     fromId: string;
@@ -766,7 +813,14 @@ export class ContractError extends GoodVibesError {
 }
 
 // @public (undocumented)
-export type ContractEvent = ({
+export type ContractEvent = (
+/**
+* A contract was created for a piece of work. `ask` is the request as given,
+* `origin` where it came from (a turn, the agent tool, the command line, a
+* hosted session, an outside client or a proposal), `sessionId` the session
+* it belongs to and `ownerAgentId` the agent record its parent waits on.
+*/
+    {
     type: 'CONTRACT_CREATED';
     contractId: string;
     sessionId: string;
@@ -774,12 +828,21 @@ export type ContractEvent = ({
     ask: string;
     ownerAgentId: string;
     gateProblems?: readonly string[];
-} | {
+}
+/** A contract moved from one lifecycle status to another (queued, shaping, planning, running, judging, fixing, committing, awaiting-owner, passed, failed, cancelled). */
+| {
     type: 'CONTRACT_STATUS_CHANGED';
     contractId: string;
     from: ContractStatus;
     to: ContractStatus;
-} | {
+}
+/**
+* The request was read for its shape before planning: whether it forbids
+* delegating, asks for parallel agents, forbids writing, or asks for several
+* attempts. Each reading carries its verdict, probability and what code does
+* with it; `decisionIds` are the decision-log records.
+*/
+| {
     type: 'CONTRACT_SHAPED';
     contractId: string;
     forbidsDelegation: ContractShapeReading;
@@ -787,7 +850,13 @@ export type ContractEvent = ({
     forbidsWriting: ContractShapeReading;
     asksForAttempts: ContractShapeReading;
     decisionIds: readonly string[];
-} | {
+}
+/**
+* The planner produced a plan (or repaired one): the goal, the acceptance
+* criteria, the groups of units and the units themselves. `repair` is 0 for
+* the first plan and n for the nth repair.
+*/
+| {
     type: 'CONTRACT_PLANNED';
     contractId: string;
     goal: string;
@@ -795,7 +864,13 @@ export type ContractEvent = ({
     groups: readonly ContractPlannedGroup[];
     units: readonly ContractPlannedUnit[];
     repair: number;
-} | {
+}
+/**
+* One check of the plan ran: `structure` and `criterion-trace` by code, the
+* others by the decision model. `passed` says whether it held; `problems`
+* lists what is wrong, by code and target.
+*/
+| {
     type: 'CONTRACT_PLAN_CHECKED';
     contractId: string;
     check: PlanCheck;
@@ -803,13 +878,17 @@ export type ContractEvent = ({
     passed: boolean;
     problems: readonly ContractPlanProblem[];
     decisionIds: readonly string[];
-} | {
+}
+/** A group of units moved from one status to another. */
+| {
     type: 'CONTRACT_GROUP_STATUS_CHANGED';
     contractId: string;
     groupId: string;
     from: ContractGroupStatus;
     to: ContractGroupStatus;
-} | {
+}
+/** A unit of work moved from one status to another; `agentId` is the agent working it, when one is. */
+| {
     type: 'CONTRACT_UNIT_STATUS_CHANGED';
     contractId: string;
     groupId: string;
@@ -817,14 +896,30 @@ export type ContractEvent = ({
     from: ContractUnitStatus;
     to: ContractUnitStatus;
     agentId?: string | undefined;
-} | {
+}
+/**
+* An agent was started to work a unit. `route` is the model, provider and
+* reasoning effort chosen and why; `purpose` says whether it is the unit's
+* first agent, a fresh start, or a retry after a transport failure, a silence
+* or a resume.
+*/
+| {
     type: 'CONTRACT_UNIT_SPAWNED';
     contractId: string;
     unitId: string;
     agentId: string;
     route: ContractUnitRouteSummary;
     purpose: UnitSpawnPurpose;
-} | {
+}
+/**
+* A unit, group or the whole deliverable was checked against its criteria.
+* `trigger` is what started the check (a turn ended, the agent finished or
+* failed, a fix passed, a resume, an owner amendment); `result` what came of
+* it (pass, nudge, await-owner, a native decision, stall, recorded). It
+* carries the reading of each criterion, the goal, the quality items, the
+* gate commands and the verification of the agent's claims.
+*/
+| {
     type: 'CONTRACT_CHECKED';
     contractId: string;
     scope: CheckScope;
@@ -841,7 +936,15 @@ export type ContractEvent = ({
     gates: readonly ContractCheckedGate[];
     claims?: ClaimVerificationKind | undefined;
     decisionIds: readonly string[];
-} | {
+}
+/**
+* A unit's agent was told what is still wrong (`kinds`: unmet or unshown
+* criteria, a regression, quality, a gate, claims) so it fixes it and is
+* checked again. `delivery` is how it reached the agent: `hold` (kept for
+* the end of its current turn), `bus` (sent while it runs) or `wake` (a
+* finished or failed agent was woken with it).
+*/
+| {
     type: 'CONTRACT_NUDGED';
     contractId: string;
     unitId: string;
@@ -851,21 +954,31 @@ export type ContractEvent = ({
     criterionIds: readonly string[];
     delivery: NudgeDelivery;
     agentId: string;
-} | {
+}
+/** The nudged agent took the nudge into its conversation, at turn `turn`. */
+| {
     type: 'CONTRACT_NUDGE_CONSUMED';
     contractId: string;
     unitId: string;
     nudgeId: string;
     agentId: string;
     turn?: number | undefined;
-} | {
+}
+/** A criterion that read met at check `metAtCheckId` reads unmet at check `checkId`; a nudge always follows. */
+| {
     type: 'CONTRACT_CRITERION_REGRESSED';
     contractId: string;
     unitId: string;
     criterionId: string;
     metAtCheckId: string;
     checkId: string;
-} | {
+}
+/**
+* A unit, group or deliverable stopped making progress on its unmet
+* criteria. `route` is what happens next: `split` (a planned fix of smaller
+* units), `fresh` (a new agent starts it over) or `owner` (the owner is asked).
+*/
+| {
     type: 'CONTRACT_STALLED';
     contractId: string;
     scope: CheckScope;
@@ -874,7 +987,9 @@ export type ContractEvent = ({
     unmetCriterionIds: readonly string[];
     reason: string;
     decisionId?: string | undefined;
-} | {
+}
+/** A fix group was planned for a stalled or failing target: `unitIds` are its units and `round` counts fix rounds. */
+| {
     type: 'CONTRACT_FIX_PLANNED';
     contractId: string;
     scope: CheckScope;
@@ -882,7 +997,14 @@ export type ContractEvent = ({
     groupId: string;
     unitIds: readonly string[];
     round: number;
-} | {
+}
+/**
+* The contract needs the owner: `question` is what the owner is asked,
+* `reason` why (an unresolved plan, a stall, an unsettled reading, fix rounds
+* used up, unclear writing permission, undecided attempts, an owner-only
+* decision), and the contract waits in `awaiting-owner` for the reply.
+*/
+| {
     type: 'CONTRACT_ESCALATED';
     contractId: string;
     escalationId: string;
@@ -891,14 +1013,26 @@ export type ContractEvent = ({
     reason: EscalationReason;
     question: string;
     unmetCriterionIds: readonly string[];
-} | {
+}
+/**
+* The owner answered an escalation. `reading` is how the reply was read
+* (approve, reject, amend, unclear) and `action` what the runner did with it
+* (approved, amended, stopped, asked again, refused).
+*/
+| {
     type: 'CONTRACT_OWNER_REPLIED';
     contractId: string;
     escalationId: string;
     reading: OwnerReplyReading;
     outcome: ContractOutcome;
     action: OwnerReplyAction;
-} | {
+}
+/**
+* One gate command from the `contract.gates` setting ran against a target:
+* whether it passed or was skipped, how long it took, its outcome, whether it
+* is required, and why when it did not pass.
+*/
+| {
     type: 'CONTRACT_GATE_RESULT';
     contractId: string;
     targetId: string;
@@ -909,21 +1043,31 @@ export type ContractEvent = ({
     outcome?: GateResultOutcome;
     required?: boolean;
     reason?: string;
-} | {
+}
+/** A unit's agent produced nothing for `silentMs`; `action` says whether it was retried with a new agent or the unit failed. */
+| {
     type: 'CONTRACT_UNIT_SILENT';
     contractId: string;
     unitId: string;
     agentId: string;
     silentMs: number;
     action: UnitSilenceAction;
-} | {
+}
+/** Merging a unit's branch back conflicted: `branch` and `path` name the unit's worktree and `files` the conflicting files. */
+| {
     type: 'CONTRACT_MERGE_CONFLICT';
     contractId: string;
     unitId: string;
     branch: string;
     path: string;
     files: readonly string[];
-} | {
+}
+/**
+* A unit run as several attempts had the passing attempts compared:
+* `candidateIds` are the attempts that passed, `chosen` the one kept (null
+* when none could be chosen) and `outcome` what code does with the choice.
+*/
+| {
     type: 'CONTRACT_ATTEMPTS_SELECTED';
     contractId: string;
     unitId: string;
@@ -931,20 +1075,35 @@ export type ContractEvent = ({
     chosen: string | null;
     outcome: ContractOutcome;
     decisionId?: string | undefined;
-} | {
+}
+/**
+* The finished work was published to the project: `committed` (as a git
+* commit, `hash` given), `applied` (as uncommitted changes), `skipped`
+* (nothing to publish) or `failed`; `note` says what was done.
+*/
+| {
     type: 'CONTRACT_COMMITTED';
     contractId: string;
     status: ContractCommitStatus;
     hash?: string | undefined;
     note: string;
-} | {
+}
+/** The contract passed: `criteriaMet` of `criteriaJudged` criteria met, `excluded` criteria not judged, after `nudges` nudges. */
+| {
     type: 'CONTRACT_PASSED';
     contractId: string;
     criteriaMet: number;
     criteriaJudged: number;
     excluded: number;
     nudges: number;
-} | {
+}
+/**
+* The contract failed. `failureKind` names the cause (transport, max_turns,
+* planning, budget, owner-rejected, judgment-unavailable, zombie, other) and
+* `reason` says it in words; `turnLimit` and its source are given for a
+* max_turns failure.
+*/
+| {
     type: 'CONTRACT_FAILED';
     contractId: string;
     reason: string;
@@ -952,12 +1111,21 @@ export type ContractEvent = ({
     membersSettled: boolean;
     turnLimit?: number | undefined;
     turnLimitSource?: TurnLimitSource | undefined;
-} | {
+}
+/** The contract was cancelled; `reason` says why and `filesModified` how many files it had changed. */
+| {
     type: 'CONTRACT_CANCELLED';
     contractId: string;
     reason: string;
     filesModified: number;
-} | {
+}
+/**
+* A request to start an agent was refused: a contract's unit agent or
+* planner may not start agents of its own (the contract plans sub-work), or
+* the spawn would pass the nesting depth or active-agent limits. `depth` and
+* `activeAgents` are the values at the refusal.
+*/
+| {
     type: 'CONTRACT_SPAWN_GUARD_TRIGGERED';
     contractId?: string | undefined;
     agentId: string;
@@ -1146,26 +1314,36 @@ export interface ControlPlaneAuthSnapshot {
 export type ControlPlaneClientKind = (typeof CONTROL_PLANE_CLIENT_KINDS)[number];
 
 // @public (undocumented)
-export type ControlPlaneEvent = {
+export type ControlPlaneEvent =
+/** A client opened a live connection to the daemon (a web UI, a terminal app, a service): `clientKind` is what it is and `transport` how it is connected. */
+    {
     type: 'CONTROL_PLANE_CLIENT_CONNECTED';
     clientId: string;
     clientKind: ControlPlaneClientKind;
     transport: ControlPlaneTransportKind;
-} | {
+}
+/** A connected client went away; `reason` says why (it closed, it timed out, it was dropped). */
+| {
     type: 'CONTROL_PLANE_CLIENT_DISCONNECTED';
     clientId: string;
     reason: string;
-} | {
+}
+/** A connected client subscribed to runtime events; `topics` are the event domains it receives. */
+| {
     type: 'CONTROL_PLANE_SUBSCRIPTION_CREATED';
     clientId: string;
     subscriptionId: string;
     topics: string[];
-} | {
+}
+/** A client's event subscription ended; `reason` says why. */
+| {
     type: 'CONTROL_PLANE_SUBSCRIPTION_DROPPED';
     clientId: string;
     subscriptionId: string;
     reason: string;
-} | {
+}
+/** A connected client was authenticated: `principalId` and `principalKind` say who it acts as and `scopes` what it may do. */
+| {
     type: 'CONTROL_PLANE_AUTH_GRANTED';
     clientId: string;
     principalId: string;
@@ -1437,7 +1615,13 @@ export const DEFAULT_WS_MAX_ATTEMPTS: number;
 export const DELIVERY_KINDS: readonly ["notification", "reply", "callback"];
 
 // @public (undocumented)
-export type DeliveryEvent = {
+export type DeliveryEvent =
+/**
+* A scheduled run's result was queued for delivery to a route: `surfaceKind`
+* is the surface (Slack, a webhook, ntfy...), `targetId` the route, and
+* `deliveryKind` whether it is a reply, a webhook callback or a notification.
+*/
+    {
     type: 'DELIVERY_QUEUED';
     deliveryId: string;
     jobId: string;
@@ -1445,7 +1629,9 @@ export type DeliveryEvent = {
     surfaceKind: RouteSurfaceKind;
     targetId: string;
     deliveryKind: DeliveryKind;
-} | {
+}
+/** An attempt to send a queued delivery began. */
+| {
     type: 'DELIVERY_STARTED';
     deliveryId: string;
     jobId: string;
@@ -1453,7 +1639,9 @@ export type DeliveryEvent = {
     surfaceKind: RouteSurfaceKind;
     targetId: string;
     startedAt: number;
-} | {
+}
+/** A delivery reached its target; `durationMs` is how long the attempt took. */
+| {
     type: 'DELIVERY_SUCCEEDED';
     deliveryId: string;
     jobId: string;
@@ -1462,7 +1650,9 @@ export type DeliveryEvent = {
     targetId: string;
     completedAt: number;
     durationMs: number;
-} | {
+}
+/** A delivery attempt failed; `retryable` says whether another attempt will follow (false once every try is used, which DELIVERY_DEAD_LETTERED then announces). */
+| {
     type: 'DELIVERY_FAILED';
     deliveryId: string;
     jobId: string;
@@ -1477,7 +1667,9 @@ export type DeliveryEvent = {
     jobId: string;
     runId: string;
     surface: 'agent';
-} | {
+}
+/** A delivery used every attempt it had and was set aside as a dead letter; `attempts` is how many were made and `reason` the last failure. */
+| {
     type: 'DELIVERY_DEAD_LETTERED';
     deliveryId: string;
     jobId: string;
@@ -1662,6 +1854,9 @@ export type EventLike = {
 
 // @public
 export type ExecutionStrategy = 'auto' | 'single' | 'cohort' | 'background' | 'remote';
+
+// @public
+export function exemptLoopbackFromProxy(hostname?: string): void;
 
 // @public (undocumented)
 export type ExpoGoodVibesPlatformOptions = ReactNativeGoodVibesPlatformOptions;
@@ -1903,8 +2098,8 @@ export { forSession as forSessionRuntime }
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
     readonly productVersion: "3.3.1";
-    readonly operatorMethodCount: 636;
-    readonly operatorEventCount: 36;
+    readonly operatorMethodCount: 640;
+    readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
 };
 
@@ -2469,6 +2664,9 @@ export function isKnownEventType(type: unknown): type is string;
 // @public
 export function isLinearSchemaPattern(source: string): boolean;
 
+// @public
+export function isLoopbackHost(hostname: string): boolean;
+
 // @public (undocumented)
 export function isOperatorMethodId(value: string): value is (typeof OPERATOR_METHOD_IDS)[number];
 
@@ -2586,71 +2784,99 @@ export interface JudgmentReadingOptions {
 }
 
 // @public
-export type KnowledgeEvent = {
+export type KnowledgeEvent =
+/** Reading a source into the knowledge store began: `connectorId` is the connector reading it, `sourceType` its kind and `uri` where it is, when it has an address. */
+    {
     type: 'KNOWLEDGE_INGEST_STARTED';
     sourceId: string;
     connectorId: string;
     sourceType: string;
     uri?: string | undefined;
-} | {
+}
+/** A source was read into the knowledge store; `status` is the source's stored status, and `artifactId` and `title` name what was kept, when there is one. */
+| {
     type: 'KNOWLEDGE_INGEST_COMPLETED';
     sourceId: string;
     status: string;
     artifactId?: string | undefined;
     title?: string | undefined;
-} | {
+}
+/** Reading a source into the knowledge store failed; `error` says why. */
+| {
     type: 'KNOWLEDGE_INGEST_FAILED';
     sourceId: string;
     error: string;
-} | {
+}
+/** The text of an ingested source was extracted and stored: `format` is what it was read as and `estimatedTokens` its size. */
+| {
     type: 'KNOWLEDGE_EXTRACTION_COMPLETED';
     sourceId: string;
     extractionId: string;
     format: string;
     estimatedTokens: number;
-} | {
+}
+/** Extracting the text of an ingested source failed; nothing from it was stored. */
+| {
     type: 'KNOWLEDGE_EXTRACTION_FAILED';
     sourceId: string;
     error: string;
-} | {
+}
+/** An extracted source was compiled into the knowledge graph: `nodeCount` nodes and `edgeCount` edges. */
+| {
     type: 'KNOWLEDGE_COMPILE_COMPLETED';
     sourceId: string;
     nodeCount: number;
     edgeCount: number;
-} | {
+}
+/** A knowledge store check finished; `issueCount` is the number of issues it recorded. */
+| {
     type: 'KNOWLEDGE_LINT_COMPLETED';
     issueCount: number;
-} | {
+}
+/** A packet of knowledge was assembled for a task (`task` is a preview of it): `itemCount` items, `estimatedTokens` in size, at `detail` level. */
+| {
     type: 'KNOWLEDGE_PACKET_BUILT';
     task: string;
     itemCount: number;
     estimatedTokens: number;
     detail: 'compact' | 'standard' | 'detailed';
-} | {
+}
+/** Knowledge was rendered as Markdown pages for a projection target, without saving them; `pageCount` is how many. */
+| {
     type: 'KNOWLEDGE_PROJECTION_RENDERED';
     targetId: string;
     pageCount: number;
-} | {
+}
+/** A Markdown projection was rendered and saved as an artifact (`artifactId`), `pageCount` pages. */
+| {
     type: 'KNOWLEDGE_PROJECTION_MATERIALIZED';
     targetId: string;
     artifactId: string;
     pageCount: number;
-} | {
+}
+/** A knowledge maintenance job was queued to run, either `inline` (now, in the caller) or in the `background`. */
+| {
     type: 'KNOWLEDGE_JOB_QUEUED';
     jobId: string;
     runId: string;
     mode: 'inline' | 'background';
-} | {
+}
+/** A queued knowledge job began running. */
+| {
     type: 'KNOWLEDGE_JOB_STARTED';
     jobId: string;
     runId: string;
     mode: 'inline' | 'background';
-} | {
+}
+/** A knowledge job finished; `durationMs` is how long it ran. */
+| {
     type: 'KNOWLEDGE_JOB_COMPLETED';
     jobId: string;
     runId: string;
     durationMs: number;
-} | {
+}
+/** A knowledge job failed after `durationMs`; `error` says why. */
+| {
     type: 'KNOWLEDGE_JOB_FAILED';
     jobId: string;
     runId: string;
@@ -2865,7 +3091,7 @@ export function openServerSentEventStream(transport: HttpTransport, pathOrUrl: s
 export const OPERATOR_CONTRACT: OperatorContractManifest;
 
 // @public (undocumented)
-export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.providerBatches.cancel", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.calendars.list", "calendar.events.create", "calendar.events.delete", "calendar.events.get", "calendar.events.list", "calendar.events.update", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.applyLabels", "channels.inbox.list", "channels.inbox.triage", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.search", "companion.chat.messages.steer", "companion.chat.queuedMessages.delete", "companion.chat.queuedMessages.edit", "companion.chat.queuedMessages.list", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.reopen", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "config.setMany", "continuity.snapshot", "contracts.budget", "contracts.cancel", "contracts.dispatch", "contracts.get", "contracts.list", "contracts.remove", "contracts.reply", "contracts.retryUnit", "contracts.start", "contracts.status", "contracts.summaries", "control.auth.current", "control.auth.login", "control.auth.logout", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.delete", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.attachment.get", "email.draft.create", "email.drafts.list", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.expectation.wait", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.inbox.update", "email.send", "flags.graduation.report", "flags.status", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.conflicts.retry", "fleet.graph.get", "fleet.interrupt", "fleet.list", "fleet.observed.steer", "fleet.resume", "fleet.snapshot", "fleet.stop", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "inbox.answer", "inbox.delivery", "inbox.list", "inbox.post", "inbox.withdraw", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-run.cancel", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "local_auth.users.scopes.set", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.tools.allow", "mcp.servers.tools.clear", "mcp.servers.tools.deny", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.collect", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.decide", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.snapshots.list", "memory.snapshots.restore", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "notifications.deadLetters.list", "notifications.deadLetters.replay", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.plans.remove", "occasions.plans.update", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "occasions.update", "ops.doctor", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.securityCode", "payments.purchase.status", "payments.purchases.list", "payments.standing.create", "payments.standing.delete", "payments.standing.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.language.get", "projectPlanning.state.get", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.backends.list", "remote.backends.register", "remote.backends.remove", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.get", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "rewind.undo", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "runtime.state.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.hosted.workspaces", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tailscale.serve.stop", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.setup", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.cancel", "watchers.triggers.create", "watchers.triggers.grant.list", "watchers.triggers.grant.register", "watchers.triggers.history", "watchers.triggers.list", "watchers.triggers.reset", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
+export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "authority.status", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.providerBatches.cancel", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.calendars.list", "calendar.events.create", "calendar.events.delete", "calendar.events.get", "calendar.events.list", "calendar.events.update", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.applyLabels", "channels.inbox.list", "channels.inbox.triage", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.search", "companion.chat.messages.steer", "companion.chat.queuedMessages.delete", "companion.chat.queuedMessages.edit", "companion.chat.queuedMessages.list", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.reopen", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "config.setMany", "continuity.snapshot", "contracts.budget", "contracts.cancel", "contracts.dispatch", "contracts.get", "contracts.list", "contracts.remove", "contracts.reply", "contracts.retryUnit", "contracts.start", "contracts.status", "contracts.summaries", "control.auth.current", "control.auth.login", "control.auth.logout", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.delete", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.attachment.get", "email.draft.create", "email.drafts.list", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.expectation.wait", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.inbox.update", "email.send", "flags.graduation.report", "flags.status", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.conflicts.retry", "fleet.graph.get", "fleet.interrupt", "fleet.list", "fleet.observed.steer", "fleet.resume", "fleet.snapshot", "fleet.stop", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "inbox.answer", "inbox.delivery", "inbox.list", "inbox.post", "inbox.withdraw", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-run.cancel", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "local_auth.users.scopes.set", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.tools.allow", "mcp.servers.tools.clear", "mcp.servers.tools.deny", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.collect", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.decide", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.snapshots.list", "memory.snapshots.restore", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "notifications.deadLetters.list", "notifications.deadLetters.replay", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.plans.remove", "occasions.plans.update", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "occasions.update", "ops.doctor", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.securityCode", "payments.purchase.status", "payments.purchases.list", "payments.standing.create", "payments.standing.delete", "payments.standing.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.language.get", "projectPlanning.state.get", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.codes.list", "relay.codes.revoke", "relay.pairing.mint", "relay.reachability.get", "remote.backends.list", "remote.backends.register", "remote.backends.remove", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.get", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "rewind.undo", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "runtime.state.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.history", "sessions.hosted.kill", "sessions.hosted.list", "sessions.hosted.workspaces", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tailscale.serve.stop", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.setup", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.cancel", "watchers.triggers.create", "watchers.triggers.grant.list", "watchers.triggers.grant.register", "watchers.triggers.history", "watchers.triggers.list", "watchers.triggers.reset", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
@@ -3202,6 +3428,7 @@ export interface OperatorMethodContract {
     // (undocumented)
     readonly pluginId?: string | undefined;
     readonly recipients?: readonly string[] | undefined;
+    readonly repeat?: 'safe' | 'keyed' | 'unsafe' | undefined;
     // Warning: (ae-forgotten-export) The symbol "ContractReplayKey" needs to be exported by the entry point index.d.ts
     readonly replay?: ContractReplayKey | undefined;
     // (undocumented)
@@ -3372,6 +3599,8 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "artifacts.list": {};
+    // (undocumented)
+    "authority.status": {};
     // (undocumented)
     "automation.heartbeat.list": {};
     // (undocumented)
@@ -4221,6 +4450,7 @@ export interface OperatorMethodInputMap {
     "channels.policies.update": ({
         surface: string;
         enabled?: boolean;
+        open?: boolean;
         requireMention?: boolean;
         allowDirectMessages?: boolean;
         allowGroupMessages?: boolean;
@@ -5685,7 +5915,7 @@ export interface OperatorMethodInputMap {
     "inbox.list": {
         itemId?: string;
         status?: "all" | "closed" | "open";
-        kinds?: readonly ("approval" | "claim" | "decision" | "purchase" | "question" | "queued-action")[];
+        kinds?: readonly ("approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report")[];
         sessionId?: string;
         limit?: number;
     };
@@ -6933,6 +7163,7 @@ export interface OperatorMethodInputMap {
     "pairing.handoff.create": {
         name: string;
         offers?: readonly string[];
+        fromSharedToken?: boolean;
     };
     // (undocumented)
     "pairing.posture.get": {
@@ -7425,7 +7656,15 @@ export interface OperatorMethodInputMap {
         provider: string;
     };
     // (undocumented)
-    "relay.pairing.mint": {};
+    "relay.codes.list": {};
+    // (undocumented)
+    "relay.codes.revoke": {
+        id: string;
+    };
+    // (undocumented)
+    "relay.pairing.mint": {
+        name?: string;
+    };
     // (undocumented)
     "relay.reachability.get": {};
     // (undocumented)
@@ -7760,6 +7999,10 @@ export interface OperatorMethodInputMap {
     "sessions.hosted.detach": {
         sessionId: string;
         clientId: string;
+    };
+    // (undocumented)
+    "sessions.hosted.history": {
+        sessionId: string;
     };
     // (undocumented)
     "sessions.hosted.kill": {
@@ -9379,6 +9622,27 @@ export interface OperatorMethodOutputMap {
         } & {
             readonly [key: string]: unknown;
         }))[];
+    };
+    // (undocumented)
+    "authority.status": {
+        readable: boolean;
+        nodeId: string;
+        groupId: string;
+        revision: number;
+        digest: string;
+        revocationFloor: number;
+        kinds: readonly ({
+            kind: string;
+            live: number;
+            revoked: number;
+        })[];
+        behindOn: readonly string[];
+        behind: boolean;
+        userConflicts: readonly ({
+            username: string;
+            accounts: number;
+            madeOn: readonly string[];
+        })[];
     };
     // (undocumented)
     "automation.heartbeat.list": {
@@ -12650,6 +12914,7 @@ export interface OperatorMethodOutputMap {
                     }) | boolean | null | number | readonly JsonValue[] | string;
                 });
             })[];
+            open?: boolean;
             updatedAt: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -13083,6 +13348,7 @@ export interface OperatorMethodOutputMap {
                     }) | boolean | null | number | readonly JsonValue[] | string;
                 });
             })[];
+            open?: boolean;
             updatedAt: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -13126,6 +13392,7 @@ export interface OperatorMethodOutputMap {
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
         })[];
+        open?: boolean;
         updatedAt: number;
         metadata: ({} & {
             readonly [key: string]: ({} & {
@@ -14234,6 +14501,20 @@ export interface OperatorMethodOutputMap {
         daemonOwned?: boolean;
     } & {
         readonly [key: string]: unknown;
+    }) | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
+    } & {
+        readonly [key: string]: unknown;
     });
     // (undocumented)
     "config.set": ({
@@ -14245,6 +14526,20 @@ export interface OperatorMethodOutputMap {
         persistedTo?: string;
         tier?: string;
         daemonOwned?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    }) | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -14261,7 +14556,21 @@ export interface OperatorMethodOutputMap {
             tier?: string;
             daemonOwned?: boolean;
         })[];
-    };
+    } | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
+    } & {
+        readonly [key: string]: unknown;
+    });
     // (undocumented)
     "continuity.snapshot": {
         sessionId: string;
@@ -20140,6 +20449,7 @@ export interface OperatorMethodOutputMap {
                         name: string;
                         behavior: string;
                     };
+                    repeat?: "keyed" | "safe" | "unsafe";
                     errorCodes?: readonly ({
                         code: string;
                         status: number;
@@ -20297,6 +20607,7 @@ export interface OperatorMethodOutputMap {
                 name: string;
                 behavior: string;
             };
+            repeat?: "keyed" | "safe" | "unsafe";
             errorCodes?: readonly ({
                 code: string;
                 status: number;
@@ -20342,6 +20653,7 @@ export interface OperatorMethodOutputMap {
                 name: string;
                 behavior: string;
             };
+            repeat?: "keyed" | "safe" | "unsafe";
             errorCodes?: readonly ({
                 code: string;
                 status: number;
@@ -23322,7 +23634,7 @@ export interface OperatorMethodOutputMap {
         applied: boolean;
         item?: {
             id: string;
-            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action";
+            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report";
             status: "answered" | "expired" | "open" | "withdrawn";
             sessionId?: string;
             title: string;
@@ -23373,7 +23685,7 @@ export interface OperatorMethodOutputMap {
         applied: boolean;
         item?: {
             id: string;
-            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action";
+            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report";
             status: "answered" | "expired" | "open" | "withdrawn";
             sessionId?: string;
             title: string;
@@ -23423,7 +23735,7 @@ export interface OperatorMethodOutputMap {
     "inbox.list": {
         items: readonly ({
             id: string;
-            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action";
+            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report";
             status: "answered" | "expired" | "open" | "withdrawn";
             sessionId?: string;
             title: string;
@@ -23461,7 +23773,7 @@ export interface OperatorMethodOutputMap {
         created: boolean;
         item: {
             id: string;
-            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action";
+            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report";
             status: "answered" | "expired" | "open" | "withdrawn";
             sessionId?: string;
             title: string;
@@ -23498,7 +23810,7 @@ export interface OperatorMethodOutputMap {
         applied: boolean;
         item?: {
             id: string;
-            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action";
+            kind: "approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report";
             status: "answered" | "expired" | "open" | "withdrawn";
             sessionId?: string;
             title: string;
@@ -27794,6 +28106,7 @@ export interface OperatorMethodOutputMap {
             mintedBy?: string;
             client?: "agent";
             scopes?: readonly string[];
+            origin: "automation" | "owner-pairing";
         })[];
         legacySharedRevoked: boolean;
     };
@@ -28122,7 +28435,7 @@ export interface OperatorMethodOutputMap {
         rules: readonly ({
             id: string;
             effect: "allow" | "ask" | "deny";
-            tier: "command-class" | "exact" | "path" | "tool";
+            tier: "command-class" | "exact" | "never-run" | "path" | "tool";
             tool: string;
             description?: string;
             createdAt: number;
@@ -30225,15 +30538,33 @@ export interface OperatorMethodOutputMap {
         recentRateLimitCount: number;
     };
     // (undocumented)
+    "relay.codes.list": {
+        codes: readonly ({
+            id: string;
+            name: string;
+            createdAt: number;
+            lastSeenAt?: number;
+        })[];
+    };
+    // (undocumented)
+    "relay.codes.revoke": {
+        id: string;
+        revoked: boolean;
+        closedConnections: number;
+    };
+    // (undocumented)
     "relay.pairing.mint": {
         pairing: null | {
             protocol: number;
             relayUrl: string;
             rid: string;
             daemonPublicKey: string;
+            code: string;
             label?: string;
         };
         status: "connecting" | "disabled" | "idle" | "reconnecting" | "refused" | "registered" | "stopped";
+        codeId?: string;
+        codeName?: string;
     };
     // (undocumented)
     "relay.reachability.get": {
@@ -32273,6 +32604,46 @@ export interface OperatorMethodOutputMap {
         };
     };
     // (undocumented)
+    "sessions.hosted.history": {
+        session: {
+            id: string;
+            nativeConversation?: true;
+            workspaceRoot: string;
+            title: string;
+            status: "idle" | "running" | "terminated";
+            detachPolicy: null | "kill" | "survive";
+            effectiveDetachPolicy: "kill" | "survive";
+            attachedClients: readonly string[];
+            providerId?: string;
+            modelId?: string;
+            createdAt: number;
+            updatedAt: number;
+            turnCount: number;
+            messageCount: number;
+            lastTurnAt?: number;
+            terminatedAt?: number;
+            terminatedReason?: string;
+            restoredFromDisk: boolean;
+            originSurface?: string;
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
+            contractIds: readonly string[];
+            saveError?: string;
+        };
+        history: readonly ({
+            role: "assistant" | "system" | "tool" | "user";
+            content: string;
+            at?: number;
+            toolCalls?: readonly ({
+                id: string;
+                name: string;
+                arguments: ({} & {
+                    readonly [key: string]: unknown;
+                });
+            })[];
+            callId?: string;
+        })[];
+    };
+    // (undocumented)
     "sessions.hosted.kill": {
         session: {
             id: string;
@@ -32745,13 +33116,29 @@ export interface OperatorMethodOutputMap {
     "sessions.permissionMode.get": {
         sessionId: string;
         mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
+        chosenMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
+        reason?: string;
     };
     // (undocumented)
     "sessions.permissionMode.set": {
         sessionId: string;
         mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
         previousMode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
-    };
+    } | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
+    } & {
+        readonly [key: string]: unknown;
+    });
     // (undocumented)
     "sessions.queuedMessages.delete": {
         sessionId: string;
@@ -38949,30 +39336,50 @@ export interface PlannerDecision {
 }
 
 // @public (undocumented)
-export type PlannerEvent = ({
+export type PlannerEvent =
+/**
+* The planner's choice of execution strategy (single, cohort, background,
+* remote) with its scored candidates and inputs, published each time a
+* decision is recorded (when `/workstream` drafts a plan and asks whether to
+* split the goal). An unsettled reading is published too, with `selected`
+* `auto` and reason `JUDGMENT_UNSETTLED`.
+*/
+({
     type: 'PLAN_STRATEGY_SELECTED';
-} & PlannerDecision) | {
+} & PlannerDecision)
+/** `/plan override` set the execution strategy `/workstream` uses when it drafts a plan, or cleared it (`strategy` null, `clearedBy` who cleared it). */
+| {
     type: 'PLAN_STRATEGY_OVERRIDDEN';
     strategy: ExecutionStrategy | null;
     clearedBy?: string | undefined;
-} | ({
+}
+/** A task was added to a project's work plan; `task` is the task as stored and `revision` the plan's revision after the change. */
+| ({
     type: 'WORK_PLAN_TASK_CREATED';
     task: WorkPlanTaskEventRecord;
-} & WorkPlanEventBase) | ({
+} & WorkPlanEventBase)
+/** A work plan task changed; `task` is the task now and `previousTask` before. */
+| ({
     type: 'WORK_PLAN_TASK_UPDATED';
     task: WorkPlanTaskEventRecord;
     previousTask: WorkPlanTaskEventRecord;
-} & WorkPlanEventBase) | ({
+} & WorkPlanEventBase)
+/** A work plan task moved from `previousStatus` to `status` (pending, in_progress, blocked, done, failed, cancelled). */
+| ({
     type: 'WORK_PLAN_TASK_STATUS_CHANGED';
     taskId: string;
     status: WorkPlanTaskStatus;
     previousStatus: WorkPlanTaskStatus;
     task: WorkPlanTaskEventRecord;
-} & WorkPlanEventBase) | ({
+} & WorkPlanEventBase)
+/** A task was removed from a project's work plan; `task` is what it was. */
+| ({
     type: 'WORK_PLAN_TASK_DELETED';
     taskId: string;
     task: WorkPlanTaskEventRecord;
-} & WorkPlanEventBase) | ({
+} & WorkPlanEventBase)
+/** A copy of the work plan read before `updatedAt` is out of date: read the plan again. `reason` says what changed it (a task created or updated here, or a change made elsewhere). */
+| ({
     type: 'WORK_PLAN_SNAPSHOT_INVALIDATED';
     reason: string;
     updatedAt: number;
@@ -39047,15 +39454,21 @@ export type PluginEvent =
 export type PluginEventType = PluginEvent['type'];
 
 // @public
-export type ProviderEvent = {
+export type ProviderEvent =
+/** The set of usable providers changed: the ids `added`, `removed` and `updated` (a key or sign-in changed). */
+    {
     type: 'PROVIDERS_CHANGED';
     added: string[];
     removed: string[];
     updated: string[];
-} | {
+}
+/** A provider problem worth showing, such as a custom provider file that could not be loaded; `message` says what. */
+| {
     type: 'PROVIDER_WARNING';
     message: string;
-} | {
+}
+/** Every provider serving the synthetic model `from` was unavailable, so the request went to the free fallback model `to`, served by `provider`. */
+| {
     type: 'MODEL_FALLBACK';
     from: string;
     to: string;
@@ -39069,7 +39482,9 @@ export type ProviderEvent = {
     kind: 'tts' | 'stt';
     billableUnits: number;
     unit: 'characters' | 'seconds';
-} | {
+}
+/** The selected model changed to `registryKey` on `provider`; `previous` is the model before, when there was one. */
+| {
     type: 'MODEL_CHANGED';
     registryKey: string;
     provider: string;
@@ -39375,37 +39790,53 @@ export const ROUTE_SURFACE_KINDS: readonly ["tui", "web", "slack", "discord", "n
 export const ROUTE_TARGET_KINDS: readonly ["session", "run", "job", "task", "message"];
 
 // @public (undocumented)
-export type RouteEvent = {
+export type RouteEvent =
+/**
+* A route binding was made: messages from a chat surface's conversation
+* (`surfaceKind`, `externalId` its id there) now go to a GoodVibes target
+* (`targetKind` session, run, job, task or message, and `targetId`).
+*/
+    {
     type: 'ROUTE_BINDING_CREATED';
     bindingId: string;
     surfaceKind: RouteSurfaceKind;
     externalId: string;
     targetKind: RouteTargetKind;
     targetId: string;
-} | {
+}
+/** A route binding changed; `changedFields` names what differs. */
+| {
     type: 'ROUTE_BINDING_UPDATED';
     bindingId: string;
     changedFields: string[];
-} | {
+}
+/** A route binding was removed; messages from that conversation are no longer routed by it. */
+| {
     type: 'ROUTE_BINDING_REMOVED';
     bindingId: string;
     surfaceKind: RouteSurfaceKind;
     externalId: string;
-} | {
+}
+/** An incoming message was matched to an existing route binding and sent to its target. */
+| {
     type: 'ROUTE_BINDING_RESOLVED';
     bindingId: string;
     surfaceKind: RouteSurfaceKind;
     externalId: string;
     targetKind: RouteTargetKind;
     targetId: string;
-} | {
+}
+/** A binding recorded where replies go in its conversation: `replyTargetId` and the thread `threadId`. */
+| {
     type: 'ROUTE_REPLY_TARGET_CAPTURED';
     bindingId: string;
     surfaceKind: RouteSurfaceKind;
     externalId: string;
     replyTargetId: string;
     threadId: string;
-} | {
+}
+/** Routing a message from a chat conversation failed; `error` says why. */
+| {
     type: 'ROUTE_BINDING_FAILED';
     surfaceKind: RouteSurfaceKind;
     externalId: string;
@@ -39719,6 +40150,20 @@ export type SecurityEvent =
     type: 'COMPANION_TOKEN_REVOKED';
     clientIp: string;
     reason?: string | undefined;
+}
+/**
+* The authority record (which keys, credentials and grants are current) changed:
+* here, in another process of this home, or merged from another machine.
+* Names the entries by kind and id only, never a value.
+*/
+| {
+    type: 'AUTHORITY_CHANGED';
+    kinds: string[];
+    ids: string[];
+    change: 'issued' | 'updated' | 'revoked' | 'absorbed';
+    rev: number;
+    origin: string;
+    cascade: string[];
 };
 
 // @public
@@ -39968,29 +40413,39 @@ export function summaryDependsOnWording(status: number | undefined): boolean;
 export const SURFACE_KINDS: readonly ["tui", "web", "slack", "discord", "ntfy", "webhook", "homeassistant", "telegram", "google-chat", "signal", "whatsapp", "telephony", "imessage", "msteams", "bluebubbles", "mattermost", "matrix", "service", "agent", "webui", "companion", "automation"];
 
 // @public
-export type SurfaceEvent = {
+export type SurfaceEvent =
+/** A chat surface (`surfaceKind`, such as Slack or Telegram) was turned on for account `accountId`. */
+    {
     type: 'SURFACE_ENABLED';
     surfaceKind: SurfaceKind;
     surfaceId: string;
     accountId: string;
-} | {
+}
+/** A chat surface was turned off; `reason` says why. */
+| {
     type: 'SURFACE_DISABLED';
     surfaceKind: SurfaceKind;
     surfaceId: string;
     reason: string;
-} | {
+}
+/** A surface's health check found it working again (it was not before); `displayName` is the surface's label. */
+| {
     type: 'SURFACE_ACCOUNT_CONNECTED';
     surfaceKind: SurfaceKind;
     surfaceId: string;
     accountId: string;
     displayName: string;
-} | {
+}
+/** A surface's health check found it failing (it was not before); `error` is the last error or the state it is in. */
+| {
     type: 'SURFACE_ACCOUNT_DEGRADED';
     surfaceKind: SurfaceKind;
     surfaceId: string;
     accountId: string;
     error: string;
-} | {
+}
+/** A surface gained (`enabled: true`) or lost (`enabled: false`) a capability, by name. */
+| {
     type: 'SURFACE_CAPABILITY_CHANGED';
     surfaceKind: SurfaceKind;
     surfaceId: string;
@@ -40081,20 +40536,6 @@ export type ToolEvent =
     tool: string;
     args: Record<string, unknown>;
 }
-/** Tool call arguments passed schema validation. */
-| {
-    type: 'TOOL_VALIDATED';
-    callId: string;
-    turnId: string;
-    tool: string;
-}
-/** Pre-execution hooks have run for this tool call. */
-| {
-    type: 'TOOL_PREHOOKED';
-    callId: string;
-    turnId: string;
-    tool: string;
-}
 /** Permission check completed; call may proceed. */
 | {
     type: 'TOOL_PERMISSIONED';
@@ -40111,20 +40552,6 @@ export type ToolEvent =
     turnId: string;
     tool: string;
     startedAt: number;
-}
-/** Tool result has been mapped/transformed for the provider. */
-| {
-    type: 'TOOL_MAPPED';
-    callId: string;
-    turnId: string;
-    tool: string;
-}
-/** Post-execution hooks have run for this tool call. */
-| {
-    type: 'TOOL_POSTHOOKED';
-    callId: string;
-    turnId: string;
-    tool: string;
 }
 /** Tool call completed successfully. */
 | {
@@ -40177,11 +40604,10 @@ export type ToolEvent =
     playbooks: readonly string[];
 }
 /**
-* A runtime budget was exceeded and the phase pipeline was terminated.
-* The `reason` discriminant distinguishes the type of budget breached:
-*  - BUDGET_EXCEEDED_MS,    wall-clock execution time limit
-*  - BUDGET_EXCEEDED_TOKENS, token consumption limit
-*  - BUDGET_EXCEEDED_COST,  cost limit in USD
+* A tool call went over its `runtime.toolBudget.*` limit (with
+* `runtime.toolBudget.enforced` on). `phase` is `executing` when the time
+* limit stopped the call, `completed` when the call finished over a limit
+* (it still succeeded; the model is told which limit it went over).
 */
 | {
     type: 'BUDGET_EXCEEDED_MS';
@@ -40191,7 +40617,9 @@ export type ToolEvent =
     phase: string;
     limitMs: number;
     elapsedMs: number;
-} | {
+}
+/** A tool call reported more tokens (`usedTokens`, its result's tokenCount) than `runtime.toolBudget.maxTokens` (`limitTokens`). */
+| {
     type: 'BUDGET_EXCEEDED_TOKENS';
     callId: string;
     turnId: string;
@@ -40199,7 +40627,9 @@ export type ToolEvent =
     phase: string;
     limitTokens: number;
     usedTokens: number;
-} | {
+}
+/** A tool call reported a cost (`usedCostUsd`, its result's costUsd) over `runtime.toolBudget.maxCostUsd` (`limitCostUsd`). */
+| {
     type: 'BUDGET_EXCEEDED_COST';
     callId: string;
     turnId: string;
@@ -40750,12 +41180,16 @@ export function validateOperatorResponse(method: OperatorMethodContract, body: u
 export const WATCHER_SOURCE_KINDS: readonly ["poll", "webhook", "tail", "file", "api", "stream"];
 
 // @public (undocumented)
-export type WatcherEvent = {
+export type WatcherEvent =
+/** A watcher began watching its source; `sourceKind` is how it reads it (poll, webhook, tail, file, api, stream) and `name` is its display name. */
+    {
     type: 'WATCHER_STARTED';
     watcherId: string;
     sourceKind: WatcherSourceKind;
     name: string;
-} | {
+}
+/** A watcher ran and saw its source at `seenAt`; `checkpoint` is how far it has read. Published after every run. */
+| {
     type: 'WATCHER_HEARTBEAT';
     watcherId: string;
     sourceKind: WatcherSourceKind;
@@ -40768,13 +41202,17 @@ export type WatcherEvent = {
     watcherId: string;
     sourceKind: WatcherSourceKind;
     checkpoint: string;
-} | {
+}
+/** A watcher run failed; `retryable` says whether it will try again. */
+| {
     type: 'WATCHER_FAILED';
     watcherId: string;
     sourceKind: WatcherSourceKind;
     error: string;
     retryable: boolean;
-} | {
+}
+/** A watcher stopped watching; `reason` says why (`stopped` by default, `removed` when it was deleted). */
+| {
     type: 'WATCHER_STOPPED';
     watcherId: string;
     sourceKind: WatcherSourceKind;

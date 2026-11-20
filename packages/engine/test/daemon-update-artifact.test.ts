@@ -69,6 +69,8 @@ function lifecycleWith(
   ]);
   const configManager = {
     get: (key: string) => config.get(key),
+    // The runtime follows service.autostart for its lifetime; these settings never change mid-test.
+    subscribe: () => () => {},
     getControlPlaneConfigDir: () => scratch,
   } as unknown as DaemonLifecycleRuntimeOptions['configManager'];
   const installs: number[] = [];
@@ -76,6 +78,7 @@ function lifecycleWith(
   const platformServiceManager = {
     serviceName: () => String(config.get('service.serviceName')),
     status: () => ({ platform: 'systemd', ...(overrides.status?.() ?? { installed: false, running: false }) }),
+    statusAsync: async () => ({ platform: 'systemd', ...(overrides.status?.() ?? { installed: false, running: false }) }),
     install: () => { installs.push(Date.now()); return overrides.install?.() ?? {}; },
   } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'];
   const runtime = new DaemonLifecycleRuntime({

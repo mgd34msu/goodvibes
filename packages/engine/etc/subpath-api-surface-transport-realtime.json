@@ -69,7 +69,7 @@
       "required": [
         "pairing"
       ],
-      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
+      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly code: string; readonly label?: string; }"
     },
     {
       "name": "RelayWebSocketLike",
@@ -291,7 +291,7 @@
       "required": [
         "pairing"
       ],
-      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
+      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly code: string; readonly label?: string; }"
     },
     {
       "name": "RelayWebSocketLike",

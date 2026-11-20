@@ -1,7 +1,9 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { BOOLEAN_SCHEMA, EMPTY_OBJECT_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, branchedSchema, objectSchema, listOutputSchema, entityOutputSchema, bodyEnvelopeSchema, methodDescriptor, requirementBranch, stringEnumSchema } from './method-catalog-shared.js';
 import {
   CONFIG_SET_OUTPUT_SCHEMA,
+  OWNER_APPROVAL_PENDING_SCHEMA,
   CONFIG_SNAPSHOT_SCHEMA,
   CREDENTIALS_SNAPSHOT_SCHEMA,
   CREDENTIAL_DELETE_INPUT_SCHEMA,
@@ -91,6 +93,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.create',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Create Local Auth User',
     description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
@@ -108,6 +111,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.scopes.set',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Set Local Auth User Scopes',
     description: 'Give a local auth user a narrower list of operator scopes, or return it to its role\'s default set with scopes: null. Takes effect on the user\'s next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.',
@@ -123,6 +127,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.delete',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Delete Local Auth User',
     description: 'Delete a local auth user.',
@@ -135,6 +140,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.users.password.rotate',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Rotate Local Auth Password',
     description: 'Rotate a local auth user password.',
@@ -147,6 +153,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.sessions.delete',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Revoke Local Auth Session',
     description: 'Revoke a local auth session.',
@@ -159,6 +166,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'local_auth.bootstrap.delete',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Delete Bootstrap File',
     description: 'Delete the local-auth bootstrap credential file.',
@@ -181,6 +189,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'panels.open',
+    repeat: 'safe',
     title: 'Open Panel',
     description: 'Open a listed panel in the terminal session this process runs. Answers opened: true only when the view appeared; an id GET /api/panels does not list is refused with 404, and a listed panel this process has no terminal screen to show is refused with 409.',
     category: 'panels',
@@ -217,6 +226,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'credentials.set',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Set Credential',
     description: 'Store a credential for a secret-bearing config key THROUGH the daemon, so a surface no longer has to write it into its own on-disk secret store, the write counterpart to credentials.get, and the reason a client on another machine can now finish a settings modal at all. `key` is the config path (e.g. surfaces.telegram.botToken); the secret-store name is derived from it. The value goes into the encrypted store at the scope the ownership rules resolve (a daemon-needed credential lands in the daemon tier whoever asked), is read BACK and compared, and only then does the config key take its goodvibes://secrets/goodvibes/<KEY> reference. A read-back mismatch fails the call and leaves the setting exactly as it was, because a reference resolving to nothing reads as a configured-but-broken credential. The response is secret-free: key names, the resolved scope, the reference now in config, and two plain sentences about where the setting and the credential are filed, never the value. Refuses a key that is not credential-bearing (use config.set) and refuses a value that is itself a goodvibes:// reference. ws-only invoke verb; no REST binding. Mutating, so a relay call is covered by relay.requireStepUpForMutations exactly as config.set is.',
@@ -229,6 +239,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'credentials.delete',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Delete Credential',
     description: 'Remove a credential: the stored secret first, then the config reference pointing at it. That order is deliberate, clearing the config first would strand a secret nothing points at and nothing reaps, while this order leaves, for an instant, a reference resolving to nothing, which every reader already treats as configured-but-broken (the honest state for a credential mid-removal). `cleared: false` means nothing was stored under that key: a miss, not an error, because asking for a credential to be gone when it already is has succeeded. ws-only invoke verb; no REST binding. Mutating, so a relay call is covered by relay.requireStepUpForMutations exactly as config.set is.',
@@ -241,35 +252,38 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'config.set',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Set Config Value',
-    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients\' lanes, which answer with that lane\'s own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.',
+    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients\' lanes, which answer with that lane\'s own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner\'s own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon\'s machine and a device the owner paired himself (origin owner-pairing) make it at once.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',
     http: { method: 'POST', path: '/config' },
     inputSchema: CONFIG_SET_INPUT_SCHEMA,
-    outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
+    outputSchema: { anyOf: [CONFIG_SET_OUTPUT_SCHEMA, OWNER_APPROVAL_PENDING_SCHEMA] },
   }),
   methodDescriptor({
     id: 'config.setMany',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Set Several Config Values',
-    description: 'Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry\'s held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.',
+    description: 'Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry\'s held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set. A change that loosens a security, permission, judgment or payment setting is the owner\'s own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon\'s machine and a device the owner paired himself (origin owner-pairing) make it at once.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',
     http: { method: 'POST', path: '/config/many' },
     inputSchema: CONFIG_SET_MANY_INPUT_SCHEMA,
-    outputSchema: CONFIG_SET_MANY_OUTPUT_SCHEMA,
+    outputSchema: { anyOf: [CONFIG_SET_MANY_OUTPUT_SCHEMA, OWNER_APPROVAL_PENDING_SCHEMA] },
   }),
   methodDescriptor({
     id: 'config.reset',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Reset Config Value',
-    description: 'Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set).',
+    description: 'Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set). A change that loosens a security, permission, judgment or payment setting is the owner\'s own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon\'s machine and a device the owner paired himself (origin owner-pairing) make it at once.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',
     http: { method: 'POST', path: '/config/reset' },
     inputSchema: objectSchema({ key: STRING_SCHEMA }, ['key']),
-    outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
+    outputSchema: { anyOf: [CONFIG_SET_OUTPUT_SCHEMA, OWNER_APPROVAL_PENDING_SCHEMA] },
   }),
 ];

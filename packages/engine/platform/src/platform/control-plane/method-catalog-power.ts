@@ -60,6 +60,7 @@ export const builtinGatewayPowerMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'power.keepAwake.set',
+    repeat: 'safe',
     title: 'Set the Owner Keep-Awake Toggle',
     description: 'Turn the owner keep-awake toggle on or off: a daemon-held sleep inhibitor INDEPENDENT of work state, surviving surface closes, persisted as power.keepAwake. Covers idle + sleep + lid-switch classes where grantable; the returned state names any refused class honestly. No timers, no AC-only sub-options, the always-visible chip is the safety mechanism. Emits runtime.ops OPS_POWER_STATE_CHANGED so every attached surface updates its chip.',
     category: 'health',

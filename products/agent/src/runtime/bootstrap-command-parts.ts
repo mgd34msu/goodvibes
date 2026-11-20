@@ -108,6 +108,7 @@ export interface BootstrapCommandSectionOptions {
   readonly readModels: UiReadModels;
   readonly shellPaths: ShellPathService;
   readonly fileUndoManager: FileUndoManager;
+  readonly workspaceCheckpointManager?: import('@goodvibes-jev/engine/platform/platform/workspace').WorkspaceCheckpointManager;
   readonly executionLedger?: AgentExecutionLedger;
   readonly approvalsView?: ApprovalsView;
   readonly memoryRegistry?: MemoryRegistry;
@@ -271,6 +272,7 @@ export function createBootstrapCommandWorkspaceSection(
     BootstrapCommandSectionOptions,
     | 'keybindingsManager'
     | 'fileUndoManager'
+    | 'workspaceCheckpointManager'
     | 'profileManager'
     | 'bookmarkManager'
     | 'processManager'
@@ -284,6 +286,7 @@ export function createBootstrapCommandWorkspaceSection(
   return {
     ...projectCommandWorkspaceSection(options), processManager: options.processManager,
     ...(options.workspaceTrustManager ? { workspaceTrustManager: options.workspaceTrustManager } : {}),
+    ...(options.workspaceCheckpointManager ? { workspaceCheckpointManager: options.workspaceCheckpointManager } : {}),
     ...shellServices.workspace,
   };
 }

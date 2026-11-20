@@ -7,7 +7,9 @@ import type { SharedSessionBroker } from '../control-plane/index.js';
 import type { ChannelPluginRegistry, ChannelReplyPipeline, RouteBindingManager } from '../channels/index.js';
 import type { ChannelPolicyManager, ChannelSurface } from '../channels/index.js';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
-import { deliverOwnerAlert } from './owner-alert.js';
+import { deliverOwnerAlert, isOwnerConversation, orderOwnerAlertRoutes } from './owner-alert.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
+import { approvalGuestChannel } from '../control-plane/approval-broker-raise.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { BOOT_RECONCILE_CANCEL_REASON } from '../control-plane/session-broker-state.js';
@@ -789,16 +791,22 @@ export class DaemonSurfaceDeliveryHelper {
   async notifyApprovalUpdate(approval: SharedApprovalRecord): Promise<void> {
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
-    const outcome = await this.deliverApprovalToItsRoute(approval);
+    // An ask a guest's turn raised (someone a channel admits who is not its
+    // owner) is the owner's: it goes to his own conversation, never the guest's.
+    const guestChannel = approvalGuestChannel(approval);
+    const outcome = guestChannel === undefined
+      ? await this.deliverApprovalToItsRoute(approval)
+      : await this.deliverApprovalToOwner(approval, guestChannel);
     if (outcome.delivered || (approval.status !== 'pending' && approval.status !== 'claimed')) return;
-    if (!this.approvalNeedsOwnerAlert(approval)) return;
+    if (guestChannel === undefined && !this.approvalNeedsOwnerAlert(approval)) return;
     // Marked already: the record update that said so is itself published here.
     const marked = approval.metadata['promptDelivery'];
     if (typeof marked === 'object' && marked !== null && (marked as { delivered?: unknown }).delivered === false) return;
     const reason = outcome.reason === 'delivery-failed' && outcome.error ? `delivery-failed: ${outcome.error}` : outcome.reason;
     const webUrl = this.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
     const text = `Approval required for ${approval.request.tool}: ${approval.request.analysis.summary}. `
-      + 'It could not be shown in the conversation it came from. '
+      + (guestChannel === undefined ? 'It could not be shown in the conversation it came from. '
+        : `It was asked for by someone on ${guestChannel} who is not you, and none of your own conversations took it. `)
       + `Answer it in the terminal app or the web UI${webUrl ? `: ${webUrl}` : ''}.`;
     const reached = await deliverOwnerAlert(this.context.routeBindings, this, null, text);
     logger.warn('An approval prompt did not reach its conversation', {
@@ -830,12 +838,42 @@ export class DaemonSurfaceDeliveryHelper {
     return !session.participants.some((participant) => INTERACTIVE_SURFACE_KINDS.has(participant.surfaceKind));
   }
 
+  /**
+   * A guest's ask, shown on the owner's own conversations (owner-alert.ts),
+   * those on the guest's channel first, newest first, until one takes it.
+   */
+  private async deliverApprovalToOwner(approval: SharedApprovalRecord, channel: string): Promise<SurfaceNoticeDelivery> {
+    let bindings: readonly RouteBinding[];
+    try { bindings = this.context.routeBindings.listBindings(); }
+    catch { return { delivered: false, reason: 'no-route-binding' }; }
+    const owners = new Map<string, string | undefined>();
+    const ownerOf = (surface: string) => {
+      if (!owners.has(surface)) owners.set(surface, this.channelOwner(surface));
+      return owners.get(surface);
+    };
+    const preferred = isChannelSurfaceKind(channel) ? channel : null;
+    let last: SurfaceNoticeDelivery = { delivered: false, reason: 'no-route-binding' };
+    for (const binding of orderOwnerAlertRoutes(bindings.filter((candidate) => isOwnerConversation(candidate, ownerOf(candidate.surfaceKind))), preferred)) {
+      try {
+        last = await this.deliverApprovalToBinding(approval, binding);
+      } catch (error) {
+        last = { delivered: false, reason: 'delivery-failed', error: summarizeError(error) };
+      }
+      if (last.delivered) return last;
+    }
+    return last;
+  }
+
   private async deliverApprovalToItsRoute(approval: SharedApprovalRecord): Promise<SurfaceNoticeDelivery> {
     const routeId = approval.routeId
       ?? this.context.sessionBroker.getSession(approval.sessionId ?? '')?.routeIds[0];
     if (!routeId) return { delivered: false, reason: 'no-route-binding' };
     const binding = this.context.routeBindings.getBinding(routeId);
     if (!binding) return { delivered: false, reason: 'no-route-binding' };
+    return this.deliverApprovalToBinding(approval, binding);
+  }
+
+  private async deliverApprovalToBinding(approval: SharedApprovalRecord, binding: RouteBinding): Promise<SurfaceNoticeDelivery> {
     // The four surfaces rendered here say whether the prompt got there.
     const deps = this.approvalDeliveryDeps();
     switch (binding.surfaceKind) {

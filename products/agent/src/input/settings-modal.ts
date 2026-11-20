@@ -22,7 +22,7 @@ import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/plat
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
-import { keepMcpToolRuleFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
@@ -654,13 +654,13 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.editingMode = false;
     this.editBuffer = '';
     this.mcpAllowAllConfirmationTarget = null;
-    try {
-      this.mcpRegistry.setServerTrustMode(entry.name, mode);
-      this.lastSettingEffectMessage = `${entry.name} trust mode is ${mode} for this session only; edit the server in /mcp to keep it after a restart.`;
-    } catch (error) {
-      this.lastSettingEffectMessage = `Trust mode not changed: ${summarizeError(error)}`;
-    }
-    this._loadMcpEntries();
+    // Applied now and kept in the server's MCP config, so it holds after a restart.
+    const registry = this.mcpRegistry;
+    keepMcpTrustModeFromSettings(registry, entry.name, mode, (message, entries) => {
+      this.lastSettingEffectMessage = message;
+      if (this.mcpRegistry === registry) this.mcpEntries = entries;
+      this.requestHostSettingRender?.();
+    });
     return true;
   }
 

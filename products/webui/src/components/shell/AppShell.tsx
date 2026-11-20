@@ -38,6 +38,7 @@ import { ThemeProvider, useTheme } from '../../hooks/useTheme';
 import ErrorBoundary from '../feedback/ErrorBoundary';
 import { ToastProvider } from '../../lib/toast';
 import { ToastViewport } from '../toast/ToastViewport';
+import { OwnerApprovalNotices } from './OwnerApprovalNotices';
 import CommandProvider from '../command/CommandProvider';
 import { PeekProvider } from '../peek/PeekPanel';
 import { ShellProvider } from './ShellContext';
@@ -115,6 +116,7 @@ function InnerShell({ children, onNavigate, onOpenSettings }: InnerShellProps) {
           <ShellProvider>
             <PeekProvider>
               {children}
+              <OwnerApprovalNotices />
               <ToastViewport />
               <AnnouncerRegion />
             </PeekProvider>

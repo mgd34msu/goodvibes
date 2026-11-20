@@ -61,6 +61,8 @@ import {
 } from './settings-reader-floor.js';
 import { VERSION } from '../version.js';
 import { logger } from '../utils/logger.js';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 /** What the reader did with a setting it could not ingest as written: skipped it, refused the file, or read it under its current name (`mapped`). */
 export type SettingsIngestionAction = 'skipped' | 'refused' | 'mapped';
@@ -501,23 +503,57 @@ export function announceIngestionNotice(
   entry: SettingsIngestionNotice,
   write: (line: string) => void = line => { process.stderr.write(line); },
 ): void {
-  const verb = entry.action === 'refused' ? 'REFUSED' : entry.action === 'mapped' ? 'read' : 'skipped';
-  const line = `goodvibes settings: ${verb} ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
-  try {
-    write(`${line}\n`);
-  } catch {
-    // A closed or unwritable stderr must never turn a bad setting into a crash.
-  }
   const fields = { file: entry.file, key: entry.key, reason: entry.reason, remedy: entry.remedy };
   if (entry.action === 'refused') logger.error('goodvibes settings: a setting could not be ingested', fields);
   else if (entry.action === 'mapped') logger.warn('goodvibes settings: a setting saved under an earlier name was read under its current one', fields);
   else logger.warn('goodvibes settings: a setting was skipped', fields);
+  // A refusal stops the program, so it is said every time, with its remedy.
+  // A skipped or renamed setting is said once per tree, in one short line: not
+  // again by the next command, the next program or the next settings reload.
+  if (entry.action !== 'refused' && !firstMention(entry)) return;
+  try {
+    write(`${describeIngestionNotice(entry)}\n`);
+  } catch {
+    // A closed or unwritable stderr must never turn a bad setting into a crash.
+  }
 }
 
-/** A one-line, owner-facing summary of one notice, for a startup receipt. */
+/** Notices already shown in this process. */
+const mentioned = new Set<string>();
+/** Where a tree records the notices it has shown: `<tree>/.goodvibes/settings-notices.json`. */
+const NOTICE_RECORD = 'settings-notices.json';
+
+/**
+ * Whether this skipped or renamed setting is news: not shown before by this
+ * process, and not recorded as shown in the tree its file belongs to (the
+ * `.goodvibes` directory two levels above `<app>/settings.json`), which every
+ * program and command of that tree reads. Keyed by the action and the key, not
+ * the file, because a program that seeds its file from another's carries the
+ * same stray key: one mention covers both. Reads one small file only when a
+ * notice exists, and writes it only for a new one.
+ */
+function firstMention(entry: SettingsIngestionNotice): boolean {
+  const id = `${entry.action} ${entry.key}`;
+  if (mentioned.has(id)) return false;
+  mentioned.add(id);
+  const tree = dirname(dirname(entry.file));
+  if (basename(tree) !== '.goodvibes') return true;
+  const record = join(tree, NOTICE_RECORD);
+  let shown: Record<string, unknown> = {};
+  try { shown = JSON.parse(readFileSync(record, 'utf-8')) as Record<string, unknown>; } catch { /* none yet */ }
+  if (shown[id] !== undefined) return false;
+  try { writeFileSync(record, `${JSON.stringify({ ...shown, [id]: entry.file }, null, 2)}\n`, { mode: 0o600 }); }
+  catch { /* unrecorded: said again next time */ }
+  return true;
+}
+
+/** A one-line, owner-facing summary of one notice: what, where and why, briefly. */
 export function describeIngestionNotice(entry: SettingsIngestionNotice): string {
-  const verb = entry.action === 'refused' ? 'refused' : entry.action === 'mapped' ? 'read' : 'ignored';
-  return `Settings: ${verb} ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
+  if (entry.action === 'refused') return `goodvibes settings: REFUSED ${entry.key} in ${entry.file}, ${entry.reason}. ${entry.remedy}`;
+  const verb = entry.action === 'mapped' ? 'read' : 'ignored';
+  // The first clause of the reason; the full reason and remedy are in the activity log.
+  const why = entry.reason.split(';')[0]!.trim().replace(/^is /, '');
+  return `goodvibes settings: ${verb} ${entry.key} in ${entry.file} (${why}).`;
 }
 
 /** Options for {@link ingestSettingsFile}; all seams are injectable for tests. */

@@ -34,6 +34,8 @@ import {
   emitPluginDisabled,
   emitPluginError,
   emitPluginLoaded,
+  emitPluginDegraded,
+  emitPluginDiscovered,
   emitPluginLoading,
   emitPluginUnloading,
 } from '../runtime/emitters/plugins.js';
@@ -756,6 +758,8 @@ export class PluginManager {
     this.ownedCalls.set(tracker, names);
     names.add(discovered.manifest.name);
     const pluginId = discovered.manifest.name;
+    // The plugin's lifecycle span starts here: this is the copy found on disk that is about to load.
+    this.emitLifecycle(pluginId, 'discovered', (bus, ctx) => emitPluginDiscovered(bus, ctx, { pluginId, path: discovered.pluginDir, version: discovered.manifest.version }));
     this.emitLifecycle(pluginId, 'loading', (bus, ctx) => emitPluginLoading(bus, ctx, { pluginId, path: discovered.pluginDir }));
     let reason: string | undefined;
     const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true,
@@ -765,6 +769,15 @@ export class PluginManager {
       this.startFailures.delete(pluginId);
       this.emitLifecycle(pluginId, 'loaded', (bus, ctx) => emitPluginLoaded(bus, ctx, { pluginId, version: loaded.manifest.version, capabilities: [...((loaded.manifest as { capabilities?: string[] }).capabilities ?? [])] }));
       this.emitLifecycle(pluginId, 'active', (bus, ctx) => emitPluginActive(bus, ctx, { pluginId }));
+      // Running with part of what it declares withheld by its trust tier: those registrations are refused.
+      const tier = this.currentTrust().getTier(pluginId);
+      const grant = resolvePluginGrant(pluginId, discovered.manifest, tier);
+      const withheld = [...grant.declared].filter((capability) => !grant.granted.has(capability));
+      if (withheld.length > 0) {
+        this.emitLifecycle(pluginId, 'degraded', (bus, ctx) => emitPluginDegraded(bus, ctx, {
+          pluginId, reason: `its trust tier (${tier}) withholds ${withheld.join(', ')}`, affectedCapabilities: withheld,
+        }));
+      }
     } else {
       this.startFailures.set(pluginId, reason ?? 'the plugin did not start');
       this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: reason ?? 'the plugin did not start', fatal: true }));

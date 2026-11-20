@@ -23,6 +23,7 @@ export type { PruneStaleOperatorTokensOptions, PruneStaleOperatorTokensResult } 
 export { PairingLimitReachedError, PairingTokenManager, pairingPrincipalId, readLegacySharedRevoked } from './pairing-token-store.js';
 export type {
   PublicPairingToken,
+  PairingTokenOrigin,
   MintedPairingToken,
   AuthenticatedPairingToken,
   PairingTokenManagerOptions,
@@ -92,6 +93,7 @@ export type {
 export {
   formatCreated,
   formatDeviceLine,
+  deviceOriginLabel,
   formatLastSeen,
   resolveTokenByIdPrefix,
   shortTokenId,
@@ -106,5 +108,5 @@ export {
 } from './offer-copy.js';
 export type { PairingOfferCopy } from './offer-copy.js';
 
-export { controlPlaneOriginUsesStableHost, controlPlaneScheme, ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, resolveControlPlaneOrigin, resolvePairingWebOrigin } from './web-origin.js';
+export { controlPlaneOriginUsesStableHost, controlPlaneScheme, ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, resolveControlPlaneOrigin, resolvePairingWebOrigin, resolveWebUiListener, resolveWebUiOrigin } from './web-origin.js';
 export type { ControlPlaneOrigin, PairingWebOrigin } from './web-origin.js';

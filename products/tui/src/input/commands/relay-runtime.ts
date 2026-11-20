@@ -67,7 +67,7 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
   ].join('\n'));
 }
 
-async function renderPair(ctx: CommandContext): Promise<void> {
+async function renderPair(ctx: CommandContext, name: string | undefined): Promise<void> {
   const cfg = relayConfigured(ctx);
   if (!cfg.enabled || !cfg.flagOn) {
     ctx.print('Relay is disabled: turn on relay.enabled in /config relay first.');
@@ -78,7 +78,7 @@ async function renderPair(ctx: CommandContext): Promise<void> {
     ctx.print('Relay pairing is unavailable: background service controller is not running in this build.');
     return;
   }
-  const reading = await externalServices.mintRelayPairing();
+  const reading = await externalServices.mintRelayPairing(name);
   if (!reading.minted) {
     ctx.print('reason' in reading
       ? `Relay pairing could not be minted: the daemon could not be asked (${reading.reason}). Check the daemon with /status.`
@@ -92,20 +92,67 @@ async function renderPair(ctx: CommandContext): Promise<void> {
     reading.minted.encoded,
     '',
     renderQrToString(qrMatrix),
+    '',
+    `It carries a relay code for one device${reading.minted.codeName ? `, "${reading.minted.codeName}"` : ''}${reading.minted.codeId ? ` (${reading.minted.codeId})` : ''}.`,
+    'Pair each device with its own code. /relay codes lists them; /relay revoke <id> cuts one device off the relay at its next request.',
   ].join('\n'));
+}
+
+function formatTime(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+}
+
+async function renderCodes(ctx: CommandContext): Promise<void> {
+  const externalServices = ctx.platform.externalServices;
+  if (!externalServices) {
+    ctx.print('Relay codes are unavailable: background service controller is not running in this build.');
+    return;
+  }
+  const reading = await externalServices.listRelayCodes();
+  if (reading.codes === null) {
+    ctx.print(`Relay codes could not be read: the daemon could not be asked (${reading.reason}). Check the daemon with /status.`);
+    return;
+  }
+  if (reading.codes.length === 0) {
+    ctx.print('No relay codes: no device is paired through the relay. /relay pair [name] pairs one.');
+    return;
+  }
+  ctx.print([
+    `Relay codes (${reading.codes.length}), one per device paired through the relay:`,
+    ...reading.codes.map((code) => `  ${code.id}  ${code.name}  created ${formatTime(code.createdAt)}  ${code.lastSeenAt ? `last used ${formatTime(code.lastSeenAt)}` : 'not used yet'}`),
+    '/relay revoke <id> cuts that device off the relay at its next request; every other device keeps working.',
+  ].join('\n'));
+}
+
+async function renderRevoke(ctx: CommandContext, id: string | undefined): Promise<void> {
+  if (!id) {
+    ctx.print('Usage: /relay revoke <id>  (the ids are in /relay codes)');
+    return;
+  }
+  const externalServices = ctx.platform.externalServices;
+  if (!externalServices) {
+    ctx.print('Relay codes are unavailable: background service controller is not running in this build.');
+    return;
+  }
+  const reading = await externalServices.revokeRelayCode(id);
+  ctx.print(reading.revoked
+    ? `Relay code ${reading.id} revoked: that device is refused at its next request through the relay. Pair it again on the home network to restore it.`
+    : `Relay code ${id} was not revoked: ${reading.reason}`);
 }
 
 export function registerRelayRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'relay',
-    description: 'Outbound relay reachability status, or mint a QR-encodable pairing payload',
-    usage: '[status|pair]',
-    argsHint: '[status|pair]',
+    description: 'Outbound relay reachability status, mint a pairing payload for one device, or list and revoke devices\' relay codes',
+    usage: '[status|pair [name]|codes|revoke <id>]',
+    argsHint: '[status|pair [name]|codes|revoke <id>]',
     async handler(args, ctx) {
       const sub = args[0]?.toLowerCase();
-      if (sub === 'pair') return renderPair(ctx);
+      if (sub === 'pair') return renderPair(ctx, args.slice(1).join(' ').trim() || undefined);
+      if (sub === 'codes') return renderCodes(ctx);
+      if (sub === 'revoke') return renderRevoke(ctx, args[1]);
       if (sub === undefined || sub === 'status') return renderStatus(ctx);
-      ctx.print(`Unknown /relay subcommand: ${sub}. Use: status | pair`);
+      ctx.print(`Unknown /relay subcommand: ${sub}. Use: status | pair [name] | codes | revoke <id>`);
     },
   });
 }

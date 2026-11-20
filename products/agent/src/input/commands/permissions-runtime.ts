@@ -1,5 +1,6 @@
 import { PERMISSIONS_COMMAND, runPermissionsCommand, type RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { CommandRegistry } from '../command-registry.ts';
+import { readExecutionModeInForce } from '../../permissions/execution-mode.ts';
 
 /**
  * `/permissions` in the Agent: the shared command (gate/policy/permissions-runtime.ts)
@@ -16,6 +17,10 @@ export function registerPermissionsRuntimeCommands(registry: CommandRegistry, ru
         print: (text) => ctx.print(text),
         ruleStore: ruleStore(),
         configManager: ctx.platform.configManager,
+        // A rule added here (other than a never-run rule) is scoped to this project.
+        projectRoot: () => ctx.platform.configManager.getWorkingDirectory(),
+        // A hosted session's mode in force is its host's; otherwise this process's settings decide it.
+        modeInForce: () => readExecutionModeInForce(ctx.platform.configManager),
         openSelection: ctx.openSelection,
       });
     },

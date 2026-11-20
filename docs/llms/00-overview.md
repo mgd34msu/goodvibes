@@ -113,7 +113,7 @@ GoodVibes keeps its state in plain files and SQLite databases under two roots: t
 
 ### The home tree
 
-The home tree is `~/.goodvibes/`. `GOODVIBES_HOME=<dir>` moves it to `<dir>/.goodvibes/` for the terminal app and the daemon; Agent uses `GOODVIBES_AGENT_HOME` instead. An installation made with `scripts/install-from-checkout.sh` sets `GOODVIBES_HOME` to its data directory (default `~/.local/share/goodvibes-data`), so its home tree is `~/.local/share/goodvibes-data/.goodvibes/`. `GOODVIBES_DAEMON_HOME=<dir>` (or `goodvibes-daemon --daemon-home <dir>`) moves only the `daemon/` directory below.
+The home tree is `~/.goodvibes/`. `GOODVIBES_HOME=<dir>` moves it to `<dir>/.goodvibes/` for the terminal app, the daemon and the Agent; `GOODVIBES_AGENT_HOME=<dir>` moves the Agent alone. An installation made with `scripts/install-from-checkout.sh` sets `GOODVIBES_HOME` to its data directory (default `~/.local/share/goodvibes-data`), so its home tree is `~/.local/share/goodvibes-data/.goodvibes/`. `GOODVIBES_DAEMON_HOME=<dir>` (or `goodvibes-daemon --daemon-home <dir>`) moves only the `daemon/` directory below.
 
 "Edit by hand" says whether a person may change the file with a text editor. A settings file is read again when it changes on disk, so a hand edit takes effect without a restart. Every other file is written by the programs; change it only through the commands named.
 
@@ -135,7 +135,7 @@ The home tree is `~/.goodvibes/`. `GOODVIBES_HOME=<dir>` moves it to `<dir>/.goo
 | `tui/guidance.json`, `agent/guidance.json` | Which one-time guidance notices were shown. | No. |
 | `tui/discovered-providers.json` | Local model servers found on this machine. | No. |
 | `tui/auth-users.json` | Local user accounts for signing in to the daemon and the web UI. | No. Use `goodvibes auth`. |
-| `tui/auth-bootstrap.txt` | The first-run bootstrap sign-in credential. The daemon deletes it the first time anyone signs in with a real password (not the bootstrap one). | No. `goodvibes auth clear-bootstrap` deletes it by hand. |
+| `tui/auth-bootstrap.txt` | The first-run bootstrap sign-in credential. Its password signs in only while this file holds it: deleting or clearing the file withdraws it. Setting `admin`'s password deletes the file. | No. `goodvibes auth clear-bootstrap` deletes it (and so withdraws the password). |
 | `tui/connected-daemons.json` | The token the terminal app presents to each daemon on another machine, keyed by that daemon's address (written by the setup choice "Connect to an existing running daemon"). | No. |
 | `agent/connected-host-pairings/pairings.json` | Agent's pairing with each daemon it connects to. | No. |
 | `tui/control-plane/` | Control-plane state: pairing tokens, daemon lifecycle, notification dead letters, occasion state, announcements. | No. |
@@ -143,7 +143,7 @@ The home tree is `~/.goodvibes/`. `GOODVIBES_HOME=<dir>` moves it to `<dir>/.goo
 | `tui/crashes.jsonl`, `agent/crashes.jsonl` | A record of crashes, one JSON object per line. | No. Read it when reporting a crash. |
 | `tui/browser/`, `agent/browser/` | The browser tools' driver (`driver/`), browser profiles with their sign-ins (`profiles/`) and saved screenshots (`screenshots/`). | No. |
 | `shared/memory.sqlite`, `shared/memory.vec.sqlite` | Memory records and their search index. | No. Use the memory commands. |
-| `shared/owner-inbox.sqlite` | The owner inbox: questions, held actions and purchase windows waiting for the owner. | No. |
+| `shared/owner-inbox.sqlite` | The owner inbox: questions, held actions, purchase windows and reports of unattended runs waiting for the owner. | No. |
 | `hosted-sessions/` | Conversations the daemon hosts. | No. |
 | `companion-chat/sessions/` | Companion chat conversations (web UI and phone). | No. |
 | `project-identities/` | Which project directory has which project id. | No. |
@@ -289,5 +289,7 @@ goodvibes failed to start: Global config load failed for /home/me/.goodvibes/tui
 ```
 
 Fix the JSON (or move the file away to start from defaults) and start the program again.
+
+A key the program does not know (a misspelling, or a key from a newer release), or one that belongs in another file (a daemon setting in a program's or a project's file), is skipped and the rest of the file applies. It is said once, in one short line naming the key and the file, for example `goodvibes settings: ignored display.bogusKey in /home/me/.goodvibes/tui/settings.json (not a setting this build knows).`; the next command or program reading the same tree does not repeat it (`<tree>/.goodvibes/settings-notices.json` records what was said), and a running app shows it once per session. The full reason and its remedy are in the activity log.
 
 Which value is in effect, and from which layer, is shown on the settings screen and by `goodvibes status` for the main keys. The full list of keys, with each one's type, default, allowed values and file, is under "Settings" in the reference.

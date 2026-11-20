@@ -104,3 +104,12 @@ export function emitCompanionTokenRevoked(
 ): void {
   bus.emit('security', securityEvent('COMPANION_TOKEN_REVOKED', data, ctx));
 }
+
+/** Emit AUTHORITY_CHANGED when the authority record changed. Kinds and ids only, never a value. */
+export function emitAuthorityChanged(
+  bus: RuntimeEventBus,
+  ctx: EmitterContext,
+  data: { kinds: string[]; ids: string[]; change: 'issued' | 'updated' | 'revoked' | 'absorbed'; rev: number; origin: string; cascade: string[] },
+): void {
+  bus.emit('security', securityEvent('AUTHORITY_CHANGED', data, ctx));
+}

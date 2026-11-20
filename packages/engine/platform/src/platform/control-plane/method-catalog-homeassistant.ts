@@ -5,6 +5,7 @@
  * that gate them.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -38,6 +39,7 @@ export const builtinGatewayHomeAssistantMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'homeassistant.conversation.submit',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Submit Home Assistant Conversation Message',
     description: 'Post one utterance to the isolated chat session of a Home Assistant conversation and wait for the reply (or return at once with wait false). A providerId or modelId of the caller\'s choosing needs an admin token. A tools list is refused.',
@@ -52,6 +54,7 @@ export const builtinGatewayHomeAssistantMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'homeassistant.conversation.stream',
+    replay: { in: 'body', name: 'messageId', behavior: 'A repeat that names the same `messageId` in the same conversation posts nothing again and starts no second turn: while the first turn runs the repeat waits for it and streams its outcome as the final or error frame; after it ended the outcome is read from the transcript. A stream the client drops cancels its own turn, so a repeat after a drop reports it cancelled. The daemon keeps the messageId while it runs (a restart forgets it). Without a messageId each call posts the utterance and starts a turn.' },
     effect: 'outward',
     title: 'Stream Home Assistant Conversation Message',
     description: 'Post one utterance and stream the reply as server-sent events: delta frames, then one final or error frame. A providerId or modelId of the caller\'s choosing needs an admin token.',
@@ -66,6 +69,7 @@ export const builtinGatewayHomeAssistantMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'homeassistant.conversation.cancel',
+    repeat: 'safe',
     title: 'Cancel Home Assistant Conversation Turn',
     description: 'Stop the running turn of a Home Assistant chat session, named by sessionId or by a known messageId. The session stays open. A session that is not a Home Assistant chat session answers 404.',
     category: 'channels',

@@ -16,6 +16,8 @@ export function registerPermissionsRuntimeCommands(registry: CommandRegistry): v
         print: (text) => ctx.print(text),
         ruleStore: ctx.clients?.userPermissionRuleStore,
         configManager: ctx.platform.configManager,
+        // A rule added here (other than a never-run rule) is scoped to this project.
+        projectRoot: () => ctx.platform.configManager.getWorkingDirectory(),
         evaluatorInForce: () => flags ? (flags.isEnabled('permissions-policy-engine') ? 'policy-engine' : 'baseline') : undefined,
         openSelection: ctx.openSelection,
       });

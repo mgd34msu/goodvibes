@@ -13,6 +13,7 @@ import {
   type PerMethodRetryPolicy,
 } from './retry.js';
 import { assertSameOriginAbsoluteUrl, buildUrl, createTransportPaths, type TransportPaths } from './paths.js';
+import { exemptLoopbackFromProxy } from './loopback-proxy.js';
 import {
   composeMiddleware,
   createUuidV4,
@@ -297,7 +298,22 @@ export function createFetch(fetchImpl?: FetchLike, fallbackFetch?: FetchLike): F
   if (typeof resolved !== 'function') {
     throw new ConfigurationError('Fetch implementation is required. Pass a fetch option (e.g. options.fetch) or ensure globalThis.fetch is available in your runtime.');
   }
-  return resolved.bind(globalThis);
+  const bound = resolved.bind(globalThis);
+  // Requests to this machine never go through a proxy (loopback-proxy.ts).
+  exemptLoopbackFromProxy();
+  return (input, init) => {
+    exemptLoopbackFromProxy(requestHostname(input));
+    return bound(input, init);
+  };
+}
+
+function requestHostname(input: string | URL | Request): string | undefined {
+  if (input instanceof URL) return input.hostname;
+  try {
+    return new URL(typeof input === 'string' ? input : input.url).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 const MAX_RETRY_AFTER_MS = 10 * 60 * 1000; // 10 minutes

@@ -3,12 +3,15 @@ import { resolve } from 'node:path';
 import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, withOwnerConfirmation, type CommandConfirmation, type ConfirmationHost } from './command-confirmation.js';
 
 type PluginTrustTierName = 'untrusted' | 'limited' | 'trusted';
 
 /** The plugin manager reads and writes the trust lines use. */
 export type PluginTrustControls = Pick<PluginManager, 'list' | 'capabilities' | 'verify' | 'trust' | 'trustSigned' | 'setPublisherKey'>;
+/** The plugin manager calls that switch a plugin on or off in a running app. */
+export type PluginLifecycleControls = Pick<PluginManager, 'enable' | 'disable' | 'reload' | 'quarantine' | 'liftQuarantine'>;
 
 /** What each trust tier lets a plugin do; the plugin loader enforces it at every start, in every app. */
 export const PLUGIN_TIER_EFFECT: Readonly<Record<PluginTrustTierName, string>> = {
@@ -136,22 +139,96 @@ export async function runPluginTrustSubcommand(
 }
 
 /**
+ * Runs `/plugin enable|disable|reload|quarantine` against the running app's plugin
+ * manager, the same lines in the terminal app and the Agent. Returns false for
+ * any other subcommand. A line that did not do what it asked throws its refusal.
+ */
+export async function runPluginLifecycleSubcommand(
+  manager: PluginLifecycleControls,
+  args: readonly string[],
+  print: (text: string) => void,
+): Promise<boolean> {
+  const sub = args[0];
+  const name = args[1];
+  if (sub === 'enable') {
+    if (!name) throw commandRefusal('Usage: /plugin enable <name>');
+    const result = await manager.enable(name);
+    if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not enabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
+    print(`Plugin '${name}' enabled and activated.`);
+    return true;
+  }
+  if (sub === 'disable') {
+    if (!name) throw commandRefusal('Usage: /plugin disable <name>');
+    const result = await manager.disable(name);
+    if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not disabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
+    print(`Plugin '${name}' disabled.`);
+    return true;
+  }
+  if (sub === 'reload') {
+    print('Reloading plugins...');
+    const summary = await manager.reload();
+    const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
+    for (const { name: failed, reason } of summary.loadFailed ?? []) {
+      lines.push(`  ${failed}: did not start, ${reason}`);
+    }
+    for (const busy of summary.notDrained) {
+      lines.push(`  ${busy}: not reloaded, calls into it were still running; it keeps its current version. Run /plugin reload again once they finish.`);
+    }
+    for (const held of summary.quarantined ?? []) {
+      lines.push(`  ${held}: not loaded, it is quarantined. Run /plugin quarantine ${held} lift, then /plugin reload.`);
+    }
+    for (const stuck of summary.cleanupFailed ?? []) {
+      lines.push(`  ${stuck}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
+    }
+    print(lines.join('\n'));
+    return true;
+  }
+  if (sub === 'quarantine') {
+    const action = args[2] ?? 'add';
+    if (!name) throw commandRefusal('Usage: /plugin quarantine <name> [add|lift] [reason]');
+    if (action === 'lift') {
+      const result = manager.liftQuarantine(name);
+      if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' quarantine was not lifted.`, undefined, 'NOT_DONE');
+      print(`Plugin '${name}' quarantine lifted; it can load again. Run /plugin reload to load it.`);
+      return true;
+    }
+    const reason = args.slice(action === 'add' ? 3 : 2).join(' ') || 'quarantined by operator';
+    const result = manager.quarantine(name, reason);
+    if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not quarantined.`, undefined, 'NOT_DONE');
+    try {
+      await result.unloading;
+    } catch (error) {
+      throw new RefusalError(refusal({
+        code: 'PLUGIN_STOP_FAILED',
+        state: `Plugin '${name}' is quarantined and will not load again`,
+        reason: `Stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`,
+        next: ['Restart to clear anything the running instance left behind'],
+      }));
+    }
+    print(`Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /plugin quarantine ${name} lift and then /plugin reload.`);
+    return true;
+  }
+  return false;
+}
+
+/**
  * `/plugin` for a shell that has no plugin workspace of its own: the plugin
  * list with each tier, and the trust lines. The tier is shared by every app on
  * this machine, so a tier set here also holds in the terminal app and daemon.
  */
 export function createPluginTrustCommand<Context extends ConfirmationHost>(
-  manager: (context: Context) => PluginTrustControls | undefined,
+  manager: (context: Context) => (PluginTrustControls & PluginLifecycleControls) | undefined,
 ): TerminalSlashCommand<Context> & CommandSubcommandHints {
   const command = {
     name: 'plugin',
     effect: 'mixed' as const,
     readVerbs: ['list'],
     aliases: [] as string[],
-    description: 'List plugins and set what each one may do (its trust tier)',
-    usage: `list | ${PLUGIN_TRUST_USAGE}`,
+    description: 'List, enable and disable plugins, and set what each one may do (its trust tier)',
+    usage: `list | enable <name> | disable <name> | reload | ${PLUGIN_TRUST_USAGE} | quarantine <name> [add|lift] [reason]`,
     subcommands: {
-      list: '', trust: '<name> <untrusted|limited|trusted> [note]', 'trust-key': '<name> <key.pem>',
+      list: '', enable: '<name>', disable: '<name>', reload: '', quarantine: '<name> [add|lift] [reason]',
+      trust: '<name> <untrusted|limited|trusted> [note]', 'trust-key': '<name> <key.pem>',
       verify: '<name>', capabilities: '<name>',
     },
     confirm: (args: readonly string[], context: Context): CommandConfirmation | undefined => pluginTrustConfirmation(manager(context), args),
@@ -169,10 +246,12 @@ export function createPluginTrustCommand<Context extends ConfirmationHost>(
           'Plugins:',
           ...listed.map((plugin) => `  ${(plugin.active ? '[active]' : plugin.enabled ? '[enabled]' : '[disabled]').padEnd(11)} ${plugin.name.padEnd(24)} v${plugin.version}  tier ${plugin.trustTier}${plugin.quarantined ? '  QUARANTINED' : ''}`),
           '',
+          'A plugin runs only once enabled: /plugin enable <name> starts it, /plugin disable <name> stops it.',
           'A tier decides what a plugin may register: /plugin capabilities <name> shows it, /plugin trust <name> <tier> changes it.',
         ].join('\n'));
         return;
       }
+      if (await runPluginLifecycleSubcommand(plugins, args, (text) => context.print(text))) return;
       if (await runPluginTrustSubcommand(plugins, args, (text) => context.print(text))) return;
       throw commandRefusal(`Unknown /plugin subcommand: ${sub}`, `Usage: /plugin ${command.usage}`);
     },

@@ -106,6 +106,7 @@ export const builtinGatewaySkillsMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'skills.create',
+    repeat: 'safe',
     title: 'Create Skill',
     description: 'Create a new skill as ~/.goodvibes/skills/<name>.md from a name, one-line description, and Markdown body (plus optional frontmatter metadata). Fails with a conflict when any listed skill already has that name, use skills.update to change an existing one.',
     category: 'skills',
@@ -116,6 +117,7 @@ export const builtinGatewaySkillsMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'skills.update',
+    repeat: 'safe',
     title: 'Update Skill',
     description: 'Update an existing skill\'s description, body, and/or frontmatter metadata in the file skills.list names. Absent fields are left unchanged; a body-only change keeps the frontmatter exactly as written. Changing the description or metadata of a skill whose frontmatter uses YAML beyond one key: value per line is refused (400) so nothing the author wrote is lost. Returns 404 when no skill with that name exists.',
     category: 'skills',
@@ -126,6 +128,7 @@ export const builtinGatewaySkillsMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'skills.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Skill',
     description: 'Permanently delete a skill. Delete means delete: a <name>.md document is removed, and a folder skill is removed with its folder, not tombstoned; path names what was removed. Returns { deleted: false } when no skill with that name existed, an honest boolean, never a 200 that pretends a phantom skill was removed.',

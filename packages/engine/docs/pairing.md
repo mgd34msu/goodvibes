@@ -486,9 +486,9 @@ with zero certificate handling on your side. Worked example:
 # One-time: install tailscale on the daemon host and the phone, log both in.
 tailscale up
 
-# Front the daemon's web surface (default port 3423) at your MagicDNS name.
-# TLS is terminated by tailscale; the daemon never touches a certificate.
-tailscale serve --bg 3423
+# Front the web UI the daemon serves (its control-plane port, default 3421) at
+# your MagicDNS name. TLS is terminated by tailscale; the daemon never touches a certificate.
+tailscale serve --bg 3421
 
 # The daemon is now at e.g. https://yourhost.your-tailnet.ts.net;
 # open that on the phone: secure context, full PWA, push, microphone.
@@ -496,8 +496,9 @@ tailscale serve --bg 3423
 
 The daemon offers this as a one-action affordance: `tailscale.get` (read-only
 detection: binary, logged-in state, MagicDNS name; where tailscale is absent,
-nothing nags), `tailscale.serve.run` (runs the serve command above for you,
-records an honest receipt, and updates `web.publicBaseUrl` to the https URL) and
+nothing nags), `tailscale.serve.run` (runs the serve command above for you on the port the
+web UI is served on, refused with 409 `WEB_UI_NOT_SERVED` when none is, records
+an honest receipt, and updates `web.publicBaseUrl` to the https URL) and
 `tailscale.serve.stop` (runs `tailscale serve --https=443 off` and puts
 `web.publicBaseUrl` back to what it was before). Tailscale keeps a serve on,
 also after the daemon stops, until it is stopped; `tailscale.get` shows the

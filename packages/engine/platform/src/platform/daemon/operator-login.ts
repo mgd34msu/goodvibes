@@ -115,11 +115,19 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
         next: [`Set a new password with goodvibes auth rotate-password ${username}`, 'Or delete both the user store and the bootstrap file and restart the daemon to generate a new admin'],
       }, { status: 401 });
     }
+    if (authResult.withdrawnBootstrapCredential) {
+      // Only someone who knew the generated password can send it, so saying it was withdrawn tells a stranger nothing.
+      return jsonErrorResponse({
+        error: 'Invalid credentials', code: 'BOOTSTRAP_CREDENTIAL_WITHDRAWN',
+        state: 'this generated password signed in only while the bootstrap credential file held it, and that file was deleted or cleared',
+        next: [`Set a password with goodvibes auth rotate-password ${username}`],
+      }, { status: 401 });
+    }
     return Response.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 
   const { user } = authResult;
-  const session = deps.userAuth.createSession(user.username);
+  const session = deps.userAuth.createSession(user.username, { viaBootstrapCredential: authResult.usedBootstrapCredential });
   authSuccessTotal.add(1);
   logger.info('AUTH_SUCCEEDED', { type: 'AUTH_SUCCEEDED', requestId, username: user.username, clientIp: clientAddress, method: 'password', source: deps.source });
   if (deps.runtimeBus) {
@@ -127,13 +135,12 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
       { username: user.username, sessionId: session.id, clientIp: clientAddress, method: 'password' });
   }
 
-  // The bootstrap credential is retired only after the first sign-in with a
-  // real password: retiring it on a bootstrap sign-in would lock the owner out
-  // if that session is lost before an account password is set.
-  if (!authResult.usedBootstrapCredential && deps.userAuth.inspect().bootstrapCredentialPresent) {
-    if (deps.userAuth.clearBootstrapCredentialFile()) {
-      logger.info('Bootstrap credential file retired after first non-bootstrap login', { username: user.username });
-    }
+  // A bootstrap file is retired at a sign-in with a real password only once
+  // nothing signs in with it: while the user it names still has the generated
+  // password, the file is that password (deleting it withdraws it), so another
+  // user's sign-in never takes it away.
+  if (!authResult.usedBootstrapCredential && deps.userAuth.retireStaleBootstrapCredential()) {
+    logger.info('Bootstrap credential file retired: the user it names has a password of its own', { username: user.username });
   }
 
   return Response.json({

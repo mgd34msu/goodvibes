@@ -30,6 +30,7 @@ import {
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   setMcpServerToolRule,
+  setMcpServerPolicy,
   upsertMcpServerConfig,
   withMcpConfigLock,
 } from './config.js';
@@ -668,20 +669,29 @@ export class McpRegistry {
       // The tool's own schema says which arguments are paths; it is already loaded for this call.
       const permission = await this.permissions.evaluateToolCall(serverName, parsed.toolName, args, { externalRequestEvidence, inputSchema: schema.inputSchema });
       signal.throwIfAborted();
-      if (permission.verdict === 'deny') {
+      // An ask-on-risk server called outside its scope: the owner decides this call through the gate, in every mode.
+      const ownerAsk = permission.askOwner;
+      if (ownerAsk !== undefined && !(host && operation)) {
+        throw new Error(`MCP call '${qualifiedName}' denied: ${permission.reason} Nobody can be asked from here, so it was not sent.`);
+      }
+      if (permission.verdict === 'deny' && ownerAsk === undefined) {
         throw new Error(`MCP call '${qualifiedName}' denied: ${permission.reason}`);
       }
-      // Enforcement answers allow or deny; any other answer is not a grant.
-      if (permission.verdict !== 'allow')
+      // Enforcement answers allow, deny or ask the owner; any other answer is not a grant.
+      if (permission.verdict !== 'allow' && ownerAsk === undefined)
         throw new Error(`MCP call '${qualifiedName}' has unresolved permission: ${permission.reason}`);
       // Deterministic server allows constrain policy; they never replace the
       // canonical recorded admission of an actual autonomous caller's source.
       if (host && operation) {
         admission = await admitExternalRequest(host, { ...transport, signal, assertCurrent: () => signal.throwIfAborted() }, operation, {
-          tool: qualifiedName, args, serverPolicy, supportingDecisionIds: [],
+          tool: qualifiedName, args, serverPolicy, supportingDecisionIds: [], ...(ownerAsk !== undefined ? { ownerAsk } : {}),
         });
         signal.throwIfAborted();
-        if (!admission.result.approved) throw new Error(`MCP call '${qualifiedName}' autonomous admission did not act`);
+        if (!admission.result.approved) {
+          throw new Error(ownerAsk !== undefined
+            ? `MCP call '${qualifiedName}' was not allowed: ${admission.result.detail ?? admission.result.userReason ?? 'the owner did not allow a call outside the server\'s scope'}`
+            : `MCP call '${qualifiedName}' autonomous admission did not act`);
+        }
       }
 
       // Pre:mcp:call hook
@@ -1151,6 +1161,43 @@ export class McpRegistry {
     }
     const scope = source.scope;
     const written = await withMcpConfigLock(roots, scope, () => setMcpServerToolRule(roots, scope, serverName, toolName, rule));
+    return { scope, path: written.path, changed: written.changed, reload: await this.reload(roots) };
+  }
+
+  /**
+   * Keep a server's trust mode or role with its entry in its MCP config file,
+   * then apply it: this session's value for that field ends and the kept one
+   * decides, after a restart too. The entry must be in a file this program
+   * writes (the owner's global file or the project's `.goodvibes/mcp.json`);
+   * `allow-all` only in the global one. The roots are the workspace the
+   * servers were started from unless given.
+   *
+   * A looser trust mode loosens what a server may do: every caller that
+   * reaches this method for one is the owner's own act (Settings, his own
+   * command, which asks once when a model runs it), never a model's tool.
+   */
+  async storeServerPolicy(
+    serverName: string,
+    policy: { readonly trustMode: NonNullable<McpServerConfig['trustMode']> } | { readonly role: NonNullable<McpServerConfig['role']> },
+    workspace?: McpConfigRoots,
+  ): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean; readonly reload: McpReloadResult }> {
+    const what = 'trustMode' in policy ? 'trust mode' : 'role';
+    const roots = workspace ?? this.startedRoots;
+    if (!roots) throw new Error(`The MCP servers were not started from a workspace yet, so the ${what} of ${serverName} was not kept. Run /mcp reload, then try again.`);
+    const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
+    if (!entry) {
+      throw new Error(`No MCP server named '${serverName}' is configured, so its ${what} was not kept. `
+        + `Known servers: ${this.serverNames.join(', ') || '(none)'}. Run /mcp servers to list them.`);
+    }
+    const source = entry.source;
+    if (!source.writable || source.scope === 'external') {
+      throw new Error(`${serverName} is configured in ${source.path}, a file another program owns, so its ${what} cannot be kept there. `
+        + `Add ${serverName} to your own MCP config (/mcp add with --scope global) to keep it.`);
+    }
+    const scope = source.scope;
+    const written = await withMcpConfigLock(roots, scope, () => setMcpServerPolicy(roots, scope, serverName, policy));
+    // The kept value decides from now on: this session's value for the field ends.
+    this.clearServerSessionPolicy(serverName, 'trustMode' in policy ? 'trustMode' : 'role');
     return { scope, path: written.path, changed: written.changed, reload: await this.reload(roots) };
   }
 

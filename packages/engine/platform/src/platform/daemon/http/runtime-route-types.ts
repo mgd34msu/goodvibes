@@ -5,25 +5,16 @@ import type {
   CreateAutomationJobInput,
   UpdateAutomationJobInput,
 } from '../../automation/index.js';
-import type { ExecutionIntent } from '../../runtime/execution-intents.js';
+import type { AgentRecordLike as DaemonApiAgentRecordLike } from '@goodvibes-jev/engine/daemon-api/runtime-route-types';
+import type { AgentManager } from '../../tools/agent/index.js';
 // The local Like-view types below describe the minimal route handler inputs
 // accepted by daemon-api handlers. They stay narrow so callers can provide
 // lightweight records instead of full runtime objects.
 interface AutomationRouteBinding {
   readonly id?: string | undefined;
 }
-type AgentRecordLike = {
-  readonly id: string;
-  readonly status: string;
-  readonly task: string;
-  readonly model?: string | null | undefined;
-  readonly tools: readonly string[];
-  readonly startedAt: number;
-  readonly completedAt?: number | undefined;
-  readonly toolCallCount?: number | undefined;
-  readonly progress?: string | null | undefined;
-  readonly error?: string | null | undefined;
-};
+/** The agent record as the task routes read it: its status and how it was started (a retry starts the same work again). */
+type AgentRecordLike = DaemonApiAgentRecordLike;
 type AutomationJobLike = { readonly id: string };
 type AutomationRunLike = {
   readonly id: string;
@@ -79,19 +70,7 @@ export interface DaemonRuntimeRouteContext extends Omit<
   readonly normalizeAtSchedule: (at: number) => AutomationScheduleDefinition;
   readonly normalizeEverySchedule: (interval: string | number, anchorAt?: number) => AutomationScheduleDefinition;
   readonly normalizeCronSchedule: (expression: string, timezone?: string, staggerMs?: unknown) => AutomationScheduleDefinition;
-  readonly trySpawnAgent: (input: {
-    mode: 'spawn';
-    task: string;
-    model?: string | undefined;
-    tools?: string[] | readonly string[] | undefined;
-    provider?: string | undefined;
-    context?: string | undefined;
-    executionIntent?: ExecutionIntent | undefined;
-    executionProtocol?: 'direct' | 'gather-plan-apply' | undefined;
-    reviewMode?: 'none' | 'contract' | undefined;
-    communicationLane?: 'parent-only' | 'parent-and-children' | 'cohort' | 'direct' | undefined;
-    outsideContract?: boolean | undefined;
-  }, logLabel: string, sessionId?: string) => AgentRecordLike | Response;
+  readonly trySpawnAgent: (input: Parameters<AgentManager['spawn']>[0], logLabel: string, sessionId?: string) => AgentRecordLike | Response;
   readonly queueSurfaceReplyFromBinding: (
     binding: AutomationRouteBinding | undefined,
     input: { readonly agentId: string; readonly task: string; readonly agentTask?: string; readonly contractId?: string; readonly sessionId?: string; },

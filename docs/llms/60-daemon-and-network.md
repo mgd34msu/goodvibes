@@ -47,7 +47,7 @@ Paths below use the defaults: the user's home directory is `~`, the daemon home 
 | `~/.goodvibes/daemon/detached-daemon.json` | The running daemon's `pid`, the `host` and `port` it bound at start, `scheme`, `command` and `startedAt`. |
 | `~/.goodvibes/hosted-sessions/` | Saved hosted sessions, so they survive a daemon restart. |
 | `~/.goodvibes/tui/auth-users.json` | Sign-in users (password hashes, roles, scopes). |
-| `~/.goodvibes/tui/auth-bootstrap.txt` | The first sign-in user's name (`admin`) and password, written once, mode `0600`. The daemon deletes it by itself the first time anyone signs in with a password other than this one; clear it yourself with `goodvibes auth clear-bootstrap` (see "The bootstrap file"). |
+| `~/.goodvibes/tui/auth-bootstrap.txt` | The first sign-in user's name (`admin`) and password, written once, mode `0600`. Its password signs in only while this file holds it; clear it with `goodvibes auth clear-bootstrap` (see "The bootstrap file"). |
 | `~/.goodvibes/tui/connected-daemons.json` | On a machine whose terminal app talks to a daemon elsewhere: the token it sends to each daemon, keyed by origin, and sign-in sessions from `/auth login daemon`. Mode `0600`. |
 | `~/.goodvibes/tui/control-plane/pairing-tokens.json` | Device tokens, stored as hashes, never as the secret. |
 | `~/.goodvibes/tui/crashes.jsonl` | Crash records. `goodvibes-daemon status` names this file. |
@@ -55,14 +55,14 @@ Paths below use the defaults: the user's home directory is `~`, the daemon home 
 | `<working dir>/.goodvibes/logs/activity.md` | The daemon's activity log. It rotates to `activity.md.1` at 10 MB. |
 | `<working dir>/.goodvibes/tui/` | State the daemon keeps per working directory: `cluster/cluster-node-id` (this machine's cluster node identity; group key material is not here, it lives only in the encrypted secret store), `devices/device-grants.json` (device grants), `operator/channel-routes.sqlite` (channel routes), `remote/distributed-runtime.json` (remote nodes), `watchers.json`, `decisions.sqlite`, `checkpoints/` and `code-index.sqlite`. A daemon started in another directory starts this state afresh. |
 
-Two switches move these files, and they move different things:
+Two switches move these files:
 
 | Switch | Moves | Does not move |
 | --- | --- | --- |
 | `GOODVIBES_HOME=<dir>` (environment) | The whole tree: everything above under `~/.goodvibes`, which becomes `<dir>/.goodvibes`, including the daemon home, the secret stores and `secrets.key`. | The working directory (`-C`) and its `.goodvibes/`. |
-| `--daemon-home <dir>` (or `GOODVIBES_DAEMON_HOME=<dir>`) | Only the daemon home, which holds the daemon's `settings.json`, the daemon secret store `secrets.enc`, `operator-tokens.json`, `owner-profile.md`, `daemon-settings.json` and the run record `detached-daemon.json`. | Everything else, which stays under the tree that `GOODVIBES_HOME` names: sign-in users (`tui/auth-users.json`) and the bootstrap file, device tokens (`tui/control-plane/pairing-tokens.json`), hosted sessions, memory and the owner inbox (`shared/`), knowledge stores, crashes, and `secrets.key`. |
+| `--daemon-home <dir>` (or `GOODVIBES_DAEMON_HOME=<dir>`) | Everything this daemon keeps. `<dir>` itself is the daemon home (`settings.json`, the daemon secret store `secrets.enc`, `operator-tokens.json`, `owner-profile.md`, `daemon-settings.json`, the run record `detached-daemon.json`), and, unless `GOODVIBES_HOME` is also set, `<dir>` is the tree root too: sign-in users and the bootstrap file, device tokens, hosted sessions, memory and the owner inbox, knowledge stores, crashes, the client-scoped settings and `secrets.key` live under `<dir>/.goodvibes/`. | The working directory (`-C`). With `GOODVIBES_HOME` also set, the tree stays where that names. |
 
-So a daemon given only `--daemon-home` shares its users, device tokens, memory and owner inbox with the daemon of the same tree: in testing, a device token minted on the first daemon and the first daemon's bootstrap password both worked on a second daemon started with `--daemon-home`, and both were refused (`401`) by a daemon started with `GOODVIBES_HOME`.
+So one switch runs a daemon that shares nothing with another: `goodvibes-daemon --daemon-home /tmp/gv-test serve` has its own users, bootstrap password, device tokens and memory. A terminal app or Agent given the same directory as its daemon home (`goodvibes --daemon-home /tmp/gv-test`, `GOODVIBES_DAEMON_HOME=/tmp/gv-test goodvibes-agent`) reads that daemon's operator token and daemon settings from it; the clients' own trees do not move.
 
 The full map of every file every program writes is in "Files and directories GoodVibes creates" in the overview.
 
@@ -72,7 +72,7 @@ The full map of every file every program writes is in "Files and directories Goo
 | --- | --- | --- | --- | --- |
 | Control plane | `controlPlane.port`, `controlPlane.hostMode`, `controlPlane.host` | `127.0.0.1:3421` | TCP, HTTP or HTTPS | The terminal app, Agent, the web UI, scripts, paired devices, reverse proxies. The web UI is served on this same port. |
 | Webhook listener | `httpListener.port`, `httpListener.hostMode`, `httpListener.host` | `127.0.0.1:3422` | TCP, HTTP or HTTPS | External services posting webhooks. It is only opened when `danger.httpListener` is `true`. |
-| Declared web port | `web.port` | `3423` | none | Nothing listens on it. It is used for links when the daemon does not serve the web UI itself, and by web UI development servers. |
+| Web UI development server | `web.port` | `3423` | HTTP | The web UI's development server (`bun run dev` in `products/webui`), when one runs. The daemon never binds it, and no link, pairing address, `goodvibes web` or `tailscale.serve.run` uses it. |
 | Cluster | `cluster.port`, `cluster.multicastGroup` | UDP `61860`, multicast group `239.255.71.86` | UDP, IPv4 only | Other nodes of a cluster. Only opened when `cluster.enabled` is `true`. |
 | Relay (outbound) | `relay.url` | not set | WebSocket out (`wss://`) | The daemon dials out; nothing listens. |
 
@@ -145,17 +145,17 @@ Every other command for that test daemon, in another shell, needs the same `GOOD
 - `service.enabled false` keeps it from ever installing itself as the machine's service; a daemon run with `GOODVIBES_HOME` or `--daemon-home` never promotes itself either. An explicit `goodvibes-daemon install-service` is not refused, though: run with `GOODVIBES_HOME` set, it writes the machine's one service unit (in the login user's `~/.config/systemd/user/`, whatever `GOODVIBES_HOME` says) pointing at the test tree, with `Environment=GOODVIBES_HOME=<dir>` (see "The daemon's background service" in the install part). Do not run `install-service` for a test daemon. `update.auto false` keeps it from updating the installed programs.
 - Leave `cluster.enabled` off in it; with it on, it would take part in the first daemon's cluster coordination on UDP 61860.
 - To point a terminal app at it, run the terminal app with the same `GOODVIBES_HOME`; it dials the port in that tree's settings.
-- The Agent does not read `GOODVIBES_HOME` (it has its own home, `GOODVIBES_AGENT_HOME`), so it would dial the first daemon. Point it at the test daemon with the address and the test daemon's operator token:
+- Run the Agent with the same `GOODVIBES_HOME` too (it uses that tree unless `GOODVIBES_AGENT_HOME` is set) and it dials the test daemon's port. It still needs a token; give it the test daemon's operator token:
 
   ```sh
   GOODVIBES_CONNECTED_HOST_TOKEN="$(python3 -c "import json;print(json.load(open('/tmp/gv-test/.goodvibes/daemon/operator-tokens.json'))['token'])")" \
     goodvibes-agent --runtime-url http://127.0.0.1:39421 status
   ```
 
-  `status` must show `baseUrl: http://127.0.0.1:39421`, `reachable: yes (HTTP 200)` and `access token: present (env:GOODVIBES_CONNECTED_HOST_TOKEN)`. Without the token it shows `reachable: yes (HTTP 401)` and `access token: missing`. Add `GOODVIBES_AGENT_HOME=/tmp/gv-test/agent` to keep the Agent's own state out of the real Agent home as well.
+  `status` must show `baseUrl: http://127.0.0.1:39421`, `reachable: yes (HTTP 200)` and `access token: present (env:GOODVIBES_CONNECTED_HOST_TOKEN)`. Without the token it shows `reachable: yes (HTTP 401)` and `access token: missing`. With `GOODVIBES_HOME=/tmp/gv-test` set as well, the Agent's own state stays in the test tree.
 - `GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD=1` keeps the test daemon from fetching wake-word model files at start. It does not stop other outbound requests the daemon makes at start, such as model catalog requests to providers.
 
-A daemon started with `--port` or `--host` keeps that binding for its whole run: a later `config set controlPlane.port` is saved but does not move it. Without those flags, a changed `controlPlane.port` moves the running daemon to the new port within about a second, but a change of address on the same port (`controlPlane.hostMode` between `local` and `network`) is not applied until the daemon restarts (see "Known fault: a new address on the same port waits for a restart").
+A daemon started with `--port` or `--host` keeps that binding for its whole run: a later `config set controlPlane.port` is saved but does not move it. Without those flags, a changed `controlPlane.port`, `controlPlane.hostMode` or `controlPlane.host` moves the running daemon to the new address within about a second, in both directions (see "Which settings apply at once").
 
 ### Environment variables the daemon reads
 
@@ -165,7 +165,7 @@ The complete list of environment variables every program reads is in "Environmen
 | --- | --- |
 | `GOODVIBES_DAEMON_TOKEN` | Serve this value as the operator token instead of the one in `operator-tokens.json`. While it is set, the shared token cannot be revoked through the API (`SHARED_TOKEN_NOT_REPLACEABLE`). |
 | `GOODVIBES_HTTP_TOKEN` | The bearer token the webhook listener accepts. Defaults to the operator token. |
-| `GOODVIBES_DAEMON_HOME` | The daemon home, as `--daemon-home`: only `settings.json`, the daemon secret store, `operator-tokens.json`, `owner-profile.md` and `daemon-settings.json` move. Users, device tokens, memory and the other stores stay under the `tui/` and `shared/` folders of the `GOODVIBES_HOME` tree. To isolate a daemon completely, use `GOODVIBES_HOME`. |
+| `GOODVIBES_DAEMON_HOME` | The daemon home, as `--daemon-home` (which wins over it): the daemon's identity files there, and, unless `GOODVIBES_HOME` is set, everything else the daemon keeps under `<dir>/.goodvibes/`. |
 | `GOODVIBES_WORKING_DIR` | The working directory, as `-C`. |
 | `GOODVIBES_HOME` | Where the `.goodvibes` tree lives instead of the user's home directory. |
 | `GOODVIBES_TAILNET_ADDRESSES` | Comma-separated Tailscale addresses (or `100.64.0.0/10`) the programs accept as private over plain HTTP when Tailscale itself cannot be asked. |
@@ -180,7 +180,7 @@ These options are accepted by every command:
 
 | Option | Effect |
 | --- | --- |
-| `--daemon-home <dir>` | The daemon home: `settings.json`, the daemon secret store, `operator-tokens.json`, `owner-profile.md`, `daemon-settings.json`. Default `~/.goodvibes/daemon`. Sign-in users, device tokens, memory and the other stores do not move with it (see "Files and directories"). |
+| `--daemon-home <dir>` | Run this daemon entirely out of `<dir>`: its identity files (`settings.json`, the daemon secret store, `operator-tokens.json`, `owner-profile.md`, `daemon-settings.json`) in `<dir>`, and its users, device tokens, memory and other stores under `<dir>/.goodvibes/` unless `GOODVIBES_HOME` names that tree. Default `~/.goodvibes/daemon` with the tree at `~/.goodvibes` (see "Files and directories"). |
 | `-C <dir>`, `--working-dir <dir>`, `--cd <dir>` | The directory the daemon treats as its workspace. |
 | `-h`, `--help` | Print help and exit `0`. |
 | `-v`, `--version` | Print the version and exit `0`. |
@@ -216,8 +216,8 @@ The top-level help (`goodvibes-daemon --help`) lists codes `0` to `5` as in this
 
 | Flag | Effect |
 | --- | --- |
-| `--host <name>` | The machine to ask. For another machine it must start with `http://` or `https://`, for example `--host https://10.0.0.7` or `--host https://homelab.example`. `http://` sends the token unencrypted over the network. |
-| `--port <n>` | That daemon's control-plane port. Default: this machine's `controlPlane.port` (3421), even for another machine and even for `https://`. A port written in `--host` is used (`--host http://10.0.0.7:3422`), but `:443` in an `https://` address and `:80` in an `http://` address are dropped as defaults, so a daemon behind a proxy on 443 needs `--port 443`: `--host https://goodvibes.example.com --port 443`. |
+| `--host <name>` | The machine to ask. For another machine it must start with `http://` or `https://`, for example `--host https://10.0.0.7:3421` or `--host https://homelab.example`. `http://` sends the token unencrypted over the network. |
+| `--port <n>` | That daemon's control-plane port. A `--host` URL is read as a browser reads it: the port written in it (`--host http://10.0.0.7:3422`, `--host https://goodvibes.example.com:443`), else `--port`, else the scheme's port, 443 for `https://` and 80 for `http://`. So a daemon behind a proxy on 443 is `--host https://goodvibes.example.com`, and a daemon serving directly on 3421 is `--host https://10.0.0.7:3421`. A port in the URL and a different `--port` are refused. With a bare host name for this machine, or no `--host`, the default is this machine's `controlPlane.port` (3421). |
 | `--token <t>` | The operator token or device token for that daemon. Default: this machine's own operator token, which is not the right credential for a different machine. |
 
 Errors these commands print, and what to do:
@@ -226,7 +226,7 @@ Errors these commands print, and what to do:
 | --- | --- | --- |
 | `no operator token was found for this machine` | The daemon has never started here, or `--daemon-home` points elsewhere. | Start the daemon once (`goodvibes-daemon`), or pass `--token`. |
 | `could not reach the daemon on this machine` | Nothing answers at that host and port. | `goodvibes-daemon service-status`; check `--port`. |
-| `'<host>' is another machine, and its connection type was not stated` | `--host` named another machine without a scheme. | Use `--host https://<host>` or `--host http://<host>`. |
+| `'<host>' is another machine, and its connection type was not stated` | `--host` named another machine without a scheme. | Use `--host https://<host>:<port>` or `--host http://<host>:<port>`; without a port the URL means 443 or 80. |
 | `'10.0.0.7:3422' is not a usable --host: the port goes in --port` (exit `1`) | A bare `host:port` without a scheme. | `--host 10.0.0.7 --port 3422`, or the URL form `--host http://10.0.0.7:3422`. |
 | `<where> refused the operator token` | Wrong token for that daemon. | Pass the right one with `--token`. |
 | `<where> does not know this command` | That daemon runs an older build, or it is not a GoodVibes daemon. | Update it. |
@@ -256,7 +256,7 @@ goodvibes daemon on this machine
 
 `--json` prints one document `{ "ok": true, "data": { "target", "isLocal", "identity", "health", ... } }`. The uptime, update and rollback lines come from files on the daemon's own machine, so for a remote daemon they are reported as unavailable.
 
-The `bound:` line is not the address the listener holds: it prints `controlPlane.host` and `controlPlane.port` from the settings, so it reads `http://127.0.0.1:<port>` for `hostMode` `network` too, and it does not change when a live rebind fails. To see the address actually bound, use the check in "Checking which address the daemon is bound to".
+The `bound:` line is the listener the daemon actually holds, with the scheme it speaks (`http` behind a TLS proxy too): `http://0.0.0.0:<port>` for `hostMode` `network`. When it differs from the settings (a rebind the system refused, see the daemon log) a second line says `the settings name <host>:<port>; this listener has not moved to it`; with no listener bound the line ends `(NOT ready)` and says so.
 
 When the daemon cannot be reached:
 
@@ -275,7 +275,7 @@ could not reach the daemon on this machine
 | `service-status [--json]` | Reports the platform, service name, definition path, `definitionOwner` (`product`, `other`, `absent`, `unreadable`), installed and running. systemd and launchd are asked live. | `0` running; `3` installed, not running; `4` not installed; `1` the platform refused the query. |
 | `start-service` | Starts the installed service. An absent service is reported as absent, not installed. | `4` no service is installed |
 | `stop-service` | Stops it until it is next started by the system. The definition stays, so it comes back: on Linux at the next boot when lingering is on for the user (which `install-service` switches on), otherwise at the user's next login (the unit is `WantedBy=default.target`); on macOS at the user's next login (the launch agent has `RunAtLoad`); on Windows at the user's next logon (the task is `/SC ONLOGON`). To keep it off, use `uninstall-service`. | `4` no service is installed |
-| `restart-service` | Restarts it. Use it to apply a setting that is only read at start, and after any change of `controlPlane.hostMode`. | `4` no service is installed |
+| `restart-service` | Restarts it. Use it to apply a setting that is only read at start (see "Which settings apply at once"). | `4` no service is installed |
 
 The service is a systemd user unit on Linux (`goodvibes.service`), a launchd user agent on macOS (`sh.goodvibes.daemon`), and a Scheduled Task on Windows. `service.serviceName` changes the name. On Linux, `install-service` also enables lingering (`loginctl enable-linger <user>`) so the daemon starts at boot without anyone logging in; when that fails it says so and prints the command to run.
 
@@ -315,14 +315,14 @@ Connection is unencrypted on your LAN. Everything works except browser-gated fea
 █▀▀▀▀▀█ ...
 ```
 
-The three "This device will get" lines read `available` when the address is a secure context (`https://`, or `localhost`). The line before the QR code describes the connection: the one above for plain HTTP on a local network; `Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.` for plain HTTP to a Tailscale address; none for `https://`. The address `pair` prints comes from the settings, not from the listener, so after a `webui enable --lan` that has not been applied yet (see "Known fault: a new address on the same port waits for a restart") it already names the network address that does not answer.
+The three "This device will get" lines read `available` when the address is a secure context (`https://`, or `localhost`). The line before the QR code describes the connection: the one above for plain HTTP on a local network; `Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.` for plain HTTP to a Tailscale address; none for `https://`. The address `pair` prints is the web UI's address from the settings (a set `web.publicBaseUrl`, else the control-plane address while the daemon serves the bundle), which the running daemon moves to within about a second of a change. With no web UI served and no `web.publicBaseUrl`, `pair` prints no link: `no web UI is served by this daemon and web.publicBaseUrl names none, so a pairing link would open nothing`, exit `1`.
 
-The local form prints a link even when the daemon does not serve the web UI. In that case the link points at `web.host:web.port` (by default `http://127.0.0.1:3423`), where nothing listens. Switch the web UI on first (see "Serving the web UI").
+The local form prints a link only when there is a web UI to open: the daemon serves the bundle, or `web.publicBaseUrl` names where it runs. Otherwise it prints `no web UI is served by this daemon and web.publicBaseUrl names none, so a pairing link would open nothing` and exits `1`; switch the web UI on first (see "Serving the web UI").
 
 Remote form (`--host` naming another machine) asks that daemon to mint a new device token and prints the block for it. Minting changes state on that daemon, so it states the plan and asks for confirmation; `-y` (`--yes`, `--non-interactive`) answers yes. Without `-y` nothing is changed.
 
 ```sh
-goodvibes-daemon pair --host https://homelab.example --token <your-operator-token> -y
+goodvibes-daemon pair --host https://homelab.example:3421 --token <your-operator-token> -y
 ```
 
 Once the shared operator token has been revoked (see "Revoking the shared operator token"), the local form no longer prints it. The daemon then prints `Device pairing: the shared token was revoked and replaced, so no pairing link carries it. Pair a device with its own token: goodvibes-daemon pair -y`.
@@ -526,10 +526,10 @@ Two settings decide exposure, and both must allow a request:
      reachable from your network at http://desktop.local:3421; the control-plane listener uses its configured binding.
      a device that cannot resolve that name can use http://192.168.0.171:3421
      To take it back to this machine only:  goodvibes-daemon webui enable --loopback
-     Restart the daemon for this to take effect on a running process.
+     A running daemon applies this within about a second; no restart is needed.
    ```
 
-3. Restart the daemon, as the command's last line says: `goodvibes-daemon restart-service` (a daemon run in a terminal: stop it with Ctrl-C and start it again the same way, without `--host` or `--port`). A running daemon does not move from `127.0.0.1` to `0.0.0.0` on the same port by itself (see "Known fault: a new address on the same port waits for a restart").
+3. Nothing to restart: a running daemon releases `127.0.0.1:3421` and binds `0.0.0.0:3421` within about a second. A daemon started with `--host` or `--port` keeps that binding for its whole run; restart it without them.
 4. Check the bound address on the daemon's machine (see "Checking which address the daemon is bound to"):
 
    ```sh
@@ -537,7 +537,7 @@ Two settings decide exposure, and both must allow a request:
    lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS (and Linux): the NAME column must read *:3421
    ```
 
-   `127.0.0.1:3421` means the restart has not happened yet.
+   `127.0.0.1:3421` a few seconds later means the daemon was started with `--host` or `--port`, or the new address could not be bound: `goodvibes-daemon status` then prints `the settings name 0.0.0.0:3421; this listener has not moved to it`, and the daemon's activity log says why.
 5. Allow TCP port `3421` in the machine's firewall if it has one.
 6. From another device on the network, check that it answers: `curl http://192.168.0.171:3421/api/control-plane/auth` (the machine's own address) prints a JSON document starting `{"authenticated":false`. No answer means the bind, the firewall or the address is wrong.
 7. Pair each device (see "Pairing a phone or another browser").
@@ -545,11 +545,12 @@ Two settings decide exposure, and both must allow a request:
 To go back to this machine only:
 
 1. Run `goodvibes-daemon webui enable --loopback`. It sets `controlPlane.hostMode` and `web.hostMode` back to `local` and leaves `controlPlane.enabled` at `true`. It rewrites `web.publicBaseUrl` to the loopback address only when `web.publicBaseUrl` is empty, holds the shipped default `http://127.0.0.1:3423`, or still equals the address the previous binding produced; when it holds anything else, it keeps it and prints `note: web.publicBaseUrl is set to <url>; links use that, the bundle is served at the URL above.` When that note appears and you want links to stop naming the network address, run `goodvibes-daemon config unset web.publicBaseUrl`.
-2. The running daemon keeps listening on `0.0.0.0` and keeps serving other machines until it restarts. To shut other machines out at once, also run `goodvibes-daemon config set controlPlane.enabled false`: from the next request, a request from another machine is refused with `403` `CONTROL_PLANE_LOCAL_ONLY`.
-3. Restart: `goodvibes-daemon restart-service` (or Ctrl-C and start again).
-4. Check: `ss -ltn 'sport = :3421'` must show `127.0.0.1:3421` (`lsof -nP -iTCP:3421 -sTCP:LISTEN` must show `127.0.0.1:3421`), and the `curl` from another device must get no answer.
+2. The running daemon releases `0.0.0.0:3421` and binds `127.0.0.1:3421` within about a second. From the moment it reads the new setting, the old listener answers another machine only with `403` `CONTROL_PLANE_LOCAL_ONLY` (`the control plane is set to listen on 127.0.0.1, so a request from <address> is not served`), so nothing the setting refuses is served while it moves. If `127.0.0.1:3421` cannot be bound, it does not go back to every interface: it binds loopback on the previous port or nothing, and says so in its log and in `status`.
+3. Check: `ss -ltn 'sport = :3421'` must show `127.0.0.1:3421` (`lsof -nP -iTCP:3421 -sTCP:LISTEN` must show `127.0.0.1:3421`), and the `curl` from another device must get no answer.
 
-### Restarting the daemon to apply a new address
+### Restarting the daemon
+
+A new address needs no restart (see "Which settings apply at once"); a daemon started with `--host` or `--port`, and `controlPlane.tls.*`, do.
 
 | How the daemon runs | Restart |
 | --- | --- |
@@ -575,21 +576,18 @@ lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS, also Linux
 
 Binding decides who can connect; `controlPlane.enabled` decides whether a connection from another machine is served. A request from another machine to a daemon with `controlPlane.enabled` `false` gets `403` with code `CONTROL_PLANE_LOCAL_ONLY` and the body `{"error":"This daemon serves only its own machine","code":"CONTROL_PLANE_LOCAL_ONLY","state":"controlPlane.enabled is off, so a request from <address> is not served","next":[...],"status":403}`. Either answer proves the bind; no answer within a few seconds means the address is not bound or a firewall drops it.
 
-Do not use these as proof of the bind: `goodvibes-daemon status` (its `bound:` line prints the settings), `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.3.1 bound: host="0.0.0.0" port=3421`, is right for that start.
+`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.3.1 bound: host="0.0.0.0" port=3421`, is right for that start.
 
-### Known fault: a new address on the same port waits for a restart
+### How a running daemon moves to a new address
 
-In 3.3.1, a running daemon does not apply a change of `controlPlane.hostMode` between `local` and `network` when the port stays the same: `config set controlPlane.hostMode`, `webui enable --lan` and `webui enable --loopback` all write the settings and print the new posture, but the listener stays where it was. The daemon binds the new address before it releases the old one, `127.0.0.1:3421` and `0.0.0.0:3421` cannot both be held, and it writes `[ERROR] DaemonServer: the new control-plane binding could not be bound; still serving on the previous address` to its activity log (`<working dir>/.goodvibes/logs/activity.md`). It does not try again.
+A change of `controlPlane.hostMode`, `controlPlane.host` or `controlPlane.port` (by `config set`, `webui enable --lan`/`--loopback` or an edit of the settings file) is applied by the running daemon within about a second:
 
-Consequences, reproduced with a second machine on a test network:
+- A new port is bound before the old listener is released, so the API never goes down, as long as the old listener serves nothing the new setting leaves out (it was on loopback, or on the same host). Otherwise the old listener is released first.
+- The same port on another host (`127.0.0.1:3421` to `0.0.0.0:3421` and back) cannot be held twice, so the old listener is released and the new one bound.
+- If the new address cannot be bound, the daemon goes back to the previous address only when the new setting still allows it; otherwise it binds `127.0.0.1` on the previous port, so the API stays reachable from this machine for a correction, or nothing. It writes `[ERROR] DaemonServer: the new control-plane binding could not be bound; still serving on the previous address` (or `no control-plane listener is bound`) to its activity log, and `status` shows the difference.
+- Until the new listener is bound, a listener wider than the setting (every interface while it names loopback) answers only this machine; other machines get `403` `CONTROL_PLANE_LOCAL_ONLY`, channel webhooks included.
 
-- After `webui enable --lan`, other devices cannot connect (`127.0.0.1` stays bound) until the daemon restarts.
-- After `webui enable --loopback`, the daemon keeps listening on `0.0.0.0` with `controlPlane.enabled` still `true`, so other machines are still served (a request from the second machine got `200`) while the settings and the command's output say "reachable from this machine only". The exposure ends only at the restart.
-- `goodvibes-daemon config set` ends with `A running daemon applies most keys live, including a changed control-plane host or port`. For a same-port address change that is wrong; follow `webui enable`'s `Restart the daemon for this to take effect on a running process.`
-
-Remedy: restart the daemon after every change of `controlPlane.hostMode` or `controlPlane.host`, then check the bound address (both above). To cut other machines off before a restart, `goodvibes-daemon config set controlPlane.enabled false` applies on the next request.
-
-What does apply live, observed on 3.3.1: a new `controlPlane.port` (the new port answered within a second and the old one was released), and a move between two specific addresses on the same port (`custom` `127.0.0.1` to `custom` `10.77.0.5` and back), because those do not overlap. A move to or from `0.0.0.0` on the same port does not.
+A daemon started with `--host` or `--port` keeps that binding for its whole run.
 
 Plain HTTP on a private network is a supported posture. The connection is not encrypted on that network, and browsers withhold three features from a page that is not a secure context (HTTPS, or `localhost`): installing the app and its service worker, push notifications, and the microphone. `pairing.posture.get` (see the next part) reports each of these as available or `needs https, available via tailscale`. A `100.64.0.0/10` address is accepted over HTTP only when a running Tailscale vouches for it or `GOODVIBES_TAILNET_ADDRESSES` lists it, because carrier-grade NAT uses the same range.
 
@@ -615,10 +613,10 @@ chmod 600 ~/.goodvibes/tui/certs/privkey.pem
 goodvibes-daemon config set controlPlane.tls.mode direct
 goodvibes-daemon restart-service
 ss -ltn 'sport = :3421'          # the bound address (lsof -nP -iTCP:3421 -sTCP:LISTEN on macOS)
-goodvibes-daemon status --host https://homelab.example --token <your-operator-token>   # direct TLS on the daemon's own port 3421
+goodvibes-daemon status --host https://homelab.example:3421 --token <your-operator-token>   # direct TLS on the daemon's own port 3421
 ```
 
-For another machine to reach it, the daemon must also be bound to an address it can reach (`webui enable --lan`, or `config set controlPlane.hostMode network` with `controlPlane.enabled` `true`) before the restart; the `ss` line must then read `0.0.0.0:3421`.
+For another machine to reach it, the daemon must also be bound to an address it can reach (`webui enable --lan`, or `config set controlPlane.hostMode network` with `controlPlane.enabled` `true`), which a running daemon applies within about a second; the `ss` line must then read `0.0.0.0:3421`.
 
 Behind a reverse proxy (nginx, Caddy, Traefik) that terminates TLS and forwards to `127.0.0.1:3421` on the same machine (a proxy on another machine also needs the daemon bound to an address it can reach: `goodvibes-daemon config set controlPlane.hostMode network`, or `custom` with `controlPlane.host`, and then `controlPlane.enabled` `true`):
 
@@ -631,10 +629,10 @@ goodvibes-daemon config set web.publicBaseUrl https://goodvibes.example.com
 goodvibes-daemon webui enable            # needs a configured bundle; otherwise add --bundle-dir <dir>
 goodvibes-daemon restart-service
 ss -ltn 'sport = :3421'                  # 127.0.0.1:3421 for a proxy on this machine; 0.0.0.0:3421 for one elsewhere
-goodvibes-daemon status --host https://goodvibes.example.com --port 443 --token <your-operator-token>
+goodvibes-daemon status --host https://goodvibes.example.com --token <your-operator-token>
 ```
 
-`--port 443` is needed in the last line: without it the command dials port 3421 on the public name (see "Talking to a daemon: `--host`, `--port`, `--token`"). The restart applies `controlPlane.tls.mode` and any change of `controlPlane.hostMode`; the other keys would apply without it (see "Which settings apply at once").
+The last line dials port 443, the port of an `https://` URL that names none (see "Talking to a daemon: `--host`, `--port`, `--token`"). The restart applies `controlPlane.tls.mode`; the other keys apply without it (see "Which settings apply at once").
 
 `controlPlane.trustProxy` makes the daemon take the client address from `x-forwarded-for` and the scheme from `x-forwarded-proto`. Only switch it on when a proxy you control is the only thing that can reach the listener. With it on, the client address is the forwarded one, so `controlPlane.enabled` must be `true` or every forwarded request is refused with `403` `CONTROL_PLANE_LOCAL_ONLY`. With `controlPlane.trustProxy` `false` (default), a same-machine proxy's requests arrive from `127.0.0.1` and are served even with `controlPlane.enabled` `false`; the proxy is then the boundary, and every request still needs a token. A request that carries a forwarding header (`forwarded`, `x-forwarded-for`, `x-real-ip`, `via` and similar) is never treated as coming straight from the daemon's own machine, so the operator token used through a proxy is reported as credential `shared-token`, not `local`. The proxy must pass WebSocket upgrades for `/api/control-plane/ws` and must not buffer `text/event-stream` responses.
 
@@ -648,8 +646,7 @@ From the code that reads each control-plane key, verified on a running 3.3.1 dae
 
 | Key | When a change applies |
 | --- | --- |
-| `controlPlane.port` | At once: the daemon binds the new port, then releases the old one (observed: the new port answered within a second, the old one stopped answering). |
-| `controlPlane.hostMode`, `controlPlane.host` | **At the next restart** when the port stays the same and the change is to or from every interface (`local` to `network`, `network` to `local`): the running daemon keeps its old address (see "Known fault: a new address on the same port waits for a restart"). A move between two specific addresses (`custom`) applies at once. Restart after any of these, then check the bound address. |
+| `controlPlane.port`, `controlPlane.hostMode`, `controlPlane.host` | At once, in both directions (`local` to `network` and back, a new port, a new `custom` host): the daemon moves its listener within about a second and a listener wider than the new setting serves only this machine meanwhile (see "How a running daemon moves to a new address"). |
 | Any of the three, with the daemon started with `--host`/`--hostname` or `--port` | Never during that run: the flags win until the daemon is started without them. |
 | `controlPlane.enabled`, `controlPlane.trustProxy` | At once, on the next request (observed: `config set controlPlane.enabled false` refused the next request from another machine with `403`). |
 | `controlPlane.streamMode` | At once, on the next request. |
@@ -692,10 +689,10 @@ The web UI is a built bundle of static files (an `index.html` and its assets). T
 | Command | Effect |
 | --- | --- |
 | `goodvibes-daemon webui status` | What is served, from where, and who can reach it. |
-| `goodvibes-daemon webui status --json` | The configured `web.*` binding for development clients. It is not proof that a listener is running. |
+| `goodvibes-daemon webui status --json` | The `web.*` binding the web UI's development server listens on. It is not the web UI's address and not proof that a listener is running. |
 | `goodvibes-daemon webui enable [--bundle-dir <dir>]` | Serve the bundle in that directory, or the one already in `controlPlane.webui.bundleDir`. Writes `controlPlane.webui.serve` `true`, `controlPlane.webui.bundleDir` (as an absolute path), `web.enabled` `true`, and `web.publicBaseUrl` when it is empty or holds the shipped default `http://127.0.0.1:3423` (any other value is kept). Changes no network exposure. With no `--bundle-dir` and no `controlPlane.webui.bundleDir` it does not fall back to `web.staticAssetsDir`: it prints `webui: no bundle directory to serve.` and `Pass one:  goodvibes-daemon webui enable --bundle-dir <dir>` and exits `2`. |
-| `goodvibes-daemon webui enable --lan` | Also set the binding to every interface and serve other devices, from the next restart (see "Making the daemon reachable on the local network"). |
-| `goodvibes-daemon webui enable --loopback` | Also set the binding to loopback only, from the next restart; until then a daemon on every interface keeps serving other machines. |
+| `goodvibes-daemon webui enable --lan` | Also set the binding to every interface and serve other devices; a running daemon moves within about a second (see "Making the daemon reachable on the local network"). |
+| `goodvibes-daemon webui enable --loopback` | Also set the binding to loopback only; a running daemon moves within about a second, and meanwhile answers other machines only with `403` `CONTROL_PLANE_LOCAL_ONLY`. |
 | `goodvibes-daemon webui disable` | Stop serving it: writes `controlPlane.webui.serve` `false` and `web.enabled` `false`. The bundle and `controlPlane.webui.bundleDir` stay, so a later bare `webui enable` serves it again. |
 | `--lan` and `--loopback` together | Refused: `webui: --lan and --loopback ask for opposite things; pass one of them`, exit `2`. `--bundle-dir`, `--lan` and `--loopback` with `disable` or `status` are refused the same way. |
 
@@ -716,7 +713,7 @@ web UI: served by the daemon from /home/alex/goodvibes/products/webui/dist
   http://127.0.0.1:3421
   reachable from this machine only (the control-plane listener is bound to loopback).
   To reach it from another device on your network:  goodvibes-daemon webui enable --lan
-  Restart the daemon for this to take effect on a running process.
+  A running daemon applies this within about a second; no restart is needed.
 ```
 
 A directory with no `index.html` is refused with `<dir> holds no index.html, so it is not a built web UI bundle`; a missing one with `no directory at <dir>`; both exit `1` and change nothing. When the daemon serves the bundle, `controlPlane.webui.bundleDir` wins over `web.staticAssetsDir` (the daemon itself does fall back to `web.staticAssetsDir` when `bundleDir` is empty; only the `webui enable` command does not).
@@ -724,13 +721,13 @@ A directory with no `index.html` is refused with `<dir> holds no index.html, so 
 When the change takes effect on a running daemon:
 
 - Serving or not serving the bundle (`enable`, `disable`, a new `--bundle-dir`): at once, on the next request.
-- The address (`--lan`, `--loopback`): **only after a restart**. Follow the command's closing line `Restart the daemon for this to take effect on a running process.`, then check the bound address (see "Checking which address the daemon is bound to"). Until the restart, a daemon that was on loopback stays on loopback after `--lan`, and a daemon that was on every interface stays on every interface after `--loopback`, still serving other machines (see "Known fault: a new address on the same port waits for a restart").
+- The address (`--lan`, `--loopback`): within about a second, in both directions; no restart (see "How a running daemon moves to a new address"). A daemon started with `--host` or `--port` keeps that binding until it is restarted without them.
 
 On a machine whose only address is loopback, `--lan` still sets the network binding but prints `reachable from this machine only` and writes `http://127.0.0.1:3421` into `web.publicBaseUrl`. `status` or `disable` with `--lan`, `--loopback` or `--bundle-dir` is refused with `<flag> only applies to 'webui enable', not '<subcommand>'` (for example `--lan only applies to 'webui enable', not 'status'`), exit `2`.
 
 The bundle itself is public: anyone who can reach the listener can load the page. Every API call the page makes needs a token.
 
-`web.enabled`, `web.hostMode`, `web.host` and `web.port` only describe a web surface for links; nothing binds them. `web.publicBaseUrl` overrides the address used in pairing links and notification links when the web UI is reached through a tunnel or proxy the daemon cannot describe.
+`web.hostMode`, `web.host` and `web.port` are where the web UI's development server listens (it reads them from `goodvibes-daemon webui status --json`); nothing else binds them, and no link, pairing address, `goodvibes web` or `tailscale.serve.run` uses them. The web UI's address has one owner: the control-plane address while the daemon serves the bundle, otherwise a set `web.publicBaseUrl`, otherwise none. `web.publicBaseUrl` also overrides the address used in pairing links and notification links when the web UI is reached through a tunnel or proxy the daemon cannot describe; `goodvibes web` prints both. `web.enabled` only switches the web channel on or off.
 
 ### Signing in to the web UI
 
@@ -783,13 +780,13 @@ Every setting the daemon knows appears in exactly one section; a namespace no se
 | Device token | Pairing: a QR code, `goodvibes pair`, `goodvibes-daemon pair --host ... -y`, or the API (`pairing.tokens.create`). Starts with `gvp_` (the operator token starts with `gv_`). | Full, unless minted with a scope list. Reported as credential `device-token`, or `agent` for the Agent's own pairing. | Hash only, in `pairing-tokens.json`; the secret is shown once. | Revoked one at a time, immediately. |
 | Sign-in | `POST /login` with a username and password. | The user's role: `admin` gives full authority; any other role reads everything except the owner's private content and writes nothing. A user can be given a narrower scope list. | In memory; users in `auth-users.json`. | After 12 hours, on `POST /logout`, or when revoked. |
 
-A newly minted device token is an offer until it is first used: it is not listed as a device, does not count toward `device.nodes.maxPaired`, and stops working if nobody uses it within 15 minutes (`PAIRING_OFFER_EXPIRED`). The first request that uses it turns it into a paired device.
+A newly minted device token is an offer until it is first used: it is not listed as a device, does not count toward `device.nodes.maxPaired`, and stops working if nobody uses it within 15 minutes (`PAIRING_OFFER_EXPIRED`). The first request that uses it turns it into a paired device. With `device.nodes.maxPaired` devices already paired, an offer made under the name of a device that is already paired is allowed, and replaces that device only at its first use (the old device token is revoked then, and what the old pairing minted moves to the new one); an offer that expires unused leaves the paired device working.
 
 ### Pairing a phone or another browser
 
 Preconditions: the daemon is running, it serves the web UI (`goodvibes-daemon webui status`), and the phone can reach its address (same network, Tailscale, or a public address).
 
-1. On the daemon's machine, make the web UI reachable from the phone: on the same network, `goodvibes-daemon webui enable --lan`, then restart the daemon (`goodvibes-daemon restart-service`) and check that `ss -ltn 'sport = :3421'` shows `0.0.0.0:3421` (all of it in "Making the daemon reachable on the local network"); over Tailscale, the Tailscale steps in "Remote access" instead (they keep the daemon on loopback, so no restart is needed).
+1. On the daemon's machine, make the web UI reachable from the phone: on the same network, `goodvibes-daemon webui enable --lan`, then check that `ss -ltn 'sport = :3421'` shows `0.0.0.0:3421` (no restart is needed) (all of it in "Making the daemon reachable on the local network"); over Tailscale, the Tailscale steps in "Remote access" instead (they keep the daemon on loopback, so no restart is needed).
 2. Show a pairing code. Any of these works:
    - `goodvibes pair --name "my phone"` (terminal app; mints a named device token on the connected daemon and prints its link and QR code);
    - `/qrcode` (aliases `/qr`, `/pair`) inside the terminal app;
@@ -814,7 +811,7 @@ Paired devices are listed, renamed and revoked in the web UI (Settings, Account,
 
 | Method | Does |
 | --- | --- |
-| `pairing.tokens.list` | `{ "tokens": [...], "legacySharedRevoked": false }`. Each token has `id`, `name`, `createdAt` and `lastSeenAt`; `mintedBy` (the id of the paired device that minted it) appears only when a paired device minted it, `scopes` only when it was minted with a narrower scope list (absent means full operator authority), and `client: "agent"` only on the Agent's own pairing. Never the secret. `legacySharedRevoked` is `true` once the shared operator token has been revoked (`pairing.tokens.revokeShared`). Offers not yet used (see "The three kinds of credential") are not listed. |
+| `pairing.tokens.list` | `{ "tokens": [...], "legacySharedRevoked": false }`. Each token has `id`, `name`, `createdAt`, `lastSeenAt` and `origin` (`owner-pairing` for a device the owner paired himself through the pairing QR or `pair`, which makes the owner's own acts; `automation` for every other token, see "A change only the owner makes" in "The operator HTTP API"); `mintedBy` (the id of the paired device that minted it) appears only when a paired device minted it, `scopes` only when it was minted with a narrower scope list (absent means full operator authority), and `client: "agent"` only on the Agent's own pairing. Never the secret. `legacySharedRevoked` is `true` once the shared operator token has been revoked (`pairing.tokens.revokeShared`). Offers not yet used (see "The three kinds of credential") are not listed. |
 | `pairing.tokens.create` | Mint a device token. Input `name` (required), `scopes`, `client: "agent"`, `attemptId`. The secret is returned once. |
 | `pairing.tokens.rename` | Input `id`, `name`. |
 | `pairing.tokens.delete` | Input `id`. Revocation is immediate: the next request with that token gets `401`. Every token that device minted is revoked with it (`alsoRevoked`). |
@@ -843,10 +840,10 @@ Do all of these that apply, on the daemon's machine or from another signed-in de
 | --- | --- |
 | Its own device token (paired with `goodvibes pair`, `/qrcode` or a QR) | Revoke it: web UI Settings, Account, Devices and pairing; or `pairing.tokens.delete` with its id (from `pairing.tokens.list`). Its next request gets `401`; its open streams get a `closed` frame; tokens it minted are revoked with it. |
 | The shared operator token (paired with `goodvibes-daemon pair`, local form) | `pairing.tokens.revokeShared` (see below). |
-| A sign-in session | Rotate that user's password: `goodvibes auth rotate-password <username> --password-stdin` ends that user's sessions on a running daemon within a few seconds, with no restart. Or end one session through the API with `local_auth.sessions.delete` (`GET /api/local-auth` lists the sessions). `goodvibes auth revoke-session(s)` only edits the stored record; a running daemon keeps the session until it restarts. |
-| A passkey (accepted the Passkey offer) | `GET /api/stepup/credentials` lists passkeys (`credentialId`, label, creation time); `DELETE /api/stepup/credentials/{credentialId}` removes one (admin, from the daemon's own machine; over the relay it needs a step-up itself). Removing the last passkey leaves nothing to confirm relay actions until a new one is registered. |
-| A relay pairing code (accepted the Relay offer) | The code cannot be revoked one phone at a time: it is the relay address, the daemon's rendezvous id and its public key, the same for every device, and it carries no credential. Without a valid token the phone reaches the daemon but is refused. To make every relay code useless, switch the relay off: `goodvibes-daemon config set relay.enabled false` refuses relayed requests at once (`503` `relay-disabled`), and a restart then closes the registration (`config unset relay.url` alone takes effect only at the restart). There is no command in 3.3.1 that gives the daemon a new relay identity. |
-| Web push (accepted Notifications) | Revoking the device token stops the daemon trusting the phone; push subscriptions are removed by the daemon only when the push service reports them gone. |
+| A sign-in session | Rotate that user's password: `goodvibes auth rotate-password <username> --password-stdin` ends that user's sessions on a running daemon within a few seconds, with no restart. Or end one session at once with `goodvibes auth revoke-session <id>` (ids from `goodvibes auth sessions`), or all of one user's with `goodvibes auth revoke-sessions <username>`; both act on the running daemon, through `local_auth.sessions.delete` (`GET /api/local-auth` lists the sessions). |
+| A passkey (accepted the Passkey offer) | `GET /api/stepup/credentials` lists passkeys (`credentialId`, label, creation time); `DELETE /api/stepup/credentials/{credentialId}` removes one (admin, from the daemon's own machine; over the relay it needs a step-up itself). Removing the last passkey leaves nothing to confirm relay actions until a new one is registered. In a group, a passkey removed on one machine confirms nothing on any machine. |
+| A relay pairing code (`gvrelay1.…`) | Each pairing carries a relay code for that one device, listed and revoked like a device token: `/relay codes` in the terminal app, `goodvibes-agent relay codes`, the operator method `relay.codes.list` or the web UI's Settings, "Relay devices", show each code's id, name, creation and last use (never the code); `/relay revoke <id>`, `goodvibes-agent relay revoke <id>`, `relay.codes.revoke` (admin) or the web UI's Revoke button revoke one. Every relay connection the code opened ends at once (its open event streams are closed, its requests stopped), and from its next request the phone is refused through the relay (`401` `relay-code-revoked`); every other device keeps working, and the phone still connects directly on the home network with a valid token. A relay code the phone asked for with its own device token is also revoked when that device token is revoked, on any machine of the group. To cut every device off at once, switch the relay off: `goodvibes-daemon config set relay.enabled false` refuses relayed requests at once (`503` `relay-disabled`). |
+| Web push (accepted Notifications) | Revoking the phone's device token also ends the push subscription the phone registered with it, on every machine of the group: no machine pushes to it again. A subscription the push service reports gone is removed by the daemon too. |
 
 ### Revoking the shared operator token
 
@@ -890,16 +887,16 @@ Roles: `admin` is the only role with a meaning; any other role name (the termina
 
 `~/.goodvibes/tui/auth-bootstrap.txt` holds the password of the first user, `admin`, in plain text. It is written once, when the user store is created.
 
-- **It disappears by itself.** The daemon deletes the file the first time anyone signs in (`POST /login`, the web UI sign-in) with a password that is not the bootstrap one, whichever user it is. In testing, the first sign-in of a newly added `viewer` user removed the file. Signing in with the bootstrap password itself never deletes it.
-- **Deleting the file does not change the `admin` password.** The bootstrap password keeps working until it is rotated; only the written copy is gone (verified: after the file was removed, the old password still signed `admin` in).
-- So, before anything else deletes it, read it or replace it. The one right way to finish with it:
+- **The file is the password.** The generated password signs in only while this file still holds it. Deleting the file, emptying it or clearing it with `goodvibes auth clear-bootstrap` withdraws the password at once: a sign-in with it then gets `401` `BOOTSTRAP_CREDENTIAL_WITHDRAWN` (`this generated password signed in only while the bootstrap credential file held it, and that file was deleted or cleared`), and every sign-in made with it ends within about a second. `admin` keeps its account; give it a password with `goodvibes auth rotate-password admin`.
+- **Another user's sign-in leaves it alone.** While `admin` still has the generated password, nobody else's sign-in deletes the file. The daemon deletes it by itself only once nothing signs in with it any more (the user it names has a password of its own), at the next sign-in with a real password.
+- The one right way to finish with it:
 
 ```sh
 printf '%s\n' '<a new admin password>' | goodvibes auth rotate-password admin --password-stdin
 goodvibes auth clear-bootstrap      # prints "Bootstrap credential file removed." or "... was already absent."
 ```
 
-The API equivalents are `local_auth.users.password.rotate` and `local_auth.bootstrap.delete` (`DELETE /api/local-auth/bootstrap-file`). Do not remove the file by hand while you still need the password it holds.
+`rotate-password` deletes the file itself when it names that user, so `clear-bootstrap` after it is only a check. The API equivalents are `local_auth.users.password.rotate` and `local_auth.bootstrap.delete` (`DELETE /api/local-auth/bootstrap-file`). Removing the file by hand ends the generated password as surely as the command does.
 
 
 ## Host pairing: giving the terminal app its own credential
@@ -933,7 +930,7 @@ The terminal app on a laptop can use a daemon on a home server instead of one of
 
 End to end:
 
-1. **On the server**, make the control plane reachable from the laptop: `goodvibes-daemon webui enable --lan` (or `config set controlPlane.hostMode network` and `config set controlPlane.enabled true`), then restart the daemon (`goodvibes-daemon restart-service`), check that `ss -ltn 'sport = :3421'` shows `0.0.0.0:3421`, and allow TCP 3421 in its firewall. Without the restart the server stays on `127.0.0.1` (see "Known fault: a new address on the same port waits for a restart"). Or use Tailscale and keep it on loopback (see "Tailscale").
+1. **On the server**, make the control plane reachable from the laptop: `goodvibes-daemon webui enable --lan` (or `config set controlPlane.hostMode network` and `config set controlPlane.enabled true`), check that `ss -ltn 'sport = :3421'` shows `0.0.0.0:3421` (no restart is needed), and allow TCP 3421 in its firewall. Or use Tailscale and keep it on loopback (see "Tailscale").
 2. **Get a credential for the laptop**, on the server: `goodvibes pair --name "laptop"` prints a device token (in the link after `#pair=`); or, from the laptop with the server's operator token, `goodvibes-daemon pair --host http://server.lan --token <server operator token> -y`. A device token can be revoked on its own later; the server's operator token works too but cannot. **Use the device token within 15 minutes:** until its first request it is only an offer, and an offer nobody uses expires (`PAIRING_OFFER_EXPIRED`). Do steps 3 and 4 straight away; step 4 is the first use that turns it into a paired device. A token that expired unused is refused with code `PAIRING_OFFER_EXPIRED` (`this pairing code was not used within 15 minutes of being made, so it expired`); mint a new one.
 3. **On the laptop**, store it and point the app at the server. Either:
    - run `goodvibes onboarding`, choose "Connect to an existing running daemon" on the network screen, and give the host, the port (3421) and the token. It writes both items below and restarts the app's connection; or
@@ -948,7 +945,7 @@ End to end:
      ```
 
      and set `daemon.connectedHost.url` to `http://server.lan:3421` in the terminal app (`/config` in the app, or the `daemon.connectedHost.url` line of `~/.goodvibes/tui/settings.json`). The key in `tokens` must be exactly the origin: scheme, host and port, with no path; the default port of the scheme is left out (`https://server.example`, not `https://server.example:443`).
-4. **Check** the server and the token from the laptop: `goodvibes-daemon status --host http://server.lan --token <the device token>` must print the server's status. (`goodvibes control-plane status` describes only the laptop's own control-plane binding, not the connected daemon.)
+4. **Check** the server and the token from the laptop: `goodvibes-daemon status --host http://server.lan:3421 --token <the device token>` must print the server's status. (`goodvibes control-plane status` describes only the laptop's own control-plane binding, not the connected daemon.)
 5. To go back to a daemon on the laptop, clear `daemon.connectedHost.url`; the token for the server stays in `connected-daemons.json` for next time.
 
 The laptop's conversation turns still run in the laptop's terminal app, so model provider credentials are needed on the laptop; the server's channels, schedules, memory and hosted sessions are the server's. The laptop's own `operator-tokens.json` is not touched by any of this.
@@ -980,7 +977,7 @@ Tailscale gives the daemon an encrypted address and a real `https://` name on th
 
 `tailscale serve` forwards from `localhost`, so the daemon can stay bound to loopback with `controlPlane.enabled` `false`.
 
-The daemon also has three API methods for this (Settings, General, Network in the web UI shows them): `tailscale.get` (read-only: is the binary there, logged in, the MagicDNS name, the serve the daemon started), `tailscale.serve.run` (admin: runs `tailscale serve --bg <port>`, records a receipt, and on success sets `web.publicBaseUrl` to the `https://` address) and `tailscale.serve.stop` (admin: runs `tailscale serve --https=443 off` and puts `web.publicBaseUrl` back). In 3.3.1, `tailscale.serve.run` serves `web.port` (default `3423`), where the daemon does not listen, so the served address answers nothing unless `web.port` is set to the control-plane port first (`goodvibes-daemon config set web.port 3421`). The manual steps above avoid this. When the tailnet has Serve switched off, Tailscale prints a link to switch it on; the receipt carries it as `enableUrl`.
+The daemon also has three API methods for this (Settings, General, Network in the web UI shows them): `tailscale.get` (read-only: is the binary there, logged in, the MagicDNS name, the serve the daemon started), `tailscale.serve.run` (admin: runs `tailscale serve --bg <port>`, records a receipt, and on success sets `web.publicBaseUrl` to the `https://` address) and `tailscale.serve.stop` (admin: runs `tailscale serve --https=443 off` and puts `web.publicBaseUrl` back). `tailscale.serve.run` serves the port the web UI is served on, the control-plane port while the daemon serves the bundle; with no web UI served it is refused with `409` `WEB_UI_NOT_SERVED` and runs nothing (serve the bundle first with `goodvibes-daemon webui enable`). When the tailnet has Serve switched off, Tailscale prints a link to switch it on; the receipt carries it as `enableUrl`.
 
 ### The relay
 
@@ -1006,7 +1003,7 @@ Setting it up, end to end:
    ```
 
 4. Check the registration with `relay.reachability.get` (API, scope `read:control-plane`). Its `status` is `disabled` (one of the three gates is off), `idle`, `connecting`, `registered` (the relay answered within the last two pings), `reconnecting`, `refused` (the relay refused the registration; the reason and next step are in `lastRefusal`) or `stopped`. The daemon records its rendezvous id in `relay.rendezvousId`; setting that key does nothing.
-5. Pair a device for the relay while it is on the local network: accept the "Relay" offer when pairing, or call `relay.pairing.mint` (admin) and give the device the code it returns (`gvrelay1.…`, or a link with `#relay=<code>`). `relay.pairing.mint` returns `pairing: null` until the daemon has registered. Treat the code like a credential: it routes a device to the daemon.
+5. Pair a device for the relay while it is on the local network: run `/relay pair [name]` in the terminal app or `goodvibes-agent relay pair [name]`, or call `relay.pairing.mint` (admin, optional `name`), and give the device the code it returns (`gvrelay1.…`, or a link with `#relay=<code>`). Each call issues a relay code for one device, carried inside the pairing and sent by the device on every relayed request; the daemon keeps only its hash and refuses a request whose code it did not issue or has revoked (`401` `relay-code-revoked`). Pair each device separately, so each can be revoked alone (see "A lost phone"). `relay.pairing.mint` returns `pairing: null`, and keeps no code, until the daemon has registered; it refuses with `409` `RELAY_CODE_LIMIT` once 64 codes are held. Treat the code like a credential: it routes a device to the daemon until it is revoked.
 6. Off the network, the web UI uses the relay automatically when the daemon's direct address does not answer. A token is still required to sign in.
 
 `relay.requireStepUpForMutations` (default `false`) makes every state-changing operator call that arrives through the relay require a recent passkey confirmation. `relay.label` is a name shown in relay pairing payloads.
@@ -1068,6 +1065,8 @@ Pairing a remote node:
 3. The node polls `pair.verify`. It answers `404` while the request is pending, then returns `peer` and a scoped peer `token` (scopes `remote:heartbeat`, `remote:pull`, `remote:complete`). A rejected, expired or already-verified request answers `410` `REMOTE_PAIR_REQUEST_SETTLED`; the node must request again.
 4. The node sends `peer.heartbeat` about every 30 seconds and `work.pull` about every 2 seconds.
 
+A peer token is on the authority record: a peer paired with one machine of a group is accepted by every machine (the first call to another machine takes the peer in there), and a token rotated or revoked on any machine is refused on all of them.
+
 One address may make 10 `pair.request` calls per minute; past that the daemon answers `429` `RATE_LIMITED` with `Retry-After: 60`. The owner manages peers with `remote.peers.list`, `remote.peers.get`, `remote.peers.disconnect`, `remote.peers.token.rotate`, `remote.peers.token.revoke`, `remote.peers.invoke`, `remote.work.list`, `remote.work.cancel` and `remote.snapshot` (`GET /api/remote`). `goodvibes remote` in the terminal app prints the posture.
 
 ## Clusters
@@ -1078,23 +1077,24 @@ A cluster is several daemons on one local network, all belonging to the owner, c
 
 The surfaces that are shared this way are the inbound readers: Telegram polling, ntfy subscriptions, Slack and Discord socket connections, and the email and other inbox pollers. Each surface has its own election, so different surfaces can be held by different machines.
 
-Everything else runs on every node independently, whoever holds a surface: outbound sends, sessions, hosted sessions, the control plane and the HTTP API, scheduled work, the knowledge and memory stores. Purchases are the exception: they are refused on every node while clustering is on.
+Four pieces of work that would otherwise happen once per machine are roles, elected the same way: purchases (the `payments` role), the scheduled check-in (`checkin`), the occasion reminders (`occasions`) and the group's schedules, reminders and url watchers (`automation`). Exactly one machine holds each at a time; `cluster status` lists a role this machine holds among its surfaces, as `elected for the payments role` (and so on). Everything else runs on every node independently, whoever holds a surface: outbound sends, sessions, hosted sessions, the control plane and the HTTP API, filesystem watchers and watchers a component registers, triggers, the knowledge and memory stores.
 
 Clustering is off by default (`cluster.enabled` `false`). Switching it on asserts that every GoodVibes daemon on this network is yours. A group (made with `cluster create` and `cluster join`) is what stops a stranger's daemon on a shared network from taking part: every coordination message is signed with the group key, and a message from outside the group is dropped.
 
 ### What is and is not synchronised between nodes
 
-Every piece of state is in exactly one of four classes:
+Every piece of state is in exactly one of these classes:
 
 - **Replicated**: every member holds the same copy; a change on any member reaches all of them.
 - **Per node**: each daemon keeps its own; nothing crosses between nodes.
-- **Elected owner only**: every node can do it, but for each inbound surface exactly one node, the elected holder, does it at a time.
-- **Off while clustered**: refused on every node while `cluster.enabled` is `true`.
+- **Elected owner only**: every node can do it, but for each inbound surface or role exactly one node, the elected holder, does it at a time.
+
+Device tokens, sign-in users, the day's payment spend, the group's schedules and url watchers, and what was answered for each occasion live on the **authority record** (`<home>/.goodvibes/tui/control-plane/authority-record.json`, mode 0600), one per daemon home and shared by every process of it. In a group it is carried between members in messages signed with each machine's own identity key, which never rotates, so a member behind on group keys still takes it; password hashes travel sealed to each member. A revocation is a permanent entry, never a deletion, so a machine that was away cannot bring a revoked credential back. A revoked or removed entry is kept for `cluster.revocationRetentionMinutes` (default 43200, 30 days; at least four gossip rounds, `4 × cluster.rosterGossipSeconds` counted as at least 30 s, rounded up to minutes, and a lower value of either setting is refused naming the minimum) and then dropped; a machine that dropped one keeps treating it as revoked, whatever copy of it a store on that machine still holds. A machine that has not held the group's record for longer than that window (it was off or cut off), or has never synced with the group it is in, sends nothing of its own and answers no request for its record until it has taken a member's whole record as the truth: what that record no longer holds is dropped on it and never issued again, unless that machine made it after it last synced; its schedules and url watchers are not armed meanwhile. `cluster status` on it then says `on returning after longer than cluster.revocationRetentionMinutes, N entries the group had removed were dropped here, not brought back` with the entries. When every member was away that long, the one with the newest record answers and the others merge it without dropping anything. A change goes out at once and again on each housekeeping pass until every member has it; the roster gossip carries each member's record head, and a member whose record differs asks for the newer one. `authority.status` (`GET /api/authority/status`, admin, `read:config`) returns `revision`, `digest`, `revocationFloor`, live and revoked counts per kind, and `behind` / `behindOn` (members whose record differs). `cluster status` shows the same head as `authority: revision N, digest …, the same on every member heard`. A record file that exists and cannot be read authenticates no device token from it until it can. Every change is announced on the runtime bus as `AUTHORITY_CHANGED` (`security` domain; kinds and ids only, never a value).
 
 | State | Class | Detail |
 | --- | --- | --- |
-| Member list (roster), group name, removal records | Replicated | Gossiped every `cluster.rosterGossipSeconds` (default 60, checked every 30 s), also to machines that were off when it changed. |
-| Group signing key, group keys | Replicated | Kept only in each member's encrypted secret store. Rotated every `cluster.keyRotationHours` (default 24) and on `rotate`, `rotate --now` and `forget`. Never in settings, logs or status. |
+| Member list (roster), group name, removals, key generations (who minted each, why, a commitment to its key, the signing public key and join verifier in force) | Replicated | Entries of the authority record: sent to every member at once; a member that missed a change (a lost message, or off at the time) takes it when the gossip of record heads every `cluster.rosterGossipSeconds` (default 60, checked every 30 s) or a datagram on a newer key shows it is behind. |
+| Group signing key, group keys, join key | Replicated | Kept only in each member's encrypted secret store; each new generation's keys travel sealed to every current member with its record entry. Rotated every `cluster.keyRotationHours` (default 24) and on `rotate`, `rotate --now` and `forget`. Never in settings, logs or status. |
 | Settings under `surfaces.`, `conversationGate.`, `automation.`, `checkin.`, `watchers.`, `integrations.`, `atRest.`, `device.`, `payments.`, `calendar.`, `google.oauth.`, `profile.`, `occasions.`, `hostedSessions.`, and the key `daemon.timezone` (daemon-owned settings only) | Replicated | A change written on any member, by `config set` or by hand, reaches every member; in testing a `config set atRest.retentionMaxTotalMb 600` on one node was read back on another within 15 seconds. Exceptions below. |
 | Credentials those replicated settings name (a channel's bot token, a calendar OAuth credential, mailbox credentials under `surfaces.`) | Replicated | Sealed to each receiving member's key for the trip, then stored in the receiver's own encrypted secret store. |
 | `controlPlane.*`, `httpListener.*`, `web.*`, `relay.*`, `cluster.*`, `voice.local.*`, `cloudflare.*`, `push.*`, `judgment.*`, `danger.httpListener`, `profile.path`, `email.passwordRef`, `email.smtpPasswordRef`, `hostedSessions.maxSessions`, every listening port | Per node | These describe one machine. |
@@ -1104,17 +1104,27 @@ Every piece of state is in exactly one of four classes:
 | Inbound channel intake: Telegram polling, ntfy subscriptions, Slack and Discord socket connections, inbound mail and the inbox pollers | Elected owner only | One election per surface. A node competes only for surfaces it is configured to serve. |
 | Channel webhooks (`/webhook/...`) | Per node | Each node answers the webhooks sent to its own address. |
 | Outbound sends (`goodvibes-daemon send`, replies, notifications) | Per node | Any node can send. |
-| Purchases (payments) | Off while clustered | Every purchase path checks that the machine is the payments leader, and a clustered daemon never is: there is no payments election. A purchase on a clustered node is refused with code `disabled`: `Refused: purchasing is off on this machine because it is part of a cluster; payments run only on a single, unclustered daemon today (a second machine would start from a clean daily budget). Turn clustering off (cluster.enabled false) on the machine that should buy.` Checkout and purchase reconciliation are refused the same way. Payment settings still replicate. |
-| Payment spend ledger and daily budgets used | Per node | |
-| Schedules and automation jobs (`automation-jobs.json`), automation runs and routes | Per node | A schedule created on one node exists and runs only there. The scheduler is not coordinated by the cluster. |
-| Watchers (`watchers.json`) | Per node | The `watchers.*` settings replicate; the watcher list does not. |
-| Check-ins and occasion reminders | Per node | Their settings replicate, and the services that run them are not coordinated by the cluster, so every node with them switched on runs them. |
+| Purchases (payments) | Elected owner only | The machine holding the `payments` role buys; `payments.budget.status` reports `isPaymentsLeader` `true` there and `false` elsewhere. A purchase begun on another machine is refused with code `disabled`, naming the holder: `Refused: in this group of machines purchases run on one machine at a time, and that is <name>. Ask there (its terminal app, web UI or channels); it buys with its own card, address and daily budget.` While an election is under way it says the group is choosing one. A machine that takes the role (the holder stopped or crashed) first recovers any checkout a previous holding of the role left interrupted on it. Payment settings replicate; cards are kept per node, so add the card on each machine that may hold the role. |
+| Payment spend ledger and daily budgets used | Replicated (the day's totals) | Each machine keeps its own ledger and writes its spend per day into the authority record (one counter per machine, only ever raised). The machine holding the `payments` role counts what every machine spent that day, so when the role moves mid-day the group still has one daily budget. Holds for purchases in flight stay on the machine that made them. |
+| Schedules, reminders and automation jobs (`automation-jobs.json`) | Replicated (authority record); elected owner runs them | A job created, changed, disabled or removed on any machine is the same on every machine and is listed on all of them; it runs once in the group, on the machine holding the `automation` role, the only machine that arms its timer. That machine writes each occurrence onto the record before starting it, so when the role moves (the holder stopped or crashed) the new holder neither runs that occurrence again nor skips the next: an occurrence that fell due while no machine held the role runs at once on the new holder, or is recorded as missed once it is older than `automation.catchUpWindowMinutes`. A removal is permanent: a machine that was asleep or off through it drops the job when it returns instead of bringing it back. A job asked to run now runs where it was asked. The scheduled check-in job is not shared (see check-ins below). Jobs a machine had before it joined are added to the group's. |
+| Automation runs and routes (`automation-runs.json`, routes) | Per node | A run is listed on the machine that ran it; the job's last run time and counts travel with the job. |
+| Watchers (`watchers.json`) | Replicated for url watchers (authority record); elected owner polls them | A webhook or polling watcher created through `watchers.create` on any machine is listed on every machine and polled only by the machine holding the `automation` role, which writes each run's start onto the record; a new holder runs it one interval after the last run any machine started. Starting, stopping, changing or removing one on any machine applies on all of them. Filesystem watchers (they look at that machine's own disk) and watchers a component registers (CI watch, the daemon's own pollers) stay per node. The `watchers.*` settings replicate. |
+| Check-ins and occasion reminders | Elected owner only | Their settings replicate, so every machine holds the check-in schedule and the reminder sweep; only the holder of the `checkin` role runs a scheduled check-in (elsewhere its run is recorded as `skipped`, `Another machine in this group runs the scheduled check-in.`), and only the holder of the `occasions` role sweeps for reminders. A check-in asked for by hand runs where it was asked. What is recorded against an occasion (`occasions-state.json`: answers, gift history, raised reminders, interviews, calendar mirrors) is on the authority record, one entry per occasion, so an occasion answered on one machine is not asked again by the machine holding the `occasions` role, whichever it is; when two machines change one occasion at the same moment both changes are kept, the later of each record winning. The occasions themselves are lines of each machine's owner profile, which stays per node. |
 | Sessions, hosted sessions, transcripts, queued inputs | Per node | A client sees the sessions of the daemon it connects to. |
 | Approvals and the owner inbox (`owner-inbox.sqlite`) | Per node | An ask raised on one node is answered on that node. |
 | Tasks, agents, contracts, the fleet | Per node | |
 | Memory (`memory.sqlite`), knowledge stores, checkpoints | Per node | |
-| Operator token, device tokens (`pairing-tokens.json`), sign-in users, passkeys, push subscriptions | Per node | A device paired with one node is not paired with another. |
+| Device tokens and their revocations | Replicated (authority record) | A device paired on any machine works on every machine of the group; revoking it on any machine (`pairing.tokens.delete`) refuses it on all of them, survives restarts, and is taken by a machine that was asleep or off as soon as it hears the group (it asks every member for its record when it starts or is re-keyed). Revoking a device revokes what it minted. Unused pairing offers stay on the machine that made them until first use. |
+| Sign-in users (`auth-users.json`), their passwords, roles, scopes and deletion | Replicated (authority record) | A user added on any machine (API or `goodvibes auth add-user`) signs in on every machine. A password change or a deletion on any machine ends that user's sign-ins on all of them. A user the group never changed (such as each machine's own setup `admin`) stays that machine's own; once changed on one machine, that user is the group's. Sign-in sessions themselves stay on the machine that issued them. |
+| Device capability grants ("always allow") and their revocations | Replicated (authority record) | A grant given on any machine is in force on every machine of the group; revoking it on any machine (`devices.grants.revoke`) refuses it on all of them, survives restarts, and is taken by a machine that was asleep or off when it returns. A request still waiting for the phone under a grant that is then revoked is withdrawn and answers `grant-revoked-before-claim`; one the phone had already picked up answers `grant-revoked-after-claim`, saying what took effect (a capture is kept under the capture retention and not returned). Last-used times and the grants ledger stay per node (`devices/device-grants.json`). |
+| Remote-node peer tokens (`remote.peers.*`) | Replicated (authority record) | A peer (a remote node or a phone's device node) paired on one machine is accepted on every machine; the first time it calls another machine, that machine takes the peer in. A token rotated or revoked on any machine is refused on all of them. Presence, queued work and the peer audit stay per node. |
+| Push subscriptions (`push.subscriptions.*`) | Replicated (authority record) | A browser registered for notifications through one machine receives every machine's pushes; turning it off on any machine, or a push service proving it dead, stops every machine pushing to it. Its endpoint and keys are sealed to each machine for the trip. Delivery outcomes stay per node. |
+| Step-up passkeys (`stepup.credentials.*`) | Replicated (authority record) | A passkey registered through one machine confirms relayed actions on every machine; one removed on any machine (a lost phone) confirms nothing anywhere. Each machine keeps its own signature counter and refuses a counter that goes backwards from what it saw. |
+| Relay codes (`relay.codes.*`) | Per node, on the authority record | A relay code is good only for the daemon that issued it (the rendezvous is that daemon's). A code issued to a paired device is revoked with that device, on any machine of the group. |
+| Operator token | Per node | Each machine keeps its own. |
 | Owner profile document | Per node | Only the `profile.*` policy settings replicate (not `profile.path`). |
+
+A machine that joins brings its own device tokens, users, grants, peers, push subscriptions and passkeys into the group's record; nothing is removed. A username that exists on both sides as separate accounts is not overwritten: each machine keeps its own account, changes to it stay on that machine, and `authority.status` (`userConflicts`) and `cluster status` (a line `user "<name>" exists as separate accounts made on different machines`) report it. The owner keeps one: `cluster publish user:<name> --yes`, run on the machine whose account the group should keep, revokes every other account of that name; `cluster accept user:<name> --yes` gives up this machine's account for the other one. Afterwards every machine signs the name in with the kept account's password, the conflict line is gone everywhere, and sign-ins of the account given up end.
 
 A joining machine takes the group's copy of the replicated settings. When a machine's own value of a replicated setting differs from the group's in a way the group did not cause, it is kept, a warning is logged (`this machine's value for a shared setting differs from the group's and was kept`), and `cluster status --json` lists it under `replication.localDifferences`. `cluster publish <setting> --yes` sends this machine's value to the group; `cluster accept <setting> --yes` takes the group's value here (it prints `this machine now runs the group's value of <setting>`). Both refuse a setting that is not replicated or that holds a credential: `<setting> is not a shared setting this command publishes` or `... can take from the group`. A change made on a machine before it holds the group's settings is held and sent once it has them (`publish` then answers `held`).
 
@@ -1206,8 +1216,8 @@ Join failures:
 | Message | Cause | Next step |
 | --- | --- | --- |
 | `sharing inbound work with your other machines is switched off on this machine` | `cluster.enabled` is `false`. | `config set cluster.enabled true`, restart. |
-| `this machine is already in a group` | | `cluster leave` first. |
-| `a machine in that group answered and the join key did not match` | A member was reached and refused the key: a mistyped key, a key that was replaced (by `rotate --now` or `forget`), or, with the right key, a member that is behind on keys answered first (any member answers a join, and the joining machine stops at the first refusal). Exit `1` at once. | Get the current key with `cluster key` on a member. If the key is right, run `cluster status` on every member; bring back any member whose `group key: generation` is lower than the others (see "Known fault: `rotate --now` followed quickly by `forget`"), then join again. |
+| `this machine is already in a group` | The machine is in a different group. (Joining the group it already belongs to, with that group's current key, is allowed: that is how a machine is put back.) | `cluster leave` first. |
+| `a machine in that group answered and the join key did not match` | A member was reached and refused the key: a mistyped key, or a key that was replaced (by `rotate --now` or `forget`). Exit `1`. | Get the current key with `cluster key` on a member and join again. |
 | `no machine in that group accepted the join key, either the join key is wrong, or no machine in that group is reachable on this network` | Nothing answered within 15 seconds. | Check that a member is running, that both machines are on the same network and UDP 61860 is open, and set `cluster.peers` if multicast is dropped; then check the key. |
 | `a group and a join key are both needed, and this is not an interactive terminal` | Script without `--group` and `--key`. | Pass both. |
 | `no goodvibes groups are advertising themselves on this network` | Nothing heard. | Check the other machine is on with clustering enabled, or join by id. |
@@ -1319,9 +1329,19 @@ the group key was replaced immediately, so that machine's copy no longer works.
 
 The machine is named by its full node id, its exact name, or a unique prefix of its node id (a prefix of the name does not work: `cluster forget charl` answers `no machine called 'charl' is in this group`). A name or prefix that matches several machines is refused and lists them. A machine cannot remove itself: `a machine cannot remove itself from the group` with `run \`cluster leave\` on this machine instead, or \`cluster forget\` from another machine in the group`.
 
-The removed machine is not told. It keeps believing it is a member, cannot be heard by the others (its key is no longer accepted), and refuses `cluster join` with `this machine is already in a group`. To bring it back on purpose: on the removed machine run `cluster leave --yes`, then `cluster join --group <id> --key <current join key>`. The old join key is refused (`a machine in that group answered and the join key did not match`); the current one admits it again, under its same node id.
+The removed machine is told. A running one takes the removal with the change itself (it is signed with the sending member's identity key, which the removed machine can check) and drops the group's keys at once; one that was asleep, stopped or restarting asks the group for its record when it next hears it or starts, and a member answers with its removal. Its log says `cluster: this machine was removed from its group by another member and no longer holds its keys`, and its `cluster status` says:
 
-Run `forget` on its own; do not precede it with `rotate --now` (see "Known fault: `rotate --now` followed quickly by `forget`"). Removing a machine does two things at once: it writes a removal record that outranks any earlier admission, so a member that missed the removal cannot bring the machine back, and it replaces the group key and the join key immediately with no grace period. The removed machine's keys stop being accepted as each member adopts the new ones. Add a machine later with the new join key from `cluster key`. If the key replacement fails after the roster changed, the command says the removal is half done; run `cluster rotate --now --yes` to finish it.
+```text
+this machine is not in a group: another member told it the group removed it 2m ago
+machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
+version: 3.3.1
+
+this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN --key <key>` here
+```
+
+To bring it back on purpose, run `cluster join --group <id> --key <current join key>` on it; no `cluster leave` is needed, before or after it has found out. The old join key is refused (`a machine in that group answered and the join key did not match`); the current one admits it again, under its same node id.
+
+`forget` may follow `rotate --now` (or the other way round) at any spacing. Removing a machine is one change to the group's record that does two things at once: it revokes the machine's membership, a revocation no member that missed it can undo, and it adds a new group key generation that replaces the group key, the group signing key and the join key immediately, with no grace period. The removed machine's keys stop being accepted as each member takes the new generation. Add a machine later with the new join key from `cluster key`. If the new key cannot be saved, nothing is changed and the command says so; run `cluster forget` again.
 
 ### Rotating keys
 
@@ -1333,7 +1353,7 @@ goodvibes-daemon cluster rotate --now --yes
 | Form | Effect |
 | --- | --- |
 | `rotate` | Replaces the group's internal key. The old one stays accepted for `cluster.keyRotationGraceMinutes` (default 5), so nothing is interrupted. Routine hygiene; it also happens by itself every `cluster.keyRotationHours`. |
-| `rotate --now` | Stops accepting the old key at once and also replaces the group signing key and the join key. Use it when a key may have leaked. A machine asleep at the time asks to come back when it wakes; a machine to be added needs the new join key. |
+| `rotate --now` | Stops accepting the old key at once and also replaces the group signing key and the join key. Use it when a key may have leaked. A machine asleep at the time takes the new key from the group when it wakes; a machine to be added needs the new join key. |
 
 What they print:
 
@@ -1348,38 +1368,14 @@ accepting generations 1 and 0
 $ goodvibes-daemon cluster rotate --now --yes
 the group key is now generation 2
 the previous key stopped being accepted immediately, and the key the group signs with
-was replaced too. A machine that is asleep right now will ask to come back when it wakes.
+was replaced too. A machine that is asleep right now takes the new key from the group when it wakes.
 
 accepting generation 2
 ```
 
-After `rotate --now`, check that every member took the new key before doing anything else to the group: run `goodvibes-daemon cluster status` on each member and compare the `group key: generation N` line. In testing, awake members showed the new generation 5 to 11 seconds after `rotate --now`.
+Key changes converge in any order and at any spacing (`rotate --now` then `forget` within a second, `forget` then `rotate --now`, several in a row, two members rotating at once). Each key generation is an entry of the group's record (who minted it, why, and a commitment to the key, never the key), and the key itself travels with it sealed to every current member, never to a removed one. The change is sent at once and again on each 30-second pass until every member's record covers it. A member that missed it, or several, notices on the group's next datagram (a generation it does not hold) or the next gossip of record heads, and asks a member for the record; the answer carries the newest generation, which it takes directly, however many it skipped. These requests and answers are signed with each machine's identity key, which never changes, so they work however far behind a member is. Which generations a machine accepts is worked out from the record, the same way on every machine, so a machine that joins later never reopens a key a removal closed. In testing every member, including one paused, one stopped and one restarted through the changes, showed the newest generation and the same record by the next status read after it was running again. A removal or `rotate --now` hands the new group signing key and join key to every remaining member the same way.
 
-### Known fault: `rotate --now` followed quickly by `forget`
-
-In 3.3.1, when `cluster forget` runs before every awake member has taken the key from a `cluster rotate --now` (in testing, `forget` sent 0 to 3 seconds after `rotate --now` on a group formed a few seconds earlier), a member that had not yet taken the first new key never takes either. It is cut off for good while it looks healthy:
-
-- its `cluster status` keeps the old `group key: generation` (for example `0` while the others show `2`) and its `traffic:` line counts more and more `on an old key`;
-- the other members' `cluster nodes` show its `LAST SEEN` growing without end (`2m ago`, `5m ago`);
-- its log repeats `cluster: replies to this machine's return could not be authenticated` and `dropped a reply to this machine's return that it could not authenticate`, and sometimes also `rejoined the group and took the current group key`, which does not mean it recovered;
-- while it is in this state it may answer other machines' joins, so a correct current join key can be refused with `a machine in that group answered and the join key did not match`.
-
-Restarting the stuck member does not help (verified). What works, verified, at once:
-
-```sh
-# on the stuck member
-goodvibes-daemon cluster leave --yes
-# on a healthy member
-goodvibes-daemon cluster key
-# on the stuck member, with the key just shown
-goodvibes-daemon cluster join --group <group id> --key <current join key>
-```
-
-It is admitted again under the same node id and shows the current generation within seconds.
-
-To avoid it: do not run `rotate --now` before `forget`. `forget` already replaces the group key and the join key at once, so it is enough on its own (verified: after `forget` alone, every remaining member showed the new generation within 5 seconds). When you do run `rotate --now` for a suspected leak and also need a `forget`, wait until `cluster status` on every awake member shows the new generation first.
-
-The join key is never rotated by the schedule; it changes only on `rotate --now` and on `forget`. Run `cluster key` afterwards to see the new one. A machine that was off through several rotations rejoins by itself when it starts, as long as it is still on the roster; its log says `rejoined the group and took the current group key`.
+The join key is never rotated by the schedule; it changes only on `rotate --now` and on `forget`. Run `cluster key` afterwards to see the new one. A machine that was off through several rotations catches up by itself when it starts, as long as the group still lists it; its log says `took authority record changes from the group` and `adopted a replacement group key`.
 
 ### Renaming a group
 
@@ -1393,7 +1389,7 @@ this name is visible to anything on this network, and every machine in the
 group will pick it up shortly.
 ```
 
-The name is shared group state, so every member picks it up with the next roster gossip (in testing, another member showed the new name 70 seconds later), and it is advertised on the network.
+The name is an entry of the group's record, so it is sent to every member at once (a member that missed it takes it with the next gossip of record heads), and it is advertised on the network.
 
 ### Confirmation
 
@@ -1426,7 +1422,7 @@ goodvibes-daemon cluster leave --yes --port 39432                               
 goodvibes-daemon cluster join --group <id> --key <current join key> --port 39432   # bravo is admitted again
 ```
 
-The outputs are the ones shown in the sections above. A wrong key (`gvj1-AAAA-...`) was refused at once with `a machine in that group answered and the join key did not match`. Skipping the `cluster status` check between `rotate --now` and `forget` can strand a member; see "Known fault: `rotate --now` followed quickly by `forget`".
+The outputs are the ones shown in the sections above. A wrong key (`gvj1-AAAA-...`) was refused at once with `a machine in that group answered and the join key did not match`.
 
 ### Election
 
@@ -1436,11 +1432,11 @@ Each surface has its own election. When several nodes can serve a surface, the w
 2. then the node holding the fewest surfaces wins, which spreads surfaces across machines;
 3. then a fixed hash of the node id and the surface id.
 
-The holder sends a heartbeat every `cluster.heartbeatSeconds` (default 30). A node shut down normally hands its surfaces over at once. A node that crashes is replaced after `cluster.masterTimeoutSeconds` (default 90; never less than two heartbeats). A starting node listens for `cluster.bootProbeSeconds` (default 3) before claiming a surface. A cluster holds at most 64 members.
+The holder sends a heartbeat every `cluster.heartbeatSeconds` (default 5). A node shut down normally hands its surfaces over at once. A node that crashes is noticed only by its silence: it is replaced after `cluster.masterTimeoutSeconds` (default 15, three missed heartbeats; never less than two heartbeats) plus a short election, about 20 seconds in all. A crashed node that is restarted takes its surfaces back after its boot probe. A starting node listens for `cluster.bootProbeSeconds` (default 3) before claiming a surface. A cluster holds at most 64 members.
 
 ### Clustering without a group
 
-With `cluster.enabled` `true` and no group, a machine listens (so `cluster join` can list groups) but sends nothing and gates nothing. `cluster.secret` is for machines that coordinate without a group: when it is set, their messages are signed with it and unsigned messages are ignored. Inside a group it is not used.
+With `cluster.enabled` `true` and no group, a machine listens (so `cluster join` can list groups) but sends nothing and gates nothing. `cluster.secret` is for machines that coordinate without a group: when it is set, their messages are signed with it and unsigned messages are ignored. When it names a stored secret that cannot be read (deleted, or the secret store cannot be opened), the machine sends and takes no coordination messages at all rather than run unsigned; its `/status` cluster section reports `electionAuthentication: "unavailable"`, `cluster status --json` the same, and the daemon log says `cluster.secret names a stored secret that could not be read`. Store the phrase again (`secrets set`) or clear `cluster.secret`, then restart. Inside a group it is not used.
 
 ### Diagnosing a node that is behind or unreachable
 
@@ -1463,8 +1459,8 @@ A procedure, run in this order:
 2. On a healthy member: `goodvibes-daemon cluster nodes`. Note the suspect's `LAST SEEN`.
 3. On every node: `goodvibes-daemon cluster status`. Compare `group key: generation`, `version`, the `shared settings` revision, and the `traffic:` line.
 4. If the suspect's `received` count does not grow: check that UDP 61860 is allowed in and out on both machines, that every node has the same `cluster.port` and `cluster.multicastGroup`, and that multicast crosses the network; if it does not, set `cluster.peers` on every node (`goodvibes-daemon config set cluster.peers '["10.0.0.2","10.0.0.3"]'`) and restart them.
-5. If the suspect's key generation is lower than the others' and stays lower for more than about two minutes: it will not catch up by itself (see "Known fault: `rotate --now` followed quickly by `forget`"). Bring it back as described there.
-6. Read its log for `cluster:` lines: `grep "cluster:" <working dir>/.goodvibes/logs/activity.md | tail -30`. Lines such as `a group key rotation did not include this machine`, `a group key rotation could not be opened by this machine` and `dropped a reply to this machine's return that it could not authenticate` mean it is behind on keys.
+5. If the suspect's key generation is lower than the others' while its `received` count grows, it catches up by itself within about a minute of hearing the group. If it stays lower, its `cluster status` will say whether the group removed it; to put it back, `cluster join --group <id> --key <current join key>` on it (no `leave` needed).
+6. Read its log for `cluster:` lines: `grep "cluster:" <working dir>/.goodvibes/logs/activity.md | tail -30`. `took authority record changes from the group` followed by `adopted a replacement group key` is a member catching up; `this machine was removed from its group by another member` means it was removed; `dropped a reply to this machine's return that it could not authenticate` means a machine whose own record no longer lists it could not be re-keyed.
 
 ### Which node holds a channel
 
@@ -1510,7 +1506,7 @@ What happens when clients leave is the detach policy:
 
 `hostedSessions.detachPolicy` sets the default; `detachPolicy` on `sessions.hosted.create` overrides it for one session. An attachment is a lease of `hostedSessions.attachmentTtlMs` (default 10 minutes); a client whose control-plane connection is open renews it automatically, and attaching again renews it. A crashed client's lease lapses, and the session then counts as detached.
 
-At most `hostedSessions.maxSessions` (default 8) sessions are live at once; another create is refused with the count and the setting named. Ended sessions are kept, listable with their reason, for `hostedSessions.terminatedRetentionMs` (default 24 hours). Each session's newest `hostedSessions.maxMessagesPerSession` messages (default 500) are saved to disk; after a daemon restart, attaching rebuilds the loop and adds a line to the transcript saying the turn that was running did not survive.
+At most `hostedSessions.maxSessions` (default 8) sessions are live at once; another create is refused with the count and the setting named. Ended sessions are kept, listable with their reason and with their transcript readable through `sessions.hosted.history` (by the credential that created or attached to them, or an admin one), for `hostedSessions.terminatedRetentionMs` (default 24 hours), also across a daemon restart. Each session's newest `hostedSessions.maxMessagesPerSession` messages (default 500) are saved to disk; after a daemon restart, attaching rebuilds the loop and adds a line to the transcript saying the turn that was running did not survive.
 
 End a session with `goodvibes-daemon sessions kill <id>` or `sessions.hosted.kill`.
 

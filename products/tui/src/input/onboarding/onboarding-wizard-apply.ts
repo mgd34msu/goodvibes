@@ -105,9 +105,15 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
       });
     }
 
-    setConfig('service.enabled', hasServers);
-    setConfig('service.autostart', hasServers);
-    setConfig('service.restartOnFailure', true);
+    // The daemon's service is the daemon's own (installed by the installer or
+    // `goodvibes-daemon install-service`) and keeps running for Local TUI Only,
+    // so that choice leaves the service settings as they are; a server-backed
+    // choice needs the service, so it turns them on.
+    if (hasServers) {
+      setConfig('service.enabled', true);
+      setConfig('service.autostart', true);
+      setConfig('service.restartOnFailure', true);
+    }
     // One-Platform daemon-by-default (platform docs/decisions/2026-07-05-daemon-by-default.md):
     // the loopback-only cross-surface session daemon is safe-by-design
     // (loopback bind, auth-gated, rate-limited) and runs regardless of whether

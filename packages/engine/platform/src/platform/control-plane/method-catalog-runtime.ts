@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   EMPTY_OBJECT_SCHEMA,
   BOOLEAN_SCHEMA,
@@ -171,6 +172,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'mcp.config.reload',
+    repeat: 'safe',
     title: 'Reload MCP Config',
     description: 'Reload effective MCP config and reconnect added, removed, or changed servers without daemon restart.',
     category: 'mcp',
@@ -186,6 +188,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'mcp.servers.upsert',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Upsert MCP Server',
     description: 'Persist a project/global MCP server config and reconnect the changed runtime server without daemon restart.',
@@ -202,6 +205,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'mcp.servers.remove',
+    repeat: 'safe',
     irreversible: true,
     title: 'Remove MCP Server',
     description: 'Remove a project/global MCP server config and disconnect it without daemon restart.',
@@ -240,6 +244,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.pair.requests.approve',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Approve Remote Pair Request',
     description: 'Approve a pending remote pair request.',
@@ -253,6 +258,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.pair.requests.reject',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Reject Remote Pair Request',
     description: 'Reject a pending remote pair request.',
@@ -285,6 +291,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.token.rotate',
+    repeat: 'unsafe',
     ownerOnly: true,
     title: 'Rotate Remote Peer Token',
     description: 'Rotate the active token for a remote peer.',
@@ -297,6 +304,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.token.revoke',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Revoke Remote Peer Token',
     description: 'Revoke the active token for a remote peer.',
@@ -309,6 +317,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.disconnect',
+    repeat: 'safe',
     title: 'Disconnect Remote Peer',
     description: 'Disconnect a remote peer.',
     category: 'remote',
@@ -320,6 +329,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.peers.invoke',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Invoke Remote Peer',
     description: 'Run a command on a remote peer. A paired peer gets it as queued work (answer: work, completed). A registered backend (remote.backends.register: docker, ssh, cloud terminal or local process) runs it now and answers with backend: exit code and output; on a backend, payload takes only args, stdin, env, timeoutMs and cwd, and the queue fields (priority, waitMs, sessionId, routeId, automation ids, approvalId) do not apply.',
@@ -344,6 +354,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.backends.register',
+    repeat: 'safe',
     effect: 'write',
     title: 'Register Remote Backend',
     description: 'Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.',
@@ -357,6 +368,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.backends.remove',
+    repeat: 'safe',
     irreversible: true,
     effect: 'write',
     title: 'Remove Remote Backend',
@@ -380,6 +392,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'remote.work.cancel',
+    repeat: 'safe',
     title: 'Cancel Remote Work',
     description: 'Cancel a remote work item.',
     category: 'remote',
@@ -498,6 +511,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   // daemon owns the setup lifecycle. Handler: routes/worktree-setup.ts.
   methodDescriptor({
     id: 'worktrees.setup.run',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Re-run Worktree Setup',
     description: 'Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.',
     category: 'worktrees',
@@ -511,6 +525,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   // honest receipt, never just a state-field write. Handler: routes/worktree-setup.ts.
   methodDescriptor({
     id: 'worktrees.discard',
+    repeat: 'safe',
     title: 'Discard a Worktree',
     description: 'Remove a worktree per the eviction-preserving rules: any uncommitted state is first committed onto the worktree\'s branch (a preservation failure REFUSES the removal rather than losing work), the directory is removed, and the branch is KEPT. Returns an honest receipt (ok, branch kept, preservation commit, detail) either way.',
     category: 'worktrees',
@@ -552,6 +567,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.vector.rebuild',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     effect: 'outward',
     title: 'Rebuild Memory Vector Index',
     description: 'Rebuild the sqlite-vec vector index.',
@@ -564,6 +580,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.embeddings.default.set',
+    repeat: 'safe',
     title: 'Set Default Memory Embedding Provider',
     description: 'Set the active default memory embedding provider.',
     category: 'memory',
@@ -623,6 +640,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.add',
+    replay: { in: 'body', name: 'id', behavior: 'An add that names a caller-generated `id` (mem_<base36 time>_<8 hex>) stores the memory once: a repeat with the same id and the same record returns the stored row, and the same id with a different record is refused. Without an id each call stores a new memory.' },
     title: 'Add Memory Record',
     description: 'Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them. An optional caller-generated id (mem_<base36 time>_<8 hex>) makes the add safe to resend: the same id with the same record returns the stored row, the same id with a different record is refused.',
     category: 'memory',
@@ -681,6 +699,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.update-review',
+    repeat: 'safe',
     title: 'Update Memory Record Review',
     description: 'Update a record\'s review signal (reviewState, confidence, reviewer, staleReason) in the canonical store. Marking a record stale or contradicted flags it so the recall-honesty contract will never inject it into a prompt again regardless of confidence. Returns 404 when no record with that id exists.',
     category: 'memory',
@@ -698,6 +717,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete Memory Record',
     description: 'Permanently delete a memory record and its links from the canonical store. Delete means delete: the record is removed from the store and the semantic index, not merely flagged. Returns { deleted: false } when no record with that id existed, an honest boolean, never a 200 that pretends a phantom row was removed.',
@@ -760,6 +780,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.import',
+    repeat: 'safe',
     title: 'Import Memory Bundle',
     description: 'Import a bundle into the canonical store as an id-keyed union: an id already present is left untouched (counted skipped), a new id is added; a link is added only when both its endpoints exist. Never overwrites, never deletes, idempotent on re-run. The daemon is the single writer, so a client imports here instead of writing the store file.',
     category: 'memory',
@@ -771,6 +792,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.update',
+    repeat: 'safe',
     title: 'Update Memory Record',
     description: 'Edit a record\'s content fields (scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.',
     category: 'memory',
@@ -800,6 +822,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'memory.records.links.add',
+    repeat: 'safe',
     title: 'Link Memory Records',
     description: 'Create a directed relation (e.g. "supersedes", "caused") from the path record to a target record. Returns 404 when either endpoint does not exist, never a 200 that pretends a link was made between records that do not both exist.',
     category: 'memory',

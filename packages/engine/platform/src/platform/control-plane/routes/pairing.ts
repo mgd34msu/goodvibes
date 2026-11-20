@@ -23,7 +23,7 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 export type PairingGatewayService = Pick<
   PairingTokenManager,
   'list' | 'mint' | 'mintForMigration' | 'rename' | 'revokeWithMinted' | 'isLegacyRevoked' | 'revokeLegacyShared'
->;
+> & Partial<Pick<PairingTokenManager, 'revokeEverywhere'>>;
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
@@ -154,7 +154,8 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const id = requireStringValue(params.id, 'id');
-    const outcome = service.revokeWithMinted(id);
+    // On every machine of the group: the revocation is an authority record entry.
+    const outcome = service.revokeEverywhere ? await service.revokeEverywhere(id) : service.revokeWithMinted(id);
     if (!outcome.revoked) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     }

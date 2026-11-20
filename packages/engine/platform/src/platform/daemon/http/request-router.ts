@@ -44,6 +44,12 @@ export interface DaemonRequestRouterOptions {
   readonly refuseUnauthenticated?: ((req: Request) => Response) | undefined;
   /** A refusal for an authenticated request before any route sees it, or null to let it through. */
   readonly admit?: ((req: Request) => Response | null) | undefined;
+  /**
+   * For a request carrying a retry key its method takes: the answer, served
+   * once per key (control-plane/idempotent-replay.ts). Null: the request is
+   * served as it is.
+   */
+  readonly keyedReplay?: ((req: Request, serve: (req: Request) => Promise<Response>) => Promise<Response> | null) | undefined;
 }
 
 export class DaemonRequestRouter {
@@ -91,6 +97,13 @@ export class DaemonRequestRouter {
     const refusal = this.options.admit?.(req);
     if (refusal) return refusal;
 
+    const keyed = this.options.keyedReplay?.(req, (request) => this.serve(request));
+    if (keyed) return await keyed;
+    return await this.serve(req);
+  }
+
+  /** The route's answer, or the 404 for a path no route serves. */
+  private async serve(req: Request): Promise<Response> {
     const response = await this.dispatch(req);
     if (response) return response;
     const url = new URL(req.url);

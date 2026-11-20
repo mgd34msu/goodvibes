@@ -569,6 +569,34 @@ export function setMcpServerToolRule(
 }
 
 /**
+ * Keep a server's trust mode or role with its entry in one writable MCP config
+ * file. `allow-all` is not kept in a project file (a repository can bring that
+ * file, so the loader ignores it there); keep it in the global file.
+ */
+export function setMcpServerPolicy(
+  roots: McpConfigRoots,
+  scope: McpConfigScope,
+  serverName: string,
+  policy: { readonly trustMode: NonNullable<McpServerConfig['trustMode']> } | { readonly role: NonNullable<McpServerConfig['role']> },
+): { readonly path: string; readonly changed: boolean; readonly config: McpConfig } {
+  if ('trustMode' in policy && policy.trustMode === 'allow-all' && scope === 'project') {
+    throw new Error(`allow-all for ${serverName} is not kept in the project's MCP file: a repository can bring that file, so allow-all there is ignored. `
+      + `Add ${serverName} to your global MCP config (scope global) to keep allow-all.`);
+  }
+  const location = writableMcpConfigLocation(roots, scope);
+  const current = readMcpConfigAtPath(location.path);
+  const existing = current.servers.find((entry) => entry.name === serverName);
+  if (!existing) throw new Error(`No MCP server named '${serverName}' in ${location.path}, so its ${'trustMode' in policy ? 'trust mode' : 'role'} was not kept.`);
+  const next: McpServerConfig = { ...existing, ...policy };
+  if ('trustMode' in policy ? existing.trustMode === policy.trustMode : existing.role === policy.role) {
+    return { path: location.path, changed: false, config: current };
+  }
+  const config = { servers: current.servers.map((entry) => (entry === existing ? next : entry)) };
+  writeMcpConfigFile(location.path, config);
+  return { path: location.path, changed: true, config };
+}
+
+/**
  * Run a read-modify-write of one writable config file while holding a lock on it,
  * so two processes (the terminal and the daemon, or two sessions) cannot each
  * read the same file and lose the other's change.

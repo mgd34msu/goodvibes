@@ -3,6 +3,10 @@ import { installedDataWriterAdmission } from './runtime/native-data-writer.ts';
 import { installedReaderCommand } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
 import { metadataCliResult } from './cli/metadata.ts';
+import { exemptLoopbackFromProxy } from '@goodvibes-jev/engine/transport-http/paths';
+
+// Requests to this machine never go through a proxy, from the first one on.
+exemptLoopbackFromProxy();
 
 // Installation reader checks, help, version and completion never load the
 // UI/config/provider runtime: they are answered from the parser alone, and the

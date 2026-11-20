@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
+import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import {
   DEVICE_CAPABILITY_CONTRACT_VERSION,
   resolveDeviceNodeProfile,
@@ -135,6 +136,11 @@ export interface DevicePostureConfigSource extends DevicePostureConfigReader {
 
 export interface DevicePostureRuntimeOptions {
   readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
+  /**
+   * The authority record the durable grants live on: a grant made or revoked
+   * on any machine of the group is in force, or refused, on every one.
+   */
+  readonly authority: AuthorityRecordFile;
   readonly transport: DevicePeerTransport;
   readonly approvals: DeviceApprovalBridge;
   readonly config: DevicePostureConfigSource;
@@ -355,11 +361,20 @@ export function createDevicePostureRuntime(options: DevicePostureRuntimeOptions)
   const listNodes = (): readonly DeviceNodeProfile[] => listDeviceNodesFromTransport(transport);
 
   const grants = new DeviceGrantStore(join(stateDirectory, 'device-grants.json'), {
+    authority: options.authority,
     policy: () => readDeviceGrantPolicy(config),
     ownership: {
       // A grant belongs to a paired node. Once that node is gone the grant is
-      // reaped rather than left to be re-honoured if the id is ever reused.
-      isKnownNode: (nodeId) => listNodes().some((node) => node.nodeId === nodeId),
+      // reaped rather than left to be re-honoured if the id is ever reused. A
+      // phone paired on another machine of the group is known here by its live
+      // peer token on the authority record, before it ever connects here; an
+      // unreadable record answers "still there", so nothing is reaped blind.
+      isKnownNode: (nodeId) => {
+        if (listNodes().some((node) => node.nodeId === nodeId)) return true;
+        const view = options.authority.view();
+        if (!view) return true;
+        return view.list('peer-token').some((entry) => entry.public.peerId === nodeId && !view.isRevoked(`peer-token:${entry.id}`));
+      },
     },
   });
 

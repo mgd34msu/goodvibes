@@ -21,6 +21,7 @@
  * runtime. Nothing here re-decides any of it.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
   JSON_OBJECT_SCHEMA,
@@ -136,8 +137,9 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.capability.request',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Request a Capability From a Paired Device',
-    description: 'Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is re-read from disk (never cached), a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.',
+    description: 'Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is read from the authority record every machine of the group shares, so a grant revoked on any of them is not honoured; work waiting for the phone under a grant that is then revoked is withdrawn (refusal grant-revoked-before-claim), and work the phone had already picked up answers grant-revoked-after-claim saying what took effect; a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.',
     category: 'runtime',
     scopes: ['write:remote'],
     http: { method: 'POST', path: '/api/devices/capability/request' },
@@ -159,13 +161,14 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
       grantId: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
       data: JSON_VALUE_SCHEMA,
       artifact: { anyOf: [DEVICE_ARTIFACT_SCHEMA, { type: 'null' }] },
-      /** node-unknown | capability-unknown | capability-unsupported | capability-gated-by-secure-context | disabled-by-config | denied-by-person | dispatch-failed. Empty when ok. */
+      /** node-unknown | capability-unknown | capability-unsupported | capability-gated-by-secure-context | disabled-by-config | invalid-input | denied-by-person | dispatch-failed | grant-revoked-before-claim | grant-revoked-after-claim. Empty when ok. */
       refusal: STRING_SCHEMA,
       detail: STRING_SCHEMA,
     }, ['ok', 'nodeId', 'capabilityId', 'capabilityTitle', 'authority', 'grantId', 'artifact', 'refusal', 'detail']),
   }),
   methodDescriptor({
     id: 'devices.artifacts.list',
+    repeat: 'safe',
     title: 'List Retained Device Captures',
     description: 'The camera and screen captures still inside their retention window, newest first, with when each was captured, when it will be deleted, and the reason the request stated. Expired captures are never listed, retention is enforced by the store, not by this verb filtering them out of a longer list.',
     category: 'runtime',
@@ -180,6 +183,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.artifacts.read',
+    repeat: 'safe',
     title: 'Read a Retained Device Capture',
     description: 'Return one retained capture\'s bytes, base64-encoded, for a caller that is not running on the daemon host and so cannot open the file itself. The store re-hashes the bytes against the digest recorded when the capture was retained and refuses to serve a mismatch, so a torn or half-written file is never handed back as if it were the picture that was taken. A capture that is gone, expired, swept, missing, or corrupted, is an honest 404 naming which of those it was.',
     category: 'runtime',
@@ -193,6 +197,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.artifacts.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Delete a Retained Device Capture',
     description: 'Remove one retained camera or screen capture now, before its retention window ends: the file on the daemon host and its record. The removal is added to the housekeeping disclosure like a sweep removal, with the reason `deleted`. `deleted` is true only when the file was unlinked; a capture whose file was already gone (`file-missing`) or no longer matches what was taken (`content-mismatch`, the file is kept for inspection) loses its record and says so. An id that is not retained is a 404.',
@@ -221,8 +226,9 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.grants.revoke',
+    repeat: 'safe',
     title: 'Revoke a Device Capability Grant',
-    description: 'Delete durable grants by grant id, by device, by capability, or any combination. Revoked grants are removed rather than flagged, so the next request for that capability asks the person again. Returns exactly what was removed.',
+    description: 'Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.',
     category: 'runtime',
     scopes: ['write:config'],
     http: { method: 'POST', path: '/api/devices/grants/revoke' },
@@ -239,6 +245,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   }),
   methodDescriptor({
     id: 'devices.housekeeping.run',
+    repeat: 'safe',
     title: 'Run Device Housekeeping',
     description: 'Sweep the device grants ledger and the retained captures now: expired and orphaned grants removed, captures past their retention window deleted, torn or missing capture files reaped. Returns the itemised disclosure of everything removed and why.',
     category: 'runtime',

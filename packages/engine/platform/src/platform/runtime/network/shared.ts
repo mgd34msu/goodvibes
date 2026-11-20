@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { isLoopbackHost } from '@goodvibes-jev/engine/transport-http/paths';
 const PEM_EXTENSIONS = new Set(['.pem', '.crt', '.cer']);
 
 export interface NetworkRootConfig {
@@ -45,12 +46,9 @@ export function readPemEntriesFromDirectory(path: string): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
+/** Whether a hostname is this machine; the rule is `isLoopbackHost` in the transport. */
 export function isLocalHostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase();
-  return normalized === 'localhost'
-    || normalized === '127.0.0.1'
-    || normalized === '::1'
-    || normalized === '[::1]';
+  return isLoopbackHost(hostname);
 }
 
 /**

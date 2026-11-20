@@ -20,6 +20,7 @@ import {
 export const builtinGatewayControlLiveTurnMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'sessions.turns.cancel',
+    repeat: 'safe',
     title: 'Request Cancellation of an Expected Turn',
     description: 'Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn\'s owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions.',
     category: 'sessions',
@@ -36,6 +37,7 @@ export const builtinGatewayControlLiveTurnMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'sessions.toolCalls.cancel',
+    repeat: 'safe',
     title: 'Cancel One In-Flight Tool Call',
     description: 'Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured "cancelled by user" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.',
     category: 'sessions',
@@ -74,6 +76,7 @@ export const builtinGatewayControlLiveTurnMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'sessions.queuedMessages.edit',
+    repeat: 'safe',
     title: 'Edit a Queued Mid-Turn Message',
     description: 'Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',
@@ -93,6 +96,7 @@ export const builtinGatewayControlLiveTurnMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'sessions.queuedMessages.delete',
+    repeat: 'safe',
     title: 'Delete a Queued Mid-Turn Message',
     description: 'Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.',
     category: 'sessions',

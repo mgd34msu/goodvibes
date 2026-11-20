@@ -155,6 +155,7 @@ export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
 export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';
 export type { NotificationDeadLetterSources } from './routes/notification-dead-letters.js';
 export { registerFlagsStatusGatewayMethods } from './routes/flags-status.js';
+export { registerAuthorityStatusGatewayMethods, type AuthorityStatusPeers } from './routes/authority-status.js';
 export type { OwnerInboxGatewayService } from './routes/owner-inbox.js';
 export { SHARED_APPROVAL_DISPOSITIONS } from './approval-disposition.js';
 export type { SharedApprovalDisposition, SharedApprovalDecision, ExplicitApprovalDisposition } from './approval-disposition.js';

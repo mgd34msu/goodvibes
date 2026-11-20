@@ -1,3 +1,4 @@
+import { IdempotentReplayStore, takesIdempotencyKey } from '../control-plane/idempotent-replay.js';
 import { WebSocketOutbox } from './websocket-outbox.js';
 import { WebSocketMessageAssembler } from '@goodvibes-jev/engine/transport-core';
 import type { AgentManager } from '../tools/agent/index.js';
@@ -72,6 +73,8 @@ export interface ControlPlaneWebSocketData {
   principalKind: 'user' | 'bot' | 'service' | 'token' | null;
   /** Which credential the socket authenticated with; null before in-band auth. */
   credentialKind?: CredentialKind | null | undefined;
+  /** A device the owner paired himself; see RequestPrincipal.ownerDevice. */
+  ownerDevice?: true | undefined;
   admin: boolean;
   scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
@@ -130,6 +133,8 @@ export interface DaemonControlPlaneContext {
   readonly dispatchApiRoutes: (req: Request) => Promise<Response | null>;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
+  /** Answers repeats of a call to a method that takes the shared Idempotency-Key; absent, such a key is not honoured. */
+  readonly idempotentReplay?: IdempotentReplayStore | undefined;
 }
 
 interface UpgradeCapableServer {
@@ -213,6 +218,12 @@ interface SettingsAdminAuthorityRecord {
 interface GatewayMethodCallInput {
   readonly authToken: string;
   readonly methodId: string;
+  /**
+   * The caller's retry key (the Idempotency-Key header of the invoke request,
+   * or `idempotencyKey` beside `body`): a method that takes the shared key
+   * answers a repeat under it with the first answer.
+   */
+  readonly idempotencyKey?: string | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly query?: Record<string, unknown> | undefined;
   readonly body?: unknown | undefined;
@@ -241,7 +252,7 @@ interface GatewayMethodCallInput {
    * call (a socket compares its authentication revision first). Absent: the
    * call authenticates the token once itself.
    */
-  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
+  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined }) | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -578,6 +589,7 @@ export class DaemonControlPlaneHelper {
       roles: authenticated.kind === 'session' ? authenticated.roles : [],
       authRevision,
       ...(authenticated.kind === 'session' ? { expiresAt: authenticated.expiresAt } : {}),
+      ...(authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined ? { ownerDevice: true as const } : {}),
     });
   }
 
@@ -763,6 +775,7 @@ export class DaemonControlPlaneHelper {
         principalId: principal.principalId,
         principalKind: principal.principalKind,
         credentialKind: principal.credentialKind,
+        ...(principal.ownerDevice === true ? { ownerDevice: true as const } : {}),
         scopes: principal.scopes,
         admin: principal.admin,
         domains,
@@ -782,6 +795,7 @@ export class DaemonControlPlaneHelper {
     data: ControlPlaneWebSocketData;
     send(message: string): void;
     getBufferedAmount?(): number;
+    close?(code?: number, reason?: string): void;
   }): void {
     this.socketSignal(ws);
     const connection = this.context.controlPlaneGateway.openWebSocketClient({
@@ -841,12 +855,14 @@ export class DaemonControlPlaneHelper {
    * this frame). The daemon does not close it itself: Bun 1.3 keeps a socket
    * the server closed counted, after which `server.stop()` never settles.
    */
-  private closeRevokedSocket(ws: { data: ControlPlaneWebSocketData; send(message: string): void }): void {
+  private closeRevokedSocket(ws: { data: ControlPlaneWebSocketData; send(message: string): void; close?(code?: number, reason?: string): void }): void {
     const lifetime = this.socketLifetimes.get(ws);
     if (lifetime?.signal.aborted) return;
     this.sendFrame(ws, SOCKET_REVOKED_FRAME);
     lifetime?.abort();
     if (ws.data.clientId) this.context.controlPlaneGateway.closeWebSocketClient(ws.data.clientId, 'credential-revoked');
+    // The socket ends after its `closed` frame, as an event stream does, instead of staying open serving nothing.
+    try { ws.close?.(1008, 'credential-revoked'); } catch { /* the client already went */ }
   }
 
   /** A socket that has not authenticated and was refused cannot do anything else; close it with the reason so the client sees why instead of an idle open socket. */
@@ -924,6 +940,7 @@ export class DaemonControlPlaneHelper {
       ws.data.principalId = principal.principalId;
       ws.data.principalKind = principal.principalKind;
       ws.data.credentialKind = principal.credentialKind;
+      ws.data.ownerDevice = principal.ownerDevice;
       ws.data.scopes = principal.scopes;
       ws.data.admin = principal.admin;
       ws.data.authRevision = principal.authRevision;
@@ -995,9 +1012,10 @@ export class DaemonControlPlaneHelper {
       const response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
-            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, admin: ws.data.admin, scopes: ws.data.scopes },
+            principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, ...(ws.data.ownerDevice === true ? { ownerDevice: true as const } : {}), admin: ws.data.admin, scopes: ws.data.scopes },
             signal: this.socketSignal(ws),
             methodId,
+            ...(typeof frame.idempotencyKey === 'string' ? { idempotencyKey: frame.idempotencyKey } : {}),
             query: typeof frame.query === 'object' && frame.query !== null ? frame.query as Record<string, unknown> : undefined,
             body: frame.body,
             context: {
@@ -1173,7 +1191,25 @@ export class DaemonControlPlaneHelper {
    * calling principal, so one owner's fresh request cannot move the watermark
    * past what another principal's session just read.
    */
-  async invokeGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown }> {
+  async invokeGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
+    const descriptor = this.context.gatewayMethods.get(input.methodId);
+    const store = this.context.idempotentReplay;
+    if (input.idempotencyKey === undefined || !store || !takesIdempotencyKey(descriptor)) return this.invokeGatewayMethodCallOnce(input);
+    const key = IdempotentReplayStore.readKey(input.idempotencyKey);
+    if (key === undefined) return this.invokeGatewayMethodCallOnce(input);
+    if (typeof key !== 'string') return { status: key.status, ok: false, body: key.body };
+    const principalId = (input.principal ?? this.describeRequestPrincipal(input.authToken))?.principalId;
+    // An unauthenticated call is refused by the call itself; a key is never kept for it.
+    if (principalId === undefined) return this.invokeGatewayMethodCallOnce(input);
+    const answer = await store.run({ principalId, methodId: input.methodId, key, request: { query: input.query ?? null, body: input.body ?? null } },
+      async () => {
+        const result = await this.invokeGatewayMethodCallOnce(input);
+        return { status: result.status, body: result.body };
+      });
+    return { status: answer.status, ok: answer.status < 400, body: answer.body, ...(answer.replayed ? { replayed: true } : {}) };
+  }
+
+  private async invokeGatewayMethodCallOnce(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown }> {
     // Only a principal this daemon verified names a scope. A call it did not authenticate (a public
     // method, a peer) shares one scope of its own, so what it claims about itself cannot reach another
     // principal's window.
@@ -1283,6 +1319,7 @@ export class DaemonControlPlaneHelper {
             scopes: context?.scopes,
             clientKind: context?.clientKind,
             ...(authenticated?.credentialKind ? { credentialKind: authenticated.credentialKind } : {}),
+            ...(authenticated?.ownerDevice === true ? { ownerDevice: true } : {}),
             ...(context?.explicitUserRequest === undefined
               ? {}
               : { metadata: { explicitUserRequest: context.explicitUserRequest } }),

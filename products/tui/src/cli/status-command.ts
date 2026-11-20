@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readCliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
+import { readCliModelInUse, readCliProviderSignInFacts, readSavedCliModelInUse } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell/cli-types';
 import { readPersistedWorkspaceTrust } from '@goodvibes-jev/engine/platform/platform/runtime/workspace-trust';
@@ -22,7 +21,7 @@ import {
   type CliSandboxStatus,
   type CliWorkspaceStatus,
 } from './status.ts';
-import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
+import { GOODVIBES_TUI_SURFACE_ROOT, TUI_TRUSTS_SAVED_SCANNED_SERVERS } from '../config/surface.ts';
 
 /** What `status`, `doctor` and `onboarding status` read: the prepared configuration and its roots. */
 export interface StatusCommandRuntime {
@@ -75,11 +74,16 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     url: String(relayCategory.url ?? ''),
     requireStepUpForMutations: relayCategory.requireStepUpForMutations === true,
   };
+  // The model a run would use, resolved as the registry a run builds resolves it (custom providers, the saved
+  // scan): from the saved names when they settle it, else by building that registry, loaded only then.
+  const modelInUse = readSavedCliModelInUse(configManager, { homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, trustScannedServer: TUI_TRUSTS_SAVED_SCANNED_SERVERS })
+    ?? await (await import('./one-shot-services.ts')).withProviderServices(runtime, ({ providerRegistry }) => readCliModelInUse(providerRegistry), { modelData: 'skip' });
   const statusOptions = {
     configManager,
     workingDirectory,
     homeDirectory,
-    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, getProviderIdFromModel(configManager.get('provider.model'))),
+    modelInUse,
+    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, modelInUse.provider),
     onboardingMarker,
     auth: readAuthPaths({ workingDirectory, homeDirectory }),
     service,

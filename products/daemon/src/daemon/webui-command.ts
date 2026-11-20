@@ -21,8 +21,9 @@
 // same-origin policy a non-issue and needs no CORS allowlist). So the URL that
 // opens the web UI is the control-plane origin: `<scheme>://<host>:<controlPlane.port>`,
 // https when the listener holds TLS itself (`controlPlane.tls.mode` direct),
-// not `web.port`. `web.port` is the surface's DECLARED endpoint, used for links
-// and for `tailscale serve`; nothing binds it. This command therefore reports,
+// not `web.port`. `web.port` is where the web UI's development server listens
+// (it reads it from `webui status --json`); nothing else binds it and no link,
+// pairing address or `tailscale serve` uses it. This command therefore reports,
 // and, when it is still sitting on the shipped placeholder, writes,
 // `web.publicBaseUrl` as the origin that actually answers, so the printed URL,
 // the pairing deep link and the running server all agree.
@@ -275,7 +276,7 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
       lines: [
         'web UI: no longer served by the daemon.',
         ...(kept ? [`  the bundle is left on disk at ${kept}; 'goodvibes-daemon webui enable' serves it again`] : []),
-        '  Restart the daemon for this to take effect on a running process.',
+        '  A running daemon stops serving it within about a second; no restart is needed.',
       ],
     };
   }
@@ -350,7 +351,8 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
     lines.push('  note: controlPlane.hostMode is not one of local|network|custom; the daemon cannot bind until that is corrected.');
   }
   lines.push(...postureLines(serving.origin, serving.loopback, projected.get('controlPlane.enabled') === true, serving.alternate));
-  lines.push('  Restart the daemon for this to take effect on a running process.');
+  // The daemon reads the serving settings per request and rebinds its listener on a host or port change.
+  lines.push('  A running daemon applies this within about a second; no restart is needed.');
   return { exitCode: 0, lines };
 }
 

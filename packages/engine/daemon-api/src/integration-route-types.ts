@@ -184,6 +184,12 @@ export interface MemoryConsolidationSchedulerLike {
 export interface DaemonIntegrationRouteContext {
   readonly channelPlugins: ChannelAccountRegistryLike;
   readonly integrationHelpers: IntegrationHelperServiceLike | null;
+  /**
+   * The control-plane listener as bound right now, or null while none is
+   * bound. Present on a daemon: the health snapshot then reports this listener
+   * instead of the settings. Absent: the settings are reported as they are.
+   */
+  readonly servingListener?: (() => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | null) | undefined;
   readonly memoryEmbeddingRegistry: MemoryEmbeddingRegistryLike;
   readonly memoryRegistry: MemoryRegistryLike;
   /** Optional: absent on embedders without the consolidation scheduler, the receipts route answers 501 honestly. */

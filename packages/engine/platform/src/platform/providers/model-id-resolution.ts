@@ -31,6 +31,23 @@ export interface ModelIdCandidate {
   readonly registryKey: string;
 }
 
+/** Why a model reference names no model this registry can run. */
+export type ModelReferenceErrorCode = 'MODEL_NOT_FOUND' | 'MODEL_AMBIGUOUS' | 'MODEL_NOT_SELECTABLE';
+
+/**
+ * A model reference that names no model (unknown), several (ambiguous) or one
+ * that cannot be chosen. A caller's input error: a request carrying it is a
+ * 400 with this code, and repeating it cannot succeed.
+ */
+export class ModelReferenceError extends Error {
+  readonly status = 400;
+  readonly recoverable = false;
+  constructor(readonly code: ModelReferenceErrorCode, message: string) {
+    super(message);
+    this.name = 'ModelReferenceError';
+  }
+}
+
 export interface ModelIdResolutionOptions {
   /** A provider already known from context, tried before the registry-wide rules. */
   readonly contextProviderId?: string | undefined;
@@ -81,14 +98,14 @@ export function resolveModelReference(
   // Rule 4: ambiguous.
   if (matches.length > 1) {
     const registryKeys = matches.map((candidate) => candidate.registryKey).sort((a, b) => a.localeCompare(b));
-    throw new Error(
+    throw new ModelReferenceError('MODEL_AMBIGUOUS',
       `Model id '${trimmed}' is ambiguous, it is available on multiple providers: ${registryKeys.join(', ')}. ` +
         `Specify one explicitly, e.g. '${registryKeys[0]}'.`,
     );
   }
 
   // Rule 5: unknown, closest-match suggestions plus a concrete valid example.
-  throw new Error(buildUnknownModelMessage(trimmed, candidates, options.maxSuggestions ?? 3));
+  throw new ModelReferenceError('MODEL_NOT_FOUND', buildUnknownModelMessage(trimmed, candidates, options.maxSuggestions ?? 3));
 }
 
 function buildUnknownModelMessage(

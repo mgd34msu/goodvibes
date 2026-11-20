@@ -29,7 +29,7 @@ export interface DevicesModalPairingTokens {
   list(): PublicPairingToken[];
   rename(id: string, name: string): boolean;
   revoke(id: string): boolean;
-  mintForMigration(input: { readonly name: string }): MintedPairingToken;
+  mintForMigration(input: { readonly name: string; readonly origin?: 'owner-pairing' | 'automation' | undefined }): MintedPairingToken;
   isLegacyRevoked(): boolean;
 }
 
@@ -150,7 +150,8 @@ class DevicesModalSurface implements ConfigModalSurface {
     }
 
     if (id === 'migrateShared') {
-      const minted = tokens.mintForMigration({ name: 'migrated device' });
+      // Minted at the owner's own terminal for one of his devices: an owner device.
+      const minted = tokens.mintForMigration({ name: 'migrated device', origin: 'owner-pairing' });
       this.minted = { name: minted.name, token: minted.token };
       this.mintedRevealed = false;
       ctx.setStatus(`Minted "${minted.name}" (id ${shortTokenId(minted.id)}). Press Ctrl+V to reveal its one-time token${this.deps.copyToClipboard ? ' or Ctrl+G then c to copy it' : ''}, then pair the device with it.`);

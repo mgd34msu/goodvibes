@@ -1,12 +1,11 @@
-import { mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import {
   buildCliServicePosture,
   createPlatformServiceManager,
   formatCliServicePosture,
-  getServiceStateRoot,
   probeServiceReadiness,
-  type CliServicePosture,
+  resolveGoodVibesDaemonExecutable,
 } from './service-posture.ts';
 
 /**
@@ -35,21 +34,31 @@ async function waitUntilServiceAnswers(runtime: CliCommandRuntime, manager: Serv
   }
 }
 
+/** The `goodvibes-daemon` command each `goodvibes service` verb runs. */
+const DAEMON_SERVICE_VERBS = {
+  install: 'install-service',
+  start: 'start-service',
+  restart: 'restart-service',
+  stop: 'stop-service',
+  uninstall: 'uninstall-service',
+} as const;
+
 /**
- * The service verbs act on the service as the settings describe it and change
- * no setting. A setting that disagrees with the platform gets one line here
- * unless the posture below already reports it as an issue.
+ * `goodvibes service install|start|restart|stop|uninstall` run the daemon's own
+ * service command (`goodvibes-daemon install-service`, ...), in this shell's
+ * environment and directory: one code path, so the two commands write the same
+ * definition, refuse the same foreign one, start, record the choice in
+ * `service.enabled` and exit with the same codes. This command adds only a
+ * readiness check of the endpoints after a start and the service summary.
  */
-function settingNotes(posture: CliServicePosture): string[] {
-  const notes: string[] = [];
-  const reported = new Set(posture.findings.map((finding) => finding.id));
-  if (!posture.config.enabled && !reported.has('service-disabled-for-server-surfaces')) {
-    notes.push('Note: service.enabled is off, so status and doctor do not check this service. Turn it on with /config set service.enabled true.');
+function runDaemonServiceVerb(verb: keyof typeof DAEMON_SERVICE_VERBS): { exitCode: number; lines: string[] } {
+  const daemon = resolveGoodVibesDaemonExecutable().command;
+  const result = spawnSync(daemon, [DAEMON_SERVICE_VERBS[verb]], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+  if (result.error) {
+    return { exitCode: 1, lines: [`Service ${verb} failed: ${daemon} could not be run (${result.error.message}). Set GOODVIBES_DAEMON_COMMAND to the goodvibes-daemon program, or put it on PATH.`] };
   }
-  if (!posture.config.autostart && posture.managed.installed && posture.managed.autostart) {
-    notes.push('Note: service.autostart is off, but the platform has the installed service set to start at login.');
-  }
-  return notes;
+  const lines = `${result.stdout ?? ''}${result.stderr ?? ''}`.split('\n').filter((line) => line.length > 0);
+  return { exitCode: result.status ?? 1, lines };
 }
 
 export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
@@ -63,39 +72,25 @@ export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<
     };
   }
   if (sub === 'install' || sub === 'start' || sub === 'restart' || sub === 'stop' || sub === 'uninstall') {
-    const manager = createPlatformServiceManager(runtime);
-    const starting = sub === 'start' || sub === 'restart';
-    if (sub === 'install' || starting) mkdirSync(getServiceStateRoot(runtime), { recursive: true });
-    const result =
-      sub === 'install' ? manager.install()
-        : sub === 'start' ? manager.start()
-          : sub === 'restart' ? manager.restart()
-            : sub === 'stop' ? manager.stop()
-              : manager.uninstall();
-    if (sub === 'uninstall' && !result.actionError) {
-      runtime.configManager.setDynamic('service.enabled', false);
-      runtime.configManager.setDynamic('service.autostart', false);
-    }
-    // The platform accepting the command is not the daemon running: a daemon
-    // that cannot bind or exits at boot is reported as a failure, not "ok".
-    const notReady = starting && !result.actionError
-      ? await waitUntilServiceAnswers(runtime, manager, sub)
+    const ran = runDaemonServiceVerb(sub);
+    const starting = sub === 'install' || sub === 'start' || sub === 'restart';
+    // The platform accepting the command is not the daemon answering: a daemon
+    // that cannot bind or exits at boot is named here (the exit code is the daemon command's).
+    const notReady = starting && ran.exitCode === 0
+      ? await waitUntilServiceAnswers(runtime, createPlatformServiceManager(runtime), sub)
       : undefined;
-    const failure = result.actionError ?? notReady;
     const posture = await buildCliServicePosture(runtime, { probe: starting });
-    const notes = sub === 'install' || starting ? settingNotes(posture) : [];
     const text = [
-      `Service ${sub}: ${failure ? 'failed' : 'ok'}`,
+      ...ran.lines,
       ...(notReady ? [`  ${notReady}. Run goodvibes service check for the details.`] : []),
-      ...notes,
+      '',
       formatCliServicePosture(posture, false),
-      ...(result.actionError ? [`actionError: ${result.actionError}`] : []),
     ].join('\n');
     return {
       output: json
-        ? JSON.stringify({ action: sub, ok: failure === undefined, ...(notReady ? { notReady } : {}), notes, result, posture }, null, 2)
+        ? JSON.stringify({ action: sub, ok: ran.exitCode === 0 && notReady === undefined, exitCode: ran.exitCode, lines: ran.lines, ...(notReady ? { notReady } : {}), posture }, null, 2)
         : text,
-      exitCode: failure ? 1 : 0,
+      exitCode: ran.exitCode,
     };
   }
   return {

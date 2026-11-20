@@ -197,6 +197,9 @@ export class AdaptivePlanner {
   private history: PlannerDecision[] = [];
   private static readonly MAX_HISTORY = 100;
 
+  /** Told of each decision as it is recorded: the host publishes PLAN_STRATEGY_SELECTED from it. */
+  constructor(private readonly options: { readonly onDecision?: ((decision: PlannerDecision) => void) | undefined } = {}) {}
+
   // -------------------------------------------------------------------------
   // Public API
   // -------------------------------------------------------------------------
@@ -468,6 +471,12 @@ export class AdaptivePlanner {
     this.history.push(decision);
     if (this.history.length > AdaptivePlanner.MAX_HISTORY) {
       this.history.shift();
+    }
+    try {
+      this.options.onDecision?.(decision);
+    } catch (error) {
+      // Publishing the decision is observability: it never changes the decision.
+      logger.warn('[AdaptivePlanner] the strategy decision could not be published', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 

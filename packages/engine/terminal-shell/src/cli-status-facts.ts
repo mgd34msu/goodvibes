@@ -1,11 +1,18 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from './onboarding-state-types.js';
 import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
+import { resolveWebSurfaceExposure } from './cli-network-posture.js';
 import { DEFAULT_DECISION_MODEL_POLICY, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { SubscriptionManager, decisionModelSet, decisionModelSettings, getBuiltinSubscriptionProvider, sharedSubscriptionsPath, type SubscriptionShellPaths } from '@goodvibes-jev/engine/platform/platform/config';
 import { getBuiltinProviderEnvVars } from '@goodvibes-jev/engine/platform/platform/config/provider-credential-catalog';
+import { describePermissionModeInForce, type PermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { gatePresetLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { builtinProviderNames, resolveSavedModelInUse } from '@goodvibes-jev/engine/platform/platform/providers/provider-names';
+import { readCustomProviderNames } from '@goodvibes-jev/engine/platform/platform/providers/custom-provider-files';
+import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery/persisted-providers';
+import type { DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 
 /**
  * Whether a decision model is in use, from the settings alone (status runs
@@ -21,30 +28,105 @@ export function cliDecisionModelFacts(config: Pick<ConfigManager, 'get'>, env: R
   const use = decisionModelUse({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: 0 });
   return { policy, policyLabel: decisionModelPolicyLabel(policy), set, inUse: use.inUse, line: use.line };
 }
+/**
+ * The status report's permission lines: the mode in force and, when it is not
+ * the saved mode, the saved mode and why. Status runs without a runtime: a set
+ * decision model that is failing is reported by the running app (its
+ * `/permissions`, its mode chip and its notice), whose mode it changes.
+ */
+export function describeCliPermissionMode(inForce: PermissionModeInForce): readonly string[] {
+  if (inForce.reason === undefined) return [`  permissions: ${gatePresetLabel(inForce.mode)} (${inForce.mode})`];
+  return [
+    `  permissions: ${gatePresetLabel(inForce.mode)} (${inForce.mode}) in force; set: ${inForce.chosen}`,
+    `    not ${inForce.chosen}, because ${inForce.reason}`,
+  ];
+}
 export function secretPolicyLabel(policy: unknown): string {
   if (policy === 'preferred_secure') return 'Use secure storage when available';
   if (policy === 'require_secure') return 'Require secure storage';
   if (policy === 'plaintext_allowed') return 'Allow plaintext storage';
   return String(policy ?? 'unknown');
 }
+/**
+ * The model a turn started now would use: `provider.model` (with any `-m` or
+ * `--provider` of this launch) resolved by the provider registry exactly as a
+ * run resolves it, so a provider named in another letter case or by its
+ * display name is shown as the registered one. `problem` says why it cannot be
+ * used (no registered provider has that name) and how to choose another.
+ */
+export interface CliModelInUse {
+  readonly registryKey: string;
+  readonly provider: string;
+  readonly problem?: string | undefined;
+}
+
+/** Reads {@link CliModelInUse} from a provider registry that has loaded custom providers and the saved scan. */
+export function readCliModelInUse(registry: {
+  getCurrentModel(): { readonly registryKey: string; readonly provider: string };
+  isUnregisteredModel(model: { readonly provider: string }): boolean;
+  unregisteredModelMessage(registryKey: string): string;
+}): CliModelInUse {
+  const model = registry.getCurrentModel();
+  return registry.isUnregisteredModel(model)
+    ? { registryKey: model.registryKey, provider: model.provider, problem: registry.unregisteredModelMessage(model.registryKey) }
+    : { registryKey: model.registryKey, provider: model.provider };
+}
+
+/**
+ * {@link CliModelInUse} from the saved names alone, without building a
+ * provider registry: the built-in provider names, the custom provider files in
+ * the settings directory, and the servers the saved scan lists that the
+ * product registers (`trustScannedServer`, with models, under a name no other
+ * provider holds), as the registry registers them. Null when only the
+ * registry can answer (a bare model id, a provider half that names no
+ * provider, a provider sharing its model catalog with another): the caller
+ * then builds it and reads {@link readCliModelInUse}.
+ */
+export function readSavedCliModelInUse(
+  config: Pick<ConfigManager, 'get' | 'getControlPlaneConfigDir'>,
+  saved: {
+    readonly homeDirectory: string;
+    readonly surfaceRoot: string;
+    readonly trustScannedServer: (server: DiscoveredServer) => boolean;
+  },
+): CliModelInUse | null {
+  const builtin = builtinProviderNames();
+  const custom = readCustomProviderNames(join(config.getControlPlaneConfigDir(), 'providers'), builtin);
+  const taken = new Set<string>([...builtin, ...custom.map((entry) => entry.name)]);
+  const scanned: string[] = [];
+  for (const server of loadPersistedProviders({ homeDirectory: saved.homeDirectory, surfaceRoot: saved.surfaceRoot })) {
+    if (taken.has(server.name) || server.models.length === 0 || !saved.trustScannedServer(server)) continue;
+    taken.add(server.name);
+    scanned.push(server.name);
+  }
+  return resolveSavedModelInUse(config.get('provider.model'), { builtin, custom, scanned });
+}
+
 /** Shared observed facts; products add their own authority/readiness assessments. */
 export function captureCliStatusFacts<Lifecycle>(
   config: Pick<ConfigManager, 'get'>,
   marker: OnboardingCheckMarkerState | null | undefined,
   lifecycle: Lifecycle | undefined,
   providerFromModel: (model: unknown) => string,
+  /** The model resolved as a run resolves it; absent, the setting as written. */
+  modelInUse?: CliModelInUse,
 ) {
   const controlPlane = resolveRuntimeEndpointBinding(config, 'controlPlane');
   const httpListener = resolveRuntimeEndpointBinding(config, 'httpListener');
-  const web = resolveRuntimeEndpointBinding(config, 'web');
+  // The web UI is described by the listener that serves it; web.* is only a development server's endpoint.
+  const web = resolveWebSurfaceExposure(config);
+  const webSwitchedOn = config.get('web.enabled') === true;
   return {
     provider: {
-      provider: providerFromModel(config.get('provider.model')),
-      model: String(config.get('provider.model')),
+      provider: modelInUse?.provider ?? providerFromModel(config.get('provider.model')),
+      model: modelInUse?.registryKey ?? String(config.get('provider.model')),
+      ...(modelInUse?.problem ? { problem: modelInUse.problem } : {}),
       reasoning: String(config.get('provider.reasoningEffort')),
     },
     auth: {
       permissionMode: config.get('permissions.mode'),
+      // The mode a session started now runs by, read the way the gate reads it, and why it is not the saved one.
+      permissionModeInForce: describePermissionModeInForce(config),
       secretPolicy: config.get('storage.secretPolicy'),
       secretPolicyLabel: secretPolicyLabel(config.get('storage.secretPolicy')),
     },
@@ -57,7 +139,13 @@ export function captureCliStatusFacts<Lifecycle>(
     endpoints: {
       controlPlane: { enabled: config.get('controlPlane.enabled'), ...controlPlane },
       httpListener: { enabled: config.get('danger.httpListener'), ...httpListener },
-      web: { enabled: config.get('web.enabled'), ...web },
+      web: {
+        enabled: webSwitchedOn && web.served,
+        ...web.binding,
+        served: web.served,
+        networkFacing: webSwitchedOn && web.networkFacing,
+        developmentEndpoint: resolveRuntimeEndpointBinding(config, 'web'),
+      },
     },
     onboarding: { checked: Boolean(marker?.exists), scope: marker?.scope ?? 'none', updatedAt: marker?.payload?.updatedAt ?? null },
     decisionModel: cliDecisionModelFacts(config),
@@ -70,6 +158,9 @@ export interface CliProviderSignInFacts {
   readonly signIns: readonly string[];
   /** Where the model list comes from and how old it is, in words. */
   readonly modelList: string;
+  /** The provider, and the environment variables that sign it in with a key, for the line that says how to sign in. */
+  readonly providerId?: string;
+  readonly apiKeyEnvVars?: readonly string[];
 }
 
 function listedAt(path: string): { readonly at: number; readonly count: number } | null {
@@ -113,8 +204,8 @@ export function cliProviderSignInFacts(input: {
   const now = input.now ?? Date.now();
   const modelList = lists.length > 0
     ? `listed by the provider ${age(now - Math.max(...lists.map((entry) => entry.at)))} ago (${new Date(Math.max(...lists.map((entry) => entry.at))).toISOString()}, ${Math.max(...lists.map((entry) => entry.count))} models); the pinned catalog fills in what it does not list`
-    : 'the pinned model catalog: the provider has not listed its models yet';
-  return { signIns, modelList };
+    : 'the pinned catalog that ships with this release (the provider\'s own list is read once requests to it are signed in)';
+  return { signIns, modelList, providerId: input.providerId, apiKeyEnvVars: input.apiKeyEnvVars };
 }
 
 /** The sign-in and model-list facts of the configured model's provider, from the files a status report may read. */
@@ -138,7 +229,12 @@ export function readCliProviderSignInFacts(
 
 /** The sign-in line of a status report. */
 export function describeCliSignIns(facts: CliProviderSignInFacts): string {
-  return facts.signIns.length > 0
-    ? facts.signIns.join(', then ')
-    : 'none found in the subscription store or the environment (a key stored with /secrets is read by the app, not by this report)';
+  if (facts.signIns.length > 0) return facts.signIns.join(', then ');
+  // A key stored with /secrets is in the secret store, which this report does
+  // not open; say so, and the one way to give a key that it does see.
+  const variable = facts.apiKeyEnvVars?.[0];
+  const provider = facts.providerId ?? 'the provider';
+  return variable
+    ? `no subscription and no ${variable} in the environment. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with: export ${variable}=<key>, or /secrets in the app`
+    : `no subscription found for ${provider}. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with /secrets in the app`;
 }

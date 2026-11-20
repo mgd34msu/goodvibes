@@ -31,6 +31,7 @@
  * end it, and list what exists.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import { SESSION_GATE_PRESET_NAMES } from '../gate/presets.js';
 import {
   BOOLEAN_SCHEMA,
@@ -102,8 +103,9 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'sessions.hosted.create',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create a Daemon-Hosted Session',
-    description: 'Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon\'s own directory, which is never what the caller meant, and must be the daemon\'s working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon\'s live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon\'s current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app\'s, and with `agent` the session answers as the GoodVibes Agent: the Agent\'s prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.',
+    description: 'Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon\'s own directory, which is never what the caller meant, and must be the daemon\'s working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon\'s live model registry when given, so an unknown, ambiguous or unselectable id is refused here, 400 MODEL_NOT_FOUND, MODEL_AMBIGUOUS or MODEL_NOT_SELECTABLE, rather than at the first turn; omitted, the session follows the daemon\'s current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app\'s, and with `agent` the session answers as the GoodVibes Agent: the Agent\'s prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused (429 HOSTED_SESSION_LIMIT_REACHED) with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
     scopes: ['write:sessions'],
@@ -111,6 +113,15 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     // session-update, a hosted session REGISTERS on the shared spine, so it
     // shows up in `sessions.list` alongside every other kind.
     events: ['control.hosted_session_update', 'control.session_update'],
+    errorCodes: [
+      { code: 'INVALID_ARGUMENT', status: 400, meaning: 'workspaceRoot is relative or outside the allowed folders, or another field is malformed (named in `field`); nothing was created.' },
+      { code: 'MODEL_NOT_FOUND', status: 400, meaning: 'No model in this daemon\'s registry answers to modelId; nothing was created. Name a model it holds, or none.' },
+      { code: 'MODEL_AMBIGUOUS', status: 400, meaning: 'modelId is served by several providers; nothing was created. Name it provider-qualified.' },
+      { code: 'MODEL_NOT_SELECTABLE', status: 400, meaning: 'The model modelId names cannot be chosen; nothing was created.' },
+      { code: 'HOSTED_SURFACE_FORBIDDEN', status: 403, meaning: 'originSurface agent needs an admin credential; nothing was created.' },
+      { code: 'HOSTED_SESSION_LIMIT_REACHED', status: 429, meaning: 'hostedSessions.maxSessions live sessions already exist; end one or raise the setting.' },
+      { code: 'HOSTED_SESSION_UNAVAILABLE', status: 409, meaning: 'The workspace\'s provider setup failed or the daemon is shutting down; nothing was created.' },
+    ],
     inputSchema: objectSchema({
       workspaceRoot: STRING_SCHEMA,
       title: STRING_SCHEMA,
@@ -124,6 +135,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'sessions.hosted.attach',
+    repeat: 'safe',
     title: 'Attach to a Daemon-Hosted Session',
     description: 'Join a hosted session and receive its transcript so far, so a client that was never connected, or one reconnecting after the daemon restarted, renders what it missed instead of an empty screen. A session restored from disk has its loop rebuilt on this call, with a system line in the transcript stating that its in-flight turn did not survive the restart. Live output continues on the `turn` and `tools` event domains, filtered on this session id. Attaching is what keeps a `kill`-policy session alive: the policy is applied when the LAST client detaches. An attachment carries a LEASE, `hostedSessions.attachmentTtlMs`, ten minutes by default, or `leaseMs` for this attachment alone, because a client that crashed or closed its tab never calls detach, and a claim nothing expires would hold a kill-policy session open forever. Calling attach again with the same `clientId` renews it, and a client whose control-plane connection is still open renews automatically, so an attached client watching a long turn in silence is never reaped. When the last attachment lapses the session is treated as detached and its policy decides. ws-only invoke verb; no REST binding.',
     category: 'sessions',
@@ -145,6 +157,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'sessions.hosted.detach',
+    repeat: 'safe',
     title: 'Detach from a Daemon-Hosted Session',
     description: 'Leave a hosted session. When other clients are still attached, nothing else happens. When this was the LAST client, the effective detach policy decides: `kill` (the default, and what closing a client has always done) terminates the session with the reason `detached`; `survive` leaves it idle and reattachable. The policy is the session\'s own override when it was created with one and the `hostedSessions.detachPolicy` setting otherwise, and the returned record says which applied and what the session now is, never a guess by the caller. ws-only invoke verb; no REST binding.',
     category: 'sessions',
@@ -162,6 +175,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   }),
   methodDescriptor({
     id: 'sessions.hosted.kill',
+    repeat: 'safe',
     irreversible: true,
     title: 'End a Daemon-Hosted Session',
     description: 'End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is interrupted, its loop is taken apart, its workspace floor is released when it was the last session using it, and the record is kept, terminated, with the reason `killed`, until `hostedSessions.terminatedRetentionMs` retires it. Killing an already-terminated session returns that record unchanged rather than reporting an error for work that is already done. ws-only invoke verb; no REST binding.',
@@ -184,5 +198,22 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     outputSchema: objectSchema({
       sessions: arraySchema(HOSTED_SESSION_RECORD_SCHEMA),
     }, ['sessions']),
+  }),
+  methodDescriptor({
+    id: 'sessions.hosted.history',
+    title: 'Read a Daemon-Hosted Session\'s Transcript',
+    description: 'Return a hosted session\'s record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or attached to, else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.',
+    category: 'sessions',
+    transport: ['ws'],
+    scopes: ['read:transcripts'],
+    errorCodes: [
+      { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'This daemon holds no hosted session with that id, or its retention ended; nothing was read.' },
+      { code: 'HOSTED_SESSION_NOT_OWNED', status: 403, meaning: 'The session was not created or attached to by this credential; read it with the credential that did, or an admin one.' },
+    ],
+    inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    outputSchema: objectSchema({
+      session: HOSTED_SESSION_RECORD_SCHEMA,
+      history: HOSTED_SESSION_HISTORY_SCHEMA,
+    }, ['session', 'history']),
   }),
 ];

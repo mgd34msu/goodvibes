@@ -94,6 +94,8 @@ import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companio
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
 import { gateGatewayBinding } from './gateway-binding-gate.js';
+import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
+import { deriveRequestWithBody } from '../derived-request.js';
 import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
@@ -117,8 +119,12 @@ import {
 
 interface DaemonHttpRouterContext {
   readonly configManager: ConfigManager;
+  /** Answers repeats of a write that takes the shared Idempotency-Key; absent, such a key is not honoured. */
+  readonly idempotentReplay?: IdempotentReplayStore | undefined;
   /** Native listener facts, never request Host/Forwarded headers or a stored URL. */
   readonly listenerBinding?: () => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' };
+  /** The control-plane listener as bound right now, or null while none is bound; what the health snapshot reports. */
+  readonly servingListener?: (() => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | null) | undefined;
   readonly serviceRegistry: ServiceRegistry;
   readonly userAuth: UserAuthManager;
   readonly agentManager: AgentManager;
@@ -190,6 +196,7 @@ interface DaemonHttpRouterContext {
   readonly invokeGatewayMethodCall: (input: {
     readonly authToken: string;
     readonly methodId: string;
+    readonly idempotencyKey?: string | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly query?: Record<string, unknown> | undefined;
     readonly body?: unknown | undefined;
@@ -202,7 +209,7 @@ interface DaemonHttpRouterContext {
       /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
       readonly connectionId?: string | undefined;
     };
-  }) => Promise<{ status: number; ok: boolean; body: unknown }>;
+  }) => Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }>;
   readonly queueSurfaceReplyFromBinding: (
     binding: import('../../automation/routes.js').AutomationRouteBinding | undefined,
     input: { readonly agentId: string; readonly task: string; readonly agentTask?: string; readonly contractId?: string; readonly sessionId?: string },
@@ -289,6 +296,24 @@ export class DaemonHttpRouter {
       refuseUnauthenticated: (req) => this.refuseUnauthenticated(req),
       // A write made with the sign-in cookie is checked for the page's origin as the socket is, then for access.
       admit: (req) => refuseCookieWriteFromOtherOrigin(req, () => configuredBrowserOrigins(context.configManager)) ?? gateGatewayBinding(req, context),
+      keyedReplay: (req, serve) => {
+        // Only a write whose method takes the shared key, and only when a key was sent.
+        const store = context.idempotentReplay;
+        const raw = req.headers.get('idempotency-key');
+        if (!store || raw === null) return null;
+        const descriptor = context.gatewayMethods.findByHttpBinding(req.method, new URL(req.url).pathname);
+        if (!takesIdempotencyKey(descriptor)) return null;
+        const principalId = context.authenticateRequest(req)?.principal.principalId;
+        if (!descriptor || principalId === undefined) return null;
+        const key = IdempotentReplayStore.readKey(raw);
+        if (key === undefined) return null;
+        if (typeof key !== 'string') return Promise.resolve(Response.json(key.body, { status: key.status }));
+        return replayKeyedRequest(store, {
+          principalId, methodId: descriptor.id, key, req,
+          uploadMaxBytes: context.artifactStore.getMaxBytes(),
+          withBody: deriveRequestWithBody,
+        }, serve);
+      },
     });
     this.authFailures = createAuthFailureAudit(context.runtimeBus);
     const settingsConfigOwner = context.configManager;
@@ -769,6 +794,7 @@ export class DaemonHttpRouter {
       integration: {
         channelPlugins: this.context.channelPlugins,
         integrationHelpers: this.context.integrationHelpers,
+        ...(this.context.servingListener ? { servingListener: this.context.servingListener } : {}),
         memoryEmbeddingRegistry: this.context.memoryEmbeddingRegistry,
         memoryRegistry: this.context.memoryRegistry,
         memoryConsolidation: this.context.memoryConsolidation ?? null,

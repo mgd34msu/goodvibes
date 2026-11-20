@@ -144,7 +144,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   doctor: {
     usage: ['doctor', 'doctor --json', 'doctor --strict', 'doctor explain <tool|command>', 'doctor routing', 'doctor hooks'],
     summary:
-      'Print status plus setup warnings, or explain a platform decision: explain (why a tool/command would be allowed/asked/denied under the current mode), routing (which model/provider serves which role), hooks (registered hooks, their source, and validation status). Exits 0 when the install is usable (advisory findings render as notes); non-zero only for a must-fix finding. --strict also fails on advisory findings, for CI.',
+      'Print status plus setup warnings, or explain a platform decision: explain (why a tool/command would be allowed/asked/denied: the gate the app runs, under the mode in force, with the decision model, remembered and never-run rules and the tool\'s path containment; it says when the decision model was not consulted), routing (which model/provider serves which role), hooks (registered hooks, their source, and validation status). Exits 0 when the install is usable (advisory findings render as notes); non-zero only for a must-fix finding. --strict also fails on advisory findings, for CI.',
     examples: [
       'doctor',
       'doctor --strict',

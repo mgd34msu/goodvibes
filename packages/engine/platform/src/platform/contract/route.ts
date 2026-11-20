@@ -69,7 +69,9 @@ export function createRoutePlannerContractSelector(planner: ContractRoutePlanner
       provider: planned.provider,
       ...(planned.fallbackModels.length === 0 ? {} : { fallbackModels: [...planned.fallbackModels] }),
       reason: planned.reason,
-      routing: { providerFailurePolicy: planned.fallbackModels.length ? 'ordered-fallbacks' : 'fail' },
+      // With no fallbacks of the route's own, a provider failure follows the owner's
+      // provider.fallbackModels, as every turn does (providers/failover.ts).
+      ...(planned.fallbackModels.length ? { routing: { providerFailurePolicy: 'ordered-fallbacks' as const } } : {}),
     };
     return route;
   };

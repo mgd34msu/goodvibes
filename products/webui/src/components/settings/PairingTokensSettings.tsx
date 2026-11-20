@@ -23,8 +23,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
-import { client as platformClient, setExplicitAuthToken } from '../../lib/goodvibes';
-import type { PublicPairingToken } from '../../lib/goodvibes';
+import { client as platformClient, getCurrentAuth, setExplicitAuthToken } from '../../lib/goodvibes';
+import type { PublicPairingToken, PublicRelayCode } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
@@ -48,6 +48,12 @@ export function PairingTokensSettings() {
   const confirm = useConfirm();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
+
+  // Which paired token this browser is signed in with, so a row can say "this browser".
+  const auth = useQuery({ queryKey: queryKeys.auth, queryFn: getCurrentAuth });
+  const currentPrincipal = typeof auth.data === 'object' && auth.data !== null
+    && typeof (auth.data as { principalId?: unknown }).principalId === 'string'
+    ? (auth.data as { principalId: string }).principalId : null;
 
   const tokens = useQuery({
     queryKey: queryKeys.pairingTokens,
@@ -85,7 +91,8 @@ export function PairingTokensSettings() {
   });
 
   const migrate = useMutation({
-    mutationFn: (name: string) => platformClient.operator.pairing.tokens.migrate(name),
+    // Through the owner's pairing flow, so this browser becomes an owner device, not an automation token.
+    mutationFn: (name: string) => platformClient.operator.pairing.handoff.selfFromSharedToken(name),
     onSuccess: async (result) => {
       // Swap THIS browser over to its own new token immediately, the daemon just
       // minted it for the same principal, so the swap never signs this tab out.
@@ -106,7 +113,7 @@ export function PairingTokensSettings() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.auth });
       toast({
         title: 'This browser now has its own token',
-        description: `Named "${result.token.name}": it no longer relies on the shared token.`,
+        description: `Named "${result.token.name}": it no longer relies on the shared token, and it is an owner device, so it makes your own changes.`,
         tone: 'success',
       });
     },
@@ -166,6 +173,32 @@ export function PairingTokensSettings() {
     });
     if (!ok) return;
     revokeShared.mutate(true);
+  }
+
+  // One relay code per device paired through the relay: listed and revoked like a device token.
+  const relayCodes = useQuery({
+    queryKey: queryKeys.relayCodes,
+    queryFn: () => platformClient.operator.relay.codes.list(),
+  });
+  const revokeRelayCode = useMutation({
+    mutationFn: (id: string) => platformClient.operator.relay.codes.revoke(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.relayCodes });
+      toast({ title: 'Relay code revoked', description: 'That device is refused at its next request through the relay. Every other device keeps working.', tone: 'success' });
+    },
+    onError: (error) => toast({ title: 'Could not revoke the relay code', description: formatError(error), tone: 'danger' }),
+  });
+
+  async function handleRevokeRelayCode(code: PublicRelayCode): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Revoke this relay code?',
+      target: code.name,
+      description: 'The device holding it can no longer reach the daemon through the relay; on the home network it still connects directly. It needs a new pairing code to use the relay again.',
+      confirmLabel: 'Revoke',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    revokeRelayCode.mutate(code.id);
   }
 
   const [relayPairing, setRelayPairing] = useState(() => getStoredRelayPairing());
@@ -267,6 +300,8 @@ export function PairingTokensSettings() {
                 className="pairing-token-row"
                 title={token.name}
                 meta={[
+                  // How it came to exist: a device the owner paired himself makes his own acts; an automation token does not.
+                  token.origin === 'owner-pairing' ? 'owner device' : 'automation token',
                   whenLabel(token.createdAt) && `Created ${whenLabel(token.createdAt)}`,
                   whenLabel(token.lastSeenAt) ? `last seen ${whenLabel(token.lastSeenAt)}` : 'never seen',
                   // What the device may do: its own scope list, or everything.
@@ -294,6 +329,16 @@ export function PairingTokensSettings() {
               />
             ))}
           </RowList>
+        )}
+
+        {tokens.isSuccess && rows.some((token) => `pairing:${token.id}` === currentPrincipal && token.origin !== 'owner-pairing') && (
+          <p className="pairing-token-row__note" role="note">
+            This browser is signed in with an automation token, so it cannot make your own changes (loosening a security,
+            permission, judgment or payment setting, or answering a change put to you). To make it an owner device in one step,
+            open the pairing link from your own app here: run <code>goodvibes pair</code> in your terminal (or <code>/pair</code>),
+            or open Settings, Paired devices on a device signed in as you and pair a new device, then open that link in this browser.
+            It signs in as an owner device; revoke this automation token afterwards.
+          </p>
         )}
       </SettingsBlock>
 
@@ -331,6 +376,40 @@ export function PairingTokensSettings() {
           </div>
         )}
       </SettingsBlock>
+
+      {relayCodes.isSuccess && relayCodes.data.codes.length > 0 && (
+        <SettingsBlock
+          testId="relay-codes"
+          title="Relay devices"
+          description="Every device paired through the relay has its own relay code. Revoking one cuts only that device off the relay, at its next request. A code is shown once, inside its pairing, so this list never shows one."
+        >
+          <RowList aria-label="Relay devices">
+            {relayCodes.data.codes.map((code) => (
+              <Row
+                key={code.id}
+                className="pairing-token-row"
+                title={code.name}
+                meta={[
+                  whenLabel(code.createdAt) && `Created ${whenLabel(code.createdAt)}`,
+                  whenLabel(code.lastSeenAt) ? `last used ${whenLabel(code.lastSeenAt)}` : 'not used yet',
+                ].filter(Boolean).join(' · ')}
+                trailing={(
+                  <Button
+                    variant="quiet-danger"
+                    size="sm"
+                    className="pairing-token-row__revoke"
+                    icon={<Trash2 aria-hidden="true" />}
+                    disabled={revokeRelayCode.isPending && revokeRelayCode.variables === code.id}
+                    onClick={() => void handleRevokeRelayCode(code)}
+                  >
+                    {revokeRelayCode.isPending && revokeRelayCode.variables === code.id ? 'Revoking…' : 'Revoke'}
+                  </Button>
+                )}
+              />
+            ))}
+          </RowList>
+        </SettingsBlock>
+      )}
 
       {relayPairing && (
         <SettingsBlock

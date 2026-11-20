@@ -433,7 +433,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     reasoningEffort: config.reasoningEffort,
     helperEnabled: config.helperEnabled,
     toolLlmEnabled: config.toolLlmEnabled,
-    providerFailureHints: config.providerFailureHints,
+    providerFallbackOrder: config.providerFallbackOrder,
     cacheEnabled: config.cacheEnabled,
     cacheStableTtl: config.cacheStableTtl,
     cacheMonitorHitRate: config.cacheMonitorHitRate,

@@ -177,6 +177,7 @@ export const MCP_TOOLS_RESPONSE_SCHEMA = objectSchema({
 export const MCP_TOOL_RULE_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'mcp.servers.tools.deny',
+    repeat: 'safe',
     title: 'Deny MCP Tool',
     description: 'Keep a denial of one tool with its MCP server\'s entry in the config file that holds it (global or this project\'s .goodvibes/mcp.json) and apply it at once: every call to the tool is refused, whatever the server\'s trust mode and scope allow, and a call not yet sent ends. A denial replaces a kept allow of the same tool. Refused for a server whose entry is in a file another program owns.',
     category: 'mcp',
@@ -189,6 +190,7 @@ export const MCP_TOOL_RULE_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[
   }),
   methodDescriptor({
     id: 'mcp.servers.tools.allow',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Allow MCP Tool',
     description: 'Keep an allow of one tool with its MCP server\'s entry in the owner\'s global MCP config and apply it at once: calls to the tool pass the server\'s path and host scope. A blocked server, a quarantined schema and a denial of the same tool still refuse. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model and for a server kept in a project file.',
@@ -202,6 +204,7 @@ export const MCP_TOOL_RULE_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[
   }),
   methodDescriptor({
     id: 'mcp.servers.tools.clear',
+    repeat: 'safe',
     ownerOnly: true,
     title: 'Clear MCP Tool Rule',
     description: 'Drop the allow or denial kept for one tool with its MCP server\'s entry and apply it at once, so the server\'s trust mode and scope decide the tool again. Lifting a denial loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model.',

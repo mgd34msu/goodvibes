@@ -1,6 +1,7 @@
 import { hasActiveExecutionMode, readExecutionMode } from './execution-mode.ts';
 import { type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
+import { describePermissionModeInForce } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate';
 
 export type ApprovalPostureKind = GatePresetName | 'unavailable';
@@ -43,5 +44,9 @@ export function readApprovalPostureFromConfig(configManager: Pick<ConfigManager,
     automaticApprovals: false, bypassesPrompts: false,
     label: 'Execution mode unavailable', detail: 'The active hosted session has not supplied a current execution mode.',
   };
-  return computeApprovalPosture({ autoApprove: !hasActiveExecutionMode(configManager) && configManager.get('behavior.autoApprove') === true, mode });
+  const hosted = hasActiveExecutionMode(configManager);
+  // A hosted session's mode is reported by its host already in force; the local mode is
+  // read the way the gate reads it (jev-decides is ask-me while no decision model works).
+  const inForce = hosted ? mode : describePermissionModeInForce(configManager).mode;
+  return computeApprovalPosture({ autoApprove: !hosted && configManager.get('behavior.autoApprove') === true, mode: inForce });
 }

@@ -220,6 +220,10 @@ function dispatchPolicyRule(
       step = result.step;
       break;
     }
+    case 'never-run':
+      // The gate enforces never-run rules itself, in every mode (gate/never-run.ts).
+      step = { layer: 'policy', check: `never-run rule ${rule.id}`, matched: false, detail: 'enforced by the gate, not this evaluator' };
+      break;
   }
 
   const reason: DecisionReason =

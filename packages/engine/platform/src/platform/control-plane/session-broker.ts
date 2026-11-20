@@ -190,6 +190,7 @@ export class SharedSessionBroker {
   /** Sender attribution and channel profiles for channel messages; set by host composition. */
   private channelIntake: ChannelIntake | null = null;
   private surfaceNoticeSender: ((routeId: string, text: string) => void) | null = null;
+  private guestSender: ((surfaceKind: string, userId: string | undefined) => boolean) | null = null;
   private loaded = false;
   /** One load at a time: a second early caller must not clear maps the first already filled. */
   private loading: Promise<void> | null = null;
@@ -478,6 +479,15 @@ export class SharedSessionBroker {
    */
   setSurfaceNoticeSender(sender: ((routeId: string, text: string) => void) | null): void {
     this.surfaceNoticeSender = sender;
+  }
+
+  /**
+   * Install the rule that says whether a channel sender is someone the channel
+   * admits who is not its owner. Such a message is never handed to a running
+   * agent as a directive: it starts a guest's turn of its own.
+   */
+  setGuestSenderRule(rule: ((surfaceKind: string, userId: string | undefined) => boolean) | null): void {
+    this.guestSender = rule;
   }
 
   private announceSurfaceReply(binding: SharedSessionSurfaceReplyBinding): void {
@@ -1369,6 +1379,7 @@ export class SharedSessionBroker {
         findProviderMessage: (key) => this.findProviderMessage(key),
         noteProviderMessage: (key, sessionId, inputId) => { this.providerMessageIndexed().set(key, { sessionId, inputId }); },
         ...(this.conversationGateConfig ? { conversationGateConfig: this.conversationGateConfig } : {}),
+        ...(this.guestSender ? { senderIsGuest: this.guestSender } : {}),
       },
       intent,
       input,

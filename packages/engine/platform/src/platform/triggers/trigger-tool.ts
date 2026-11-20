@@ -34,7 +34,7 @@ export const TRIGGER_TOOL_DEFINITION: ToolDefinition = {
       id: { type: 'string', description: 'The trigger id, for history, cancel and reset.' },
       definition: {
         type: 'object',
-        description: 'For create: { id, label, description?, spec, action? }. spec.kind is on-exit | stream | condition. action defaults to an agent turn ({"kind":"agent-turn","prompt"?}); {"kind":"action-grant","grantId","digest"} runs a command the owner registered.',
+        description: 'For create: { id, label, description?, spec, action? }. spec.kind is on-exit | stream | condition. action defaults to an agent turn ({"kind":"agent-turn","prompt"?,"deliverTo"?}); its answer goes to the channel deliverTo names ("telegram", "slack:C123"), else to the owner inbox. {"kind":"action-grant","grantId","digest"} runs a command the owner registered.',
       },
       limit: { type: 'number', description: 'For history: how many of the newest runs to return (default 20).' },
     },

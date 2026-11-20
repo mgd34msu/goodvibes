@@ -6,88 +6,32 @@
 // `workspaceCheckpointManager` (src/runtime/services.ts) and threaded through
 // CommandContext.workspace exactly like FileUndoManager already is.
 //
-// Restoring a checkpoint is now done through the unified, message-anchored
-// /rewind (rewind-runtime.ts), which rewinds files AND/OR conversation to a
-// completed turn, reusing this same checkpoint store for the files half.
+// /checkpoints restore <n|id> restores the files of one checkpoint (shared
+// with the Agent, terminal-shell/recovery-commands.ts). The unified,
+// message-anchored /rewind (rewind-runtime.ts) rewinds files AND/OR
+// conversation to a completed turn, reusing this same store for the files half.
 // ---------------------------------------------------------------------------
 
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { WorkspaceCheckpoint } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { createCheckpointsCommand, shortCheckpointId } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-/** Drop the redundant 'wcp_' prefix and cap length for compact listing. Full ids (and any unambiguous prefix of one) are still accepted by /rewind. Exported: /rewind's no-anchors checkpoint fallback (rewind-runtime.ts) reuses this same formatting. */
-export function shortId(id: string): string {
-  const stripped = id.startsWith('wcp_') ? id.slice(4) : id;
-  return stripped.length > 12 ? stripped.slice(0, 12) : stripped;
-}
-
-function formatAge(createdAtMs: number, nowMs: number = Date.now()): string {
-  const deltaMs = Math.max(0, nowMs - createdAtMs);
-  const seconds = Math.floor(deltaMs / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+/** Exported for /rewind's no-anchors checkpoint fallback (rewind-runtime.ts), which lists checkpoints the same way. */
+export { shortCheckpointId as shortId } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
 
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
 export function registerCheckpointRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'checkpoints',
+  // /checkpoints and /checkpoints restore: the same lines the Agent runs.
+  registry.register(createCheckpointsCommand<CommandContext>({
     aliases: ['ckpts'],
-    description: 'List workspace checkpoints, newest first',
-    handler: async (_args, ctx: CommandContext) => {
-      const mgr = ctx.workspace.workspaceCheckpointManager;
-      if (!mgr) {
-        ctx.print('Checkpoints are not available in this session.');
-        return;
-      }
-      let checkpoints: WorkspaceCheckpoint[];
-      try {
-        checkpoints = await mgr.list();
-      } catch (err) {
-        ctx.print(`Failed to list checkpoints: ${summarizeError(err)}`);
-        return;
-      }
-      const trimmed = mgr.historyTrimmed();
-      const retentionFailure = mgr.retentionFailure();
-      const notes = [
-        ...(trimmed ? [`${trimmed.reason} (${trimmed.count} removed ${formatAge(trimmed.at)}; the newest is always kept).`] : []),
-        ...(retentionFailure ? [`Automatic retention is failing: ${retentionFailure.error}`] : []),
-      ];
-      if (checkpoints.length === 0) {
-        ctx.print(['No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.', ...notes].join('\n'));
-        return;
-      }
-      const lines = [`Checkpoints (${checkpoints.length}, newest first):`];
-      for (const cp of checkpoints) {
-        lines.push(`  ${shortId(cp.id).padEnd(12)} ${cp.kind.padEnd(9)} ${cp.label}  ${formatAge(cp.createdAt)}  ~${formatBytes(cp.sizeBytes)} new`);
-      }
-      // Files-changed counts are deliberately NOT shown per-row here: getting
-      // them would cost one diff spawn per checkpoint (O(checkpoints)), which
-      // stops being cheap once there are more than a handful. /rewind <id>
-      // loads exactly one diff, so the exact file list is available there.
-      lines.push(...notes);
-      lines.push('Use /rewind to preview and restore a completed turn (files and/or conversation); it reuses these checkpoints for the files half. With no completed turns recorded this run (e.g. right after a restart), /rewind falls back to restoring one of these checkpoints directly, by number or id; files only, no conversation state.');
-      ctx.print(lines.join('\n'));
-    },
-  });
+    manager: (ctx) => ctx.workspace.workspaceCheckpointManager,
+    record: (ctx, text) => ctx.session.conversationManager.addTypedSystemMessage(text, 'operational'),
+    emptyHint: '/checkpoint <label> creates one manually; turns and agent runs snapshot automatically.',
+    listFooter: '/rewind restores a completed turn instead (files and/or conversation), reusing these checkpoints for the files half. /checkpoint <label> creates one.',
+  }));
 
   registry.register({
     name: 'checkpoint',
@@ -108,7 +52,7 @@ export function registerCheckpointRuntimeCommands(registry: CommandRegistry): vo
           ctx.print('No changes since the last checkpoint; nothing to save.');
           return;
         }
-        ctx.print(`Checkpoint created: ${shortId(checkpoint.id)} "${checkpoint.label}" (forensic retention).`);
+        ctx.print(`Checkpoint created: ${shortCheckpointId(checkpoint.id)} "${checkpoint.label}" (forensic retention).`);
       } catch (err) {
         ctx.print(`Checkpoint failed: ${summarizeError(err)}`);
       }

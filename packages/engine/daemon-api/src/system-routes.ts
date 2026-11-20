@@ -9,7 +9,7 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
-import { requestActor } from './http-policy.js';
+import { isAutomationCredential, requestActor } from './http-policy.js';
 import type {
   ApprovalRememberTier,
   AutomationRouteBindingKind,
@@ -247,6 +247,16 @@ export function createDaemonSystemRouteHandlers(
           code: 'OWNER_ONLY',
         }, { status: 403 }));
       }
+      // A change put to the owner (owner-act.ts) is answered with his own credential only:
+      // an automation token cannot approve the change it, or another script, asked for.
+      if ((action === 'approve' || action === 'deny') && isPairedDeviceCredential(context, req)
+        && isOwnerActRecord(context.approvalBroker.getApproval?.(approvalId))) {
+        return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({
+          error: `Approval ${approvalId} asks the owner to make a change only he makes; a token minted for automation cannot answer it. Nothing was answered.`,
+          code: 'OWNER_ONLY',
+          next: ['The owner answers it from his own app: the approval prompt, /approval in a terminal, or the web UI signed in as him.'],
+        }, { status: 403 }));
+      }
       return handleApprovalAction(context, approvalId, action, req);
     },
     getConfig: (req) => {
@@ -287,6 +297,27 @@ export function createDaemonSystemRouteHandlers(
       if (payload instanceof Response) return payload;
       // The two owner lanes take the caller's authority themselves and check it
       // once more immediately before the write, so they are not checked again here.
+      // A settings import replaces the owner's settings wholesale: a paired
+      // device's credential does not carry that act.
+      if (Object.hasOwn(payload, 'settingsImportPrecondition') && isPairedDeviceCredential(context, req)) {
+        return jsonErrorResponse({
+          error: 'A settings import is the owner\'s own act; a token minted for automation cannot make it. Nothing was imported.',
+          code: 'OWNER_ONLY', state: 'the settings are unchanged',
+          next: ['Import the settings from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
+        }, { status: 403 });
+      }
+      if (Object.hasOwn(payload, 'settingsPrecondition')) {
+        const arm = isJsonRecord(payload.settingsPrecondition) ? payload.settingsPrecondition : null;
+        if (arm && arm.action === 'write' && typeof arm.key === 'string' && arm.key) {
+          const key = arm.key;
+          const reset = arm.operation === 'reset-default';
+          const value = arm.value;
+          const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value, ...(reset ? { toDefault: true } : {}) }],
+            reset ? 'config.reset' : 'config.set', reset ? { key } : { key, value },
+            () => (reset ? context.configManager.reset?.(key) : context.configManager.setDynamic(key, value)));
+          if (putToOwner) return putToOwner;
+        }
+      }
       if (Object.hasOwn(payload, 'settingsImportPrecondition')) {
         return context.settingsImportPrecondition?.handle(req, payload, importLifetime)
           ?? jsonErrorResponse({ error: 'Settings import owner unavailable', code: 'SETTINGS_IMPORT_PRECONDITION_UNSUPPORTED' }, { status: 409 });
@@ -322,6 +353,12 @@ export function createDaemonSystemRouteHandlers(
           { status: 400 },
         );
       }
+      const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value }], 'config.set', { key, value },
+        () => context.configManager.setDynamic(key, value));
+      if (putToOwner) return putToOwner;
+      // The owner question may have yielded; the caller's authority is read again before the write.
+      const writeAdmin = context.requireAdmin(req);
+      if (writeAdmin) return writeAdmin;
       try {
         context.configManager.setDynamic(key, value);
       } catch (error: unknown) {
@@ -408,6 +445,15 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'This host cannot write several settings as one update.', code: 'CONFIG_SET_MANY_UNSUPPORTED', state: unchanged,
           next: ['Send each setting with config.set.'] }, { status: 409 });
       }
+      const setMany = context.configManager.setMany.bind(context.configManager);
+      const putToOwner = await ownerActResponse(context, req, '/config/many', changes, 'config.setMany', { entries: changes },
+        () => {
+          const applied = setMany(changes, { kind: 'owner', surface: 'daemon-api' });
+          if (!applied.ok) throw new Error(applied.refusal.reason);
+        });
+      if (putToOwner) return putToOwner;
+      const writeAdmin = context.requireAdmin(req);
+      if (writeAdmin) return writeAdmin;
       // One admission, one write per settings file, one revision and one change event per key.
       const result = context.configManager.setMany(changes, { kind: 'owner', surface: 'daemon-api' });
       if (!result.ok) {
@@ -493,6 +539,12 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'This host cannot reset a setting.', code: 'CONFIG_RESET_UNSUPPORTED', state: unchanged,
           next: ['Write the default value with config.set instead.'] }, { status: 409 });
       }
+      const reset = context.configManager.reset.bind(context.configManager);
+      const putToOwner = await ownerActResponse(context, req, '/config/reset', [{ key, value: undefined, toDefault: true }], 'config.reset', { key },
+        () => reset(key));
+      if (putToOwner) return putToOwner;
+      const writeAdmin = context.requireAdmin(req);
+      if (writeAdmin) return writeAdmin;
       try {
         // The manager owns the managed-policy lock and refuses a locked key here.
         context.configManager.reset(key);
@@ -818,7 +870,7 @@ async function handleApprovalAction(
     const approval = await context.approvalBroker.claimApproval(approvalId, actor, 'web', note, outcome);
     return approval
       ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
-      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
+      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
   }
   if (action === 'cancel') {
     const outcome: { applied?: boolean | undefined } = {};
@@ -830,7 +882,7 @@ async function handleApprovalAction(
       : await context.approvalBroker.cancelApproval(approvalId, actor, 'web', note, outcome);
     return approval
       ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
-      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
+      : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
   }
   // Legacy generic callbacks choose this URL from a boolean. The URL alone
   // therefore cannot prove that an operator chose permanent workspace trust.
@@ -839,7 +891,7 @@ async function handleApprovalAction(
     ? disposition !== 'approved'
     : disposition !== 'denied' && disposition !== 'amended')) {
     return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`,
-      jsonErrorResponse({ error: 'disposition must match the approval action.' }, { status: 400 }));
+      jsonErrorResponse({ error: 'disposition must match the approval action.', code: 'INVALID_ARGUMENT', field: 'disposition' }, { status: 400 }));
   }
   const selectedHunks = action === 'approve' ? readSelectedHunks(payload.selectedHunks) : undefined;
   if (selectedHunks instanceof Response) {
@@ -858,7 +910,7 @@ async function handleApprovalAction(
     return context.recordApiResponse(
       req,
       `/api/approvals/${approvalId}/${action}`,
-      jsonErrorResponse({ error: 'reason must be a string.' }, { status: 400 }),
+      jsonErrorResponse({ error: 'reason must be a string.', code: 'INVALID_ARGUMENT', field: 'reason' }, { status: 400 }),
     );
   }
   const reason = typeof payload.reason === 'string' ? payload.reason : undefined;
@@ -886,16 +938,74 @@ async function handleApprovalAction(
     // The broker throws a 400-tagged error for an out-of-range or non-edit
     // per-hunk selection. Surface it as an honest HTTP 400, not a 500.
     const status = typeof (error as { status?: unknown })?.status === 'number' ? (error as { status: number }).status : 500;
+    const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
     const message = error instanceof Error ? error.message : 'Approval resolution failed.';
     return context.recordApiResponse(
       req,
       `/api/approvals/${approvalId}/${action}`,
-      jsonErrorResponse({ error: message }, { status }),
+      jsonErrorResponse({ error: message, ...(code ? { code } : status === 400 ? { code: 'INVALID_ARGUMENT' } : {}) }, { status }),
     );
   }
   return approval
     ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome), recorded: recordedDecision(approval) }))
-    : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
+    : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval', code: 'APPROVAL_NOT_FOUND' }, { status: 404 }));
+}
+
+/** Automation's credential (a paired device's token the owner's pairing flow did not mint), never the owner's own. */
+function isPairedDeviceCredential(context: DaemonSystemRouteContext, req: Request): boolean {
+  return isAutomationCredential(context.resolveAuthenticatedPrincipal?.(req));
+}
+
+/** Whether an approval record marks a change only the owner's own credential answers (control-plane/owner-act.ts). */
+function isOwnerActRecord(approval: unknown): boolean {
+  return isJsonRecord(approval) && isJsonRecord(approval.metadata) && approval.metadata.ownerAct === true;
+}
+
+/**
+ * A settings write that loosens a security, permission, judgment or payment
+ * setting is the owner's own act. From an automation token (a paired device's token the owner's pairing flow did not mint) it is not
+ * made: it is put to the owner as an approval, applied when he approves it,
+ * and the caller is answered 202 with the approval's id. Any other credential,
+ * or a change that loosens nothing, gets null and the write goes on.
+ */
+async function ownerActResponse(
+  context: DaemonSystemRouteContext,
+  req: Request,
+  path: string,
+  changes: readonly { readonly key: string; readonly value: unknown; readonly toDefault?: boolean }[],
+  tool: string,
+  args: Record<string, unknown>,
+  apply: () => unknown,
+): Promise<Response | null> {
+  if (!isPairedDeviceCredential(context, req) || !context.configLoosening) return null;
+  const reasons = changes.flatMap(({ key, value, toDefault }) => {
+    const loosening = context.configLoosening!(key, value, toDefault ? { toDefault: true } : {});
+    return loosening === null ? [] : [`Changing ${key} would ${loosening}.`];
+  });
+  if (reasons.length === 0) return null;
+  const keys = changes.map(({ key }) => key);
+  if (!context.putToOwner) {
+    return context.recordApiResponse(req, path, jsonErrorResponse({
+      error: `${reasons.join(' ')} Only the owner makes that change; a token minted for automation cannot. Nothing was changed.`,
+      code: 'OWNER_ONLY', state: 'the settings are unchanged',
+      next: ['Make the change from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
+    }, { status: 403 }));
+  }
+  const requestedBy = context.resolveAuthenticatedPrincipal?.(req)?.principalId ?? 'an automation token';
+  const { approvalId } = await context.putToOwner({
+    summary: `An automation token asks to change ${keys.join(', ')}`,
+    reasons, tool, args, requestedBy, apply,
+  });
+  return context.recordApiResponse(req, path, Response.json({
+    success: false,
+    code: 'OWNER_APPROVAL_PENDING',
+    approvalId,
+    ...(keys.length === 1 ? { key: keys[0] } : {}),
+    keys,
+    reasons,
+    state: 'nothing was changed yet; the change waits for the owner\'s answer and is applied when he approves it',
+    next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event); the setting changes only if the owner approves it from his own app.`],
+  }, { status: 202 }));
 }
 
 /**
@@ -964,7 +1074,7 @@ function readRememberTier(value: unknown): ApprovalRememberTier | undefined | Re
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string' || !(APPROVAL_REMEMBER_TIERS as readonly string[]).includes(value)) {
     return jsonErrorResponse(
-      { error: `rememberTier must be one of: ${APPROVAL_REMEMBER_TIERS.join(', ')}.` },
+      { error: `rememberTier must be one of: ${APPROVAL_REMEMBER_TIERS.join(', ')}.`, code: 'INVALID_ARGUMENT', field: 'rememberTier' },
       { status: 400 },
     );
   }
@@ -978,7 +1088,7 @@ function readRememberTier(value: unknown): ApprovalRememberTier | undefined | Re
 function readModifiedArgs(value: unknown): Record<string, unknown> | undefined | Response {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'object' || Array.isArray(value)) {
-    return jsonErrorResponse({ error: 'modifiedArgs must be an object of tool arguments.' }, { status: 400 });
+    return jsonErrorResponse({ error: 'modifiedArgs must be an object of tool arguments.', code: 'INVALID_ARGUMENT', field: 'modifiedArgs' }, { status: 400 });
   }
   return value as Record<string, unknown>;
 }
@@ -1056,7 +1166,7 @@ function recordedDecision(approval: unknown): {
 function readSelectedHunks(value: unknown): readonly number[] | undefined | Response {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value) || !value.every((entry) => Number.isInteger(entry))) {
-    return jsonErrorResponse({ error: 'selectedHunks must be an array of integer hunk indices.' }, { status: 400 });
+    return jsonErrorResponse({ error: 'selectedHunks must be an array of integer hunk indices.', code: 'INVALID_ARGUMENT', field: 'selectedHunks' }, { status: 400 });
   }
   return value as readonly number[];
 }

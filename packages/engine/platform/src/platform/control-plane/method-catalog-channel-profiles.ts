@@ -118,6 +118,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'channels.profiles.set',
+    repeat: 'safe',
     title: 'Bind Channel Profile',
     description: 'Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.',
     category: 'channels',
@@ -129,6 +130,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   }),
   methodDescriptor({
     id: 'channels.profiles.delete',
+    repeat: 'safe',
     irreversible: true,
     title: 'Unbind Channel Profile',
     description: 'Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.',

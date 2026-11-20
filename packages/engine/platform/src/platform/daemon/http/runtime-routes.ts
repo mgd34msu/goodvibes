@@ -14,8 +14,8 @@ import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 
 export type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
 
-type PlatformSpawnAgentInput = Parameters<PlatformDaemonRuntimeRouteContext['trySpawnAgent']>[0];
-type RuntimeRouteSpawnAgentInput = Parameters<DaemonRuntimeRouteContext['trySpawnAgent']>[0];
+type RuntimeRouteSpawnAgentInput = Parameters<PlatformDaemonRuntimeRouteContext['trySpawnAgent']>[0];
+type PlatformSpawnAgentInput = Parameters<DaemonRuntimeRouteContext['trySpawnAgent']>[0];
 
 const providerSelections = new Set(['inherit-current', 'concrete', 'synthetic']);
 const providerFailurePolicies = new Set(['ordered-fallbacks', 'fail']);
@@ -284,25 +284,29 @@ function isExecutionIntent(value: unknown): value is ExecutionIntent {
   return objectProblem(value, EXECUTION_INTENT_CHECKS, 'executionIntent') === null;
 }
 
-function isRuntimeRouteSpawnAgentInput(input: PlatformSpawnAgentInput): input is RuntimeRouteSpawnAgentInput {
-  return input.mode === 'spawn'
-    && typeof input.task === 'string'
-    && isOptionalString(input.model)
-    && isOptionalStringArray(input.tools)
-    && isOptionalString(input.provider)
-    && isOptionalString(input.context)
-    && (input.executionIntent === undefined || isExecutionIntent(input.executionIntent))
-    && isOptionalStringFrom(input.executionProtocol, executionProtocols)
-    && isOptionalStringFrom(input.reviewMode, reviewModes)
-    && isOptionalStringFrom(input.communicationLane, communicationLanes)
-    && isOptionalBoolean(input.outsideContract);
-}
-
-function parseRuntimeRouteSpawnAgentInput(input: PlatformSpawnAgentInput): RuntimeRouteSpawnAgentInput {
-  if (!isRuntimeRouteSpawnAgentInput(input)) {
+/**
+ * The agent start a task route asked for, as the agent manager takes it: the
+ * route's lists are copied, so nothing the route holds is shared with the
+ * record the agent keeps.
+ */
+export function toAgentSpawnInput(input: RuntimeRouteSpawnAgentInput): PlatformSpawnAgentInput {
+  if (input.mode !== 'spawn' || typeof input.task !== 'string'
+    || (input.executionIntent !== undefined && !isExecutionIntent(input.executionIntent))
+    || !isOptionalStringFrom(input.executionProtocol, executionProtocols)
+    || !isOptionalStringFrom(input.reviewMode, reviewModes)
+    || !isOptionalStringFrom(input.communicationLane, communicationLanes)) {
     throw new Error('Invalid agent spawn payload from runtime route parser.');
   }
-  return input;
+  const { tools, fallbackModels, routing, successCriteria, requiredEvidence, writeScope, ...rest } = input;
+  return {
+    ...rest,
+    ...(tools ? { tools: [...tools] } : {}),
+    ...(fallbackModels ? { fallbackModels: [...fallbackModels] } : {}),
+    ...(routing ? { routing: { ...routing, ...(routing.fallbackModels ? { fallbackModels: [...routing.fallbackModels] } : {}) } } : {}),
+    ...(successCriteria ? { successCriteria: [...successCriteria] } : {}),
+    ...(requiredEvidence ? { requiredEvidence: [...requiredEvidence] } : {}),
+    ...(writeScope ? { writeScope: [...writeScope] } : {}),
+  };
 }
 
 export function createDaemonRuntimeRouteHandlers(
@@ -315,12 +319,6 @@ export function createDaemonRuntimeRouteHandlers(
       createJob: (input) => context.automationManager.createJob(parseCreateAutomationJobInput(input)),
       updateJob: (jobId, input) => context.automationManager.updateJob(jobId, parseUpdateAutomationJobInput(input)),
     },
-    trySpawnAgent: (input, logLabel, sessionId) => {
-      const spawnInput = parseRuntimeRouteSpawnAgentInput(input);
-      return context.trySpawnAgent({
-        ...spawnInput,
-        ...(spawnInput.tools ? { tools: [...spawnInput.tools] } : {}),
-      }, logLabel, sessionId);
-    },
+    trySpawnAgent: (input, logLabel, sessionId) => context.trySpawnAgent(toAgentSpawnInput(input), logLabel, sessionId),
   });
 }

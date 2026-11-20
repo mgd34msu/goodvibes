@@ -31,7 +31,7 @@ export class HostedSessionUnavailableError extends Error {
 export class HostedSessionTerminatedError extends HostedSessionUnavailableError {
   readonly code = 'HOSTED_SESSION_TERMINATED';
   constructor(sessionId: string, terminatedReason: string | undefined) {
-    super(sessionId, `it is terminated (${terminatedReason ?? 'no reason recorded'})`);
+    super(sessionId, `it is terminated (${terminatedReason ?? 'no reason recorded'}); its transcript stays readable with sessions.hosted.history until its retention ends`);
     this.name = 'HostedSessionTerminatedError';
   }
 }

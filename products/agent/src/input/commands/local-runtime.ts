@@ -90,7 +90,6 @@ function parseMediaCollectArgs(args: readonly string[]): { readonly providerId: 
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: true,
-  liveDiscovery: false,
   unpinByModelId: true,
   imageHint: '<path> [prompt]',
   supportedFormats: '\nSupported .png, .jpg, .jpeg, .webp, .gif',

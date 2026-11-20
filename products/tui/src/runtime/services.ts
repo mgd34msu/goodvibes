@@ -37,7 +37,7 @@ import { startReplayRecording } from '@goodvibes-jev/engine/platform/platform/co
 import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
+import { GOODVIBES_TUI_SURFACE_ROOT, TUI_TRUSTS_SAVED_SCANNED_SERVERS } from '../config/surface.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { createTerminalApprovalUpdateSubscriber } from './client/approval-updates.ts';
 import { createHostedSessionsClient } from './client/hosted-sessions.ts';
@@ -191,6 +191,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       keybindingsManager,
       localUserAuthManager: options.localUserAuthManager,
       modelDiscovery: options.modelDiscovery,
+      // Every server the terminal app saved was found by the owner's own /scan.
+      trustScannedServer: TUI_TRUSTS_SAVED_SCANNED_SERVERS,
       powerSeam: options.powerSeam,
       currentSessionId: options.currentSessionId,
       provisionWakeModelsAtBoot: provisionWakeModels && !daemonMayOwnHomeHousekeeping,

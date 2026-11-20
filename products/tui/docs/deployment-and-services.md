@@ -113,14 +113,14 @@ The browser operator surface is controlled separately from the daemon control pl
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `web.enabled` | `true` | Enable the browser operator surface, bound to loopback until `web.hostMode` widens it |
-| `web.hostMode` | `local` | Bind mode: `local`, `network`, or `custom` |
-| `web.host` | `127.0.0.1` | Bind host for the web surface |
-| `web.port` | `3423` | Bind port for the web surface |
-| `web.publicBaseUrl` | *(empty)* | Public base URL for web links and notification deep links, for a tunnel or proxy address. Empty derives links from the daemon's reachable address (when it serves the web app) or the web endpoint binding |
+| `web.enabled` | `true` | Switch the web channel on (its status and delivery); the web UI itself is served by the control-plane listener after `goodvibes-daemon webui enable` |
+| `web.hostMode` | `local` | Bind mode of the web UI's development server: `local`, `network`, or `custom` |
+| `web.host` | `127.0.0.1` | Bind host of the web UI's development server |
+| `web.port` | `3423` | Port of the web UI's development server; the daemon never binds it and no link uses it |
+| `web.publicBaseUrl` | *(empty)* | Public base URL for web links and notification deep links, for a tunnel or proxy address. Empty derives links from the daemon's reachable address while it serves the web app; otherwise there is no web app and no link |
 | `web.staticAssetsDir` | `dist/web` | Static asset directory for the embedded web surface |
 
-The daemon/control-plane backend defaults to port `3421`, the webhook/event listener defaults to `3422`, and the browser surface defaults to `3423`.
+The daemon/control-plane backend defaults to port `3421` and serves the web UI on that same port, the webhook/event listener defaults to `3422`, and the web UI's development server defaults to `3423`.
 
 Host modes resolve as:
 

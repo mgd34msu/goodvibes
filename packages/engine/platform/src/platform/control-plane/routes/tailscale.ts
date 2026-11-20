@@ -25,8 +25,11 @@ export interface TailscaleGatewayDeps {
   /** Injectable command runner (tests never touch a real tailscale). */
   readonly runner: TailscaleCommandRunner;
   readonly receipts: TailscaleServeReceiptStore;
-  /** The daemon web port `tailscale serve` fronts. */
-  readonly resolveWebPort: () => number;
+  /**
+   * The local port `tailscale serve` fronts: where the web UI is served
+   * (`resolveWebUiListener`), null when no web UI is served.
+   */
+  readonly resolveWebUiPort: () => number | null;
   /** Persist web.publicBaseUrl: the https MagicDNS URL on a serve, the earlier value on a stop. */
   readonly setPublicBaseUrl: (url: string) => void;
   /**
@@ -68,7 +71,11 @@ function createGetHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
 function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
-    const attempt = await enableTailscaleServeAsync(deps.resolveWebPort(), deps.runner);
+    const port = deps.resolveWebUiPort();
+    if (port === null) {
+      throw new GatewayVerbError('No web UI is served on this machine, so tailscale serve would front nothing. Serve it first with goodvibes-daemon webui enable --bundle-dir <dir>.', 'WEB_UI_NOT_SERVED', 409);
+    }
+    const attempt = await enableTailscaleServeAsync(port, deps.runner);
     let receipt = attempt;
     if (attempt.ok && attempt.url && deps.getPublicBaseUrl) {
       // A second serve while one is on must keep the address the first one

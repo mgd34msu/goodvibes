@@ -169,6 +169,14 @@ export interface PermissionExecutionOptions {
    * A dangerous tool is an owner-only grant of access (gate/classify.ts).
    */
   readonly definition?: import('../types/tools.js').ToolDefinition | undefined;
+  /**
+   * A rule of the owner's outside the gate asks him about this call, in one
+   * sentence: his `Pre:tool:<tool>` hook answered `ask`, or an MCP server he
+   * trusts `ask-on-risk` was called outside its scope. The call is put to the
+   * owner in every mode (held for him in just-vibes) unless a rule refuses it
+   * outright.
+   */
+  readonly ownerAsk?: string | undefined;
 }
 
 export type PermissionRequestHandler = (

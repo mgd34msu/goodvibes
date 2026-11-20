@@ -49,7 +49,7 @@ curl -sS -H "Authorization: Bearer $GV_TOKEN" \
 ### Three rules clients trip on
 
 1. **The invoke route takes an envelope.** `POST /api/control-plane/methods/<id>/invoke` reads the method's input from a field called `body`, with an optional `query` beside it. Send `{"body":{"workspaceRoot":"/home/alex/projects/app"}}`, not `{"workspaceRoot":"/home/alex/projects/app"}`. The bare form is refused with `400` `{"error":"Missing required field: body. Expected envelope shape: { query?, body }","status":400}`. REST routes take the input directly as the JSON body; only the invoke route uses the envelope.
-2. **Watching a turn live needs an admin credential.** `GET /api/sessions/{sessionId}/events` answers a non-admin `403` `{"error":"Admin role required","code":"ADMIN_REQUIRED",...}`, and the event domains that carry a turn (`session`, `turn`, `tools`) are admin-only on the main stream too: `GET /api/control-plane/events?domains=session,turn,tools` answers a non-admin `403` `EVENT_ACCESS_DENIED` with all three in `withheldDomains`, whatever scopes it holds. A non-admin cannot stream a turn at all; it can only poll for the result (see "The least-privilege client").
+2. **A non-admin watches only its own sessions live, with `read:own-sessions`.** `GET /api/sessions/{sessionId}/events` answers a non-admin `403` `{"error":"Admin role required","code":"ADMIN_REQUIRED",...}`, and the event domains that carry a turn (`session`, `turn`, `tools`, `gate`) are admin-only for every other session. A credential holding `read:own-sessions` opens `GET /api/control-plane/events?domains=turn,tools,gate,session` and receives those frames, and the `approval-update` and `hosted-session-update` events, of the sessions its own principal created or attached to, and nothing of any other session (see "The least-privilege client").
 3. **To make a hosted session run a turn, use `sessions.followUp` (or `sessions.steer`), not `sessions.messages.create`.** `POST /api/sessions/{sessionId}/messages` with no `kind` (which means `kind: "message"`) answers `202` with `"routedTo":"conversation"` and records the message in the transcript, but the hosted session's loop does not run a turn for it. Send `POST /api/sessions/{sessionId}/follow-up` with `{"body":"<text>","messageId":"<id>"}`.
 
 Every response from the daemon carries the header `x-goodvibes-decision-policy` (for example `{"policy":"Hybrid","operation":"decision","reason":null,"revision":0}`), which says which decision model policy is in force.
@@ -171,7 +171,9 @@ The upgrade request to `/api/control-plane/ws` must itself be authenticated: sen
 | Device token with a scope list | Exactly that list. Not admin. A device token's list can never contain `*` (minting refuses it). |
 | Sign-in user with a stored scope list | That list, never more than the role's default. Not admin. A stored list containing `*` counts as no list (the role's default set, admin for an `admin` user). |
 
-A method requires every scope it lists, and an `admin` method also requires an admin credential. Some admin methods are additionally owner-only: the Agent's own credential is refused (for example `approvals.approve`, `approvals.deny`, `inbox.answer`, `sessions.permissionMode.set`).
+A method requires every scope it lists, and an `admin` method also requires an admin credential. Some admin methods are additionally owner-only: the Agent's own credential is refused (for example `approvals.approve`, `approvals.deny`, `inbox.answer`, `sessions.permissionMode.set`). A write that loosens a security, permission, judgment or payment setting is put to the owner when a token minted for automation makes it, even an admin one (see "A change only the owner makes").
+
+`read:own-sessions` is the scope for a client without the admin role that follows its own work live: it receives the turns, tool calls, approvals and lifecycle notices of the sessions its principal created or attached to, and nothing of any other session (see "The least-privilege client"). A non-admin sign-in holds it by default.
 
 The owner-private read scopes, which a non-admin sign-in does not get by default: `read:email`, `read:profile`, `read:profile-document`, `read:payments`, `read:occasions`, `read:memory`, `read:transcripts`, `read:pairing`, `read:remote`, `read:checkpoints`, `read:calendar`, `read:approvals`, `read:principals`, `read:browser-content`, `read:knowledge-content`, `read:channel-content`, `read:automation-content`, `read:fleet-content`, `read:skill-content`.
 
@@ -195,7 +197,7 @@ Every method has one of three access levels, and an event has one of two:
 - **scope** (the contract calls it `authenticated`): any valid credential that holds every scope the method lists. A narrowed device token or a non-admin sign-in can call it when it holds those scopes.
 - **admin**: an admin credential (the operator token, a device token minted without a scope list, or a sign-in user with the `admin` role and no narrowing list), and the method's scopes. A non-admin is refused with `403` `ADMIN_REQUIRED` (`Gateway method requires admin access: <method>`, or `Admin role required` on some routes) whatever scopes it holds.
 
-Each method's access is in the Access column of "Operator API methods" in the reference (`authenticated` there is "scope" here). A client can also ask the daemon: `GET /api/control-plane/methods/{methodId}` answers `{"method":{...}}`, the method's descriptor wrapped in `method`, with the fields `id`, `title`, `description`, `category`, `access`, `scopes`, `effect` (`read`, `write` or `outward`), `http` (its REST route, when it has one), `invokable`, `transport`, `source`, `inputSchema`, `outputSchema`, and, when the method declares them, `replay` (its retry key, see "Idempotency and safe retries") and `errorCodes` (`[{code, status, meaning}]`). `GET /api/control-plane/methods` lists them all. By family (the method id's first part, as the contract groups them), the access of the methods that only read and of those that change something:
+Each method's access is in the Access column of "Operator API methods" in the reference (`authenticated` there is "scope" here). A client can also ask the daemon: `GET /api/control-plane/methods/{methodId}` answers `{"method":{...}}`, the method's descriptor wrapped in `method`, with the fields `id`, `title`, `description`, `category`, `access`, `scopes`, `effect` (`read`, `write` or `outward`), `http` (its REST route, when it has one), `invokable`, `transport`, `source`, `inputSchema`, `outputSchema`, `repeat` (`safe`, `keyed` or `unsafe`: what sending it twice does, see "Idempotency and safe retries"), and, when the method declares them, `replay` (its retry key) and `errorCodes` (`[{code, status, meaning}]`). `GET /api/control-plane/methods` lists them all. By family (the method id's first part, as the contract groups them), the access of the methods that only read and of those that change something:
 
 | Family | Reads | Writes |
 | --- | --- | --- |
@@ -217,7 +219,7 @@ Each method's access is in the Access column of "Operator API methods" in the re
 | config | admin | admin |
 | continuity | scope | (none) |
 | contracts | scope | scope |
-| control-plane | scope | scope, except public: `control.auth.current`, `control.auth.login`, `control.auth.logout`; admin: `relay.pairing.mint`, `update.check` |
+| control-plane | scope | scope, except public: `control.auth.current`, `control.auth.login`, `control.auth.logout`; admin: `relay.pairing.mint`, `relay.codes.list`, `relay.codes.revoke`, `update.check` |
 | cost | scope | (none) |
 | deliveries | scope | scope |
 | email | scope, except admin: `email.attachment.get`, `email.drafts.list`, `email.expectation.wait`, `email.inbox.read` | admin |
@@ -279,47 +281,34 @@ Other route families outside the operator methods:
 
 Every event needs `read:events`; some need more. Each event a client can subscribe to, with its catalog name, its SSE name (the `event:` line of a frame), its domain, its access and its scopes, is in "Event streams a client subscribes to" in the reference. A runtime domain's catalog name is `runtime.<domain>` and its SSE name is the domain name; the other events have their own SSE names (`control.approval_update` is `approval-update`). The rules that matter to a client:
 
-- Admin only: the domains that carry a conversation or the daemon's inner state, among them `session`, `turn`, `tools`, `tasks`, `agents`, `gate` (approvals and the owner inbox), `config` and `fleet`, and the `approval-update`, `owner-inbox-update`, `hosted-session-update` and `session-update` events. A non-admin credential never receives them, whatever scopes it holds.
+- Admin only: the domains that carry a conversation or the daemon's inner state, among them `session`, `turn`, `tools`, `tasks`, `agents`, `gate` (approvals and the owner inbox), `config` and `fleet`, and the `approval-update`, `owner-inbox-update`, `hosted-session-update` and `session-update` events. One exception: a credential holding `read:own-sessions` receives the `turn`, `tools`, `gate` and `session` frames and the `approval-update` and `hosted-session-update` events of the sessions its principal created or attached to (`sessions.hosted.create`, `sessions.hosted.attach`), frame by frame, and of no other session; a frame that names no session is withheld. It must name those domains (`?domains=turn,tools,gate,session`). Ownership is saved with the session and holds across a daemon restart.
 - Any credential with the scopes: the rest, among them `providers`, `automation`, `surfaces`, `transport`, `ops` and the `ready` and `heartbeat` frames. `surface-message` also needs `read:transcripts`, and the `remote-*` events `read:remote`.
 - An event a plugin adds is admin-only.
 - Two frames are not in the catalog: `gap` (events were dropped, see "Reconnecting") and `closed` (the daemon ended the stream, see "Server-Sent Events"). Any stream can receive them.
 
 ### The least-privilege client
 
-What a non-admin credential can and cannot do with conversations, checked against a 3.3.1 daemon with a device token holding `read:sessions`, `write:sessions`, `read:transcripts` and `read:events`:
+What a non-admin credential can and cannot do with conversations, for a device token holding `read:sessions`, `write:sessions`, `read:transcripts` and `read:own-sessions`:
 
 | Action | Non-admin? | How |
 | --- | --- | --- |
 | List workspaces, create a hosted session, give it its first turn | Yes | `sessions.hosted.workspaces`, `sessions.hosted.create` with `initialPrompt` (not with `originSurface` `agent`). |
 | Send a further turn (`sessions.followUp`, `sessions.steer`, `sessions.messages.create`) | No | Admin methods. |
-| Stream the turn (text deltas, tool calls) | No | `turn`, `tools` and `session` are admin-only, on every stream. |
-| Know the turn has ended | Yes, by polling | `sessions.hosted.list` (`read:transcripts`): the session's `status` goes `running` then `idle`, and `turnCount` and `lastTurnAt` move. |
-| Read the reply | Yes | `sessions.hosted.attach` (`write:sessions`) returns `history` with the `user`, `assistant`, `system` and `tool` messages. `GET /api/sessions/{id}/messages` does not have the reply (see "7. Read the transcript"). |
+| Stream the turn (text deltas, tool calls), its approvals and its lifecycle | Yes, its own sessions | `read:own-sessions`: `GET /api/control-plane/events?domains=turn,tools,gate,session` delivers the frames of the sessions this principal created or attached to, and the `approval-update` and `hosted-session-update` events for them. Every other session's frames are withheld. |
+| Know the turn has ended | Yes | Live: `TURN_COMPLETED` on `turn`, or `hosted-session-update` with `hosted-session-turn-ended`. By polling: `sessions.hosted.list` (`read:transcripts`), where the session's `status` goes `running` then `idle`, and `turnCount` and `lastTurnAt` move. |
+| Read the reply | Yes, also after the session ended | `sessions.hosted.history` (`read:transcripts`) returns `session` and `history` with the `user`, `assistant`, `system` and `tool` messages, for a live or an ended session, also after a daemon restart, for `hostedSessions.terminatedRetentionMs` (24 hours) after it ended. `sessions.hosted.attach` (`write:sessions`) returns the same `history` while the session is live. `GET /api/sessions/{id}/messages` does not have the reply (see "7. Read the transcript"). |
 | Cancel a running turn | Yes | `sessions.turns.cancel` (`write:sessions`). |
 | Detach, kill | Yes | `sessions.hosted.detach`, `sessions.hosted.kill`. |
-| Approve or deny a tool call the turn asks for | No | Admin and owner-only. In `ask-me` mode a non-admin's turn waits for the owner. |
+| Approve or deny a tool call the turn asks for | No | Admin and owner-only. In `ask-me` mode a non-admin's turn waits for the owner; with `read:own-sessions` the client sees the ask (`approval-update`) and its answer. |
 | Run a task | No | `tasks.create` is admin. |
 
 So the least-privilege client that works end to end is:
 
-- **One turn per session, result by polling:** a device token with `read:sessions`, `write:sessions` and `read:transcripts`. Create the session with `initialPrompt`, poll `sessions.hosted.list` about once a second until the session's `status` is `idle` and its `turnCount` has grown, then call `sessions.hosted.attach` and read the last `assistant` message in `history` (a failed turn leaves a `system` message instead, for example `No model 'openrouter:openrouter/free' for provider 'openrouter' in registry.`). Kill or detach the session when done.
+- **One turn per session, followed live:** a device token with `read:sessions`, `write:sessions`, `read:transcripts` and `read:own-sessions`. Open `GET /api/control-plane/events?domains=turn,tools,gate,session`, create the session with `initialPrompt`, follow its frames by its id until the turn ends, then call `sessions.hosted.history` and read the last `assistant` message in `history` (a failed turn leaves a `system` message instead, for example `No model 'openrouter:openrouter/free' for provider 'openrouter' in registry.`). Without `read:own-sessions`, poll `sessions.hosted.list` about once a second until the session's `status` is `idle` and its `turnCount` has grown. Kill or detach the session when done.
 
-**A reply can be lost before it is read.** `sessions.hosted.attach` is the only way to read a hosted session's reply, and it works only while the session is live: on an ended session it answers `409` `{"error":"Hosted session <id> is unavailable: it is terminated (killed).","code":"HOSTED_SESSION_TERMINATED",...}` (the reason in brackets says why it ended), and no method returns an ended session's history. The record is kept for `hostedSessions.terminatedRetentionMs` (24 hours), visible in `sessions.hosted.list` with `includeTerminated`, but without its messages. A session whose detach policy is `kill` (the default, `hostedSessions.detachPolicy`) ends by itself:
+**The reply stays readable after the session ends.** A session whose detach policy is `kill` (the default, `hostedSessions.detachPolicy`) ends by itself when its last attached client detaches or its attachment lease lapses (an attach renews it; the lease is `leaseMs` on attach, 30 seconds to 24 hours, default `hostedSessions.attachmentTtlMs`, 10 minutes), when no client was ever attached and it has sat idle for one lease after its last turn, and when the daemon restarts. A `survive` session ends only when it is killed. Once ended, `sessions.hosted.attach` answers `409` `HOSTED_SESSION_TERMINATED` (the reason in brackets says why it ended), but `sessions.hosted.history` still returns the record and the whole transcript, the reply included, to the credential that created or attached to the session (any admin credential reads any session), for `hostedSessions.terminatedRetentionMs` (24 hours) after it ended, and across a daemon restart. After that the id answers `404` `SESSION_NOT_FOUND`. Another non-admin credential is refused `403` `HOSTED_SESSION_NOT_OWNED`.
 
-- when its last attached client detaches, or its attachment lease lapses without renewal (an attach renews it; the lease is `leaseMs` on attach, 30 seconds to 24 hours, default `hostedSessions.attachmentTtlMs`, 10 minutes);
-- when no client was ever attached and it has sat idle for one lease after its last turn;
-- when the daemon restarts.
-
-A `survive` session ends only when it is killed (and stays across a daemon restart). To make sure the reply can be read:
-
-1. Create the session with `"detachPolicy":"survive"` (any caller may set it).
-2. Or attach at once with your `clientId` (`clientId` on `sessions.hosted.create`, or `sessions.hosted.attach` right after) and attach again within every lease while you poll; give a long `leaseMs` when polling is slow.
-3. Read the reply, then kill or detach the session yourself.
-
-On `409` `HOSTED_SESSION_TERMINATED`: the session is gone and so is its reply; do not retry the attach. What the turn did to files stays done. Create a new session if the answer is still needed, and send the prompt again.
-- **Several turns, live text, approvals or tasks:** an admin credential. Use a device token minted without a scope list, so it can be revoked on its own.
-
-There is no non-admin way to watch a turn as it runs.
+- **Several turns, approvals or tasks:** an admin credential. Use a device token minted without a scope list, so it can be revoked on its own.
 
 ## Calling a method
 
@@ -419,11 +408,11 @@ Examples captured from a 3.3.1 daemon:
 
 | Status | Meaning | What to do |
 | --- | --- | --- |
-| `400` | The input is wrong (`INVALID_ARGUMENT`, `VALIDATION_FAILED`, `INVALID_MESSAGE_ID`, `INVALID_KIND`, `UNKNOWN_EVENT_DOMAIN`, `NOT_INVOKABLE`). Nothing was changed. | Fix the input. Do not retry unchanged. |
+| `400` | The input is wrong (`INVALID_ARGUMENT`, `VALIDATION_FAILED`, `INVALID_MESSAGE_ID`, `INVALID_KIND`, `UNKNOWN_EVENT_DOMAIN`, `NOT_INVOKABLE`, `MODEL_NOT_FOUND`, `MODEL_AMBIGUOUS`, `MODEL_NOT_SELECTABLE`, `TASK_NOT_RETRYABLE`). Nothing was changed. | Fix the input. Do not retry unchanged. |
 | `401` | No valid credential (`AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PAIRING_OFFER_EXPIRED`, `PAIRING_TOKEN_ROTATION_DUE`). | Get a new credential. |
-| `403` | The credential lacks authority (`MISSING_SCOPE`, `ADMIN_REQUIRED`, `PERMISSION_DENIED`, `EVENT_ACCESS_DENIED`, `CONTROL_PLANE_LOCAL_ONLY`, `SESSION_NOT_OWNED`, `HOSTED_SURFACE_FORBIDDEN`). | Use another credential, or change the setting named. |
-| `404` | Not found (`NOT_FOUND`, `METHOD_NOT_FOUND`, `SESSION_NOT_FOUND`, `CONTRACT_NOT_FOUND`, `SESSION_NOT_LOCAL`). | Check the id. |
-| `409` | The state does not allow it (`SESSION_CLOSED`, `SESSION_ACTIVE`, `HOSTED_SESSION_STILL_RUNNING`, `IDEMPOTENCY_KEY_REUSED`, `STREAM_MODE_NOT_SERVED`, `CANCEL_NOT_ALLOWED`). | Read the state, then act. |
+| `403` | The credential lacks authority (`MISSING_SCOPE`, `ADMIN_REQUIRED`, `PERMISSION_DENIED`, `EVENT_ACCESS_DENIED`, `CONTROL_PLANE_LOCAL_ONLY`, `SESSION_NOT_OWNED`, `HOSTED_SURFACE_FORBIDDEN`, `HOSTED_SESSION_NOT_OWNED`, `OWNER_ONLY`). | Use another credential, or change the setting named. |
+| `404` | Not found (`NOT_FOUND`, `METHOD_NOT_FOUND`, `SESSION_NOT_FOUND`, `CONTRACT_NOT_FOUND`, `SESSION_NOT_LOCAL`, `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`, `APPROVAL_NOT_FOUND`). | Check the id. |
+| `409` | The state does not allow it (`SESSION_CLOSED`, `SESSION_ACTIVE`, `HOSTED_SESSION_STILL_RUNNING`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_KEY_IN_FLIGHT`, `IDEMPOTENCY_OUTCOME_UNKNOWN`, `STREAM_MODE_NOT_SERVED`, `CANCEL_NOT_ALLOWED`, `TASK_SETTINGS_UNAVAILABLE`). | Read the state, then act. |
 | `429` | Rate limited (`RATE_LIMITED`). | Wait for `Retry-After` or `retryAfterMs`. |
 | `500` | The daemon failed (`INTERNAL_ERROR`, `SESSION_AGENT_BIND_FAILED`). | Read the state before retrying. |
 | `503` | A dependency is unavailable (`SERVICE_UNAVAILABLE`, `relay-disabled`). | Retry later. |
@@ -435,13 +424,14 @@ Every code with its HTTP status, meaning and whether to retry is in the referenc
 
 | Code | Status | What happened | What to do |
 | --- | --- | --- | --- |
-| `OWNER_ONLY` | `403` | The method is the owner's own act and the request came with the Agent's own credential (credential kind `agent`). Body, observed for every owner-only method through invoke and REST alike: `{"error":"<method id> is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}`. Owner-only methods include `approvals.approve`, `approvals.deny`, `inbox.answer`, `credentials.set`, `pairing.tokens.create`, `pairing.tokens.delete` and `sessions.permissionMode.set`. | Not retryable with that credential. The owner does it from his own app, or a script uses its own device token. |
-| `HOSTED_SESSION_TERMINATED` | `409` | The hosted session has ended; its reply can no longer be read. | Do not retry; create a new session. Keep sessions you must read from with `detachPolicy` `survive` (see "The least-privilege client"). |
+| `OWNER_ONLY` | `403` | The method is the owner's own act and the request came with the Agent's own credential (credential kind `agent`), or a token minted for automation answered an approval that puts a change to the owner (metadata `ownerAct`, see "A change only the owner makes"), or imported settings. Body, observed for every owner-only method through invoke and REST alike: `{"error":"<method id> is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}`. Owner-only methods include `approvals.approve`, `approvals.deny`, `inbox.answer`, `credentials.set`, `pairing.tokens.create`, `pairing.tokens.delete` and `sessions.permissionMode.set`. | Not retryable with that credential. The owner does it from his own app, or a script uses its own device token. |
+| `HOSTED_SESSION_TERMINATED` | `409` | The hosted session has ended; nothing can run in it. | Do not retry. Read its reply with `sessions.hosted.history` (kept for `hostedSessions.terminatedRetentionMs`); create a new session for more turns. |
+| `OWNER_APPROVAL_PENDING` | `202` | A change that loosens a security, permission, judgment or payment setting was asked with a token minted for automation: nothing changed yet, the change was put to the owner as approval `approvalId` and is applied when he approves it. | Watch the approval (`approvals.list` with `approvalId`, or `approval-update`); do not send the change again. |
 | `HOSTED_SESSION_LIMIT_REACHED` | `429` | `hostedSessions.maxSessions` hosted sessions already exist. No `Retry-After`. | Kill or detach a session, or raise the setting. A plain wait succeeds only if a session ends meanwhile. |
 | `PAIRING_TOKEN_ROTATION_DUE` | `401` | A device token older than managed token rotation allows (`security.tokenAudit.managed` on, and the token's age past the rotation limit). Body `state`: `the token of "<name>" is <n> days old and managed token rotation (security.tokenAudit.managed) allows <m> days`. | Pair the device again for a new token, then revoke the old one. |
 | `PAIRING_OFFER_EXPIRED` | `401` | A device token was not used within 15 minutes of being minted. | Mint a new one and use it at once. |
 | `SESSION_NOT_LOCAL` | `404` | `This daemon does not host a live runtime for session <id>.`: a live-session control (`sessions.permissionMode.get`/`.set`, `sessions.contextUsage.get`, `sessions.turns.cancel`, `sessions.toolCalls.cancel`, `sessions.queuedMessages.*`) was asked for a session that has no model loop in this daemon: one a terminal app runs in its own process, a hosted session that ended, or an id nobody holds. | Act on it in the app that runs it, or use a live hosted session of this daemon (`sessions.hosted.list`). |
-| (no code) `500` | `500` | `Model '<id>' is not in this daemon's model registry.` from `sessions.hosted.create` with an unknown `modelId`; `category` `service`. | Do not retry; fix `modelId`. |
+| `MODEL_NOT_FOUND`, `MODEL_AMBIGUOUS`, `MODEL_NOT_SELECTABLE` | `400` | The model named (`modelId` on `sessions.hosted.create`, `model`, `routing.modelId` or a fallback model on `tasks.create` and the session routes) is not in this daemon's model registry, is served by several providers, or cannot be chosen; `recoverable: false`. Nothing was created or started. | Do not retry; fix the model (provider-qualified for an ambiguous id). |
 | `INVALID_INPUT` | `400` | The invoke input does not match the method's input schema. | Fix the input. |
 | `INVALID_JSON` | `400` | The body is not valid JSON. | Fix the body. |
 
@@ -455,59 +445,63 @@ Apply these in order, and give every request a limit on attempts (for example 5)
 
 1. The body says `"recoverable": false`: do not repeat the same request.
 2. The body says `"recoverable": true`: repeat it, after `retryAfterMs` or `Retry-After` when given.
-3. A `500` that names a cause in the request (an unknown model, id or setting), or the same `500` body twice in a row: permanent. Do not retry; fix the request. The unknown-`modelId` refusal of `sessions.hosted.create` is one: it carries no `code` and no `recoverable`, and the SDK counts it as transient, so a client that retries every `500` loops on it until its attempt limit.
+3. The same `500` body twice in a row: permanent. Do not retry; fix the request. (An unknown model is a `400` with `MODEL_NOT_FOUND`, not a `500`.)
 4. `429` `HOSTED_SESSION_LIMIT_REACHED`: free a session first (see the table above); retrying alone does not help.
-5. Status `408`, `429`, `500`, `502`, `503`, `504` or `529`: retryable (the SDK treats exactly these as transient). Wait `retryAfterMs` or `Retry-After` when given, otherwise back off (1, 2, 4 ... 30 seconds), and stop at the attempt limit. For a `500` on a write, read the state first (the write may have happened) unless the method has a replay key.
+5. Status `408`, `429`, `500`, `502`, `503`, `504` or `529`: retryable (the SDK treats exactly these as transient). Wait `retryAfterMs` or `Retry-After` when given, otherwise back off (1, 2, 4 ... 30 seconds), and stop at the attempt limit. For a `500` on a write, read the state first (the write may have happened) unless the method is `safe` or the request carried its retry key.
 6. Any other `4xx`: not retryable as is. `401` needs a new credential, `403` another credential or setting, `404` another id, `409` a different state (read it first), `400` a corrected request.
 
 The SDK exposes its own answer as `error.recoverable` on every `GoodVibesError`; it follows rules 1, 2, 5 and 6, so apply rules 3 and 4 and the attempt limit yourself.
 
 ## Idempotency and safe retries
 
-A client that loses a response cannot tell whether the request was applied. The rule:
+A client that loses a response cannot tell whether the request was applied. Every method declares what a repeat does, read from its handler, as `repeat` on `GET /api/control-plane/methods/{methodId}` (and the Retry column of "Operator API methods" in the reference):
 
-- A method whose effect is `read` is safe to repeat.
-- A method that declares a retry key is safe to repeat with the same key. Which methods declare one is the Retry column of "Operator API methods" in the reference, and `GET /api/control-plane/methods/{methodId}` returns the key as `replay`.
-- Every other method that writes or sends (effect `write` or `outward`, the Effect column of the same table) has no declared retry behaviour ("not declared" in the Retry column). Treat it as unsafe to repeat: after a lost response, read the state and look for what you did before sending again, unless you have read its handler and know a repeat does no harm.
+- `safe`: a repeat changes nothing more. Every read is safe, and so is a write that sets what is already set or finds the thing already done or gone (a second delete answers `404` or `deleted: false`, a second decision `applied: false`). Send it again.
+- `keyed`: safe when the call carries its retry key, named in `replay` (`in` `header` or `body`, `name`, and what a repeat returns). Generate the key once per logical request, keep it, and send the same key on every retry.
+- `unsafe`: a repeat acts again (a second record, a second browser tab, a second card). After a lost response, read the state and look for what you did before sending again. Two methods that pay for work are `unsafe` because their answer cannot be kept for a replay: `voice.tts.stream` (the audio streams) and `voice.realtime.session` (it hands out a one-time session credential). Every other write that takes money, sends a message or starts work has a key.
 
-The methods with a declared key, and what a repeat does:
+Every write that takes money, sends a message or starts work and has no key of its own takes the shared key: the `Idempotency-Key` header (1 to 255 characters). Over the method-invoke envelope it may be sent as `idempotencyKey` beside `body` (`{"body":{...},"idempotencyKey":"..."}`), and on a WebSocket `call` frame as `idempotencyKey`. A repeat of the same request (same method, path and body; for a multipart or raw upload, the same fields and the same file content, however the body is encoded, so a new multipart boundary is still the same request) by the same credential under the same key, within a day and across a daemon restart, returns the first answer with the header `Idempotent-Replayed: true` and does not act again. The same key with a different request is `409` `IDEMPOTENCY_KEY_REUSED`; a repeat while the first is still running is `409` `IDEMPOTENCY_KEY_IN_FLIGHT` (retry in a second); a repeat after the daemon stopped in the middle of the first is `409` `IDEMPOTENCY_OUTCOME_UNKNOWN` (check the state, do not send again). A refusal (`4xx`) is not remembered, so the corrected request may use the same key. Among these: `tasks.create`, `tasks.retry`, `sessions.hosted.create`, `acp.sessions.create`, `automation.jobs.run`, `automation.schedules.run`, `automation.runs.retry`, `automation.heartbeat.run`, `watchers.run`, `checkin.run`, `channels.test.send`, `channels.actions.invoke`, `channels.tools.invoke`, `calendar.events.create`, `payments.checkout.approve`, `payments.standing.create`, `remote.peers.invoke`, `devices.capability.request`, `push.subscriptions.verify`, `notifications.deadLetters.replay`, `companion.chat.messages.edit`, `.retry` and `.steer`, `contracts.reply`, `contracts.retryUnit`, `media.generate`, `media.transform`, `batch.jobs.create`, `knowledge.job.run` and the `refinement.run` methods; the ingests, which fetch, extract and enrich again on a repeat (`knowledge.ingest.url`, `.urls`, `.bookmarks`, `.browserHistory`, `.connector` and `.artifact`, `homeassistant.homeGraph.ingestHomeGraphUrl`, `.ingestHomeGraphNote` and `.ingestHomeGraphArtifact`, `multimodal.writeback`); `homeassistant.homeGraph.reindex` (with `force` it enriches again); `config.set`, `config.setMany`, `config.reset` and `sessions.permissionMode.set` (from a paired device, a loosening change asks the owner); `watchers.update` (a running watcher restarts and runs at once); `worktrees.setup.run` (it runs the setup commands); writes that schedule paid work for later (`automation.schedules.create`, `watchers.create`, `ci.watches.create`, `knowledge.schedule.save`); `approvals.raise` (it prompts the owner); `calendar.events.update` and `calendar.ics.import` (they can notify attendees); and the paid queries whose repeat would pay again (`knowledge.ask`, `homeassistant.homeGraph.askHomeGraph`, `web_search.query`, `media.analyze`, `multimodal.analyze`, `voice.stt`, `voice.tts`, `channels.inbox.triage`, `memory.vector.rebuild`). The SDK sends one generated key on every attempt of these calls, and retries a `safe` call by itself.
+
+Methods with a key of their own:
 
 | Method | Key | Behaviour on a repeat |
 | --- | --- | --- |
 | `sessions.messages.create`, `sessions.steer`, `sessions.followUp` | Body `messageId`: 1 to 128 letters, digits, `.`, `_`, `:` or `-`, chosen by the caller. | The same `messageId` to the same session from the same surface returns the receipt of the input already recorded (same `input.id`, same message) instead of recording a second one. The match is on the key alone (surface kind, surface id, `messageId`, session), not on the body: a repeat with a different body returns the first input and the new text is dropped. An input that failed is run again under its first text. Another format is refused with `400` `INVALID_MESSAGE_ID`. |
 | `contracts.start` | Header `Idempotency-Key` (or body `idempotencyKey`; the header wins). | Same key and same body: the first contract is returned with header `Idempotent-Replayed: true` and `replayed: true`. Same key, different body: `409` `IDEMPOTENCY_KEY_REUSED`. Kept across daemon restarts. |
+| `contracts.dispatch` | Body `idempotencyKey`. | The same caller's repeat returns the first dispatch's contract while it runs. |
+| `email.send` | Body `clientSendId` (8 to 128 letters, digits, `-` or `_`). | The same id and message within ten minutes returns the first answer; the same id with another message is `409` `CLIENT_SEND_ID_REUSED`. |
+| `companion.chat.messages.create` | Body `clientMessageId`. | Returns the first message's id and starts no second turn, while the chat stays loaded (a daemon restart forgets it). |
+| `payments.checkout.begin` | Body `requestId`. | An admitted `requestId` never starts another purchase; read the outcome with `payments.purchase.status`. |
+| `inbox.post` | Body `key`. | While an item posted under that `key` is open, a repeat returns it with `created: false`. |
+| `approvals.cancel` | Body `holdId` (with `release: true`). | A repeated release with the same `holdId` gives up nothing more. |
+| `automation.jobs.create` | Body `id`. | A job with that id already there is returned unchanged. |
+| `homeassistant.conversation.stream` | Body `messageId`, chosen by the caller. | The same `messageId` in the same conversation posts nothing again: the repeat streams the first turn's outcome as its final or error frame. A stream the client drops cancels its own turn, so a repeat after a drop reports it cancelled. A daemon restart forgets the id. |
+| `memory.records.add` | Body `id` (`mem_<base36 time>_<8 hex>`), generated by the caller. | The same id and record returns the stored row; the same id with another record is refused. |
+| `projectPlanning.workPlan.task.create` | Body `task.taskId`. | A task with that id already there refuses the repeat; nothing more is added. |
 | `sessions.register` | Body `sessionId`. | A repeat is a heartbeat and returns the existing record. |
 | `pairing.tokens.create`, `pairing.tokens.migrate` | Body `attemptId` (8 to 128 letters, digits, `.`, `_`, `:` or `-`). | While the token is unused, the repeat returns the same token id with a new secret, and the earlier secret stops working. |
-| `workLedger.submit` | Body `requestId`. | Same id, same content: the original receipt with `replayed: true`. |
-| `workLedger.importLegacy` | Body `requestId`. | The durable result is replayed. |
+| `workLedger.submit`, `workLedger.importLegacy` | Body `requestId`. | Same id, same content: the original result with `replayed: true`. |
+| `workLedger.intake.capture`, `.admit`, `.resume`, `workLedger.turn.start`, `.startAgent` | Body `inputId`. | One input is captured, admitted and delivered once; a repeat joins or reports the first. |
+| `workLedger.execution.start`, `.resume` | Body `attemptId`. | One attempt runs once; a repeat returns the same execution. |
 
 The HTTP response to a repeated `messageId` has the same status (`202`) and does not carry a `duplicate` field; recognise a repeat by the same `input.id` and `message.id` in the response. Its `mode` reports the input's current progress (for example `continued-live`), not the first answer's `mode`. Two scripts that send to one session with the default surface (`surfaceKind` `web`, `surfaceId` `surface:web`) share one key space: give each script its own `surfaceId`, or messageIds that cannot collide. Choose a new `messageId` for every new message.
 
-Writes with no declared key whose handlers make a repeat harmless (read from the handlers; the Retry column still says "not declared" for them):
-
-| Write | A repeat |
-| --- | --- |
-| `sessions.hosted.kill` | Killing a session that has already ended returns its record unchanged, `200` (observed). |
-| `sessions.detach` | Detaching a surface that is no longer a participant, or detaching from a closed session, returns the session unchanged; nothing is published. An unknown session is `404`. |
-| `sessions.turns.cancel` with `expectedTurnId` | Compares the turn id first: a repeat after the turn ended answers `already-ended` (or `turn-not-found`/`stale-turn` once the id is forgotten) and cancels nothing else. |
-| `inbox.post` with a `key` | While an item posted under that `key` is still open, a repeat returns that item with `created: false` instead of asking the owner again. Without a `key`, a repeat posts a second item. |
-| `approvals.cancel` | An approval that already ended is returned unchanged with `applied: false` and a `refusal`. A surface releasing an ask it raised with `approvals.raise` passes the `holdId` it got: a repeated release with the same `holdId` changes nothing, while a repeat without it can give up another surface's hold. |
-
-The writes a client needs most, and what their handlers do on a repeat:
+The writes a client needs most:
 
 | Write | Repeat after a lost response |
 | --- | --- |
-| Create a session: `sessions.hosted.create`, `sessions.create` | No key: a repeat creates a second session. Look first with `sessions.hosted.list` (or `GET /api/sessions`) for the one you made (same `title` and `workspaceRoot`), and create again only if it is not there. Kill an extra one with `sessions.hosted.kill`. |
-| Send a message or turn: `sessions.followUp`, `sessions.steer`, `sessions.messages.create` | Safe with the same `messageId` (above). Without a `messageId` a repeat records a second input and runs a second turn. |
-| Run a task: `POST /task` (`tasks.create`) | No key: a repeat starts a second agent and pays for it twice. Look first with `GET /api/tasks` (newest first; match the `title`, which is the task text), and send again only if it is not there. `POST /api/tasks/{taskId}/retry` is refused (`400`) when repeated, because the first retry leaves the task `queued`. |
-| Decide an approval: `POST /api/approvals/{id}/approve` or `/deny`, `inbox.answer` | Safe: the first decision wins. A repeat, or a different decision afterwards, answers `200` with `"applied":false` and a `refusal` naming who decided; nothing changes. |
-| Write a setting: `POST /config` (`config.set`), `config.setMany`, `config.reset` | Safe: writing the same value again leaves the same state. |
+| Create a hosted session: `sessions.hosted.create` | Keyed (`Idempotency-Key`): the same key returns the first session. Without one, a repeat creates a second session. |
+| Create a shared session: `sessions.create` | `unsafe`: look first with `GET /api/sessions` and create again only if it is not there. |
+| Send a message or turn: `sessions.followUp`, `sessions.steer`, `sessions.messages.create` | Keyed with the same `messageId` (above). |
+| Run or retry a task: `POST /task` (`tasks.create`), `POST /api/tasks/{taskId}/retry` | Keyed (`Idempotency-Key`): the same key returns the first answer and starts no second agent. |
+| Decide an approval: `POST /api/approvals/{id}/approve` or `/deny`, `inbox.answer` | `safe`: the first decision wins. A repeat, or a different decision afterwards, answers `200` with `"applied":false` and a `refusal` naming who decided; nothing changes. |
+| Write a setting: `POST /config` (`config.set`), `config.setMany`, `config.reset` | Keyed (`Idempotency-Key`): writing the same value again leaves the same state, but a paired device's change that loosens a setting is put to the owner as an approval, and each unkeyed repeat asks him again. |
 
 ## Sessions: shared and hosted
 
 A shared session is the record every conversation has: its messages, queued inputs, participants and status (`active` or `closed`). The `sessions.*` REST methods work on shared sessions.
 
-A hosted session is a shared session whose model loop runs inside the daemon. `sessions.hosted.*` (invoke-only) create, attach, detach, list and kill hosted sessions. A hosted session's id (`hosted-<uuid>`) is also its shared-session id, so the `sessions.*` routes work on it: `sessions.followUp` and `sessions.steer` drive its turns, `sessions.turns.cancel` cancels a turn, and `GET /api/sessions/{id}/messages` lists the user messages sent to it through those routes. Its replies are read with `sessions.hosted.attach`, not from `/messages` (see "7. Read the transcript").
+A hosted session is a shared session whose model loop runs inside the daemon. `sessions.hosted.*` (invoke-only) create, attach, detach, list and kill hosted sessions. A hosted session's id (`hosted-<uuid>`) is also its shared-session id, so the `sessions.*` routes work on it: `sessions.followUp` and `sessions.steer` drive its turns, `sessions.turns.cancel` cancels a turn, and `GET /api/sessions/{id}/messages` lists the user messages sent to it through those routes. Its replies are read with `sessions.hosted.history` (live or ended) or `sessions.hosted.attach` (live), not from `/messages` (see "7. Read the transcript").
 
 For an automated client that wants the model to do work, create a hosted session. A shared session made with `sessions.create` has no model loop of its own; its inputs wait for a surface to collect them.
 
@@ -517,7 +511,7 @@ How to send text to a session:
 | --- | --- | --- |
 | `sessions.followUp` | `POST /api/sessions/{sessionId}/follow-up` | Start a new turn when the session is idle, or queue one to run after the current turn. Use this for a hosted session. |
 | `sessions.steer` | `POST /api/sessions/{sessionId}/steer` | On a session answered by a running agent, hand the text to that agent now. On a hosted session it behaves exactly like `sessions.followUp` (see below). |
-| `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | Append a user message with routing by `kind` (`message`, the default; `task`; `followup`). With the default `kind` the response is `{"messageId":"...","routedTo":"conversation","sessionId":"..."}` and, on a hosted session, no turn runs. Do not use it to drive a hosted session. With `kind` `task` and an unknown `sessionId` it creates a new session and starts an agent instead of refusing (see "Form 2: a task in a shared session"). |
+| `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | Append a user message with routing by `kind` (`message`, the default; `task`; `followup`). With the default `kind` the response is `{"messageId":"...","routedTo":"conversation","sessionId":"..."}` and, on a hosted session, no turn runs. Do not use it to drive a hosted session. An unknown `sessionId` is refused with `404` `SESSION_NOT_FOUND` for every `kind`; nothing is recorded or started. |
 
 All three are admin methods with scope `write:sessions` and accept `messageId`, `surfaceKind`, `surfaceId` and `routing` (provider, model, fallbacks, reasoning effort, tool list, execution intent). A missing or empty `body` is refused with `400` (`Missing shared session steer body`, `Missing shared session follow-up body`).
 
@@ -573,7 +567,7 @@ Inputs of `sessions.hosted.create`:
 | --- | --- | --- |
 | `workspaceRoot` | yes | Absolute path of an allowed folder. |
 | `title` | no | Shown in lists. Default: the first prompt. |
-| `modelId` | no | A model registry key; checked now, so an unknown model is refused here (see the refusals below). Default: the daemon's current model. |
+| `modelId` | no | A model registry key; checked now, so an unknown, ambiguous or unselectable model is refused here with `400` (see the refusals below). Default: the daemon's current model. |
 | `initialPrompt` | no | Submitted as the first user message. The call does not wait for that turn. |
 | `detachPolicy` | no | `kill` or `survive`. Default: `hostedSessions.detachPolicy` (`kill`). Use `survive` for a script that may disconnect. |
 | `clientId` | no | Attaches this client at creation. |
@@ -585,11 +579,11 @@ Refusals, observed on a 3.3.1 daemon:
 | --- | --- | --- | --- |
 | `400` | `INVALID_ARGUMENT`, for example `'/etc' is outside the folders this daemon runs work in (/home/alex/projects/app). Pick one of them, or register the project first with workspaces.registrations.add (or by opening it in the terminal app).` | `workspaceRoot` outside the allowed roots. | Pick an allowed root. |
 | `400` | `{"error":"sessionId is required","code":"INVALID_INPUT","category":"bad_request","status":400}` (this example from `sessions.hosted.attach`) | The input does not match the method's schema. | Fix the input. |
-| `409` | `{"error":"Hosted session <id> is unavailable: it is terminated (<reason>).","code":"HOSTED_SESSION_TERMINATED",...}` (from `sessions.hosted.attach` and the other `sessions.hosted.*` calls on an ended session) | The session ended (killed, detached under the `kill` policy, the daemon restarted). | Do not retry. Its history cannot be read any more; create a new session (see "The least-privilege client"). |
+| `409` | `{"error":"Hosted session <id> is unavailable: it is terminated (<reason>).","code":"HOSTED_SESSION_TERMINATED",...}` (from `sessions.hosted.attach` and the other `sessions.hosted.*` calls on an ended session) | The session ended (killed, detached under the `kill` policy, the daemon restarted). | Do not retry. Read its history with `sessions.hosted.history`; create a new session for more turns. |
 | `429` | `{"error":"This daemon already hosts 1 sessions, the configured maximum (hostedSessions.maxSessions). Kill one, or raise the setting.","code":"HOSTED_SESSION_LIMIT_REACHED","category":"rate_limit","status":429}` | `hostedSessions.maxSessions` live sessions already exist. No `Retry-After` is sent. | Waiting does not help unless a session ends: kill or detach one (`sessions.hosted.list`, then `sessions.hosted.kill`), or raise the setting. |
-| `500` | `{"error":"Model 'nope:nope' is not in this daemon's model registry.","category":"service","status":500}`, with no `code` and no `recoverable` | `modelId` names no model this daemon knows. | **Do not retry**: the same request fails the same way every time. Pick a model from the registry (the `provider:model` ids that `GET /v1/models` lists) or leave `modelId` out. A generic retry rule that repeats every `500` would loop on this one; see "Deciding whether to retry". |
+| `400` | `{"error":"Model 'nope:nope' is not in this daemon's model registry; name a model it holds, or none for its current model.","code":"MODEL_NOT_FOUND",...}` (`MODEL_AMBIGUOUS` for a bare id several providers serve, `MODEL_NOT_SELECTABLE` for one that cannot be chosen) | `modelId` names no model this daemon can run. | Do not retry; pick a model from the registry or leave `modelId` out. |
 
-The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). Permission modes are explained in "Permissions, decisions and safety".
+The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). `GET /api/sessions/{sessionId}/permission-mode` answers `{"sessionId","mode","chosenMode","reason"}`: `mode` is the mode in force (the one that decides the session's calls), `chosenMode` the mode the session chose or the saved one, and `reason`, present only when they differ, why (for example `jev-decides` runs as `ask-me` while no decision model is set or the set one is not answering). Permission modes are explained in "Permissions, decisions and safety".
 
 ### 4. Open the event stream before sending
 
@@ -600,7 +594,7 @@ curl -sS -N -H "Authorization: Bearer $GV_TOKEN" \
   http://127.0.0.1:3421/api/sessions/hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c/events
 ```
 
-`GET /api/sessions/{sessionId}/events` is a Server-Sent Events stream of that session's events on the default domains plus `tools`. It needs an admin credential (`403` `ADMIN_REQUIRED` otherwise). A non-admin client has no stream that carries a turn; it follows "The least-privilege client" instead (poll `sessions.hosted.list`, read `sessions.hosted.attach`). The walkthrough below uses an admin token.
+`GET /api/sessions/{sessionId}/events` is a Server-Sent Events stream of that session's events on the default domains plus `tools`. It needs an admin credential (`403` `ADMIN_REQUIRED` otherwise). A non-admin client holding `read:own-sessions` follows its own sessions on `GET /api/control-plane/events?domains=turn,tools,gate,session` instead (see "The least-privilege client"). The walkthrough below uses an admin token.
 
 The stream opens with:
 
@@ -770,7 +764,7 @@ Remember tiers and permission modes are explained in "Permissions, decisions and
 
 ### The owner inbox
 
-Approvals are one kind of item in the owner inbox, which also holds questions agents left, channel claims, purchase windows, queued actions and decisions the decision model made. `inbox.list` (invoke, `read:approvals`) lists them (`status` `open`, `closed` or `all`; `kinds`; `sessionId`; `limit`; `itemId`). `inbox.answer` (invoke, admin, owner-only) answers one with one of its `options`, or with `text`: `{"body":{"itemId":"...","option":"approve"}}`. Changes arrive as event `owner-inbox-update` on domain `gate`. The first answer wins; a later one returns `applied: false` with who answered.
+Approvals are one kind of item in the owner inbox, which also holds questions agents left, channel claims, purchase windows, queued actions, decisions the decision model made, and reports (kind `report`: the answer of a scheduled run or trigger turn that named no surface or whose send failed, answered `read`). `inbox.list` (invoke, `read:approvals`) lists them (`status` `open`, `closed` or `all`; `kinds`; `sessionId`; `limit`; `itemId`). `inbox.answer` (invoke, admin, owner-only) answers one with one of its `options`, or with `text`: `{"body":{"itemId":"...","option":"approve"}}`. Changes arrive as event `owner-inbox-update` on domain `gate`. The first answer wins; a later one returns `applied: false` with who answered.
 
 ## Settings through the API
 
@@ -812,7 +806,20 @@ Refusals:
 | `403` | `CONFIG_MANAGED` | The key is locked by managed policy. |
 | `409` | `CONFIG_SET_NOT_APPLIED` `Config key <key> did not take the requested value in <file>. The host now reports <value>.` | A higher layer (managed policy, an environment variable, a daemon-owned value) overrides what was written. `config.setMany` adds `notApplied` (the keys), `revision` and `entries`; the write itself happened. |
 
-**An admin API write is the owner's own act.** `config.set`, `config.setMany` and `config.reset` are recorded as the owner's change made from the daemon API, so a value that loosens security or spending (for example `permissions.mode` `yolo`, a higher payment limit) is written at once, with no question asked; in testing `POST /config {"key":"permissions.mode","value":"yolo"}` answered `200` and took effect. The owner-only check on loosening applies only when a model's tool call asks for the change. Give a script a narrowed token (which cannot call `config.*`) unless it must change settings.
+### A change only the owner makes
+
+A write that loosens a security, permission, judgment or payment setting (for example `permissions.mode` `yolo`, `sandbox.enabled` `false`, a new `judgment.endpoint` or `judgment.model`, a higher payment limit) is the owner's own act. Made with the owner's own credential it is written at once: the operator token, an admin sign-in, an app on the daemon's machine, or a device the owner paired himself. Made with a token minted for automation, nothing is written: the change is put to the owner as an approval and the answer is `202`.
+
+Which tokens are which is recorded on the token when it is minted and never changes; `pairing.tokens.list` shows it as `origin`, and the device lists of the terminal app (`/devices`) and the web UI (Settings, Paired devices) say "owner device" or "automation token":
+
+- `owner-pairing` (owner device): a device paired through the owner's pairing flow, the pairing QR or `goodvibes pair` / `goodvibes-daemon pair` (`pairing.handoff.create`), asked from the owner's own credential (the operator token, an admin sign-in, an app on his machine, or another owner device, the relay included) with full authority, or the pairing screen and devices list of the terminal app on the daemon's machine. The web UI's "Migrate this browser" button (a browser signed in with the shared operator token moving onto its own token) goes through the same flow (`pairing.handoff.create` with `fromSharedToken: true`), so the owner's browser becomes an owner device.
+- `automation` (automation token): every other token: one minted through the API by another token (`pairing.tokens.create`, `pairing.tokens.migrate`), one minted with a narrowed scope list or for a named client (the Agent's credential), one paired from an automation token or the Agent's credential, and every token minted before 3.3.2, which recorded no origin. To make such a device an owner device, pair it again: open the pairing link from the owner's own app on it (`goodvibes pair` or `/pair` in the terminal app, or Settings, Paired devices in the web UI on a device signed in as the owner) and revoke the old token. The web UI says so on the paired-devices list when the browser it runs in is signed in with an automation token.
+
+```json
+{"success":false,"code":"OWNER_APPROVAL_PENDING","approvalId":"apr-...","key":"permissions.mode","keys":["permissions.mode"],"reasons":["Changing permissions.mode would loosen the permission mode."],"state":"nothing was changed yet; ...","next":["Watch approval apr-... ..."]}
+```
+
+The change is applied when the owner approves it, and only his own credential can approve it (an owner device included): a token minted for automation answering that approval, through `approvals.approve` or `inbox.answer`, is refused `403` `OWNER_ONLY`. The web UI shows such a change as waiting for the owner's approval and reports how it settled; the terminal app and the Agent say it is waiting, with the approval's id. It expires after a day unanswered, and is cancelled if the daemon restarts before he answers; nothing is changed then, and the request may be sent again. The same holds for `config.setMany`, `config.reset` (a reset that loosens), the `settingsPrecondition` write lane, and `sessions.permissionMode.set` to a looser mode; a settings import (`settingsImportPrecondition`) from a token minted for automation is refused `403` `OWNER_ONLY`. A change that tightens a setting is written at once from any admin credential.
 
 A replicated setting written on one cluster node reaches the other nodes; see "Clusters" in "The daemon, the web UI and networking".
 
@@ -827,7 +834,7 @@ curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: applicat
   http://127.0.0.1:3421/task -d '{"task":"say hi","tools":["read"]}'
 ```
 
-The daemon reads these fields: `task` (required, a non-empty string), `model` (a model registry key), `tools` (up to 64 tool names), and `routing.executionIntent`. `tools` is added to the agent's default tool set, it does not restrict it: in testing `"tools":["read"]` started an agent with `read`, `write`, `edit`, `find`, `exec`, `analyze`, `inspect`, `fetch` and `registry`. The daemon starts the agent at once and answers `202`:
+The daemon reads these fields: `task` (required, a non-empty string), `model` (a model registry key), `provider`, `tools` (up to 64 tool names), and `routing` (`modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent`, `reasoningEffort`); a top-level `model`, `provider` or `tools` wins over the same choice in `routing`. `tools` is added to the agent's default tool set, it does not restrict it: in testing `"tools":["read"]` started an agent with `read`, `write`, `edit`, `find`, `exec`, `analyze`, `inspect`, `fetch` and `registry`. The daemon starts the agent at once and answers `202`:
 
 ```json
 {"acknowledged":true,"agentId":"agent-65854493","status":"pending","task":"say hi","model":null,"tools":["read","write","edit","find","exec","analyze","inspect","fetch","registry"]}
@@ -837,7 +844,7 @@ The daemon reads these fields: `task` (required, a non-empty string), `model` (a
 
 ### Form 2: a task in a shared session
 
-When the body has `sessionId`, `routeId` or `surfaceKind`, the text is recorded as a message in that shared session first (a missing `sessionId` with a `routeId` uses or creates the session bound to that route). The fields read in this form are `task`, `model`, `tools`, `routing` (all of `providerId`, `modelId`, `tools`, `executionIntent`, and the rest of the routing object), `sessionId`, `routeId`, `surfaceKind` (default `web`), `surfaceId` (default `surface:web`), `externalId`, `threadId`, `userId`, `displayName`, `title` and `metadata`. The answer depends on the session:
+When the body has `sessionId`, `routeId` or `surfaceKind`, the text is recorded as a message in that shared session first. `sessionId` names an existing session; to start a new session, leave it out and send `surfaceKind` (a new session is created) or `routeId` (the session bound to that route is used or created). The fields read in this form are `task`, `model`, `provider`, `tools`, `routing` (as in form 1), `sessionId`, `routeId`, `surfaceKind` (default `web`), `surfaceId` (default `surface:web`), `externalId`, `threadId`, `userId`, `displayName`, `title` and `metadata`. The answer depends on the session:
 
 | Session state | Status | Body |
 | --- | --- | --- |
@@ -848,14 +855,7 @@ When the body has `sessionId`, `routeId` or `surfaceKind`, the text is recorded 
 
 Do not send a task into a hosted session; use `sessions.followUp` there (see "Steer and follow-up on a hosted session").
 
-**An unknown `sessionId` is not refused.** Form 2 with a `sessionId` that no session has (a typo, a stale id, an id from another daemon) creates a new shared session and starts an agent in it: the answer is `202` `{"acknowledged":true,"mode":"spawn","sessionId":"sess-<new>","agentId":"agent-<new>",...}`, and the agent starts paid model work. The `sessionId` in the answer differs from the one sent, which is the only sign. The same holds for `POST /api/sessions/{sessionId}/messages` with `"kind":"task"`; with the default `kind` (`message`) or `followup`, and for `sessions.steer` and `sessions.followUp`, an unknown id is refused with `404` `SESSION_NOT_FOUND`. (From the code: the broker refuses an unknown id for every intent except `submit`, which these two use. The contract lists `SESSION_NOT_FOUND` for `tasks.create` and `sessions.messages.create`, but they do not send it for this case.) Check first, every time:
-
-```sh
-curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $GV_TOKEN" \
-  http://127.0.0.1:3421/api/sessions/<sessionId>      # 200: it exists; 404: do not send the task
-```
-
-and, after sending, compare the `sessionId` in the answer with the one you sent.
+**An unknown `sessionId` is refused.** Form 2 with a `sessionId` that no session has (a typo, a stale id, an id from another daemon) answers `404` `{"error":"Unknown shared session \"<id>\". Nothing was recorded or started; ...","code":"SESSION_NOT_FOUND",...}`: nothing is recorded and no agent starts. The same holds for `POST /api/sessions/{sessionId}/messages` (every `kind`), `sessions.steer` and `sessions.followUp`. Creating a session is an explicit request: leave `sessionId` out, or create it first with `POST /api/sessions`.
 
 ### Every refusal of `POST /task`
 
@@ -863,18 +863,21 @@ and, after sending, compare the `sessionId` in the answer with the one you sent.
 | --- | --- | --- |
 | `401` | `AUTH_REQUIRED` | No credential. |
 | `403` | `ADMIN_REQUIRED` | The credential is not admin. |
-| `400` | `{"error":"Missing required field: task (non-empty string)"}` | No `task`, or an empty one. |
+| `400` | `{"error":"Missing required field: task (non-empty string)","code":"INVALID_ARGUMENT","field":"task"}` | No `task`, or an empty one. |
+| `400` | `MODEL_NOT_FOUND` or `MODEL_AMBIGUOUS` | `model`, `routing.modelId` or a fallback model names no registered model, or a bare id several providers serve. Nothing starts. |
+| `400` | `INVALID_ARGUMENT` (`recoverable: false`) | The model routing contradicts itself (a `provider` without a provider-qualified model, a model of another provider, `ordered-fallbacks` with no fallback model, `fail` with fallback models). |
+| `404` | `SESSION_NOT_FOUND` | Form 2 with a `sessionId` no session has. Nothing was recorded or started. |
 | `400` | `INVALID_ARGUMENT` naming the field | A malformed `routing` or `tools`, or a `surfaceKind` that is not one of the allowed surface kinds (the error lists them). |
-| `400` | invalid JSON body | The body is not a JSON object. |
+| `400` | `INVALID_JSON` | The body is not a JSON object. |
 | `409` | `SESSION_CLOSED` | Form 2 with a closed session; reopen it with `POST /api/sessions/{sessionId}/reopen`. |
 | `409` | `"mode":"rejected"` (above) | Form 2: the running agent did not take the text. |
 | `429` | `CAPACITY_EXCEEDED`, header `Retry-After: 5`, `hint` naming `fleet.maxSize` | The daemon already runs `fleet.maxSize` agents. Wait and retry, or raise the setting. |
-| `500` | the spawn error, or `Failed to spawn agent` | The agent could not be started (for example an unknown model). In form 2 the input is released back to the queue. |
+| `500` | the spawn error, or `Failed to spawn agent` | The agent could not be started for a reason in the daemon. In form 2 the input is released back to the queue. |
 | `500` | `SESSION_AGENT_BIND_FAILED` | Form 2: the agent started but could not be bound to the session; the input was released to the queue. |
 
-Where the code and the contract disagree, the code above is what the daemon does: the contract lists `provider` as an input, but no form reads a top-level `provider` (use `routing.providerId` in form 2, or a `provider:model` key in `model`); form 1 ignores `routing` except `executionIntent`; the form-2 responses carry `inputId`, which the contract's output schema does not name; and the contract does not list `CAPACITY_EXCEEDED` or the `409` `rejected` answer.
+The contract (`tasks.create`) states the same fields, forms, answers and codes.
 
-`POST /task` has no idempotency key. After a lost response, look for the task with `GET /api/tasks` before sending it again.
+`POST /task` takes the `Idempotency-Key` header: a repeat under the same key returns the first answer and starts no second agent (see "Idempotency and safe retries").
 
 ### Watching and acting on a task
 
@@ -889,9 +892,9 @@ Statuses:
 
 | Route | Returns | Access |
 | --- | --- | --- |
-| `GET /task/{agentId}` | `{"agentId","task","status","model","tools","durationMs","toolCallCount","progress","error"}`, not wrapped. `404` `Agent not found: <agentId>` for an unknown agent. | scope `read:transcripts` |
+| `GET /task/{agentId}` | `{"agentId","task","status","model","tools","durationMs","toolCallCount","progress","error"}`, not wrapped. `404` `AGENT_NOT_FOUND` (`Agent not found: <agentId>`) for an unknown agent. | scope `read:transcripts` |
 | `GET /api/tasks?limit=<n>` | `{"queued","running","blocked","totals":{"created","completed","failed","cancelled"},"tasks":[...]}`, newest first. A caller without `read:transcripts` sees each task's kind as its title and no description. | scope `read:tasks` |
-| `GET /api/tasks/{taskId}` | `{"task":{...}}`, wrapped: `id`, `kind` (`exec`, `agent`, `acp`, `scheduler`, `daemon`, `mcp`, `plugin`, `integration`), `title`, `description`, `status`, `owner` (the agent now running it), `cancellable`, `parentTaskId`, `childTaskIds`, `queuedAt`, `startedAt`, `endedAt`, `retryPolicy`, `exitCode`, `error`, `result`, `turnId`. `404` `{"error":"Unknown runtime task","status":404}`. | scope `read:transcripts` |
+| `GET /api/tasks/{taskId}` | `{"task":{...}}`, wrapped: `id`, `kind` (`exec`, `agent`, `acp`, `scheduler`, `daemon`, `mcp`, `plugin`, `integration`), `title`, `description`, `status`, `owner` (the agent now running it), `cancellable`, `parentTaskId`, `childTaskIds`, `queuedAt`, `startedAt`, `endedAt`, `retryPolicy`, `exitCode`, `error`, `result`, `turnId`. `404` `{"error":"Unknown runtime task","code":"TASK_NOT_FOUND","status":404}`. | scope `read:transcripts` |
 | Event domains `tasks`, `agents` | Task and agent lifecycle events. | admin |
 
 Example, a failed task:
@@ -902,16 +905,15 @@ Example, a failed task:
 
 Act on it (admin, `write:tasks`):
 
-- `POST /api/tasks/{taskId}/cancel` stops the task's agent (its `owner`) and asks the task store to mark the task `cancelled` with error `Cancelled via control plane`. It answers `200` `{"task":{...}}` with the task as the store now holds it. There is no state check: cancelling a task that already ended is not an error, and the store decides whether the state changes, so read `task.status` in the answer. An unknown id answers `404` `Unknown runtime task`.
-- `POST /api/tasks/{taskId}/retry` starts a new agent and answers `{"retried":true,"task":{...},"agentId":"<new agent id>"}`. Only failed or cancelled agent tasks can be retried: another kind answers `400` `Retry is only implemented for agent tasks`, another state `400` `Task cannot be retried: only failed or cancelled tasks can be retried`. A full fleet answers `429` `CAPACITY_EXCEEDED`.
+- `POST /api/tasks/{taskId}/cancel` stops the task's agent (its `owner`) and asks the task store to mark the task `cancelled` with error `Cancelled via control plane`. It answers `200` `{"task":{...}}` with the task as the store now holds it. There is no state check: cancelling a task that already ended is not an error, and the store decides whether the state changes, so read `task.status` in the answer. An unknown id answers `404` `TASK_NOT_FOUND`.
+- `POST /api/tasks/{taskId}/retry` starts a new agent and answers `{"retried":true,"task":{...},"agentId":"<new agent id>"}`. Only failed or cancelled agent tasks can be retried: another kind or state answers `400` `TASK_NOT_RETRYABLE` (`Retry is only implemented for agent tasks`, `Task cannot be retried: only failed or cancelled tasks can be retried`). A full fleet answers `429` `CAPACITY_EXCEEDED`.
 
-What a retry keeps and drops:
+What a retry keeps:
 
-- It keeps the text (the task's description, or its title).
-- It drops `model`, `tools`, `routing` and the session: the new agent runs on the daemon's current model with the default tool set, outside any session.
+- It keeps the text, the model, the provider, the exact tool list the first agent ran with, the routing (fallback models, provider selection and failure policy, reasoning effort), the execution limits, the contract settings, and the session that started it. These are read from the record of the agent that ran the task; when that record is no longer held (the daemon keeps the newest finished agents), nothing starts and the answer is `409` `TASK_SETTINGS_UNAVAILABLE`: create the task again.
 - The new run is tracked as a **new** task whose id is the new agent id returned in `agentId`. Follow that id (`GET /task/<new agentId>`, `GET /api/tasks/<new agentId>`).
 - The original task is set back to `queued` with `owner` naming the new agent, and stays `queued`: in testing, after the new agent failed, `GET /api/tasks` listed the original as `queued` and the new one as `failed`. Cancel the original if a list of open tasks matters to you.
-- Retry has no idempotency key, but a repeated retry of the same task is refused, because the original is `queued` after the first one (`400` `Task cannot be retried: ...`). Retrying the new task's id after it fails starts another agent.
+- Retry takes the `Idempotency-Key` header: a repeat under the same key returns the first answer. Without a key a repeated retry of the same task is refused, because the original is `queued` after the first one (`400` `TASK_NOT_RETRYABLE`). Retrying the new task's id after it fails starts another agent.
 
 For larger work with acceptance criteria, use contracts: `POST /api/contracts` (`contracts.start`, with `Idempotency-Key`), `GET /api/contracts/{contractId}`, `POST /api/contracts/{contractId}/cancel`, `POST /api/contracts/{contractId}/reply`; contracts are explained in "The terminal app (`goodvibes`)".
 
@@ -948,7 +950,7 @@ Event names:
 | `surface-message` | A message for a surface. |
 | `remote-pair-requested`, `remote-peer`, ... | Remote peer activity. |
 | `gap` | Events were dropped because this client read too slowly: `{"dropped":<n>,"afterId":"<last delivered id>"}`. Reconnect with `Last-Event-ID` set to `afterId`. |
-| `closed` | The daemon ended the stream: `{"reason":"credential-revoked","next":"Sign in again or pair this device again, then reconnect."}`. It is sent when the stream's credential is revoked (the device token deleted, or revoked with the token that minted it, the sign-in ended, the shared token replaced). It is the last frame; do not reconnect with the same credential. |
+| `closed` | The daemon ended the stream: `{"reason":"credential-revoked","next":"Sign in again or pair this device again, then reconnect."}`. It is sent when the stream's credential is revoked (the device token deleted, or revoked with the token that minted it, the sign-in ended, the shared token replaced). It is the last frame; do not reconnect with the same credential. On the WebSocket the same frame arrives as `{"type":"closed","reason":"credential-revoked","next":...}`, and the daemon then closes the socket (code `1008`, reason `credential-revoked`). |
 
 The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
 
@@ -975,7 +977,7 @@ Two kinds of frame travel on a stream, and `domains` filters them differently (f
 | Runtime events (`turn`, `tools`, `gate`, `config`, ... frames named after their domain: `TURN_*`, `TOOL_*` and the rest) | Only the 14 default domains: `session`, `tasks`, `agents`, `automation`, `routes`, `control-plane`, `deliveries`, `surfaces`, `watchers`, `transport`, `ops`, `knowledge`, `providers`, `turn`. These are what the `ready` frame lists. No `tools`, `gate`, `config`, `fleet`, `contracts` or `mcp` runtime events, so no tool calls. | Exactly the listed domains. |
 | Broadcast events: `approval-update` and `owner-inbox-update` (tagged `gate`), `session-update` and `hosted-session-update` (tagged `session`), and the untagged ones (`surface-message`, the `remote-*` events) | All of them, whatever the `ready` frame lists, so approvals do arrive. | A tagged one only when its tag is listed (`approval-update` needs `gate` in the list); an untagged one always. |
 
-Access applies on top in both cases: a non-admin credential never receives an admin-only event or domain (`approval-update`, `owner-inbox-update`, `session-update`, `hosted-session-update`, the `session`, `turn`, `tools`, `tasks`, `agents`, `gate` domains and the others in "Access of every event"); a non-admin stream without `domains` opens on the defaults it may read and lists the rest under `withheldDomains`.
+Access applies on top in both cases: a non-admin credential never receives an admin-only event or domain (`approval-update`, `owner-inbox-update`, `session-update`, `hosted-session-update`, the `session`, `turn`, `tools`, `tasks`, `agents`, `gate` domains and the others in "Access of every event"), except that `read:own-sessions` opens the `turn`, `tools`, `gate` and `session` frames and the `approval-update` and `hosted-session-update` events of the caller's own sessions; a non-admin stream without `domains` opens on the defaults it may read and lists the rest under `withheldDomains`.
 
 So an admin client that wants approvals can open the stream without `domains` (it then also gets every session update but no tool calls), or name its domains and include `gate`: `?domains=gate,session,turn,tools`. A stream opened with `?domains=session` gets no `approval-update`. Listing `domains` replaces the defaults; it does not add to them.
 

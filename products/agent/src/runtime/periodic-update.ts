@@ -286,7 +286,7 @@ export function resumeArgv(argv: readonly string[], sessionId: string | undefine
 }
 
 export interface StartPeriodicSelfUpdateParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath'>>;
+  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath' | 'getDaemonTierPath'>>;
   readonly services: {
     /**
      * The sessions THIS process is running, and how many are mid-turn. Read

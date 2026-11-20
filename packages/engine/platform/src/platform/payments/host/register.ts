@@ -104,6 +104,8 @@ export interface PaymentsHandlerDeps {
    * coordinator's own answer.
    */
   readonly isPaymentsLeader: () => boolean;
+  /** The name of the machine that runs payments when this one does not; see gates.ts. */
+  readonly paymentsHolder?: (() => string | null) | undefined;
   readonly now?: (() => number) | undefined;
   readonly checkout: CheckoutComposition;
 }
@@ -351,6 +353,13 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
  */
 export interface PaymentsRegistration {
   readonly ready: Promise<void>;
+  /**
+   * This machine just took the group's payments role: recover the checkouts a
+   * previous holder of it left interrupted here, exactly as boot does. Runs
+   * after `ready`; the shared registry keeps a live operation from being read
+   * as interrupted.
+   */
+  readonly recoverAsLeader: () => Promise<void>;
   readonly unregister: Unregister;
   /** Stop admission immediately and drain accepted checkout and recovery work. */
   readonly close: () => Promise<void>;
@@ -537,5 +546,15 @@ export function registerPaymentsMethods(
     void closing.catch(() => {});
     return closing;
   };
-  return { ready, close, unregister: () => { void close(); } };
+  const recoverAsLeader = async (): Promise<void> => {
+    await ready;
+    if (torn) return;
+    try {
+      const sweep = await checkoutServiceHolder.recoverInterruptedCheckouts();
+      logger.info('payments recovery on taking the payments role settled', { sweep });
+    } catch (error) {
+      logger.error('payments recovery on taking the payments role failed', { error });
+    }
+  };
+  return { ready, recoverAsLeader, close, unregister: () => { void close(); } };
 }

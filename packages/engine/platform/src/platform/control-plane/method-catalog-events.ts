@@ -157,6 +157,11 @@ const RUNTIME_DOMAIN_ACCESS = {
   config: 'admin',
 } satisfies Record<RuntimeEventDomain, GatewayEventAccess>;
 
+/** The descriptor that declares `read:own-sessions`; delivery is decided frame by frame in gateway-scope-enforcement.ts. */
+export const OWN_SESSION_ACTIVITY_EVENT_ID = 'control.own_session_activity';
+/** The scope that lets a credential without the admin role watch the sessions its principal owns. */
+export const OWN_SESSIONS_SCOPE = 'read:own-sessions';
+
 /** The wire events the distributed runtime publishes about paired peers and the work they run. */
 export const REMOTE_RUNTIME_WIRE_EVENTS = [
   'remote-pair-requested',
@@ -184,6 +189,8 @@ const BROADCAST_EVENT_ACCESS: Readonly<Record<string, GatewayEventAccess>> = {
   'control.owner_inbox_update': 'admin',
   'control.hosted_session_update': 'admin',
   'control.session_update': 'admin',
+  // Delivers only frames of sessions the caller's principal owns (gateway-scope-enforcement.ts).
+  [OWN_SESSION_ACTIVITY_EVENT_ID]: 'authenticated',
 };
 
 /** The access an event descriptor requires. A descriptor this table does not know (a plugin's) is admin-only. */
@@ -330,6 +337,22 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       clientId: STRING_SCHEMA,
       detail: STRING_SCHEMA,
     }, ['event', 'session', 'createdAt']),
+  }),
+  eventDescriptor({
+    id: OWN_SESSION_ACTIVITY_EVENT_ID,
+    title: 'Own Session Activity',
+    description:
+      'What a credential without the admin role holding `read:own-sessions` receives of the sessions '
+      + 'its own principal created or attached to (sessions.hosted.create, sessions.hosted.attach): '
+      + 'their `turn`, `tools`, `gate` and `session` runtime frames (streamed text, tool calls and '
+      + 'results, permission decisions, turn transitions), their `approval-update` events and their '
+      + '`hosted-session-update` notices. Frames of every other session, and frames naming no session, '
+      + 'are withheld; the admin-only domains stay admin-only for everything else. Open the stream with '
+      + '`?domains=turn,tools,gate,session` (or subscribe to those domains on the socket) and filter '
+      + 'on the session id. Ownership is saved with the session, so it holds across a daemon restart.',
+    category: 'sessions',
+    transport: ['sse', 'ws'],
+    scopes: [OWN_SESSIONS_SCOPE],
   }),
   eventDescriptor({
     id: 'control.session_update',

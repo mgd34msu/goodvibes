@@ -137,7 +137,7 @@ export function buildCapabilitiesStep(controller: OnboardingWizardControllerLike
       id: 'capabilities',
       title: 'Choose GoodVibes capabilities',
       shortLabel: 'Capabilities',
-      description: 'Choose what GoodVibes should be able to do. Local TUI Only avoids servers; any other choice enables service mode and autostart.',
+      description: 'Choose what GoodVibes should be able to do. Local TUI Only opens no network surface and leaves the daemon\'s service as it is; any other choice also turns on service mode and autostart.',
       summaryTitle: 'Selected capabilities',
       summaryLines: [
         `${selectedCount}/${capabilities.length} option(s) selected`,

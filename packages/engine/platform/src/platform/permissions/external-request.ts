@@ -60,7 +60,9 @@ export interface ExternalOperationSource {
  * they are instead of a second set.
  */
 export async function admitExternalRequest(host: ExternalPermissionHost, transport: ExternalRequestScope,
-  operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest },
+  operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest;
+    /** The owner's own rule asks him about this request (an `ask-on-risk` MCP server called outside its scope): one sentence, shown to him. */
+    readonly ownerAsk?: string | undefined },
   opened?: { readonly signal: AbortSignal; readonly source: AutonomousToolSource }) {
   const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, ...(input.serverPolicy ? { serverPolicy: input.serverPolicy } : {}) });
   let unsubscribe: () => void = () => {};
@@ -85,6 +87,7 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
       externalRequestEvidence, signal, sourceOf, assertPrepared: assertCurrent, ...(input.supportingDecisionIds ? { preparationDecisionIds: input.supportingDecisionIds } : {}),
       schemaRevision: protocol?.revision ?? requestId,
       decoratePort: () => host.port,
+      ...(input.ownerAsk !== undefined ? { ownerAsk: input.ownerAsk } : {}),
     }), signal);
     assertCurrent();
     let finished = false, claimed = false;

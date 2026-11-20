@@ -32,6 +32,7 @@
  * daemon refuses any key outside its config schema, so keys it holds beyond the
  * schema are listed read-only and have no editor.
  */
+import { OwnerApprovalPendingError } from '../../../lib/owner-approval';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { isStructuredCredentialReferenceConfigKey } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
@@ -178,7 +179,8 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
           tone: 'success',
         });
       } catch (error) {
-        toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
+        // A change put to the owner is shown as waiting for him (OwnerApprovalNotices), not as a failure.
+        if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
         throw error;
       }
     },
@@ -200,7 +202,8 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         ]);
         toast({ title: 'Config saved', description: `${keys.join(' and ')} updated together.`, tone: 'success' });
       } catch (error) {
-        toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
+        // A change put to the owner is shown as waiting for him (OwnerApprovalNotices), not as a failure.
+        if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
         throw error;
       }
     },
@@ -218,7 +221,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         ]);
         toast({ title: 'Setting reset', description: `${key} is back to its default.`, tone: 'success' });
       } catch (error) {
-        toast({ title: 'Failed to reset setting', description: formatError(error), tone: 'danger' });
+        if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to reset setting', description: formatError(error), tone: 'danger' });
         throw error;
       }
     },

@@ -1112,6 +1112,31 @@
       "types": "./platform/dist/platform/daemon/daemon-service-default.d.ts",
       "import": "./platform/dist/platform/daemon/daemon-service-default.js"
     },
+    "./platform/platform/providers/provider-names": {
+      "bun": "./platform/src/platform/providers/provider-names.ts",
+      "types": "./platform/dist/platform/providers/provider-names.d.ts",
+      "import": "./platform/dist/platform/providers/provider-names.js"
+    },
+    "./platform/platform/providers/custom-provider-files": {
+      "bun": "./platform/src/platform/providers/custom-provider-files.ts",
+      "types": "./platform/dist/platform/providers/custom-provider-files.d.ts",
+      "import": "./platform/dist/platform/providers/custom-provider-files.js"
+    },
+    "./platform/platform/discovery/persisted-providers": {
+      "bun": "./platform/src/platform/discovery/persisted-providers.ts",
+      "types": "./platform/dist/platform/discovery/persisted-providers.d.ts",
+      "import": "./platform/dist/platform/discovery/persisted-providers.js"
+    },
+    "./platform/platform/runtime/provider-stack": {
+      "bun": "./platform/src/platform/runtime/provider-stack.ts",
+      "types": "./platform/dist/platform/runtime/provider-stack.d.ts",
+      "import": "./platform/dist/platform/runtime/provider-stack.js"
+    },
+    "./platform/platform/runtime/judgment-services": {
+      "bun": "./platform/src/platform/runtime/judgment-services.ts",
+      "types": "./platform/dist/platform/runtime/judgment-services.d.ts",
+      "import": "./platform/dist/platform/runtime/judgment-services.js"
+    },
     "./platform/platform/runtime/feature-flags/manager": {
       "bun": "./platform/src/platform/runtime/feature-flags/manager.ts",
       "types": "./platform/dist/platform/runtime/feature-flags/manager.d.ts",
@@ -3511,6 +3536,11 @@
       "bun": "./terminal-shell/src/plugin-trust-command.ts",
       "types": "./terminal-shell/dist/plugin-trust-command.d.ts",
       "import": "./terminal-shell/dist/plugin-trust-command.js"
+    },
+    "./terminal-shell/recovery-commands": {
+      "bun": "./terminal-shell/src/recovery-commands.ts",
+      "types": "./terminal-shell/dist/recovery-commands.d.ts",
+      "import": "./terminal-shell/dist/recovery-commands.js"
     },
     "./terminal-shell/plugin-bundles-command": {
       "bun": "./terminal-shell/src/plugin-bundles-command.ts",

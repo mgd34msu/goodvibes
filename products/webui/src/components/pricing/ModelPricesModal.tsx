@@ -7,6 +7,7 @@
  * provider-served and catalog pricing, so cost-bearing queries are
  * invalidated on every successful commit.
  */
+import { OwnerApprovalPendingError } from '../../lib/owner-approval';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog } from '../ui/Dialog';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -40,7 +41,7 @@ export function ModelPricesModal({ open, onClose, initialModelKey }: ModelPrices
     try {
       await platformClient.operator.config.set('pricing.modelPrices', next);
     } catch (error) {
-      toast({ title: 'Failed to save model prices', description: formatError(error), tone: 'danger' });
+      if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to save model prices', description: formatError(error), tone: 'danger' });
       throw error;
     }
     await Promise.all([

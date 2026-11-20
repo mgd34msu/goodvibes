@@ -29,8 +29,9 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'inbox.answer',
+    repeat: 'safe',
     title: 'Answer Owner Inbox Item',
-    description: 'Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item\'s choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer\'s text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner\'s own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon\'s own machine or a paired device, admin, with write:payments), else 403.',
+    description: 'Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item\'s choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer\'s text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner\'s own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon\'s own machine or a paired device, admin, with write:payments), else 403. An approval that puts a change to the owner (metadata `ownerAct`) is not answered with a token minted for automation: 403 OWNER_ONLY.',
     category: 'approvals',
     access: 'admin',
     scopes: ['write:approvals'],
@@ -41,6 +42,7 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'inbox.post',
+    replay: { in: 'body', name: 'key', behavior: 'A post under a `key` that already has an open item returns that item instead of posting a second one, so a repeat asks the owner once.' },
     title: 'Post to Owner Inbox',
     description: 'Leave the owner a question or a queued action from a process that is not the daemon (an agent in a terminal app). Returns at once; the asker carries on and reads the answer later with inbox.list (`itemId`). A post under a `key` that already has an open item returns that item with `created: false`, so a retried post never asks twice. Permission asks are raised with approvals.raise; claims and purchase windows are posted by the daemon itself.',
     category: 'approvals',
@@ -51,6 +53,7 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'inbox.withdraw',
+    repeat: 'safe',
     title: 'Withdraw Owner Inbox Item',
     description: 'Take back an open item this caller posted, because the answer is no longer needed. Only the principal that posted an item may withdraw it. An item that is no longer open returns `applied: false` with a `refusal`.',
     category: 'approvals',
@@ -61,6 +64,7 @@ export const builtinGatewayOwnerInboxMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'inbox.delivery',
+    repeat: 'safe',
     title: 'Report Owner Answer Delivery',
     description: 'The asking session reports what became of the answer to a question it posted: `delivered` once the answer is in its conversation, `undeliverable` (with `reason`) when its session was deleted. Only the principal that posted the question may report, only on an answered question a session asked, and only once: a second report returns `applied: false` with a `refusal`, so exactly one terminal puts the answer in its conversation.',
     category: 'approvals',

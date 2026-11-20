@@ -32,7 +32,15 @@ export function formatCreated(ms: number): string {
 
 /** One device line: name · created · last-seen · short id. */
 export function formatDeviceLine(token: PublicPairingToken, now: number = Date.now()): string {
-  return `${token.name}  ·  created ${formatCreated(token.createdAt)}  ·  last seen ${formatLastSeen(token.lastSeenAt, now)}  ·  ${shortTokenId(token.id)}`;
+  return `${token.name}  ·  ${deviceOriginLabel(token)}  ·  created ${formatCreated(token.createdAt)}  ·  last seen ${formatLastSeen(token.lastSeenAt, now)}  ·  ${shortTokenId(token.id)}`;
+}
+
+/**
+ * How a token came to exist, in words every surface shows beside it: the
+ * owner's own device makes his own acts; an automation token does not.
+ */
+export function deviceOriginLabel(token: Pick<PublicPairingToken, 'origin'>): string {
+  return token.origin === 'owner-pairing' ? 'owner device' : 'automation token';
 }
 
 /** Resolve a token by exact id or unambiguous id-prefix; returns a resolution result. */

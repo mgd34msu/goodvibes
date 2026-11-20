@@ -526,7 +526,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "acp.agents.list",
@@ -581,7 +583,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "acp.sessions.create",
@@ -733,12 +737,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "approvals.approve",
         "title": "Approve Approval",
-        "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).",
+        "description": "Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). Malformed `disposition`, `selectedHunks`, `rememberTier`, `reason` or `modifiedArgs`, a hunk index out of range and `remember` with an amendment are 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
         "category": "approvals",
         "source": "builtin",
         "access": "admin",
@@ -1371,7 +1382,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "status": 400,
+            "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+          },
+          {
+            "code": "APPROVAL_NOT_FOUND",
+            "status": 404,
+            "meaning": "No approval has that id; nothing was answered."
+          },
+          {
+            "code": "OWNER_ONLY",
+            "status": 403,
+            "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+          }
+        ]
       },
       {
         "id": "approvals.cancel",
@@ -1962,7 +1992,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "holdId",
+          "behavior": "A surface releasing an ask it raised (`release: true`) passes the `holdId` approvals.raise returned: a repeat of that release gives up nothing more, even when another surface holds the same ask. A plain cancel of an ended approval is answered `applied: false`."
+        },
+        "repeat": "keyed",
+        "errorCodes": [
+          {
+            "code": "APPROVAL_NOT_FOUND",
+            "status": 404,
+            "meaning": "No approval has that id; nothing was answered."
+          }
+        ]
       },
       {
         "id": "approvals.claim",
@@ -2541,12 +2584,21 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "APPROVAL_NOT_FOUND",
+            "status": 404,
+            "meaning": "No approval has that id; nothing was answered."
+          }
+        ]
       },
       {
         "id": "approvals.deny",
         "title": "Deny Approval",
-        "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).",
+        "description": "Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail). `disposition` is `denied` or `amended` (an amendment cannot be remembered). Malformed `disposition`, `rememberTier` or `reason` is 400 INVALID_ARGUMENT naming the field; an unknown id is 404 APPROVAL_NOT_FOUND. Answering is the owner's act: the Agent's credential is refused 403 OWNER_ONLY, and so is a token minted for automation for a change put to the owner (metadata `ownerAct`).",
         "category": "approvals",
         "source": "builtin",
         "access": "admin",
@@ -3147,7 +3199,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "status": 400,
+            "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+          },
+          {
+            "code": "APPROVAL_NOT_FOUND",
+            "status": 404,
+            "meaning": "No approval has that id; nothing was answered."
+          },
+          {
+            "code": "OWNER_ONLY",
+            "status": 403,
+            "meaning": "Only the owner answers this approval: the Agent's credential never does, and a token minted for automation does not answer a change put to the owner. Nothing was answered."
+          }
+        ]
       },
       {
         "id": "approvals.list",
@@ -3838,7 +3909,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "approvals.raise",
@@ -4713,12 +4786,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "inbox.answer",
         "title": "Answer Owner Inbox Item",
-        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner's own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon's own machine or a paired device, admin, with write:payments), else 403.",
+        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller. Answering is the owner's own act: an agent is refused, and a purchase window is answered only with the authority payments.purchase.approve takes (an app on the daemon's own machine or a paired device, admin, with write:payments), else 403. An approval that puts a change to the owner (metadata `ownerAct`) is not answered with a token minted for automation: 403 OWNER_ONLY.",
         "category": "approvals",
         "source": "builtin",
         "access": "admin",
@@ -4766,7 +4846,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "claim",
                     "purchase",
                     "queued-action",
-                    "decision"
+                    "decision",
+                    "report"
                   ]
                 },
                 "status": {
@@ -4971,7 +5052,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbox.delivery",
@@ -5029,7 +5112,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "claim",
                     "purchase",
                     "queued-action",
-                    "decision"
+                    "decision",
+                    "report"
                   ]
                 },
                 "status": {
@@ -5233,7 +5317,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbox.list",
@@ -5272,7 +5358,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "claim",
                   "purchase",
                   "queued-action",
-                  "decision"
+                  "decision",
+                  "report"
                 ]
               }
             },
@@ -5304,7 +5391,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "claim",
                       "purchase",
                       "queued-action",
-                      "decision"
+                      "decision",
+                      "report"
                     ]
                   },
                   "status": {
@@ -5452,7 +5540,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbox.post",
@@ -5555,7 +5645,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "claim",
                     "purchase",
                     "queued-action",
-                    "decision"
+                    "decision",
+                    "report"
                   ]
                 },
                 "status": {
@@ -5699,7 +5790,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "key",
+          "behavior": "A post under a `key` that already has an open item returns that item instead of posting a second one, so a repeat asks the owner once."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "inbox.withdraw",
@@ -5749,7 +5846,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "claim",
                     "purchase",
                     "queued-action",
-                    "decision"
+                    "decision",
+                    "report"
                   ]
                 },
                 "status": {
@@ -5953,7 +6051,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "artifacts.content.get",
@@ -6005,6 +6105,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": false,
+        "repeat": "safe",
+        "idempotent": true,
         "metadata": {
           "responseKind": "binary"
         }
@@ -6234,6 +6336,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "unsafe",
         "metadata": {
           "uploadModes": [
             "json-inline",
@@ -6370,7 +6473,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "artifacts.list",
@@ -6494,7 +6599,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.bootstrap.delete",
@@ -6534,7 +6641,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.sessions.delete",
@@ -6581,7 +6690,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.status",
@@ -6688,7 +6799,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.users.create",
@@ -6773,7 +6886,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.users.delete",
@@ -6820,7 +6935,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.users.password.rotate",
@@ -6871,7 +6988,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "local_auth.users.scopes.set",
@@ -6954,7 +7073,131 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "authority.status",
+        "title": "Authority Record Status",
+        "description": "Return the head of this daemon's authority record: the record every machine of a group answers \"is this device token, user, grant or peer token current\" from. revision and digest are equal on every machine that holds the same record; behind is true when another group member has gossiped a newer one, and behindOn names the members whose record differs. kinds counts the live and revoked entries of each kind. userConflicts names each username held by separate accounts made on different machines before they joined one group: neither is overwritten, each machine keeps its own, and changes to it stay on that machine. Never returns a credential or a hash. readable false means the record file exists and cannot be read: nothing authenticates from it until it can.",
+        "category": "authority",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:config"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/authority/status"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "readable": {
+              "type": "boolean"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "groupId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "digest": {
+              "type": "string"
+            },
+            "revocationFloor": {
+              "type": "number"
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "live": {
+                    "type": "number"
+                  },
+                  "revoked": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "live",
+                  "revoked"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "behindOn": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "behind": {
+              "type": "boolean"
+            },
+            "userConflicts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "accounts": {
+                    "type": "number"
+                  },
+                  "madeOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "username",
+                  "accounts",
+                  "madeOn"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "readable",
+            "nodeId",
+            "groupId",
+            "revision",
+            "digest",
+            "revocationFloor",
+            "kinds",
+            "behindOn",
+            "behind",
+            "userConflicts"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.heartbeat.list",
@@ -7036,7 +7279,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.heartbeat.run",
@@ -8096,7 +8341,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "automation.integration.snapshot",
@@ -8323,7 +8575,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.create",
@@ -9653,7 +9907,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "delivery.targets[].address",
           "delivery.fallbackTargets[].address"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "id",
+          "behavior": "A create that names an `id` returns the existing job unchanged when a job with that id exists, so a repeat creates nothing more. Without an id each call creates a job."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "automation.jobs.delete",
@@ -9709,7 +9969,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.disable",
@@ -9764,7 +10026,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.enable",
@@ -9819,7 +10083,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.list",
@@ -11468,7 +11734,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.run",
@@ -11527,7 +11795,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "automation.jobs.update",
@@ -12817,7 +13092,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "delivery.targets[].address",
           "delivery.fallbackTargets[].address"
         ],
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.runs.cancel",
@@ -13802,7 +14079,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.runs.get",
@@ -14886,7 +15165,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.runs.list",
@@ -16843,7 +17124,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.runs.retry",
@@ -17828,7 +18111,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.create",
@@ -19087,7 +19377,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "delivery.targets[].address",
           "delivery.fallbackTargets[].address"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.delete",
@@ -19140,7 +19437,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.disable",
@@ -19192,7 +19491,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.enable",
@@ -19244,7 +19545,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.list",
@@ -21014,7 +21317,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "automation.schedules.run",
@@ -21070,7 +21375,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "batch.jobs.cancel",
@@ -21217,7 +21529,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "batch.jobs.create",
@@ -21435,7 +21749,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "batch.jobs.get",
@@ -21582,7 +21903,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "batch.jobs.list",
@@ -21729,7 +22052,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "batch.providerBatches.cancel",
@@ -21896,7 +22221,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "batch.run",
@@ -21955,7 +22282,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "batch.runtime.get",
@@ -22095,7 +22424,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.click",
@@ -22196,7 +22527,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "browser.extract",
@@ -22311,7 +22649,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.history.back",
@@ -22369,7 +22709,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.history.forward",
@@ -22427,7 +22768,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.navigate",
@@ -22509,7 +22851,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.press",
@@ -22602,7 +22945,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "browser.provision",
@@ -22669,7 +23019,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.readText",
@@ -22769,7 +23121,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.screenshot",
@@ -22839,7 +23193,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.scroll",
@@ -22936,7 +23292,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.select",
@@ -23034,7 +23391,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.sessions.attach",
@@ -23189,7 +23547,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.sessions.close",
@@ -23314,7 +23673,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.sessions.launch",
@@ -23445,7 +23806,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.sessions.list",
@@ -23565,7 +23928,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.sessions.release",
@@ -23692,7 +24057,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.snapshot",
@@ -23800,7 +24167,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.status",
@@ -24009,7 +24378,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.tabs.close",
@@ -24089,7 +24460,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.tabs.create",
@@ -24180,7 +24553,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "browser.tabs.list",
@@ -24250,7 +24624,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.tabs.switch",
@@ -24302,7 +24678,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "browser.type",
@@ -24401,7 +24779,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "browser.waitFor",
@@ -24489,7 +24874,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.calendars.list",
@@ -24543,7 +24930,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.events.create",
@@ -24627,7 +25016,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "recipients": [
           "attendees[]"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "calendar.events.delete",
@@ -24685,7 +25081,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "outward",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.events.get",
@@ -24766,7 +25164,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.events.list",
@@ -24860,7 +25260,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.events.update",
@@ -24941,7 +25343,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "recipients": [
           "attendees[]"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "calendar.ics.export",
@@ -24999,7 +25408,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "calendar.ics.import",
@@ -25099,7 +25510,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.accounts.action.default",
@@ -25407,7 +25825,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.accounts.action.named",
@@ -25716,7 +26141,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.accounts.get",
@@ -25883,7 +26315,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.accounts.list",
@@ -26051,7 +26485,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.accounts.surface.list",
@@ -26226,7 +26662,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.actions.invoke",
@@ -26337,7 +26775,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.actions.list",
@@ -26458,7 +26903,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.actions.surface.list",
@@ -26586,7 +27033,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.agent_tools.list",
@@ -26683,7 +27132,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.agent_tools.surface.list",
@@ -26787,7 +27238,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.allowlist.edit",
@@ -27020,6 +27473,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "additionalProperties": false
                   }
                 },
+                "open": {
+                  "type": "boolean"
+                },
                 "updatedAt": {
                   "type": "number"
                 },
@@ -27212,7 +27668,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.allowlist.resolve",
@@ -27399,7 +27857,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.authorize",
@@ -27669,7 +28129,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.capabilities.list",
@@ -27767,7 +28229,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.capabilities.surface.list",
@@ -27872,7 +28336,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.directory.query",
@@ -28029,7 +28495,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.doctor.get",
@@ -28258,7 +28726,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.drafts.delete",
@@ -28309,7 +28779,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.drafts.get",
@@ -28399,7 +28871,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.drafts.list",
@@ -28510,7 +28984,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.drafts.save",
@@ -28669,7 +29145,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "channels.inbox.applyLabels",
@@ -28791,7 +29268,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.inbox.list",
@@ -29073,7 +29552,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.inbox.triage",
@@ -29175,7 +29656,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.lifecycle.get",
@@ -29259,7 +29747,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.policies.audit",
@@ -29378,7 +29868,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.policies.list",
@@ -29552,6 +30044,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "additionalProperties": false
                     }
                   },
+                  "open": {
+                    "type": "boolean"
+                  },
                   "updatedAt": {
                     "type": "number"
                   },
@@ -29611,12 +30106,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.policies.update",
         "title": "Update Channel Policy",
-        "description": "Update ingress policy configuration for a channel surface.",
+        "description": "Update ingress policy configuration for a channel surface. `open` makes it a shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised (off by default, so the first unknown sender raises a claim the owner accepts or declines). Anyone admitted who is not the channel's owner talks as a guest: their turn may read and answer, and every change it asks for is put to the owner.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -29638,6 +30135,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "enabled": {
+              "type": "boolean"
+            },
+            "open": {
               "type": "boolean"
             },
             "requireMention": {
@@ -29952,6 +30452,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "additionalProperties": false
               }
             },
+            "open": {
+              "type": "boolean"
+            },
             "updatedAt": {
               "type": "number"
             },
@@ -30005,7 +30508,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.profiles.delete",
@@ -30062,7 +30567,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.profiles.get",
@@ -30265,7 +30772,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.profiles.list",
@@ -30413,7 +30922,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.profiles.set",
@@ -30611,7 +31122,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.repairs.list",
@@ -30735,7 +31248,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.routing.assign",
@@ -30819,7 +31334,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.routing.delete",
@@ -30870,7 +31387,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.routing.list",
@@ -30956,7 +31475,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.setup.get",
@@ -31247,7 +31768,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.status",
@@ -31344,7 +31867,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.targets.resolve",
@@ -31575,7 +32100,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.test.send",
@@ -31637,7 +32164,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "recipients": [
           "address"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.tools.invoke",
@@ -31748,7 +32282,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "channels.tools.list",
@@ -31872,7 +32413,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "channels.tools.surface.list",
@@ -32003,7 +32546,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.conversation.cancel",
@@ -32054,7 +32599,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.conversation.health",
@@ -32104,7 +32651,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           }
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.conversation.stream",
@@ -32179,7 +32728,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           }
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "messageId",
+          "behavior": "A repeat that names the same `messageId` in the same conversation posts nothing again and starts no second turn: while the first turn runs the repeat waits for it and streams its outcome as the final or error frame; after it ended the outcome is read from the transcript. A stream the client drops cancels its own turn, so a repeat after a drop reports it cancelled. The daemon keeps the messageId while it runs (a restart forgets it). Without a messageId each call posts the utterance and starts a turn."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "homeassistant.conversation.submit",
@@ -32264,7 +32819,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "checkin.config.get",
@@ -32344,7 +32906,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkin.config.set",
@@ -32436,7 +33000,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkin.receipts.list",
@@ -32651,7 +33217,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkin.run",
@@ -32705,7 +33273,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "checkpoints.create",
@@ -32850,7 +33425,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.diff",
@@ -32926,7 +33503,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.list",
@@ -33079,7 +33658,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.restore",
@@ -33234,7 +33815,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.restorePreview",
@@ -33310,7 +33893,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.revertHunk",
@@ -33466,7 +34051,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "checkpoints.revertHunkPreview",
@@ -33580,7 +34167,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ci.status",
@@ -33718,7 +34307,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ci.watches.create",
@@ -33861,7 +34452,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "ci.watches.delete",
@@ -33912,7 +34510,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ci.watches.list",
@@ -34038,7 +34638,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ci.watches.run",
@@ -34193,7 +34795,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "cloudflare.credentials.verify",
@@ -34264,7 +34873,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.disable",
@@ -34367,7 +34978,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.provision",
@@ -34727,7 +35340,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.resources.list",
@@ -34943,7 +35558,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.status",
@@ -35034,7 +35651,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.token.create",
@@ -35224,7 +35843,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "cloudflare.token.requirements.get",
@@ -35402,7 +36022,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cloudflare.worker.verify",
@@ -35489,7 +36111,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.events.stream",
@@ -35527,6 +36151,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": false,
+        "repeat": "safe",
+        "idempotent": true,
         "metadata": {
           "responseKind": "sse",
           "stream": true,
@@ -35673,7 +36299,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "clientMessageId",
+          "behavior": "A second send with the same `clientMessageId` returns the first message's id and starts no second turn, while the session stays loaded in the daemon (a daemon restart forgets the id)."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "companion.chat.messages.edit",
@@ -35833,7 +36465,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "companion.chat.messages.list",
@@ -36036,7 +36675,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.messages.retry",
@@ -36099,7 +36740,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "companion.chat.messages.search",
@@ -36200,7 +36848,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.messages.steer",
@@ -36357,7 +37007,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "companion.chat.queuedMessages.delete",
@@ -36414,7 +37071,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.queuedMessages.edit",
@@ -36475,7 +37134,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.queuedMessages.list",
@@ -36544,7 +37205,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.close",
@@ -36593,7 +37256,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.create",
@@ -36784,7 +37449,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "companion.chat.sessions.delete",
@@ -36834,7 +37500,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.get",
@@ -37124,7 +37792,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.list",
@@ -37297,7 +37967,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.reopen",
@@ -37350,7 +38022,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.update",
@@ -37618,7 +38292,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "companion.chat.turns.cancel",
@@ -37681,7 +38357,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "config.get",
@@ -37983,12 +38661,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "config.reset",
         "title": "Reset Config Value",
-        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set).",
+        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -38016,62 +38696,128 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "success": {
-              "type": "boolean"
-            },
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "success": {
                   "type": "boolean"
                 },
-                {
-                  "type": "null"
+                "key": {
+                  "type": "string"
                 },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
                 },
-                {
-                  "type": "array",
-                  "items": {}
+                "persistedTo": {
+                  "type": "string"
+                },
+                "tier": {
+                  "type": "string"
+                },
+                "daemonOwned": {
+                  "type": "boolean"
                 }
-              ]
+              },
+              "required": [
+                "success",
+                "key"
+              ],
+              "additionalProperties": true
             },
-            "persistedTo": {
-              "type": "string"
-            },
-            "tier": {
-              "type": "string"
-            },
-            "daemonOwned": {
-              "type": "boolean"
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "success",
-            "key"
-          ],
-          "additionalProperties": true
+          ]
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "config.set",
         "title": "Set Config Value",
-        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.",
+        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -38311,62 +39057,128 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "success": {
-              "type": "boolean"
-            },
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "success": {
                   "type": "boolean"
                 },
-                {
-                  "type": "null"
+                "key": {
+                  "type": "string"
                 },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
                 },
-                {
-                  "type": "array",
-                  "items": {}
+                "persistedTo": {
+                  "type": "string"
+                },
+                "tier": {
+                  "type": "string"
+                },
+                "daemonOwned": {
+                  "type": "boolean"
                 }
-              ]
+              },
+              "required": [
+                "success",
+                "key"
+              ],
+              "additionalProperties": true
             },
-            "persistedTo": {
-              "type": "string"
-            },
-            "tier": {
-              "type": "string"
-            },
-            "daemonOwned": {
-              "type": "boolean"
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "success",
-            "key"
-          ],
-          "additionalProperties": true
+          ]
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "config.setMany",
         "title": "Set Several Config Values",
-        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -38431,73 +39243,139 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "success": {
-              "type": "boolean"
-            },
-            "revision": {
-              "type": "number"
-            },
-            "entries": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "key": {
-                    "type": "string"
-                  },
-                  "value": {
-                    "anyOf": [
-                      {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "number"
+                },
+                "entries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
                         "type": "string"
                       },
-                      {
-                        "type": "number"
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          }
+                        ]
                       },
-                      {
+                      "persistedTo": {
+                        "type": "string"
+                      },
+                      "tier": {
+                        "type": "string"
+                      },
+                      "daemonOwned": {
                         "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      },
-                      {
-                        "type": "array",
-                        "items": {}
                       }
-                    ]
-                  },
-                  "persistedTo": {
+                    },
+                    "required": [
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "success",
+                "revision",
+                "entries"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
                     "type": "string"
-                  },
-                  "tier": {
-                    "type": "string"
-                  },
-                  "daemonOwned": {
-                    "type": "boolean"
                   }
                 },
-                "required": [
-                  "key"
-                ],
-                "additionalProperties": false
-              }
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "success",
-            "revision",
-            "entries"
-          ],
-          "additionalProperties": false
+          ]
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "credentials.delete",
@@ -38555,7 +39433,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "credentials.get",
@@ -38646,7 +39526,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "credentials.set",
@@ -38717,7 +39599,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "continuity.snapshot",
@@ -38891,7 +39775,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "contracts.budget",
@@ -38949,6 +39835,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "changesContract": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "INVALID_ARGUMENT",
@@ -39024,6 +39912,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -47118,6 +48008,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "idempotencyKey",
+          "behavior": "A repeat by the same caller with the same `idempotencyKey` returns the first dispatch's contract while that contract runs, instead of starting a second one."
+        },
+        "repeat": "keyed",
         "errorCodes": [
           {
             "code": "INVALID_ARGUMENT",
@@ -55192,6 +56088,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -63269,7 +64167,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "contracts.remove",
@@ -63312,6 +64212,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "irreversible": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -63416,6 +64318,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "outward",
         "changesContract": true,
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -63497,6 +64406,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -71616,6 +72532,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "name": "Idempotency-Key",
           "behavior": "A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the contract store per caller, so a retry after a daemon restart still returns the first contract; the body is compared field by field, in any order. The key may also be sent as `idempotencyKey` in the body; the header wins when both are given. A replayed result carries `replayed: true`."
         },
+        "repeat": "keyed",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "INVALID_ARGUMENT",
@@ -71902,6 +72820,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CONTRACT_NOT_FOUND",
@@ -72156,7 +73076,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.auth.current",
@@ -72288,7 +73210,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.auth.login",
@@ -72346,7 +73270,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": false
+        "invokable": false,
+        "repeat": "unsafe"
       },
       {
         "id": "control.auth.logout",
@@ -72381,7 +73306,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": false
+        "invokable": false,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.clients.list",
@@ -72450,7 +73377,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.contract",
@@ -73027,6 +73956,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             ],
                             "additionalProperties": false
                           },
+                          "repeat": {
+                            "type": "string",
+                            "enum": [
+                              "safe",
+                              "keyed",
+                              "unsafe"
+                            ]
+                          },
                           "errorCodes": {
                             "type": "array",
                             "items": {
@@ -73311,7 +74248,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.events.catalog",
@@ -73462,7 +74401,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.events.stream",
@@ -73508,6 +74449,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": false,
+        "repeat": "safe",
+        "idempotent": true,
         "metadata": {
           "responseKind": "sse",
           "stream": true
@@ -73716,7 +74659,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.methods.get",
@@ -73906,6 +74851,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   ],
                   "additionalProperties": false
                 },
+                "repeat": {
+                  "type": "string",
+                  "enum": [
+                    "safe",
+                    "keyed",
+                    "unsafe"
+                  ]
+                },
                 "errorCodes": {
                   "type": "array",
                   "items": {
@@ -73973,7 +74926,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.methods.list",
@@ -74165,6 +75120,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   },
+                  "repeat": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "keyed",
+                      "unsafe"
+                    ]
+                  },
                   "errorCodes": {
                     "type": "array",
                     "items": {
@@ -74233,7 +75196,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.snapshot",
@@ -74595,7 +75560,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.status",
@@ -74705,7 +75672,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "control.web",
@@ -74750,14 +75719,74 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": false,
+        "repeat": "safe",
+        "idempotent": true,
         "metadata": {
           "responseKind": "html"
         }
       },
       {
-        "id": "relay.pairing.mint",
-        "title": "Mint A Relay Pairing Payload",
-        "description": "Return the pairing payload a surface scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, and the daemon's static public key. `pairing` is null, not an error, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet, and is the same value the in-process capability returns. Minting does not create a second identity or a second registration; it describes the one that exists.",
+        "id": "relay.codes.list",
+        "title": "List Relay Codes",
+        "description": "List the relay codes this daemon issued, one per device paired through the relay (relay.pairing.mint), as redacted views: id, name, created time and, when the device has used it, the last time a relayed request presented it. The code itself is never stored in listable form and is never returned.",
+        "category": "control-plane",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:control-plane"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "codes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "createdAt"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "codes"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "relay.codes.revoke",
+        "title": "Revoke Relay Code",
+        "description": "Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.",
         "category": "control-plane",
         "source": "builtin",
         "access": "admin",
@@ -74769,7 +75798,62 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         ],
         "inputSchema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revoked": {
+              "type": "boolean"
+            },
+            "closedConnections": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "revoked",
+            "closedConnections"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "relay.pairing.mint",
+        "title": "Mint A Relay Pairing Payload",
+        "description": "Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: \"Relay device\" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.",
+        "category": "control-plane",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:control-plane"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
         "outputSchema": {
@@ -74792,6 +75876,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "daemonPublicKey": {
                       "type": "string"
                     },
+                    "code": {
+                      "type": "string"
+                    },
                     "label": {
                       "type": "string"
                     }
@@ -74800,7 +75887,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "protocol",
                     "relayUrl",
                     "rid",
-                    "daemonPublicKey"
+                    "daemonPublicKey",
+                    "code"
                   ],
                   "additionalProperties": false
                 },
@@ -74820,6 +75908,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "refused",
                 "stopped"
               ]
+            },
+            "codeId": {
+              "type": "string"
+            },
+            "codeName": {
+              "type": "string"
             }
           },
           "required": [
@@ -74830,7 +75924,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "relay.reachability.get",
@@ -74910,7 +76005,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "update.check",
@@ -75117,7 +76214,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "update.status",
@@ -75315,7 +76414,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "cost.attribution.get",
@@ -75571,7 +76672,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "deliveries.get",
@@ -75708,7 +76811,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "deliveries.list",
@@ -75873,7 +76978,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "notifications.deadLetters.list",
@@ -75965,7 +77072,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "notifications.deadLetters.replay",
@@ -76043,7 +77152,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "email.attachment.get",
@@ -76099,7 +77215,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.draft.create",
@@ -76166,7 +77284,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "email.drafts.list",
@@ -76243,7 +77362,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.expectation.cancel",
@@ -76326,7 +77447,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.expectation.list",
@@ -76406,7 +77529,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.expectation.open",
@@ -76508,7 +77633,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "email.expectation.wait",
@@ -76678,7 +77804,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.inbound.status",
@@ -77055,7 +78183,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.inbox.list",
@@ -77182,7 +78312,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.inbox.read",
@@ -77273,7 +78405,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.inbox.update",
@@ -77333,7 +78467,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "email.send",
@@ -77404,7 +78540,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "recipients": [
           "to"
         ],
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "clientSendId",
+          "behavior": "A repeat with the same `clientSendId` and the same message within ten minutes returns the first answer instead of sending again; the same id with a different message is 409 CLIENT_SEND_ID_REUSED."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "flags.graduation.report",
@@ -77613,7 +78755,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "flags.status",
@@ -77674,7 +78818,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.archive",
@@ -77721,7 +78867,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.archived.list",
@@ -78143,7 +79291,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.archiveFinished",
@@ -78176,7 +79326,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.attempts.judge",
@@ -78248,7 +79400,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "fleet.attempts.list",
@@ -78577,7 +79736,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.attempts.pick",
@@ -78937,7 +80098,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.conflicts.list",
@@ -79011,7 +80174,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.conflicts.resolve",
@@ -79066,7 +80231,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "fleet.conflicts.retry",
@@ -79115,7 +80287,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "fleet.graph.get",
@@ -79278,7 +80451,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.interrupt",
@@ -79332,7 +80507,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.list",
@@ -79780,7 +80957,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.observed.steer",
@@ -79840,7 +81019,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "fleet.resume",
@@ -79894,7 +81080,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.snapshot",
@@ -80324,7 +81512,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.stop",
@@ -80378,7 +81568,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "fleet.unarchive",
@@ -80418,7 +81610,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "health.snapshot",
@@ -80730,7 +81924,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ops.doctor",
@@ -80898,7 +82094,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "ops.memory.get",
@@ -81084,7 +82282,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "power.keepAwake.set",
@@ -81291,7 +82491,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "power.status.get",
@@ -81488,7 +82690,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "runtime.state.get",
@@ -81573,7 +82777,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.local.install",
@@ -81623,7 +82829,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.local.status",
@@ -82079,7 +83287,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.setup",
@@ -82252,7 +83462,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.wake.model.get",
@@ -82345,7 +83557,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.wake.provision",
@@ -82472,7 +83686,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.wake.status",
@@ -82719,7 +83935,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.cancel",
@@ -82938,7 +84156,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.configure",
@@ -83205,7 +84425,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "inbound.telegram.decide",
@@ -83579,7 +84800,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.list",
@@ -83944,7 +85167,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.read",
@@ -84518,7 +85743,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.release",
@@ -84727,7 +85954,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.revoke",
@@ -84913,7 +86142,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "inbound.telegram.status",
@@ -85487,7 +86718,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "intelligence.snapshot",
@@ -85561,7 +86794,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "judgment.battery.run",
@@ -85950,6 +87185,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": false,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "metadata": {
           "directHttpOnly": true,
           "retry": false,
@@ -86084,7 +87326,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.browse",
@@ -86532,7 +87781,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.export",
@@ -87107,7 +88358,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.generateHomeGraphPacket",
@@ -87424,7 +88677,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "homeassistant.homeGraph.generateRoomPage",
@@ -87729,7 +88983,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "homeassistant.homeGraph.import",
@@ -87836,7 +89091,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.ingestHomeGraphArtifact",
@@ -88305,6 +89562,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "metadata": {
           "uploadModes": [
             "json-artifact-reference",
@@ -88740,7 +90004,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.ingestHomeGraphUrl",
@@ -89167,7 +90438,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.linkHomeGraphKnowledge",
@@ -89408,7 +90686,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.listHomeGraphIssues",
@@ -89543,7 +90823,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.map",
@@ -90235,7 +91517,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.pages.list",
@@ -90315,7 +91599,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.refinement.run",
@@ -90493,7 +91779,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.refinement.task.cancel",
@@ -90754,7 +92047,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.refinement.task.get",
@@ -91018,7 +92313,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.refinement.tasks.list",
@@ -91281,7 +92578,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.refreshDevicePassport",
@@ -91583,7 +92882,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "homeassistant.homeGraph.reindex",
@@ -91915,7 +93215,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.reset",
@@ -92049,7 +93356,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.reviewHomeGraphFact",
@@ -92489,7 +93798,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.sources.list",
@@ -92657,7 +93968,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.status",
@@ -92767,7 +94080,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.syncHomeGraph",
@@ -93454,7 +94769,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "homeassistant.homeGraph.unlinkHomeGraphKnowledge",
@@ -93695,7 +95012,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.ask",
@@ -94605,7 +95924,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.candidate.decide",
@@ -94783,7 +96109,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.candidate.get",
@@ -94919,7 +96247,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.candidates.list",
@@ -95064,7 +96394,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.connector.doctor",
@@ -95221,7 +96553,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.connector.get",
@@ -95489,7 +96823,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.connectors.list",
@@ -95753,7 +97089,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.extraction.get",
@@ -95913,7 +97251,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.extractions.list",
@@ -96082,7 +97422,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.graphql.execute",
@@ -96229,7 +97571,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.graphql.schema",
@@ -96275,7 +97624,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.ingest.artifact",
@@ -96573,6 +97924,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "metadata": {
           "uploadModes": [
             "json-artifact-reference",
@@ -96786,7 +98144,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.ingest.browserHistory",
@@ -97201,7 +98566,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.ingest.connector",
@@ -97468,7 +98840,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.ingest.url",
@@ -97759,7 +99138,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.ingest.urls",
@@ -97964,7 +99350,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.issue.review",
@@ -98406,7 +99799,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.issues.list",
@@ -98524,7 +99919,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.item.get",
@@ -99196,7 +100593,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.job-run.cancel",
@@ -99730,7 +101129,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.job-runs.list",
@@ -100264,7 +101665,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.job.get",
@@ -100378,7 +101781,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.job.run",
@@ -100928,7 +102333,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.jobs.list",
@@ -101038,7 +102450,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.lint",
@@ -101146,7 +102560,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.map",
@@ -101724,7 +103140,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.nodes.list",
@@ -102059,7 +103477,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.packet",
@@ -102263,7 +103683,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.projection.materialize",
@@ -102825,7 +104247,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "knowledge.projection.render",
@@ -103095,7 +104518,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.projections.list",
@@ -103200,7 +104625,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.refinement.run",
@@ -103361,7 +104788,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.refinement.task.cancel",
@@ -103601,7 +105035,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.refinement.task.get",
@@ -103841,7 +105277,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.refinement.tasks.list",
@@ -104099,7 +105537,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.reindex",
@@ -104267,7 +105707,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.report.get",
@@ -104383,7 +105825,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.reports.list",
@@ -104505,7 +105949,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.schedule.delete",
@@ -104551,7 +105997,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.schedule.enable",
@@ -104739,7 +106187,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.schedule.get",
@@ -104923,7 +106373,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.schedule.save",
@@ -105241,7 +106693,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "knowledge.schedules.list",
@@ -105425,7 +106884,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.search",
@@ -105774,7 +107235,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.source.extraction.get",
@@ -105934,7 +107397,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.sources.list",
@@ -106241,7 +107706,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.status",
@@ -106333,7 +107800,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "knowledge.usage.list",
@@ -106449,7 +107918,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.decisions.list",
@@ -106580,7 +108051,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.decisions.record",
@@ -106867,7 +108340,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.language.get",
@@ -107142,7 +108617,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.state.get",
@@ -107823,7 +109300,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.status",
@@ -107915,7 +109394,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.clearCompleted",
@@ -108593,7 +110074,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.snapshot",
@@ -108854,7 +110337,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.task.create",
@@ -109616,7 +111101,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "task.taskId",
+          "behavior": "A create whose task names a `taskId` adds that task once: a repeat is refused because the task already exists, and nothing more is added. Without a taskId each call adds a task."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "projectPlanning.workPlan.task.delete",
@@ -110294,7 +111785,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.task.get",
@@ -110509,7 +112002,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.task.status",
@@ -111197,7 +112692,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.task.update",
@@ -111903,7 +113400,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.tasks.list",
@@ -112164,7 +113663,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "projectPlanning.workPlan.tasks.reorder",
@@ -112845,7 +114346,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.config.get",
@@ -113044,7 +114547,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.config.reload",
@@ -113307,7 +114812,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.list",
@@ -113449,7 +114956,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.remove",
@@ -113742,7 +115251,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.reveal",
@@ -113954,7 +115465,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.tools.allow",
@@ -114262,7 +115775,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.tools.clear",
@@ -114570,7 +116085,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.tools.deny",
@@ -114877,7 +116394,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.servers.upsert",
@@ -115278,7 +116797,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "mcp.tools.list",
@@ -115343,7 +116864,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "media.analyze",
@@ -115606,7 +117129,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "media.collect",
@@ -115797,7 +117327,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "media.generate",
@@ -116038,7 +117570,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "media.providers.list",
@@ -116099,7 +117638,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "media.transform",
@@ -116374,7 +117915,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "multimodal.analyze",
@@ -117019,7 +118567,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "multimodal.packet",
@@ -117317,7 +118872,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "multimodal.providers.list",
@@ -117414,7 +118971,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "multimodal.status",
@@ -117523,7 +119082,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "multimodal.writeback",
@@ -117948,7 +119509,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "memory.consolidation.decide",
@@ -118046,7 +119614,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.consolidation.receipts",
@@ -118219,7 +119789,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.doctor",
@@ -118413,7 +119985,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.embeddings.default.set",
@@ -118614,7 +120188,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.projections.get",
@@ -118740,7 +120316,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.projections.list",
@@ -118858,7 +120436,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.add",
@@ -119099,7 +120679,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "id",
+          "behavior": "An add that names a caller-generated `id` (mem_<base36 time>_<8 hex>) stores the memory once: a repeat with the same id and the same record returns the stored row, and the same id with a different record is refused. Without an id each call stores a new memory."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "memory.records.delete",
@@ -119149,7 +120735,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.export",
@@ -119436,7 +121024,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.get",
@@ -119589,7 +121179,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.import",
@@ -119828,7 +121420,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.links.add",
@@ -119902,7 +121496,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.links.list",
@@ -119971,7 +121567,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.list",
@@ -120192,7 +121790,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.search",
@@ -120470,7 +122070,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.search-semantic",
@@ -120718,7 +122320,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.update",
@@ -120911,7 +122515,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.records.update-review",
@@ -121082,7 +122688,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.review-queue",
@@ -121137,7 +122745,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.snapshots.list",
@@ -121210,7 +122820,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "memory.snapshots.restore",
@@ -121294,6 +122906,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "ownerOnly": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "MEMORY_SNAPSHOT_UNAVAILABLE",
@@ -121399,7 +123013,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "memory.vector.stats",
@@ -121483,7 +123104,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.acknowledge",
@@ -121558,7 +123181,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.answer",
@@ -121722,7 +123347,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.confirm",
@@ -121832,7 +123459,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "occasions.conflict.resolve",
@@ -121917,7 +123545,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.gifts",
@@ -121993,7 +123623,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.interview.answer",
@@ -122141,7 +123773,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.interview.get",
@@ -122281,7 +123915,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.interview.record",
@@ -122425,7 +124061,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.list",
@@ -122709,7 +124347,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.pending",
@@ -123066,7 +124706,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.plans.confirm",
@@ -123167,7 +124809,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "occasions.plans.list",
@@ -123335,7 +124978,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.plans.propose",
@@ -123431,7 +125076,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.plans.remove",
@@ -123513,7 +125160,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.plans.update",
@@ -123667,7 +125316,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.propose",
@@ -123771,7 +125422,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.remove",
@@ -123849,7 +125502,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.state",
@@ -123970,7 +125625,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "occasions.sweep",
@@ -124277,7 +125934,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "occasions.update",
@@ -124443,7 +126107,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.handoff.complete",
@@ -124562,12 +126228,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.handoff.create",
         "title": "Create Pairing Hand-off",
-        "description": "Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion.",
+        "description": "The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -124588,6 +126256,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "string"
               }
+            },
+            "fromSharedToken": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -124710,7 +126381,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "pairing.posture.get",
@@ -124794,12 +126466,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.tokens.create",
         "title": "Mint Paired Device Token",
-        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.",
+        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -124876,7 +126550,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "in": "body",
           "name": "attemptId",
           "behavior": "Sending the same attemptId again while the token that attempt produced is still unused returns that token (same id) under a new secret, and the secret of the lost reply stops working; once the token has been used, the same attemptId mints a new token."
-        }
+        },
+        "repeat": "keyed"
       },
       {
         "id": "pairing.tokens.delete",
@@ -124928,12 +126603,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.tokens.list",
         "title": "List Paired Device Tokens",
-        "description": "List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did) and scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority). The token secret is never stored in listable form and is never returned.",
+        "description": "List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself through the pairing flow (pairing.handoff.create or the pairing screen, from the operator token, an admin sign-in, an app on his machine or another owner device, with full authority), which makes the owner's own acts (loosening a security, permission, judgment or payment setting; answering a change put to him), or `automation` for every other token (pairing.tokens.create, pairing.tokens.migrate, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which does not. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -124977,12 +126654,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "origin": {
+                    "type": "string",
+                    "enum": [
+                      "owner-pairing",
+                      "automation"
+                    ]
                   }
                 },
                 "required": [
                   "id",
                   "name",
-                  "createdAt"
+                  "createdAt",
+                  "origin"
                 ],
                 "additionalProperties": false
               }
@@ -124998,12 +126683,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.tokens.migrate",
         "title": "Migrate Off The Shared Token",
-        "description": "A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once, the honest migration path. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).",
+        "description": "A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once. A token minted here is automation (origin automation), for a script; the owner's own browser or app moves off the shared token with pairing.handoff.create and `fromSharedToken: true`, which makes it an owner device. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -125068,7 +126755,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "in": "body",
           "name": "attemptId",
           "behavior": "Sending the same attemptId again while the token that attempt produced is still unused returns that token (same id) under a new secret, and the secret of the lost reply stops working; once the token has been used, the same attemptId mints a new token."
-        }
+        },
+        "repeat": "keyed"
       },
       {
         "id": "pairing.tokens.rename",
@@ -125116,12 +126804,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "pairing.tokens.revokeShared",
         "title": "Revoke The Legacy Shared Token",
-        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Idempotent.",
+        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -125145,7 +126835,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "panels.list",
@@ -125211,7 +126902,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "panels.open",
@@ -125271,7 +126964,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.budget.status",
@@ -125428,7 +127123,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.cards.create",
@@ -125567,7 +127264,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "payments.cards.delete",
@@ -125621,7 +127319,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.cards.list",
@@ -125722,7 +127422,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.checkout.approve",
@@ -125801,7 +127503,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "payments.checkout.begin",
@@ -126171,7 +127880,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "requestId",
+          "behavior": "Reusing an admitted `requestId` never starts another purchase, even with changed input; after a lost response read the outcome with payments.purchase.status and that requestId."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "payments.purchase.approve",
@@ -126244,7 +127959,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchase.cancel",
@@ -126369,7 +128086,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchase.deny",
@@ -126442,7 +128161,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchase.reconcile",
@@ -126666,7 +128387,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchase.securityCode",
@@ -126736,7 +128459,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchase.status",
@@ -127059,7 +128784,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.purchases.list",
@@ -127322,7 +129049,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.standing.create",
@@ -127474,7 +129203,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "payments.standing.delete",
@@ -127529,7 +129265,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.standing.list",
@@ -127637,7 +129375,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "permissions.rules.delete",
@@ -127678,7 +129418,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "permissions.rules.list",
@@ -127723,7 +129465,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "exact",
                       "command-class",
                       "path",
-                      "tool"
+                      "tool",
+                      "never-run"
                     ]
                   },
                   "tool": {
@@ -127753,7 +129496,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "principals.create",
@@ -127933,7 +129678,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "principals.delete",
@@ -127984,7 +129730,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "principals.get",
@@ -128107,7 +129855,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "principals.list",
@@ -128226,7 +129976,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "principals.resolve",
@@ -128357,7 +130109,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "principals.update",
@@ -128539,7 +130293,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.append",
@@ -128652,7 +130408,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "profile.forget",
@@ -128759,7 +130516,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.get",
@@ -128889,7 +130648,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.person",
@@ -129008,7 +130769,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.provenance",
@@ -129201,7 +130964,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.read",
@@ -129459,7 +131224,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.set",
@@ -129572,7 +131339,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "profile.status",
@@ -129654,7 +131422,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "profile.undo",
@@ -129755,7 +131525,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "models.current.get",
@@ -129914,7 +131685,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "models.current.set",
@@ -130095,7 +131868,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "models.list",
@@ -130343,7 +132118,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "providers.get",
@@ -130723,7 +132500,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "providers.list",
@@ -131108,7 +132887,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "providers.usage.get",
@@ -131330,7 +133111,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "push.subscriptions.create",
@@ -131423,12 +133206,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "push.subscriptions.delete",
         "title": "Delete Web Push Subscription",
-        "description": "Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.",
+        "description": "Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.",
         "category": "push",
         "source": "builtin",
         "access": "authenticated",
@@ -131467,7 +133252,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "push.subscriptions.list",
@@ -131563,7 +133350,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "push.subscriptions.reconcile",
@@ -131661,7 +133450,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "push.subscriptions.verify",
@@ -131724,7 +133515,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "push.vapid.get",
@@ -131752,7 +133550,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "quota.fanout.get",
@@ -131838,7 +133638,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "quota.snapshot.get",
@@ -131901,7 +133703,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "stepup.challenge.mint",
@@ -131963,7 +133767,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "stepup.credentials.list",
@@ -132024,7 +133830,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "stepup.credentials.register",
@@ -132126,7 +133934,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "stepup.credentials.remove",
@@ -132177,7 +133987,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.backends.list",
@@ -132324,7 +134136,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.backends.register",
@@ -132523,6 +134337,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "REMOTE_BACKEND_ID_TAKEN",
@@ -132579,7 +134395,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.node_host.contract",
@@ -132816,7 +134634,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.pair.requests.approve",
@@ -133194,6 +135014,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "ownerOnly": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "REMOTE_PAIR_REQUEST_SETTLED",
@@ -133375,7 +135197,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.pair.requests.reject",
@@ -133586,7 +135410,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.peers.disconnect",
@@ -133799,7 +135625,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.peers.get",
@@ -134006,7 +135834,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.peers.invoke",
@@ -134430,6 +136260,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "REMOTE_PEER_REVOKED",
@@ -134644,7 +136481,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.peers.token.revoke",
@@ -134858,7 +136697,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.peers.token.rotate",
@@ -135120,7 +136961,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "remote.snapshot",
@@ -136068,7 +137910,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.work.cancel",
@@ -136358,7 +138202,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "remote.work.list",
@@ -136641,7 +138487,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "tailscale.get",
@@ -136774,12 +138622,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "tailscale.serve.run",
         "title": "Set Up Tailscale Serve For The Daemon",
-        "description": "The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon's web surface at its https MagicDNS URL. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.",
+        "description": "The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.",
         "category": "remote-access",
         "source": "builtin",
         "access": "admin",
@@ -136856,7 +138706,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "tailscale.serve.stop",
@@ -136941,7 +138793,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "review.snapshot",
@@ -137009,7 +138863,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.apply",
@@ -137289,7 +139145,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.conversation.host.register",
@@ -137375,7 +139233,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "rewind.conversation.host.release",
@@ -137448,7 +139307,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.conversation.hosts.list",
@@ -137509,7 +139370,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.conversation.requests.answer",
@@ -137625,7 +139488,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.conversation.requests.take",
@@ -137743,7 +139608,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "rewind.plan",
@@ -137904,7 +139770,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "rewind.undo",
@@ -137995,7 +139863,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "routes.bindings.create",
@@ -138235,7 +140105,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "routes.bindings.delete",
@@ -138288,7 +140160,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "routes.bindings.list",
@@ -138464,7 +140338,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "routes.bindings.update",
@@ -138689,7 +140565,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "routes.snapshot",
@@ -138877,7 +140755,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "surfaces.list",
@@ -138994,7 +140874,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.artifacts.delete",
@@ -139081,7 +140963,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.artifacts.list",
@@ -139182,7 +141066,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.artifacts.read",
@@ -139276,12 +141162,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.capability.request",
         "title": "Request a Capability From a Paired Device",
-        "description": "Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is re-read from disk (never cached), a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.",
+        "description": "Ask one paired device node for one capability, a photo, a screen capture, a location fix, its clipboard, a notification, a link to open, a buzz, and return what came back. The reason is required and is shown VERBATIM on the confirmation prompt, so the person deciding sees what the caller said it was for. Every gate lives in the daemon-owned device runtime and this verb re-decides none of them: a durable grant is read from the authority record every machine of the group shares, so a grant revoked on any of them is not honoured; work waiting for the phone under a grant that is then revoked is withdrawn (refusal grant-revoked-before-claim), and work the phone had already picked up answers grant-revoked-after-claim saying what took effect; a request with no grant asks the person on whatever surface they are looking at, a capability turned off by configuration is refused with the configuration key that turned it off, and a capture is retained under the configured retention window and disclosed. A refusal is returned as ok:false with the reason and a machine-readable refusal code, it is an answer, not an error. A capability that produces a capture returns an artifact REFERENCE; fetch the bytes with devices.artifacts.read.",
         "category": "runtime",
         "source": "builtin",
         "access": "authenticated",
@@ -139474,7 +141362,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "devices.grants.list",
@@ -139622,12 +141517,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.grants.revoke",
         "title": "Revoke a Device Capability Grant",
-        "description": "Delete durable grants by grant id, by device, by capability, or any combination. Revoked grants are removed rather than flagged, so the next request for that capability asks the person again. Returns exactly what was removed.",
+        "description": "Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.",
         "category": "runtime",
         "source": "builtin",
         "access": "authenticated",
@@ -139709,7 +141606,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.housekeeping.run",
@@ -139839,7 +141738,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "devices.nodes.list",
@@ -140001,7 +141902,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "runtime.metrics.get",
@@ -140074,7 +141977,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "scheduler.capacity",
@@ -140131,7 +142036,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "services.install",
@@ -140441,7 +142348,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "services.restart",
@@ -140751,7 +142660,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "services.start",
@@ -141061,7 +142971,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "services.status",
@@ -141371,7 +143283,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "services.stop",
@@ -141681,7 +143595,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "services.uninstall",
@@ -141992,7 +143908,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.changes.get",
@@ -142077,7 +143995,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.close",
@@ -142287,6 +144207,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -142476,7 +144398,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.create",
@@ -142688,7 +144612,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "sessions.delete",
@@ -142742,6 +144667,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "irreversible": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -142967,6 +144894,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -143629,6 +145558,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "name": "messageId",
           "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
+        "repeat": "keyed",
         "errorCodes": [
           {
             "code": "INVALID_MESSAGE_ID",
@@ -143952,6 +145882,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -144185,12 +146117,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.hosted.create",
         "title": "Create a Daemon-Hosted Session",
-        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
+        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown, ambiguous or unselectable id is refused here, 400 MODEL_NOT_FOUND, MODEL_AMBIGUOUS or MODEL_NOT_SELECTABLE, rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused (429 HOSTED_SESSION_LIMIT_REACHED) with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -144369,7 +146303,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "status": 400,
+            "meaning": "workspaceRoot is relative or outside the allowed folders, or another field is malformed (named in `field`); nothing was created."
+          },
+          {
+            "code": "MODEL_NOT_FOUND",
+            "status": 400,
+            "meaning": "No model in this daemon's registry answers to modelId; nothing was created. Name a model it holds, or none."
+          },
+          {
+            "code": "MODEL_AMBIGUOUS",
+            "status": 400,
+            "meaning": "modelId is served by several providers; nothing was created. Name it provider-qualified."
+          },
+          {
+            "code": "MODEL_NOT_SELECTABLE",
+            "status": 400,
+            "meaning": "The model modelId names cannot be chosen; nothing was created."
+          },
+          {
+            "code": "HOSTED_SURFACE_FORBIDDEN",
+            "status": 403,
+            "meaning": "originSurface agent needs an admin credential; nothing was created."
+          },
+          {
+            "code": "HOSTED_SESSION_LIMIT_REACHED",
+            "status": 429,
+            "meaning": "hostedSessions.maxSessions live sessions already exist; end one or raise the setting."
+          },
+          {
+            "code": "HOSTED_SESSION_UNAVAILABLE",
+            "status": 409,
+            "meaning": "The workspace's provider setup failed or the daemon is shutting down; nothing was created."
+          }
+        ]
       },
       {
         "id": "sessions.hosted.detach",
@@ -144534,7 +146512,237 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "sessions.hosted.history",
+        "title": "Read a Daemon-Hosted Session's Transcript",
+        "description": "Return a hosted session's record and its transcript, live or ended, without attaching. An ended session (its last client detached under the kill policy, its attachment lease lapsed, it was killed, or the daemon restarted) keeps its transcript on disk until `hostedSessions.terminatedRetentionMs` (24 hours by default) retires it, so its reply stays readable here, also after a daemon restart; after that the id answers 404 SESSION_NOT_FOUND. An admin credential reads any session; any other credential reads only a session its principal created or attached to, else 403 HOSTED_SESSION_NOT_OWNED. Reading changes nothing and does not keep a kill-policy session alive. ws-only invoke verb; no REST binding.",
+        "category": "sessions",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:transcripts"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "nativeConversation": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "workspaceRoot": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "idle",
+                    "running",
+                    "terminated"
+                  ]
+                },
+                "detachPolicy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "kill",
+                        "survive"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "effectiveDetachPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "kill",
+                    "survive"
+                  ]
+                },
+                "attachedClients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "providerId": {
+                  "type": "string"
+                },
+                "modelId": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "turnCount": {
+                  "type": "number"
+                },
+                "messageCount": {
+                  "type": "number"
+                },
+                "lastTurnAt": {
+                  "type": "number"
+                },
+                "terminatedAt": {
+                  "type": "number"
+                },
+                "terminatedReason": {
+                  "type": "string"
+                },
+                "restoredFromDisk": {
+                  "type": "boolean"
+                },
+                "originSurface": {
+                  "type": "string"
+                },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "contractIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "saveError": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "workspaceRoot",
+                "title",
+                "status",
+                "detachPolicy",
+                "effectiveDetachPolicy",
+                "attachedClients",
+                "createdAt",
+                "updatedAt",
+                "turnCount",
+                "messageCount",
+                "restoredFromDisk",
+                "contractIds"
+              ],
+              "additionalProperties": false
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant",
+                      "system",
+                      "tool"
+                    ]
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "toolCalls": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "arguments": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "arguments"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "callId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "session",
+            "history"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "SESSION_NOT_FOUND",
+            "status": 404,
+            "meaning": "This daemon holds no hosted session with that id, or its retention ended; nothing was read."
+          },
+          {
+            "code": "HOSTED_SESSION_NOT_OWNED",
+            "status": 403,
+            "meaning": "The session was not created or attached to by this credential; read it with the credential that did, or an admin one."
+          }
+        ]
       },
       {
         "id": "sessions.hosted.kill",
@@ -144697,7 +146905,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.hosted.list",
@@ -144855,7 +147065,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.hosted.workspaces",
@@ -144891,7 +147103,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.inputs.cancel",
@@ -145156,6 +147370,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "CANCEL_NOT_ALLOWED",
@@ -145445,6 +147661,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "INPUT_NOT_CLAIMABLE",
@@ -145891,6 +148109,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -145972,7 +148192,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.list",
@@ -146226,7 +148448,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.messages.create",
@@ -146909,6 +149133,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "name": "messageId",
           "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
+        "repeat": "keyed",
         "errorCodes": [
           {
             "code": "INVALID_KIND",
@@ -147246,6 +149471,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -147257,7 +149484,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.get",
         "title": "Get Session Permission Mode",
-        "description": "Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -147299,6 +149526,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "yolo",
                 "plan"
               ]
+            },
+            "chosenMode": {
+              "type": "string",
+              "enum": [
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
+                "yolo",
+                "plan"
+              ]
+            },
+            "reason": {
+              "type": "string"
             }
           },
           "required": [
@@ -147308,12 +149548,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.permissionMode.set",
         "title": "Set Session Permission Mode",
-        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.",
         "category": "sessions",
         "source": "builtin",
         "access": "admin",
@@ -147355,42 +149597,108 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "sessionId": {
-              "type": "string"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "previousMode": {
+                  "type": "string",
+                  "enum": [
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
+                    "yolo",
+                    "plan"
+                  ]
+                }
+              },
+              "required": [
+                "sessionId",
+                "mode",
+                "previousMode"
+              ],
+              "additionalProperties": false
             },
-            "mode": {
-              "type": "string",
-              "enum": [
-                "ask-me",
-                "jev-decides",
-                "just-vibes",
-                "yolo",
-                "plan"
-              ]
-            },
-            "previousMode": {
-              "type": "string",
-              "enum": [
-                "ask-me",
-                "jev-decides",
-                "just-vibes",
-                "yolo",
-                "plan"
-              ]
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "sessionId",
-            "mode",
-            "previousMode"
-          ],
-          "additionalProperties": false
+          ]
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "sessions.queuedMessages.delete",
@@ -147450,7 +149758,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.queuedMessages.edit",
@@ -147514,7 +149824,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.queuedMessages.list",
@@ -147583,7 +149895,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.register",
@@ -147872,7 +150186,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "in": "body",
           "name": "sessionId",
           "behavior": "Registering the same sessionId again is a heartbeat, not a second session; it returns the existing record."
-        }
+        },
+        "repeat": "keyed"
       },
       {
         "id": "sessions.reopen",
@@ -148082,6 +150397,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -148321,7 +150638,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.steer",
@@ -148980,6 +151299,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "name": "messageId",
           "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
+        "repeat": "keyed",
         "errorCodes": [
           {
             "code": "INVALID_MESSAGE_ID",
@@ -149061,7 +151381,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "sessions.turns.cancel",
@@ -149130,7 +151452,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "security.settings",
@@ -149278,7 +151602,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "settings.snapshot",
@@ -149642,7 +151968,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "skills.create",
@@ -149781,7 +152109,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "skills.delete",
@@ -149834,7 +152164,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "skills.get",
@@ -149938,7 +152270,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "skills.list",
@@ -150034,7 +152368,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "skills.update",
@@ -150171,7 +152507,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "tasks.cancel",
@@ -150375,12 +152713,21 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "TASK_NOT_FOUND",
+            "status": 404,
+            "meaning": "No runtime task has that id."
+          }
+        ]
       },
       {
         "id": "tasks.create",
         "title": "Create Task",
-        "description": "Submit a task to the daemon or a shared session.",
+        "description": "Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), or 409 with `mode` `rejected` and `acknowledged: false`. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing's `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.",
         "category": "tasks",
         "source": "builtin",
         "access": "admin",
@@ -150631,6 +152978,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "SESSION_NOT_FOUND",
@@ -150646,13 +153000,38 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "code": "SESSION_AGENT_BIND_FAILED",
             "status": 500,
             "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "status": 400,
+            "meaning": "A field is missing or not in its documented shape (the body names it in `field`); nothing was changed."
+          },
+          {
+            "code": "INVALID_JSON",
+            "status": 400,
+            "meaning": "The body is not JSON; nothing was started."
+          },
+          {
+            "code": "MODEL_NOT_FOUND",
+            "status": 400,
+            "meaning": "No registered model answers to the model (or a fallback model) named; nothing was started. Name a model this daemon holds."
+          },
+          {
+            "code": "MODEL_AMBIGUOUS",
+            "status": 400,
+            "meaning": "The bare model id is served by several providers; nothing was started. Name it provider-qualified, as the message lists."
+          },
+          {
+            "code": "CAPACITY_EXCEEDED",
+            "status": 429,
+            "meaning": "The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds."
           }
         ]
       },
       {
         "id": "tasks.get",
         "title": "Get Runtime Task",
-        "description": "Return a single runtime task record.",
+        "description": "Return a single runtime task record, as `{ task }`.",
         "category": "tasks",
         "source": "builtin",
         "access": "authenticated",
@@ -150845,7 +153224,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "TASK_NOT_FOUND",
+            "status": 404,
+            "meaning": "No runtime task has that id."
+          }
+        ]
       },
       {
         "id": "tasks.list",
@@ -151083,12 +153471,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "tasks.retry",
         "title": "Retry Runtime Task",
-        "description": "Retry a runtime task through the task action endpoint.",
+        "description": "Retry a failed or cancelled agent task: a new agent runs the same task on the model, provider, tools, routing (fallback models, provider selection and failure policy, reasoning effort), execution limits and contract settings the task was started with, in the session that started it. The task keeps its id and its `owner` becomes the new agent, returned as `agentId`. When the record of the agent that ran it is no longer held, nothing is started (409 TASK_SETTINGS_UNAVAILABLE).",
         "category": "tasks",
         "source": "builtin",
         "access": "admin",
@@ -151287,12 +153677,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "TASK_NOT_FOUND",
+            "status": 404,
+            "meaning": "No runtime task has that id."
+          },
+          {
+            "code": "TASK_NOT_RETRYABLE",
+            "status": 400,
+            "meaning": "Only a failed or cancelled agent task can be retried; nothing was started."
+          },
+          {
+            "code": "TASK_SETTINGS_UNAVAILABLE",
+            "status": 409,
+            "meaning": "The record of the agent that ran the task is no longer held, so the model, tools and routing it ran with are unknown; nothing was started. Create the task again."
+          },
+          {
+            "code": "MODEL_NOT_FOUND",
+            "status": 400,
+            "meaning": "No registered model answers to the model (or a fallback model) named; nothing was started. Name a model this daemon holds."
+          },
+          {
+            "code": "MODEL_AMBIGUOUS",
+            "status": 400,
+            "meaning": "The bare model id is served by several providers; nothing was started. Name it provider-qualified, as the message lists."
+          },
+          {
+            "code": "CAPACITY_EXCEEDED",
+            "status": 429,
+            "meaning": "The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds."
+          }
+        ]
       },
       {
         "id": "tasks.status",
         "title": "Get Task Status",
-        "description": "Return lightweight runtime task status by agent id.",
+        "description": "Return lightweight runtime task status by agent id. `status` is pending, running, completed, failed or cancelled.",
         "category": "tasks",
         "source": "builtin",
         "access": "authenticated",
@@ -151388,7 +153817,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "AGENT_NOT_FOUND",
+            "status": 404,
+            "meaning": "No agent with that id is held."
+          }
+        ]
       },
       {
         "id": "telemetry.errors.list",
@@ -151721,7 +154159,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.events.list",
@@ -152054,7 +154494,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.metrics.get",
@@ -152360,7 +154802,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.otlp.logs",
@@ -152472,7 +154916,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.otlp.metrics",
@@ -152584,7 +155030,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.otlp.traces",
@@ -152696,7 +155144,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.snapshot",
@@ -153819,7 +156269,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "telemetry.stream",
@@ -154000,6 +156452,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": false,
+        "repeat": "safe",
+        "idempotent": true,
         "metadata": {
           "responseKind": "sse",
           "stream": true,
@@ -154282,7 +156736,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.providers.list",
@@ -154343,7 +156799,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.realtime.session",
@@ -154475,7 +156933,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "repeat": "unsafe"
       },
       {
         "id": "voice.status",
@@ -154587,7 +157046,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "voice.stt",
@@ -154783,7 +157244,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "voice.tts",
@@ -154955,7 +157423,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "voice.tts.stream",
@@ -155050,6 +157525,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": false,
+        "repeat": "unsafe",
         "metadata": {
           "responseKind": "binary-stream"
         }
@@ -155144,7 +157620,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.create",
@@ -155377,7 +157855,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "watchers.delete",
@@ -155430,7 +157915,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "irreversible": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.list",
@@ -155605,7 +158092,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.run",
@@ -155775,7 +158264,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "watchers.start",
@@ -155945,7 +158441,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.stop",
@@ -156115,7 +158613,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.triggers.cancel",
@@ -156203,6 +158703,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "TRIGGER_OPERATOR_REQUIRED",
@@ -156249,7 +158751,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "watchers.triggers.create",
         "title": "Create a trigger",
-        "description": "Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.",
+        "description": "Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn, whose answer goes to the channel its deliverTo names (telegram, slack:C123) or else to the owner inbox; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.",
         "category": "watchers",
         "source": "builtin",
         "access": "admin",
@@ -156353,6 +158855,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "TRIGGER_OPERATOR_REQUIRED",
@@ -156469,7 +158973,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.triggers.grant.register",
@@ -156568,6 +159074,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "ownerOnly": true,
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "TRIGGER_OPERATOR_REQUIRED",
@@ -156728,6 +159236,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "read",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "TRIGGER_OPERATOR_REQUIRED",
@@ -156861,7 +159371,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.triggers.reset",
@@ -156949,6 +159461,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
         "errorCodes": [
           {
             "code": "TRIGGER_OPERATOR_REQUIRED",
@@ -157060,7 +159574,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "watchers.update",
@@ -157296,7 +159812,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "web_search.providers.list",
@@ -157368,7 +159891,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "web_search.query",
@@ -157693,7 +160218,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "workLedger.execution.cancel",
@@ -158638,7 +161170,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.execution.resume",
@@ -159583,7 +162117,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "attemptId",
+          "behavior": "One attempt (workId, attemptId and expectedRevision) runs once: an exact repeat returns the same execution identity instead of starting a second run; launch-claimed effects are never replayed."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.execution.start",
@@ -160528,7 +163068,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "attemptId",
+          "behavior": "One attempt (workId, attemptId and expectedRevision) runs once: an exact repeat returns the same execution identity instead of starting a second run; launch-claimed effects are never replayed."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.execution.status",
@@ -161473,7 +164019,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.history",
@@ -163045,7 +165593,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.importLegacy",
@@ -165225,7 +167775,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "in": "body",
           "name": "requestId",
           "behavior": "Sending the same requestId again replays the durable result without a new admission evaluation."
-        }
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.intake.admit",
@@ -167346,7 +169897,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "inputId",
+          "behavior": "One input id is captured and admitted once: an exact repeat returns the original source identity or joins the operation already running instead of acting again."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.intake.cancel",
@@ -169467,7 +172024,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.intake.capture",
@@ -171713,7 +174272,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "inputId",
+          "behavior": "One input id is captured and admitted once: an exact repeat returns the original source identity or joins the operation already running instead of acting again."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.intake.get",
@@ -173847,7 +176412,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.intake.resume",
@@ -175968,7 +178535,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "inputId",
+          "behavior": "One input id is captured and admitted once: an exact repeat returns the original source identity or joins the operation already running instead of acting again."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.prepareLegacyImport",
@@ -176063,7 +178636,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.project",
@@ -176105,7 +178680,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.snapshot",
@@ -177037,7 +179614,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.submission.get",
@@ -177300,7 +179879,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.submit",
@@ -177584,7 +180165,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "in": "body",
           "name": "requestId",
           "behavior": "Sending the same requestId with the same content again returns the original immutable receipt (replayed: true). After a lost response, use workLedger.submission.get with the same requestId."
-        }
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.turn.cancel",
@@ -177756,7 +180338,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.turn.session",
@@ -177843,7 +180427,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workLedger.turn.start",
@@ -178025,7 +180611,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "inputId",
+          "behavior": "An admitted input (inputId with its sourceRevision) is delivered at most once: a repeat joins or reports the first dispatch instead of starting a second turn. An ambiguous dispatch is never replayed; read it with workLedger.turn.status."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.turn.startAgent",
@@ -178207,7 +180799,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "outward",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "inputId",
+          "behavior": "An admitted input (inputId with its sourceRevision) is delivered at most once: a repeat joins or reports the first dispatch instead of starting a second turn. An ambiguous dispatch is never replayed; read it with workLedger.turn.status."
+        },
+        "repeat": "keyed"
       },
       {
         "id": "workLedger.turn.status",
@@ -178379,7 +180977,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workspaces.registrations.add",
@@ -178464,7 +181064,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workspaces.registrations.list",
@@ -178547,7 +181149,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workspaces.registrations.remove",
@@ -178596,7 +181200,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "workspaces.resolve",
@@ -178683,7 +181289,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "worktrees.discard",
@@ -178742,7 +181350,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "worktrees.setup.run",
@@ -178846,7 +181456,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "invokable": true
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "worktrees.snapshot",
@@ -179035,7 +181652,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
-        "invokable": true
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
       }
     ],
     "events": [
@@ -180272,6 +182891,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         }
       },
       {
+        "id": "control.own_session_activity",
+        "title": "Own Session Activity",
+        "description": "What a credential without the admin role holding `read:own-sessions` receives of the sessions its own principal created or attached to (sessions.hosted.create, sessions.hosted.attach): their `turn`, `tools`, `gate` and `session` runtime frames (streamed text, tool calls and results, permission decisions, turn transitions), their `approval-update` events and their `hosted-session-update` notices. Frames of every other session, and frames naming no session, are withheld; the admin-only domains stay admin-only for everything else. Open the stream with `?domains=turn,tools,gate,session` (or subscribe to those domains on the socket) and filter on the session id. Ownership is saved with the session, so it holds across a daemon restart.",
+        "category": "sessions",
+        "source": "builtin",
+        "transport": [
+          "sse",
+          "ws"
+        ],
+        "scopes": [
+          "read:own-sessions"
+        ]
+      },
+      {
         "id": "control.approval_update",
         "title": "Approval Record Update",
         "description": "Every approval record transition, pushed the moment the broker records it: an ask RAISED (status pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, or expired. The payload is the whole `approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the event and never needs a follow-up read to draw it. This is the channel that makes approvals.raise usable from a surface that is not in the daemon process: raise returns the pending record and the DECISION arrives here, so a client gets keystroke-fast prompt delivery instead of polling approvals.list on a timer. Domain-tagged `gate` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened the stream with ?domains=… must include `gate` to receive it; a client that opted into no domain narrowing receives it as before. The record is the daemon's, not the subscriber's: several surfaces see the same transition and the daemon remains the single source of the applied result, a surface renders what the record says rather than what it locally decided.",
@@ -181041,7 +183674,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "claim",
                     "purchase",
                     "queued-action",
-                    "decision"
+                    "decision",
+                    "report"
                   ]
                 },
                 "status": {
@@ -181565,20 +184199,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 636,
-      "typedInputs": 631,
+      "methods": 640,
+      "typedInputs": 635,
       "genericInputs": 5,
-      "typedOutputs": 634,
+      "typedOutputs": 638,
       "genericOutputs": 2
     },
     "eventCoverage": {
-      "events": 36,
+      "events": 37,
       "withDomains": 32,
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 636,
-      "validated": 629,
+      "methods": 640,
+      "validated": 633,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

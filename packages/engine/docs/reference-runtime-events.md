@@ -879,7 +879,8 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
             "claim",
             "purchase",
             "queued-action",
-            "decision"
+            "decision",
+            "report"
           ]
         },
         "status": {

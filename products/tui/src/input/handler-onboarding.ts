@@ -655,7 +655,8 @@ export function getOnboardingRuntimePostureForHandler(handler: InputHandler, req
       // Daemon-by-default: the loopback session daemon can be expected to run
       // even when nothing else was explicitly enabled here, so it does not
       // belong in "did onboarding opt into a network-facing bundle."
-      serverBacked: serviceEnabled || listenerEnabled || webEnabled,
+      // Service mode is not a server choice: Local TUI Only leaves it as it is.
+      serverBacked: getConfigValue('controlPlane.enabled') === true || listenerEnabled || webEnabled,
       remoteExposure,
     };
   }

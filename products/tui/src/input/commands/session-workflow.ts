@@ -156,7 +156,7 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
   },
   copySidecars: (ctx, _source, destination) => copySessionSidecars(ctx, destination),
   beforeSwitch: (ctx, operation, source, destination) => {
-    if (operation === 'fork' || source !== destination) ctx.cancelPendingRecovery?.();
+    if (operation === 'fork' || source !== destination) ctx.cancelSessionWork?.();
     // The session lock follows the live session to its new id at once.
     moveLiveSessionArtifacts(requireSurface(ctx), source, destination);
   },
@@ -215,7 +215,7 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
         const outcome = ctx.resumeSession
           ? await ctx.resumeSession(found.name, { quiet: true, liveChecked: true })
           : await (() => {
-            ctx.cancelPendingRecovery?.();
+            ctx.cancelSessionWork?.();
             return resumeSessionCore(found.name, {
               sessionManager: sm,
               conversation: ctx.session.conversationManager,

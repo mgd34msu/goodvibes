@@ -10,8 +10,13 @@ import type {
   DistributedPeerKind,
   DistributedPeerRecord,
   DistributedRuntimeWaiter,
+  StoredPeerRecord,
+  StoredPeerTokenRecord,
 } from './distributed-runtime-types.js';
+import type { AuthorityChange } from '../../cluster/authority-record-file.js';
+import type { AuthorityEntry, AuthorityKey } from '../../cluster/authority-record.js';
 import {
+  buildAudit,
   normalizeAudit,
   normalizePairRequest,
   normalizePeer,
@@ -651,4 +656,184 @@ export async function persistDistributedRuntime(state: DistributedRuntimeManager
   for (const item of snapshot.work) {
     if (item.status === 'claimed' && item.leaseExpiresAt !== undefined) state.writtenLeases.set(item.id, item.leaseExpiresAt);
   }
+}
+
+// ── the authority record ────────────────────────────────────────────────────
+//
+// Peer tokens live on the authority record (cluster/authority-record.ts) as
+// `peer-token` entries, so a peer paired on one machine of the group is
+// accepted on every machine, and a token rotated or revoked on any machine is
+// refused on all of them, including one that was asleep or restarted. This
+// store keeps the peer's working state (presence, work, audit); whether a
+// token may authenticate is the record's answer.
+
+const peerTokenKey = (id: string): AuthorityKey => `peer-token:${id}`;
+
+/** What another machine needs to serve a peer it has never seen: its description, never its tokens. */
+function describePeerForRecord(peer: StoredPeerRecord): Record<string, unknown> {
+  const deviceNode = peer.metadata['deviceNode'];
+  return {
+    kind: peer.kind,
+    label: peer.label,
+    requestedId: peer.requestedId,
+    ...(peer.platform !== undefined ? { platform: peer.platform } : {}),
+    ...(peer.deviceFamily !== undefined ? { deviceFamily: peer.deviceFamily } : {}),
+    ...(peer.version !== undefined ? { version: peer.version } : {}),
+    ...(peer.clientMode !== undefined ? { clientMode: peer.clientMode } : {}),
+    capabilities: [...peer.capabilities],
+    commands: [...peer.commands],
+    pairedAt: peer.pairedAt,
+    // A phone's device-node announcement, so it is a device node on any machine it connects to.
+    ...(deviceNode !== undefined ? { metadata: { deviceNode } } : {}),
+  };
+}
+
+/**
+ * Write a token change to the authority record: the token issued (with the
+ * peer it belongs to) and the tokens it replaced or that were revoked. Throws
+ * when the record cannot be written, so a revocation is never reported done
+ * while other machines still accept the token.
+ */
+export async function publishDistributedPeerTokens(
+  state: DistributedRuntimeManagerState,
+  peerId: string,
+  change: { readonly issued?: StoredPeerTokenRecord | undefined; readonly revoked: readonly string[]; readonly by: string; readonly reason: string },
+): Promise<void> {
+  const authority = state.authority;
+  if (!authority) return;
+  const peer = state.peers.get(peerId);
+  await authority.write((view) => {
+    const changes: AuthorityChange<null>[] = [];
+    const issued = change.issued;
+    if (issued && peer && !view.entry('peer-token', issued.id)) {
+      changes.push({ kind: 'issue', value: null, entries: [{
+        kind: 'peer-token',
+        id: issued.id,
+        public: {
+          peerId, label: issued.label, tokenHash: issued.secretHash, scopes: [...issued.scopes], issuedAt: issued.issuedAt,
+          peer: describePeerForRecord(peer),
+        },
+      }] });
+    }
+    for (const id of change.revoked) {
+      const entry = view.entry('peer-token', id);
+      if (entry && !entry.revoked) changes.push({ kind: 'revoke', key: peerTokenKey(id), by: change.by, reason: change.reason, value: null });
+    }
+    return changes.length === 0 ? { kind: 'none', value: null } : { kind: 'many', changes, value: null };
+  });
+}
+
+/**
+ * The record's answer for a presented peer token: refused (the record cannot
+ * be read, or holds the token as revoked), or the live entry that is not in
+ * this store yet (paired on another machine), or nothing to add.
+ */
+export function peerTokenOnRecord(
+  state: DistributedRuntimeManagerState,
+  tokenHash: string,
+  localTokenId: string | undefined,
+): { readonly refused: true } | { readonly refused: false; readonly entry: AuthorityEntry<'peer-token'> | null } {
+  const authority = state.authority;
+  if (!authority) return { refused: false, entry: null };
+  const view = authority.view();
+  if (!view) return { refused: true };
+  if (localTokenId !== undefined) return view.isRevoked(peerTokenKey(localTokenId)) ? { refused: true } : { refused: false, entry: null };
+  return { refused: false, entry: view.peerTokenByHash(tokenHash) };
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A peer paired on another machine presented a token the record holds as
+ * live: take the peer (or its new token) into this store, so it can pull
+ * work and be asked for things here. One write, once per peer and token.
+ */
+export async function adoptDistributedPeerFromRecord(
+  state: DistributedRuntimeManagerState,
+  entry: AuthorityEntry<'peer-token'>,
+): Promise<StoredPeerRecord> {
+  const view = state.authority?.view() ?? null;
+  const now = Date.now();
+  const peerId = entry.public.peerId;
+  const described = isRecord(entry.public['peer']) ? entry.public['peer'] : {};
+  const token: StoredPeerTokenRecord = {
+    id: entry.id,
+    label: entry.public.label,
+    scopes: [...entry.public.scopes],
+    issuedAt: entry.public.issuedAt,
+    lastUsedAt: undefined,
+    rotatedAt: entry.public.issuedAt,
+    revokedAt: undefined,
+    fingerprint: 'issued on another machine of the group',
+    secretHash: entry.public.tokenHash,
+  };
+  const existing = state.peers.get(peerId);
+  const otherTokens = (existing?.tokens ?? [])
+    .filter((held) => held.id !== token.id)
+    .map((held) => held.revokedAt || !view?.isRevoked(peerTokenKey(held.id)) ? held : { ...held, revokedAt: now });
+  const kind = described['kind'] === 'node' || described['kind'] === 'device' ? described['kind'] : 'device';
+  const metadata = isRecord(described['metadata']) ? described['metadata'] : {};
+  const peer: StoredPeerRecord = existing
+    ? { ...existing, status: existing.status === 'revoked' ? 'paired' : existing.status, activeTokenId: token.id, tokens: [...otherTokens, token] }
+    : {
+      id: peerId,
+      kind,
+      label: stringField(described['label']) ?? entry.public.label,
+      requestedId: stringField(described['requestedId']) ?? peerId,
+      platform: stringField(described['platform']),
+      deviceFamily: stringField(described['deviceFamily']),
+      version: stringField(described['version']),
+      clientMode: stringField(described['clientMode']),
+      capabilities: isStringArray(described['capabilities']) ? [...described['capabilities']] : [],
+      commands: isStringArray(described['commands']) ? [...described['commands']] : [],
+      permissions: undefined,
+      status: 'paired',
+      pairedAt: isFiniteNumber(described['pairedAt']) ? described['pairedAt'] : now,
+      verifiedAt: entry.public.issuedAt,
+      lastSeenAt: undefined,
+      lastConnectedAt: undefined,
+      lastDisconnectedAt: undefined,
+      lastRemoteAddress: undefined,
+      activeTokenId: token.id,
+      tokens: [token],
+      metadata: { ...metadata },
+    };
+  state.peers.set(peerId, peer);
+  recordDistributedRuntimeAudit(state, buildAudit('pair-verified', 'authority-record', {
+    peerId,
+    note: `${peer.label}: paired on another machine of the group (node ${entry.origin}); its token is current on the authority record`,
+  }));
+  await pruneAndPersistDistributedRuntime(state);
+  publishDistributedRuntimeEvent(state, 'remote-pair-verified', { peer: sanitizePeer(peer) });
+  return peer;
+}
+
+/**
+ * Mark here every token the record holds as revoked (revoked on another
+ * machine, or by another process of this home), so this store's peer list and
+ * the work admitted for its peers agree with the record. One write when
+ * anything changed.
+ */
+export async function applyDistributedPeerTokenRevocations(state: DistributedRuntimeManagerState): Promise<void> {
+  const view = state.authority?.view();
+  if (!view || !state.loaded) return;
+  const now = Date.now();
+  const changed: StoredPeerRecord[] = [];
+  for (const peer of state.peers.values()) {
+    if (!peer.tokens.some((token) => !token.revokedAt && view.isRevoked(peerTokenKey(token.id)))) continue;
+    const tokens = peer.tokens.map((token) => !token.revokedAt && view.isRevoked(peerTokenKey(token.id)) ? { ...token, revokedAt: now } : token);
+    const active = tokens.find((token) => !token.revokedAt) ?? null;
+    const updated: StoredPeerRecord = { ...peer, tokens, status: active ? peer.status : 'revoked', activeTokenId: active?.id };
+    state.peers.set(peer.id, updated);
+    recordDistributedRuntimeAudit(state, buildAudit('token-revoked', 'authority-record', {
+      peerId: peer.id,
+      note: `${peer.label}: token revoked on the authority record`,
+    }));
+    changed.push(updated);
+  }
+  if (changed.length === 0) return;
+  await pruneAndPersistDistributedRuntime(state);
+  for (const peer of changed) publishDistributedRuntimeEvent(state, 'remote-token-revoked', { peer: sanitizePeer(peer), tokenId: null });
 }

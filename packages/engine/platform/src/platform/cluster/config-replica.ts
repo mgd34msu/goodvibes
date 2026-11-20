@@ -60,6 +60,40 @@ export interface ConfigReplicaDocument {
   readonly revision: number;
   readonly entries: readonly ConfigReplicaEntry[];
   readonly tombstones: readonly ConfigReplicaTombstone[];
+  /**
+   * LOCAL ONLY: per path, the revision whose effect is on THIS machine (the
+   * setting written, the credential stored, the deletion made). Saved in the
+   * same file write as the document and read back with it, never sent and
+   * never merged (`wireReplicaDocument` strips it). An entry or deletion above
+   * it is a change still to apply here, so a change lost to a restart between
+   * saving the document and applying it is applied on the next pass, and a
+   * credential counts as held only for the revision it was stored under.
+   */
+  readonly applied?: Readonly<Record<string, number>> | undefined;
+}
+
+/** The document as it goes on the wire: without this machine's applied state. */
+export function wireReplicaDocument(document: ConfigReplicaDocument): ConfigReplicaDocument {
+  if (document.applied === undefined) return document;
+  return { version: 1, groupId: document.groupId, revision: document.revision, entries: document.entries, tombstones: document.tombstones };
+}
+
+/** The revision whose effect is on this machine for `path`, or -1. */
+export function appliedRevision(document: ConfigReplicaDocument, path: string): number {
+  return document.applied?.[path] ?? -1;
+}
+
+/** Record that the effect of `revision` for each path is on this machine. */
+export function withApplied(document: ConfigReplicaDocument, applied: Readonly<Record<string, number>>): ConfigReplicaDocument {
+  const next: Record<string, number> = { ...document.applied };
+  let changed = false;
+  for (const [path, revision] of Object.entries(applied)) {
+    // Revisions only grow: an effect recorded for a newer revision stays.
+    if ((next[path] ?? -1) >= revision) continue;
+    next[path] = revision;
+    changed = true;
+  }
+  return changed ? { ...document, applied: next } : document;
 }
 
 /**
@@ -160,12 +194,18 @@ export function readConfigReplicaDocument(
     .filter((entry): entry is ConfigReplicaTombstone => entry !== null && keep(entry.path));
   const revision = isFiniteNumber(candidate['revision']) ? Math.max(0, Math.trunc(candidate['revision'])) : 0;
   if (!Number.isSafeInteger(revision)) return null;
+  const applied: Record<string, number> = {};
+  const rawApplied = candidate['applied'];
+  if (typeof rawApplied === 'object' && rawApplied !== null && !Array.isArray(rawApplied)) {
+    for (const [path, value] of Object.entries(rawApplied as Record<string, unknown>)) if (keep(path) && isRevision(value)) applied[path] = Math.trunc(value);
+  }
   return normalize({
     version: 1,
     groupId: candidate['groupId'],
     revision,
     entries,
     tombstones,
+    ...(Object.keys(applied).length > 0 ? { applied } : {}),
   });
 }
 
@@ -200,8 +240,15 @@ function normalize(document: ConfigReplicaDocument): ConfigReplicaDocument {
     else tombstones.delete(path);
   }
   const bounded = [...entries.values()].sort(byPath).slice(0, MAX_REPLICATED_ENTRIES);
+  // Applied state is kept only for paths the document still holds.
+  let applied = document.applied;
+  if (applied) {
+    const held = new Set([...bounded.map((entry) => entry.path), ...tombstones.keys()]);
+    if (Object.keys(applied).some((path) => !held.has(path))) applied = Object.fromEntries(Object.entries(applied).filter(([path]) => held.has(path)));
+  }
   return {
     ...document,
+    ...(applied !== document.applied ? { applied } : {}),
     revision: Math.max(
       document.revision,
       ...bounded.map((entry) => entry.revision),
@@ -223,7 +270,11 @@ function beats(candidate: ConfigReplicaEntry, incumbent: ConfigReplicaEntry): bo
   return candidate.origin < incumbent.origin;
 }
 
-/** Reconcile two copies. Commutative: the merge order does not change the result. */
+/**
+ * Reconcile two copies. Commutative in what it selects: the merge order does
+ * not change the entries and deletions. The applied state is LOCAL's (it says
+ * what is on this machine), never the remote copy's.
+ */
 export function mergeConfigReplica(
   local: ConfigReplicaDocument,
   remote: ConfigReplicaDocument,
@@ -235,6 +286,7 @@ export function mergeConfigReplica(
     revision: Math.max(local.revision, remote.revision),
     entries: [...local.entries, ...remote.entries],
     tombstones: [...local.tombstones, ...remote.tombstones],
+    ...(local.applied !== undefined ? { applied: local.applied } : {}),
   });
 }
 

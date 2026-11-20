@@ -99,7 +99,6 @@ export interface GoodVibesConfig {
     staleContextWarnings: boolean; // default: true
     saveHistory: boolean;       // default: true
     notifyOnComplete: boolean;  // default: true
-    suggestAlternativeOnProviderFail: boolean; // default: false
     hitlMode: 'off' | 'quiet' | 'balanced' | 'operator'; // default: 'balanced'. 'off' keeps the baseline notification policy
     toolResultReconciliation: 'reconcile' | 'warn-only'; // default: 'reconcile'. Inject synthetic results for dangling tool calls at turn end
     returnContextMode: 'off' | 'local' | 'assisted'; // default: 'off'

@@ -1,3 +1,4 @@
+import { resolveWebSurfaceExposure } from '@goodvibes-jev/engine/terminal-shell/cli-network-posture';
 import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
@@ -131,10 +132,18 @@ export async function connectedHostStatusSummary(
         enabled: context.platform.configManager.get('danger.httpListener'),
         ...resolveRuntimeEndpointBinding(context.platform.configManager, 'httpListener'),
       },
-      web: {
-        enabled: context.platform.configManager.get('web.enabled'),
-        ...resolveRuntimeEndpointBinding(context.platform.configManager, 'web'),
-      },
+      // Where the web UI is served (the control-plane listener) or not; web.* is only a development server's.
+      web: (() => {
+        const exposure = resolveWebSurfaceExposure(context.platform.configManager);
+        const switchedOn = context.platform.configManager.get('web.enabled') === true;
+        return {
+          enabled: switchedOn && exposure.served,
+          ...exposure.binding,
+          served: exposure.served,
+          networkFacing: switchedOn && exposure.networkFacing,
+          developmentEndpoint: resolveRuntimeEndpointBinding(context.platform.configManager, 'web'),
+        };
+      })(),
     },
     operatorToken: {
       present: token.present,

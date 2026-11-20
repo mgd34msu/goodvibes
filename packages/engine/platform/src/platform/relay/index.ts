@@ -51,3 +51,4 @@ export {
   type MintedStepUpChallenge,
   type StepUpChallengeFailure,
 } from './step-up-service.js';
+export { RelayCodeStore, type PublicRelayCode, type MintedRelayCode } from './relay-codes.js';

@@ -302,6 +302,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'memory search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]',
       'memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <state>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>]',
       'memory show <id>',
+      'memory edit <id> [--summary <text>] [--detail <text>] [--tags a,b] [--scope <scope>] --yes',
       'memory queue [limit]',
       'memory review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]',
       'memory stale <id> <reason>',
@@ -472,10 +473,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
   },
   relay: {
-    usage: ['relay status', 'relay pair'],
+    usage: ['relay status', 'relay pair [name]', 'relay codes', 'relay revoke <id>'],
     summary:
-      "Ask the connected GoodVibes host for its live relay registration (status) and mint the pairing payload a surface scans to reach it through the relay (pair: relay URL, rendezvous id and the daemon's public key). The host holds the relay identity; status also shows this Agent's imported relay.* settings and the relay-connect feature flag.",
-    examples: ['relay status', 'relay pair'],
+      "Ask the connected GoodVibes host for its live relay registration (status) and mint the pairing payload one device scans to reach it through the relay (pair: relay URL, rendezvous id, the daemon's public key and a relay code for that device alone, labelled with the name). codes lists the devices' relay codes; revoke cuts one device off the relay at its next request while every other keeps working. The host holds the relay identity; status also shows this Agent's imported relay.* settings and the relay-connect feature flag.",
+    examples: ['relay status', 'relay pair "Mike\'s phone"', 'relay codes', 'relay revoke rc_1a2b3c4d5e6f'],
   },
   fleet: {
     usage: [

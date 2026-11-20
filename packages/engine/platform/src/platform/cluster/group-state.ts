@@ -1,17 +1,26 @@
 /**
- * group-state.ts, the replicated membership document, and how two copies of it
- * are reconciled.
+ * group-state.ts, who is in the group, read from the authority record.
  *
- * Every member holds the whole document and every member may edit it, so the
- * merge has to be a function of the two inputs alone: no "who asked first", no
- * clock comparison, nothing that depends on which node ran the merge. That is
- * what makes a partition heal into one answer instead of two.
+ * Membership is not a document of its own. Every admission is a `member`
+ * entry of the authority record (authority-record.ts) and every removal is
+ * the REVOCATION of that entry, so the roster converges by the record's merge:
+ * a removal is a positive, terminal fact that no copy which has not heard of
+ * it can undo, and a machine put back on purpose is a new incarnation at a
+ * higher membership generation. The record is carried to every member by
+ * authority-sync.ts, signed with identity keys that never rotate, so a machine
+ * any number of key generations behind still learns who is in.
  *
- * The document is PUBLIC to the group. It holds public keys and display names
- * and nothing else, no join key, no group key, no surface, no hostname. The
- * secret half lives in the encrypted key store (group-store.ts) and is never
- * written here.
+ * What this module holds is the READ: the roster (`GroupStateDocument`) a
+ * group's entries describe, and the ids those entries are written under. It is
+ * PUBLIC to the group: public keys and display names, nothing secret.
+ *
+ * Every entry id starts with the group id, so a machine that was in another
+ * group before keeps that group's entries (they are merged, never deleted)
+ * without them ever counting in this one.
  */
+import { type AnyAuthorityEntry, type AuthorityEntry, type AuthorityKey, type AuthorityRecord } from './authority-record.js';
+import { signWithIdentity, verifyWithIdentity, type NodeKeyPairMaterial } from './group-crypto.js';
+import type { KeyEpochFacts } from './group-store.js';
 
 /** One machine in the group. */
 export interface GroupMember {
@@ -23,20 +32,13 @@ export interface GroupMember {
   /** x25519 public key, where a new group key is sealed to. */
   readonly agreementKey: string;
   readonly admittedAt: number;
-  /**
-   * Membership generation for this node id. Monotonic per node: an add sets
-   * it, a later removal sets it higher, a later re-add higher still.
-   */
+  /** Membership generation (incarnation) of this node id: every admission is a higher one. */
   readonly gen: number;
 }
 
 /**
- * A removal. Not the absence of a member, the PRESENCE of a refusal.
- *
- * An absent member is indistinguishable from a member this copy has not
- * learned about yet, so a merge that treated absence as removal would let a
- * node that had never heard of the removal re-add the removed machine. A
- * tombstone is a positive fact that survives the merge.
+ * A removal: the revoked incarnation of a node with no live one above it.
+ * Not the absence of a member, the PRESENCE of a refusal.
  */
 export interface GroupTombstone {
   readonly nodeId: string;
@@ -44,38 +46,25 @@ export interface GroupTombstone {
   readonly at: number;
   /** Short plain-language reason, shown in `cluster nodes`. Never a hostname. */
   readonly reason: string;
+  /** The removed machine's identity key: it can still be told, verifiably, that it was removed. */
+  readonly identityKey: string;
   /**
    * Fingerprint of the join key the group used when the machine was removed,
    * which the removed machine still holds. A join proved with that key never
-   * puts it back (see `decideAdmission`), on any member, whether or not that
-   * member has adopted the replacement join key yet. Absent on older records.
+   * puts it back (see `decideAdmission`).
    */
   readonly removedUnder?: string;
 }
 
-/** The whole replicated document. */
+/** The roster one group's record entries describe. */
 export interface GroupStateDocument {
-  /** Schema version, a document from a future build is refused, not guessed at. */
   readonly version: 1;
   readonly groupId: string;
-  /**
-   * The name shown in the discovery beacon, so it is visible to anything on
-   * this network that is listening. Replicated: renaming on any member renames
-   * everywhere.
-   */
+  /** The name shown in the discovery beacon, visible to anything on this network. */
   readonly displayName: string;
-  /** Last-writer-wins counter for `displayName`. */
-  readonly displayNameGen: number;
   readonly members: readonly GroupMember[];
   readonly tombstones: readonly GroupTombstone[];
-  /**
-   * The public half of the GROUP's signing key, and its generation.
-   *
-   * Replicated because a machine that has been away has to be able to check a
-   * reply against the group rather than against whichever member answered, and
-   * its own copy of this is the one it stored the day it joined. Higher
-   * generation wins, exactly like every other record here.
-   */
+  /** The group signing public key of the newest generation on the record, and its generation. */
   readonly groupSigning: GroupSigningPublicKey;
 }
 
@@ -88,27 +77,10 @@ export interface GroupSigningPublicKey {
 /** The neutral name a group gets when the operator does not choose one. */
 export const DEFAULT_GROUP_DISPLAY_NAME = 'goodvibes group';
 
-/**
- * Bounds. Persisted state that can only grow is a slow leak, so both lists are
- * capped and swept, see `sweepGroupState`.
- *
- * 64 members is far past any homelab and still a trivial document to gossip.
- * 256 tombstones at 180 days is likewise generous; the reasoning for why
- * expiring a tombstone is SAFE is on `sweepGroupState`.
- */
+/** 64 members is far past any homelab and still a small record to carry. */
 export const MAX_GROUP_MEMBERS = 64;
-export const MAX_GROUP_TOMBSTONES = 256;
-export const GROUP_TOMBSTONE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1_000;
 /** Longest a display name may be. Long enough to be descriptive, short enough to fit a beacon. */
 export const MAX_GROUP_DISPLAY_NAME_LENGTH = 48;
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-function isNonEmptyString(value: unknown, max: number): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= max;
-}
 
 /** Trim and cap a display name; empty input falls back to the neutral default. */
 export function normalizeDisplayName(value: unknown, fallback: string): string {
@@ -118,408 +90,232 @@ export function normalizeDisplayName(value: unknown, fallback: string): string {
   return collapsed.slice(0, MAX_GROUP_DISPLAY_NAME_LENGTH);
 }
 
-// ── validation ──────────────────────────────────────────────────────────────
+// ── entry ids ───────────────────────────────────────────────────────────────
 
-function readMember(value: unknown): GroupMember | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Record<string, unknown>;
-  if (!isNonEmptyString(candidate['nodeId'], 128)) return null;
-  if (!isNonEmptyString(candidate['identityKey'], 128)) return null;
-  if (!isNonEmptyString(candidate['agreementKey'], 128)) return null;
-  if (!isFiniteNumber(candidate['admittedAt']) || !isFiniteNumber(candidate['gen'])) return null;
-  // A `lastSeenAt` written by an older build is ignored: when a member was
-  // last heard is kept in memory by the runtime, never in this document.
+/** The record id of one incarnation of a member. */
+export function memberEntryId(groupId: string, nodeId: string, gen: number): string {
+  return `${groupId}#${nodeId}#${gen}`;
+}
+
+/** The record id of one key generation. */
+export function keyEpochEntryId(groupId: string, epoch: number): string {
+  return `${groupId}#${epoch}`;
+}
+
+/** True when a record entry belongs to `groupId`'s membership, keys or name. */
+export function isGroupEntry(entry: AnyAuthorityEntry, groupId: string): boolean {
+  if (entry.kind === 'group') return entry.id === groupId;
+  return (entry.kind === 'member' || entry.kind === 'key-epoch') && entry.id.startsWith(`${groupId}#`);
+}
+
+// ── reading ─────────────────────────────────────────────────────────────────
+
+function isNonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max;
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** A member entry's public part, validated: it may have arrived from another machine. */
+function readMemberEntry(entry: AuthorityEntry<'member'>): GroupMember | null {
+  const value = entry.public as unknown as Record<string, unknown>;
+  if (!isNonEmptyString(value['nodeId'], 128) || !nonNegativeInteger(value['gen'])) return null;
+  if (!isNonEmptyString(value['identityKey'], 128) || !isNonEmptyString(value['agreementKey'], 128)) return null;
   return {
-    nodeId: candidate['nodeId'],
-    displayName: normalizeDisplayName(candidate['displayName'], candidate['nodeId'].slice(0, 8)),
-    identityKey: candidate['identityKey'],
-    agreementKey: candidate['agreementKey'],
-    admittedAt: Math.trunc(candidate['admittedAt']),
-    gen: Math.max(0, Math.trunc(candidate['gen'])),
+    nodeId: value['nodeId'],
+    displayName: normalizeDisplayName(value['displayName'], value['nodeId'].slice(0, 8)),
+    identityKey: value['identityKey'],
+    agreementKey: value['agreementKey'],
+    admittedAt: typeof value['admittedAt'] === 'number' && Number.isFinite(value['admittedAt']) ? Math.trunc(value['admittedAt']) : 0,
+    gen: value['gen'],
   };
 }
 
-function readGroupSigningPublicKey(value: unknown): GroupSigningPublicKey | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Record<string, unknown>;
-  if (!isNonEmptyString(candidate['publicKey'], 128)) return null;
-  if (!isFiniteNumber(candidate['generation']) || candidate['generation'] < 0) return null;
-  return { publicKey: candidate['publicKey'], generation: Math.trunc(candidate['generation']) };
+/** A key-epoch entry's public part, validated. */
+export function readKeyEpochEntry(entry: AuthorityEntry<'key-epoch'>): KeyEpochFacts | null {
+  const value = entry.public as unknown as Record<string, unknown>;
+  const signing = value['signing'] as Record<string, unknown> | null | undefined;
+  if (!nonNegativeInteger(value['epoch']) || (value['cause'] !== 'scheduled' && value['cause'] !== 'revocation')) return null;
+  if (typeof value['mintedBy'] !== 'string' || !isNonEmptyString(value['keyCommitment'], 128) || typeof value['joinVerifier'] !== 'string') return null;
+  if (!signing || typeof signing !== 'object' || !isNonEmptyString(signing['publicKey'], 128) || !nonNegativeInteger(signing['generation'])) return null;
+  return {
+    epoch: value['epoch'],
+    cause: value['cause'],
+    mintedBy: value['mintedBy'],
+    createdAt: typeof value['createdAt'] === 'number' && Number.isFinite(value['createdAt']) ? Math.trunc(value['createdAt']) : 0,
+    keyCommitment: value['keyCommitment'],
+    signing: { publicKey: signing['publicKey'], generation: signing['generation'] },
+    joinVerifier: value['joinVerifier'],
+  };
 }
 
-function readTombstone(value: unknown): GroupTombstone | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Record<string, unknown>;
-  if (!isNonEmptyString(candidate['nodeId'], 128)) return null;
-  if (!isFiniteNumber(candidate['gen']) || !isFiniteNumber(candidate['at'])) return null;
-  const removedUnder = candidate['removedUnder'];
-  return {
-    nodeId: candidate['nodeId'],
-    gen: Math.max(0, Math.trunc(candidate['gen'])),
-    at: Math.trunc(candidate['at']),
-    reason: normalizeDisplayName(candidate['reason'], 'removed'),
-    ...(typeof removedUnder === 'string' && /^[a-f0-9]{32}$/.test(removedUnder) ? { removedUnder } : {}),
-  };
+/** Every key generation the record holds for `groupId`, by generation. */
+export function keyEpochsFromRecord(record: AuthorityRecord, groupId: string): Map<number, KeyEpochFacts> {
+  const epochs = new Map<number, KeyEpochFacts>();
+  for (const entry of record.entries.values()) {
+    if (entry.kind !== 'key-epoch' || !isGroupEntry(entry, groupId)) continue;
+    const facts = readKeyEpochEntry(entry);
+    if (facts && entry.id === keyEpochEntryId(groupId, facts.epoch)) epochs.set(facts.epoch, facts);
+  }
+  return epochs;
 }
 
 /**
- * Parse an untrusted document, from disk after a crash, or off the wire from a
- * peer running a different build.
- *
- * Malformed ENTRIES are dropped individually rather than failing the whole
- * document: one corrupt member record should cost that record, not the group.
- * A malformed DOCUMENT returns null, and the caller decides what that means
- * (on disk: start over and say so; on the wire: drop the datagram).
+ * The roster `groupId`'s entries describe. Per node: its live incarnation
+ * above every revoked one is the member; a revoked incarnation with no live
+ * one above it is the removal. At equal generation revoked wins (the merge
+ * keeps a revocation terminal), which is the partition rule: a node that did
+ * not hear of a removal can never bring the machine back.
  */
-export function readGroupStateDocument(value: unknown): GroupStateDocument | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Record<string, unknown>;
-  if (candidate['version'] !== 1) return null;
-  if (!isNonEmptyString(candidate['groupId'], 64)) return null;
-  const rawMembers = Array.isArray(candidate['members']) ? candidate['members'] : [];
-  const rawTombstones = Array.isArray(candidate['tombstones']) ? candidate['tombstones'] : [];
-  const members = rawMembers.map(readMember).filter((entry): entry is GroupMember => entry !== null);
-  const tombstones = rawTombstones
-    .map(readTombstone)
-    .filter((entry): entry is GroupTombstone => entry !== null);
-  return normalizeGroupState({
-    version: 1,
-    groupId: candidate['groupId'],
-    displayName: normalizeDisplayName(candidate['displayName'], DEFAULT_GROUP_DISPLAY_NAME),
-    displayNameGen: isFiniteNumber(candidate['displayNameGen'])
-      ? Math.max(0, Math.trunc(candidate['displayNameGen']))
-      : 0,
-    members,
-    tombstones,
-    groupSigning: readGroupSigningPublicKey(candidate['groupSigning']) ?? { publicKey: '', generation: -1 },
-  });
-}
-
-/** An empty document for a group that has just been created. */
-export function createGroupStateDocument(
-  groupId: string,
-  displayName: string,
-  groupSigning: GroupSigningPublicKey = { publicKey: '', generation: -1 },
-): GroupStateDocument {
+export function groupStateFromRecord(record: AuthorityRecord, groupId: string): GroupStateDocument {
+  const live = new Map<string, GroupMember>();
+  const removed = new Map<string, GroupTombstone>();
+  let displayName = DEFAULT_GROUP_DISPLAY_NAME;
+  let signing: GroupSigningPublicKey = { publicKey: '', generation: -1 };
+  let signingEpoch = -1;
+  for (const entry of record.entries.values()) {
+    if (!isGroupEntry(entry, groupId)) continue;
+    if (entry.kind === 'group') {
+      displayName = normalizeDisplayName(entry.public.displayName, DEFAULT_GROUP_DISPLAY_NAME);
+      continue;
+    }
+    if (entry.kind === 'key-epoch') {
+      const facts = readKeyEpochEntry(entry);
+      if (facts && facts.epoch > signingEpoch) { signingEpoch = facts.epoch; signing = facts.signing; }
+      continue;
+    }
+    if (entry.kind !== 'member') continue;
+    const member = readMemberEntry(entry);
+    if (!member || entry.id !== memberEntryId(groupId, member.nodeId, member.gen)) continue;
+    if (entry.revoked) {
+      const existing = removed.get(member.nodeId);
+      if (!existing || member.gen > existing.gen) {
+        const removedUnder = (entry.public as { readonly removedUnder?: unknown }).removedUnder;
+        removed.set(member.nodeId, {
+          nodeId: member.nodeId,
+          gen: member.gen,
+          at: entry.revoked.at,
+          reason: normalizeDisplayName(entry.revoked.reason, 'removed'),
+          identityKey: member.identityKey,
+          ...(typeof removedUnder === 'string' && /^[a-f0-9]{32}$/.test(removedUnder) ? { removedUnder } : {}),
+        });
+      }
+      continue;
+    }
+    const existing = live.get(member.nodeId);
+    if (!existing || member.gen > existing.gen) live.set(member.nodeId, member);
+  }
+  for (const [nodeId, tombstone] of removed) {
+    const member = live.get(nodeId);
+    if (!member) continue;
+    // A removal at or above the live incarnation removes it; one below it is
+    // history (the machine was put back after it).
+    if (tombstone.gen >= member.gen) live.delete(nodeId);
+    else removed.delete(nodeId);
+  }
+  const byNodeId = <T extends { readonly nodeId: string }>(a: T, b: T): number => (a.nodeId < b.nodeId ? -1 : a.nodeId > b.nodeId ? 1 : 0);
   return {
     version: 1,
     groupId,
-    displayName: normalizeDisplayName(displayName, DEFAULT_GROUP_DISPLAY_NAME),
-    displayNameGen: 1,
-    members: [],
-    tombstones: [],
-    groupSigning,
+    displayName,
+    members: [...live.values()].sort(byNodeId),
+    tombstones: [...removed.values()].sort(byNodeId),
+    groupSigning: signing,
   };
 }
 
-/** Publish a newly minted group signing public key into the replicated document. */
-export function withGroupSigningKey(
-  state: GroupStateDocument,
-  groupSigning: GroupSigningPublicKey,
-): GroupStateDocument {
-  if (groupSigning.generation <= state.groupSigning.generation) return state;
-  return { ...state, groupSigning };
-}
-
-// ── merge ───────────────────────────────────────────────────────────────────
-
-/**
- * Deduplicate and order a document so two copies holding the same facts
- * serialize identically. Ordering by node id (not by time) keeps the
- * comparison stable regardless of what order updates arrived in.
- */
-function normalizeGroupState(state: GroupStateDocument): GroupStateDocument {
-  const members = new Map<string, GroupMember>();
-  for (const member of state.members) {
-    const existing = members.get(member.nodeId);
-    if (!existing || member.gen > existing.gen) members.set(member.nodeId, member);
-  }
-  const tombstones = new Map<string, GroupTombstone>();
-  for (const tombstone of state.tombstones) {
-    const existing = tombstones.get(tombstone.nodeId);
-    if (!existing || tombstone.gen > existing.gen) tombstones.set(tombstone.nodeId, tombstone);
-  }
-  // A tombstone at or above a member's generation removes it. Equal generations
-  // resolve to REMOVED deliberately: see mergeGroupState. A tombstone BELOW a
-  // member's generation is history: the machine was put back after it, and the
-  // record is dropped so no copy still carrying it can count the machine as
-  // removed again.
-  for (const [nodeId, tombstone] of tombstones) {
-    const member = members.get(nodeId);
-    if (!member) continue;
-    if (tombstone.gen >= member.gen) members.delete(nodeId);
-    else tombstones.delete(nodeId);
-  }
-  return {
-    ...state,
-    members: [...members.values()].sort((a, b) => (a.nodeId < b.nodeId ? -1 : a.nodeId > b.nodeId ? 1 : 0)),
-    tombstones: [...tombstones.values()].sort((a, b) => (a.nodeId < b.nodeId ? -1 : a.nodeId > b.nodeId ? 1 : 0)),
-  };
-}
-
-/**
- * Reconcile two copies of the document.
- *
- * The rules, in full:
- *
- *  - per node id, the HIGHEST membership generation wins, whether that record
- *    is an add or a tombstone;
- *  - at EQUAL generation a tombstone beats an add. Removal is always written
- *    at a generation above any add the writer has seen, so an equal generation
- *    means two copies disagree about the same step, and resolving that toward
- *    "removed" is the only direction that cannot resurrect a machine the
- *    operator deliberately ejected. The reverse rule would mean a node that
- *    was partitioned away during the removal could re-add it on heal;
- *  - the display name takes the higher `displayNameGen`, and at equal
- *    generation the lexicographically smaller name, so the tie resolves the
- *    same way on every node rather than flapping between them.
- *
- * Do not "simplify" the equal-generation tombstone rule into a plain
- * generation comparison. It is the partition case, and it is tested.
- */
-export function mergeGroupState(local: GroupStateDocument, remote: GroupStateDocument): GroupStateDocument {
-  if (local.groupId !== remote.groupId) return local;
-
-  const members = new Map<string, GroupMember>();
-  for (const member of [...local.members, ...remote.members]) {
-    const existing = members.get(member.nodeId);
-    if (!existing) {
-      members.set(member.nodeId, member);
-      continue;
-    }
-    if (member.gen > existing.gen) members.set(member.nodeId, member);
-  }
-
-  const tombstones = new Map<string, GroupTombstone>();
-  for (const tombstone of [...local.tombstones, ...remote.tombstones]) {
-    const existing = tombstones.get(tombstone.nodeId);
-    if (!existing || tombstone.gen > existing.gen) tombstones.set(tombstone.nodeId, tombstone);
-  }
-
-  const nameWins = remote.displayNameGen > local.displayNameGen
-    || (remote.displayNameGen === local.displayNameGen && remote.displayName < local.displayName);
-
-  return normalizeGroupState({
-    version: 1,
-    groupId: local.groupId,
-    displayName: nameWins ? remote.displayName : local.displayName,
-    displayNameGen: Math.max(local.displayNameGen, remote.displayNameGen),
-    members: [...members.values()],
-    tombstones: [...tombstones.values()],
-    // The signing key rotates only on a removal, so the higher generation is by
-    // construction the one written after the more recent removal.
-    groupSigning: remote.groupSigning.generation > local.groupSigning.generation
-      ? remote.groupSigning
-      : local.groupSigning,
-  });
-}
-
-// ── edits ───────────────────────────────────────────────────────────────────
-
-/** The next membership generation to write for `nodeId`, above every record held. */
+/** The next membership generation to write for `nodeId`, above every incarnation held. */
 export function nextMembershipGeneration(state: GroupStateDocument, nodeId: string): number {
   const member = state.members.find((entry) => entry.nodeId === nodeId);
   const tombstone = state.tombstones.find((entry) => entry.nodeId === nodeId);
   return Math.max(member?.gen ?? 0, tombstone?.gen ?? 0) + 1;
 }
 
-/** True when `nodeId` is currently a member (present, and not tombstoned above it). */
+/** True when `nodeId` is currently a member. */
 export function isCurrentMember(state: GroupStateDocument, nodeId: string): boolean {
   return state.members.some((entry) => entry.nodeId === nodeId);
 }
 
-/**
- * The removal record that still applies to `nodeId`, if the group holds one.
- *
- * A record older than the machine's current membership generation does not
- * apply: the machine was put back after it.
- */
+/** The removal that still applies to `nodeId`, if the group recorded one. */
 export function findTombstone(state: GroupStateDocument, nodeId: string): GroupTombstone | null {
-  const tombstone = state.tombstones.find((entry) => entry.nodeId === nodeId);
-  if (!tombstone) return null;
-  const member = state.members.find((entry) => entry.nodeId === nodeId);
-  return member && tombstone.gen < member.gen ? null : tombstone;
+  return state.tombstones.find((entry) => entry.nodeId === nodeId) ?? null;
 }
 
-export interface AdmitMemberInput {
-  readonly nodeId: string;
-  readonly displayName: string;
-  readonly identityKey: string;
-  readonly agreementKey: string;
-  readonly now: number;
-}
-
-/** Why an admission was refused, in words that name the fix. */
-export type AdmitRefusal = 'group-is-full' | 'node-was-removed';
-
-export interface AdmitOutcome {
-  readonly state: GroupStateDocument;
-  readonly refused: AdmitRefusal | null;
-}
+// ── rule 7: whose entries a member takes ────────────────────────────────────
 
 /**
- * Add (or re-add) a member.
- *
- * A tombstoned node is refused here rather than silently re-added: undoing a
- * removal is an operator decision. `readmitMember` is the deliberate path, and
- * it is reached only by a request that proved the CURRENT join key.
+ * What a member's identity key signs to bind its daemon home's record id (the
+ * `origin` of every entry that home writes) to its membership. With it, an
+ * entry's origin names a member of the group, checked against the member's
+ * identity key, never against anything the entry says about itself.
  */
-export function admitMember(state: GroupStateDocument, input: AdmitMemberInput): AdmitOutcome {
-  if (findTombstone(state, input.nodeId)) return { state, refused: 'node-was-removed' };
-  if (!isCurrentMember(state, input.nodeId) && state.members.length >= MAX_GROUP_MEMBERS) {
-    return { state, refused: 'group-is-full' };
-  }
-  const gen = nextMembershipGeneration(state, input.nodeId);
-  const existing = state.members.find((entry) => entry.nodeId === input.nodeId);
-  const member: GroupMember = {
-    nodeId: input.nodeId,
-    displayName: normalizeDisplayName(input.displayName, input.nodeId.slice(0, 8)),
-    identityKey: input.identityKey,
-    agreementKey: input.agreementKey,
-    admittedAt: existing?.admittedAt ?? Math.trunc(input.now),
-    gen,
-  };
-  return {
-    state: normalizeGroupState({
-      ...state,
-      members: [...state.members.filter((entry) => entry.nodeId !== input.nodeId), member],
-    }),
-    refused: null,
-  };
+function originBindingMessage(groupId: string, nodeId: string, origin: string): string {
+  return `goodvibes-cluster-authority-origin-v1\0${groupId}\0${nodeId}\0${origin}`;
 }
+
+/** Sign this machine's record id into its membership of `groupId`. */
+export function signOriginBinding(identity: NodeKeyPairMaterial, groupId: string, nodeId: string, origin: string): string {
+  return signWithIdentity(identity, originBindingMessage(groupId, nodeId, origin));
+}
+
+/** True when `proof` binds `origin` to `nodeId` under `identityKey`. */
+export function originBindingHolds(identityKey: string, groupId: string, nodeId: string, origin: string, proof: string): boolean {
+  try { return verifyWithIdentity(identityKey, originBindingMessage(groupId, nodeId, origin), proof); }
+  catch { return false; }
+}
+
+const bindingChecks = new Map<string, boolean>();
 
 /**
- * Put a removed machine back.
+ * Rule 7 for `groupId`, per entry (the `admit` merge option of
+ * authority-record.ts). Each member entry with a valid binding names the
+ * record id its daemon home writes under:
  *
- * Clears the tombstone and admits at a generation above it, so the add wins
- * every subsequent merge. Reached ONLY from a request that proved the current
- * join key, see rule 3 of `decideAdmission`. A stale add arriving from a
- * partitioned peer still loses to the tombstone, because a stale add is not a
- * join and never reaches here.
+ *  - an origin bound to a live member: its entries are taken;
+ *  - an origin bound only to removed members: its entries and revocations up
+ *    to the revision recorded with the removal (`originCutoff`, the newest of
+ *    its writes the removing member held) stand, anything above it was written
+ *    after the removal and is refused, on every member, however it arrives;
+ *  - an origin no member is bound to (entries a machine brought with it from
+ *    before it joined, owner decision D2): taken, as before.
+ *
+ * A function of the merged entries alone, so every member reaches the same
+ * answer whatever order changes arrive in. Null when no member of the group
+ * carries a binding.
  */
-export function readmitMember(state: GroupStateDocument, input: AdmitMemberInput): AdmitOutcome {
-  const cleared = normalizeGroupState({
-    ...state,
-    tombstones: state.tombstones.filter((entry) => entry.nodeId !== input.nodeId),
-  });
-  const gen = Math.max(
-    nextMembershipGeneration(cleared, input.nodeId),
-    (findTombstone(state, input.nodeId)?.gen ?? 0) + 1,
-  );
-  if (!isCurrentMember(cleared, input.nodeId) && cleared.members.length >= MAX_GROUP_MEMBERS) {
-    return { state, refused: 'group-is-full' };
-  }
-  return {
-    state: normalizeGroupState({
-      ...cleared,
-      members: [...cleared.members.filter((entry) => entry.nodeId !== input.nodeId), {
-        nodeId: input.nodeId,
-        displayName: normalizeDisplayName(input.displayName, input.nodeId.slice(0, 8)),
-        identityKey: input.identityKey,
-        agreementKey: input.agreementKey,
-        admittedAt: Math.trunc(input.now),
-        gen,
-      }],
-    }),
-    refused: null,
-  };
-}
-
-/**
- * Remove a member and write the tombstone that keeps it removed.
- *
- * The generation is taken ABOVE every record this copy holds for that node, so
- * a peer that only learns of the removal later cannot have an add that outranks
- * it. Rotating the group key alongside this is what makes the removal bite,
- * that is the caller's job, and group-runtime.ts does it in the same step.
- */
-export function removeMember(
-  state: GroupStateDocument,
-  nodeId: string,
-  reason: string,
-  now: number,
-  removedUnder?: string,
-): GroupStateDocument {
-  const gen = nextMembershipGeneration(state, nodeId);
-  return normalizeGroupState({
-    ...state,
-    tombstones: [
-      ...state.tombstones.filter((entry) => entry.nodeId !== nodeId),
-      { nodeId, gen, at: Math.trunc(now), reason: normalizeDisplayName(reason, 'removed'), ...(removedUnder ? { removedUnder } : {}) },
-    ],
-  });
-}
-
-/** Rename the group everywhere. The new name is replicated on the next gossip. */
-export function renameGroup(state: GroupStateDocument, displayName: string): GroupStateDocument {
-  return {
-    ...state,
-    displayName: normalizeDisplayName(displayName, DEFAULT_GROUP_DISPLAY_NAME),
-    displayNameGen: state.displayNameGen + 1,
-  };
-}
-
-// ── fitting a datagram ──────────────────────────────────────────────────────
-
-/**
- * Trim a document so its JSON is at most `maxBytes`, by dropping the OLDEST
- * removal records. Members are never dropped: a roster without them would be
- * wrong, not smaller.
- *
- * Used only for what is put on the wire. A receiver merges what it hears into
- * its own copy, so an older removal left out of one datagram is still held by
- * everyone who already had it; the local document is never trimmed here.
- */
-export function fitStateToBytes(
-  state: GroupStateDocument,
-  maxBytes: number,
-): { readonly state: GroupStateDocument; readonly droppedTombstones: number } {
-  if (Buffer.byteLength(JSON.stringify(state), 'utf8') <= maxBytes) return { state, droppedTombstones: 0 };
-  const newestFirst = [...state.tombstones].sort((a, b) => b.at - a.at);
-  let low = 0, high = newestFirst.length;
-  // Largest prefix of the newest tombstones that still fits.
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    const candidate = { ...state, tombstones: newestFirst.slice(0, mid) };
-    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') <= maxBytes) low = mid; else high = mid - 1;
-  }
-  return {
-    state: { ...state, tombstones: newestFirst.slice(0, low) },
-    droppedTombstones: state.tombstones.length - low,
-  };
-}
-
-// ── sweep ───────────────────────────────────────────────────────────────────
-
-export interface GroupStateSweepResult {
-  readonly state: GroupStateDocument;
-  readonly droppedTombstones: number;
-}
-
-/**
- * Bound the document. Called on load and periodically thereafter.
- *
- * Tombstones expire after {@link GROUP_TOMBSTONE_MAX_AGE_MS} and are capped at
- * {@link MAX_GROUP_TOMBSTONES}, oldest dropped first. Expiring a removal sounds
- * dangerous and is not, for one specific reason: a removed machine is refused
- * because its node id IS NOT ON THE ROSTER, and dropping the tombstone does not
- * put it back. The tombstone's only job is to beat a stale add during the
- * window when some peer might still be carrying one, and 180 days is far longer
- * than any partition that ends in a heal rather than a rebuild.
- *
- * Members are NOT swept by age. A machine that has been off all winter is still
- * a member, and reaping it would mean the operator has to re-join it by hand,
- * exactly the zero-touch return this design exists to provide.
- */
-export function sweepGroupState(state: GroupStateDocument, now: number): GroupStateSweepResult {
-  const cutoff = now - GROUP_TOMBSTONE_MAX_AGE_MS;
-  const fresh = state.tombstones.filter((entry) => entry.at >= cutoff);
-  const kept = fresh.length <= MAX_GROUP_TOMBSTONES
-    ? fresh
-    : [...fresh].sort((a, b) => b.at - a.at).slice(0, MAX_GROUP_TOMBSTONES);
-  if (kept.length === state.tombstones.length) return { state, droppedTombstones: 0 };
-  return {
-    state: normalizeGroupState({ ...state, tombstones: kept }),
-    droppedTombstones: state.tombstones.length - kept.length,
+export function originAdmission(groupId: string): (entries: ReadonlyMap<AuthorityKey, AnyAuthorityEntry>) => ((entry: AnyAuthorityEntry) => AnyAuthorityEntry | null) | null {
+  return (entries) => {
+    const limits = new Map<string, number>();
+    for (const entry of entries.values()) {
+      if (entry.kind !== 'member' || !isGroupEntry(entry, groupId)) continue;
+      const value = entry.public as unknown as Record<string, unknown>;
+      const origin = value['authorityOrigin'], proof = value['originProof'], nodeId = value['nodeId'], identityKey = value['identityKey'];
+      if (typeof origin !== 'string' || typeof proof !== 'string' || typeof nodeId !== 'string' || typeof identityKey !== 'string') continue;
+      const cacheKey = `${identityKey}\0${groupId}\0${nodeId}\0${origin}\0${proof}`;
+      let holds = bindingChecks.get(cacheKey);
+      if (holds === undefined) {
+        holds = originBindingHolds(identityKey, groupId, nodeId, origin, proof);
+        if (bindingChecks.size > 4_096) bindingChecks.clear();
+        bindingChecks.set(cacheKey, holds);
+      }
+      if (!holds) continue;
+      const cutoff = value['originCutoff'];
+      const limit = entry.revoked === null ? Number.POSITIVE_INFINITY
+        : typeof cutoff === 'number' && Number.isSafeInteger(cutoff) ? cutoff : entry.revoked.rev - 1;
+      limits.set(origin, Math.max(limits.get(origin) ?? Number.NEGATIVE_INFINITY, limit));
+    }
+    if (limits.size === 0) return null;
+    return (entry) => {
+      const limit = limits.get(entry.origin);
+      if (limit !== undefined && entry.rev > limit) return null;
+      const revocation = entry.revoked;
+      if (revocation) {
+        const revocationLimit = limits.get(revocation.origin);
+        if (revocationLimit !== undefined && revocation.rev > revocationLimit) return { ...entry, revoked: null } as AnyAuthorityEntry;
+      }
+      return entry;
+    };
   };
 }

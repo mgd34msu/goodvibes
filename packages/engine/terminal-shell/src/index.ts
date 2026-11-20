@@ -240,6 +240,7 @@ export {
   classifyBindPosture,
   isLoopbackHost,
   isNetworkFacing,
+  resolveWebSurfaceExposure,
   type BindPosture,
   type BindPostureKind,
 } from './cli-network-posture.js';

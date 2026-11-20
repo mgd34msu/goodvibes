@@ -76,6 +76,12 @@ export interface OperatorMethodContract {
   readonly idempotent?: boolean | undefined;
   /** The header or body field that makes a retry of this method safe, when it has one. */
   readonly replay?: ContractReplayKey | undefined;
+  /**
+   * What sending the same call twice does: `safe`, nothing more happens;
+   * `keyed`, safe when the call carries its `replay` key; `unsafe`, it acts
+   * again. Every builtin method states it, read from its handler.
+   */
+  readonly repeat?: 'safe' | 'keyed' | 'unsafe' | undefined;
   /** Codes this method's route answers with beyond the shared engine codes. */
   readonly errorCodes?: readonly ContractErrorCode[] | undefined;
   /**

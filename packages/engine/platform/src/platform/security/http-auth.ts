@@ -21,6 +21,8 @@ export type AuthenticatedOperatorRequest =
       readonly client?: 'agent' | undefined;
       /** The scope list the pairing stores, when narrower than full operator authority. */
       readonly scopes?: readonly string[] | undefined;
+      /** A device the owner paired himself through his pairing flow, recorded when it was minted. */
+      readonly ownerDevice?: true | undefined;
     }
   | {
       readonly kind: 'session';
@@ -93,7 +95,7 @@ export interface PairingTokenAuthenticator {
   ensureLocalNativeOwner?(): AuthenticatedNativePairingToken | null;
   withNativeAuthority?<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T>;
-  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined; readonly scopes?: readonly string[] | undefined } | null;
+  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined; readonly scopes?: readonly string[] | undefined; readonly ownerDevice?: true | undefined } | null;
   /** Whether the shared operator token has been revoked (and, in the serving daemon, replaced). */
   isLegacyRevoked(): boolean;
   /**
@@ -200,7 +202,8 @@ export function authenticateOperatorToken(
   if (pairing) {
     return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name,
       ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}),
-      ...(pairing.scopes !== undefined ? { scopes: pairing.scopes } : {}) };
+      ...(pairing.scopes !== undefined ? { scopes: pairing.scopes } : {}),
+      ...(pairing.ownerDevice === true ? { ownerDevice: true as const } : {}) };
   }
 
   // Then the shared token, unless this value was revoked. The revocation is

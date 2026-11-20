@@ -143,9 +143,43 @@ function countsToday(
  * zone then in force, so changing `daemon.timezone` cannot refill a spent pool
  * before that day is over, see `countsToday` and day.ts.
  */
+/**
+ * What the other machines of a group spent, and where this machine's own
+ * spend is told to them (the authority record's per-day spend counter). A
+ * group's daily budget is spent once in the group, not once per machine that
+ * held the payments role that day.
+ */
+export interface GroupSpendSource {
+  /** What every OTHER machine has spent on `day`, from the record. */
+  othersSpent(day: DayKey): { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits };
+  /** This machine's whole spend on `day`; written to the record (one slot per machine, only ever raised). */
+  publish(day: DayKey, own: { readonly item: MinorUnits; readonly overage: MinorUnits; readonly tolerance: MinorUnits }): void;
+}
+
 export class BudgetLedger {
   /** Why durable accounting stopped itself; an in-memory ledger never does. */
   stopped(): PaymentStoreStop | null { return null; }
+
+  private group: GroupSpendSource | null = null;
+
+  /** Count the group's spend in every pool from now on, and tell the group this machine's own. */
+  attachGroupSpend(source: GroupSpendSource | null): void {
+    this.group = source;
+    if (!source) return;
+    const days = new Set(this.spend.map((record) => record.dayKey).filter((day): day is DayKey => day !== undefined));
+    for (const day of days) this.publishDay(day);
+  }
+
+  /** This machine's spend on `day`, told to the group. */
+  protected publishDay(day: DayKey): void {
+    if (!this.group) return;
+    let item = 0, overage = 0, tolerance = 0;
+    for (const record of this.spend) {
+      if (record.dayKey !== day) continue;
+      item += record.itemMinorUnits; overage += record.overageMinorUnits; tolerance += record.toleranceMinorUnits;
+    }
+    this.group.publish(day, { item, overage, tolerance });
+  }
 
   private spend: SpendRecord[] = [];
   private reservations: BudgetReservation[] = [];
@@ -169,9 +203,11 @@ export class BudgetLedger {
       if (day === undefined) { day = dayKey(nowMs, zone); days.set(zone, day); }
       return day;
     };
-    let itemSpent = 0;
-    let overageSpent = 0;
-    let toleranceSpent = 0;
+    // What the other machines of the group spent today counts against the same pools.
+    const others = this.group?.othersSpent(today) ?? { item: 0, overage: 0, tolerance: 0 };
+    let itemSpent = others.item;
+    let overageSpent = others.overage;
+    let toleranceSpent = others.tolerance;
     for (const record of this.spend) {
       if (!countsToday(record.atMs, record.timezone, record.dayKey, today, timezone, todayIn)) continue;
       itemSpent += record.itemMinorUnits;
@@ -254,6 +290,7 @@ export class BudgetLedger {
     if (reservation === undefined) return null;
     const record: SpendRecord = spendFromHold(reservation, atMs);
     this.spend.push(record);
+    if (record.dayKey !== undefined) this.publishDay(record.dayKey);
     return record;
   }
 
@@ -307,6 +344,7 @@ export class BudgetLedger {
       if (receipt.outcome === 'purchased') {
         finalSpend = spendFromHold(held, receipt.atMs);
         this.spend.push(finalSpend);
+        if (finalSpend.dayKey !== undefined) this.publishDay(finalSpend.dayKey);
       }
     }
     const stored = Object.freeze({ ...receipt, reservation: held === null ? null : Object.freeze({ ...held }),

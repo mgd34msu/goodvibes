@@ -18,7 +18,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Keys inside lists and forms | "Keys inside lists and forms" |
 | How slash commands are typed and quoted | "How slash commands work" |
 | Saved sessions, crash snapshots, session locks, branches | "Sessions" |
-| Provider model lists, providers, API-key and subscription sign-in, local servers, custom providers, routing roles, reasoning effort, synthetic failover, the OpenAI sign-in move | "Models and providers" (the Agent never switches to `provider.fallbackModels`; see "Failover") |
+| Provider model lists (`/refresh-models` reads every provider's list again, as in the terminal app), providers, API-key and subscription sign-in, local servers, custom providers, routing roles, reasoning effort, synthetic failover, the OpenAI sign-in move, `provider.fallbackModels` | "Models and providers" and "Failover" (the Agent moves a failed turn along `provider.fallbackModels` the same way) |
 | Tools and the permission gate | "Tools" |
 | Helper agents, archetypes, worktrees | "Helper agents and worktrees" |
 | Contracts and workstreams | "Contracts, workstreams and work plans" |
@@ -140,7 +140,7 @@ GoodVibes Agent blocks CLI task submission from the host-owned task workflow.
 | Named profiles | `~/.goodvibes/agent/profile-homes/<name>/` (a whole home of its own) |
 | Settings import undo | `~/.goodvibes/agent/settings-import-undo.json` |
 
-`GOODVIBES_AGENT_HOME=<dir>` makes the Agent use `<dir>` as its home directory, so all of the above move under `<dir>/.goodvibes/`.
+The Agent's home is the GoodVibes tree root: `GOODVIBES_HOME` when set (the same tree as the terminal app and the daemon, with one `secrets.key`), else the login home. `GOODVIBES_AGENT_HOME=<dir>` moves the Agent alone to `<dir>`, ahead of `GOODVIBES_HOME`, so all of the above move under `<dir>/.goodvibes/`.
 `GOODVIBES_WORKING_DIR=<dir>` sets the default working directory.
 `GOODVIBES_AGENT_DEBUG=1` prints a fatal start-up error with its details.
 
@@ -162,24 +162,24 @@ goodvibes-agent run --intake-status --output json
 
 ### Composer differences
 
-In the Agent, a typed `@<path>` (at the start of the message or after a space) that names an existing file inside the project is replaced by the file's text, read as UTF-8, inside `<context-file path="<relative path>" bytes="<size>">` ... `</context-file>`.
+In the Agent, a typed `@<path>` (at the start of the message or after a space) that names an existing text file inside the project is replaced by the file's text, read as UTF-8, inside `<context-file path="<relative path>" bytes="<size>">` ... `</context-file>`.
 A folder becomes `<context-folder path="...">` with one line per entry (`dir <name>` or `file <name>`).
 `@https://...` becomes a `<context-url href="...">` note telling the model it may fetch the page; nothing is fetched by the composer.
 Trailing punctuation (`),.;:!?`) after the reference is kept outside it, and `@model:...` is never a reference.
 Each file or listing is cut at 100,000 characters, at a line end when one is near, with a note `[File cut: kept the first N of M characters. Ask for the rest with the read tool.]`.
 An `@word` that names nothing stays as typed. A path that exists but cannot be read stops the send: `Not sent: could not read @<path> (permission denied). Your message is still in the composer; fix or remove the reference, then press Enter`.
 In the terminal app `@<path>` stays plain text. `!@<path>` puts the file's text in place of the reference in both.
+A referenced file is judged by its bytes, not its name. An image (PNG, JPEG, WebP or GIF) becomes an image attachment, as a pasted image does. Any other file that is not UTF-8 text stops the send: `Not sent: could not read @<path> (a binary file is not sent as text; images are PNG, JPEG, WebP or GIF)`, or `(the file is not UTF-8 text and is not sent)` for text in another encoding. A file's bytes never reach the model as text.
 
-The Agent sends text only. A message carrying an image (a pasted clipboard image, a pasted path of an image file, or `/image <path>`) is not sent:
+The Agent sends text only. A message carrying an image (a pasted clipboard image, a pasted path of an image file, a typed `@photo.png` or `!@photo.png`, or `/image <path>`) is not sent:
 
 ```text
 Not sent: a conversation turn carries text only, and this message has [IMAGE: img1, photo.png, 812KB]. Your text is back in the composer; to send it, remove the image and describe it in words, then press Enter
 ```
 
-For `/image`, the message names `attached image` instead of a marker.
+For a typed reference the message names the reference (`@photo.png`); for `/image`, it names `attached image`.
 
-The text goes back into the composer; remove the image marker and describe the image in words.
-A typed `@photo.png` is not treated as an image: like any other file it is read as UTF-8 text into a `<context-file>` block, so the model receives the image's bytes as unreadable text, up to 100,000 characters. Do not reference image files with `@` in the Agent.
+The text goes back into the composer; remove the image marker or reference and describe the image in words.
 
 ### Keys
 
@@ -220,39 +220,31 @@ The terminal app checkpoints any workspace. The Agent takes automatic checkpoint
 `goodvibes-agent workspaces register --yes` registers the current directory; `goodvibes-agent workspaces list` shows the registrations.
 Setting `checkpoints.unregisteredWorkspaces` to `guarded` checkpoints unregistered workspaces too, under the root and size guards (`checkpoints.preferGitRoot`, `checkpoints.allowBroadRoot`, `checkpoints.allowLargeFirstSnapshot`, `checkpoints.maxFirstSnapshotFiles`, `checkpoints.autoRetention`).
 `goodvibes-agent status` and `doctor` say `checkpoints off: workspace not registered` when this applies.
-What the owner cannot do in the Agent:
+Undoing a file change and restoring a checkpoint use the same lines as the terminal app (see "Undo, rewind and checkpoints" and "`/undo [rewind|file]`" in the terminal-app part):
 
-- Undo a file change with a command. The Agent's `/undo` and `/redo` work on conversation turns only; there is no `/undo file`. The file-undo stack exists (the `write` and `edit` tools record into it), but only the model reaches it: ask it, for example "undo your last edit to src/app.ts". The model reads the stack with its `execution` tool (`action: "recovery"`) and applies one undo or redo step with `agent_harness` `mode: "run_file_recovery"`, which needs your request and the permission gate's admission (both tools are listed under "The model's tools in the Agent").
-- Restore a checkpoint. The Agent has no `/rewind`, `/checkpoint` or `/checkpoints`, and the terminal app's `/rewind` lists only the terminal app's own checkpoints (kept under `<project>/.goodvibes/tui/`), not the Agent's.
+- `/undo file` reverts every file the most recent not-yet-undone `write` or `edit` call changed; `/redo file` re-applies it. An entry a later change to one of its files blocks is kept; `/undo file drop` (or `/redo file drop`) sets it aside without changing a file. `/undo` and `/redo` alone work on conversation turns. The Agent has no `/undo rewind`.
+- `/checkpoints` lists the Agent's checkpoints, newest first and numbered from 1. `/checkpoints restore <n|id>` shows the files that would change in a question and restores them once you confirm (`--yes` typed by you answers it in advance; from the model it is ignored). Files only: the conversation is unchanged, and the current files are first kept in a safety checkpoint, which `/checkpoints restore` can bring back. The receipt is `[Checkpoint] Restored files from checkpoint <id> ("<label>"). Files only: the conversation is unchanged.`
+- The Agent has no `/rewind` and no `/checkpoint` (it creates checkpoints only automatically, in a registered workspace). The terminal app's `/checkpoints` lists only the terminal app's own checkpoints (kept under `<project>/.goodvibes/tui/`), not the Agent's.
 
 ### Hooks in the Agent
 
-The Agent loads hooks exactly as the terminal app does (see "Hooks" in the terminal-app part): from the file its own setting `tools.hooksFile` names, resolved against the working directory, `<project>/hooks.json` by default, with the same event paths, command hook contract, `yolo` rule and trust rules. A hooks file in a workspace that is not trusted waits for trust, and the Agent says so once at start; `/trust workspace trusted` (hidden but available) trusts the workspace and loads the waiting file at once, with no restart.
+The Agent loads hooks exactly as the terminal app does (see "Hooks" in the terminal-app part): from the file its own setting `tools.hooksFile` names, resolved against the working directory, `<project>/hooks.json` by default, with the same event paths, command hook contract, rules in every mode and trust rules. A hooks file in a workspace that is not trusted waits for trust, and the Agent says so once at start; `/trust workspace trusted` (hidden but available) trusts the workspace and loads the waiting file at once, with no restart.
 The Agent has no `/hooks` command and no `hooks validate`. To manage its hooks:
 
 1. Edit `<project>/hooks.json` by hand (the terminal app's `/hooks scaffold` writes the same file when both programs use the default `tools.hooksFile`).
 2. Check it with the terminal app: `goodvibes hooks validate` in the same directory, and `goodvibes doctor hooks`.
 3. Restart the Agent after editing the file: it reads the hooks file at start (and when the workspace becomes trusted), and has no `/hooks reload`.
 
-Besides `exec`, the Agent runs commands through `terminal` (`args.command`), `process` (`args.command` for `action: "start"`, and `args.data` written to a running process's standard input for `action: "write"`), `agent_harness` (for example `mode: "run_background_process"`) and `agent_operator_method` (daemon methods that run a command on a paired peer or backend). A hook fires only for the tool the model calls directly, not for one tool run inside another, so a hook that guards commands needs an entry for each. The `git push` example under "Hooks" in the terminal-app part registers all of them.
+Besides `exec`, the Agent runs commands through `terminal` (`args.command`), `process` (`args.command` for `action: "start"`, and `args.data` written to a running process's standard input for `action: "write"`), `agent_harness` (for example `mode: "run_background_process"`) and `agent_operator_method` (daemon methods that run a command on a paired peer or backend). A hook fires for the tool called, whether the model called it or another tool ran it, in every permission mode, so a hook that guards commands needs an entry for each tool that runs one. The `git push` example under "Hooks" in the terminal-app part registers all of them. To make sure a command never runs, use a never-run rule instead: `/permissions add never git push` (see "Never-run rules" in "Permissions and decisions"); the rule is kept in the one rules file every program reads (`~/.goodvibes/shared/permission-rules.json`), so it holds for the Agent's own turns, the terminal app and turns the Agent hands to a hosted session on the daemon.
 
 ### Plugins in the Agent
 
 The Agent loads plugins from the same two directories as the terminal app (`<project>/.goodvibes/plugins/` and `~/.goodvibes/plugins/`), with the same manifest, entry file and trust tiers (see "Plugins" in the terminal-app part). The trust tier is shared by both programs (`~/.goodvibes/plugin-trust.json`); the enabled list is not: the Agent starts only the plugins enabled in its own `~/.goodvibes/agent/plugins.json`.
-The Agent has no command that enables a plugin: its `/plugin` takes only `list`, `trust`, `trust-key`, `verify` and `capabilities` (`/plugin enable word-count` prints `Unknown /plugin subcommand: enable` and the usage), and `goodvibes-agent plugin` only `bundles`. To run a plugin in the Agent:
+The Agent's `/plugin` takes `list`, `enable <name>`, `disable <name>`, `reload`, `quarantine <name> [add|lift] [reason]`, `trust`, `trust-key`, `verify` and `capabilities`, with the same lines and answers as the terminal app's. `goodvibes-agent plugin` on the command line has only `bundles`. To run a plugin in the Agent:
 
-1. Set its tier if it needs one: `goodvibes plugin trust word-count limited` (or `/plugin trust word-count limited` in the Agent).
-2. With the Agent closed, write `~/.goodvibes/agent/plugins.json` (merge into the file when it exists):
-
-```json
-{
-  "enabled": { "word-count": true },
-  "enabledDirs": { "word-count": "/home/me/.goodvibes/plugins/word-count" }
-}
-```
-
-`enabledDirs` gives the absolute directory of the copy to run. It may be left out for a copy in `~/.goodvibes/plugins/`, which is then recorded at the next start; a copy inside the project is not run without it (`[plugins] word-count: not loaded, the copy found in this repository was never enabled by you; enable it again to run it`).
-3. Start the Agent. `/plugin list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled in `plugins.json` but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent.
+1. Set its tier if it needs one: `/plugin trust word-count limited` (or `goodvibes plugin trust word-count limited`).
+2. `/plugin enable word-count` loads and starts it at once and records the choice, with the directory it was enabled from, in `~/.goodvibes/agent/plugins.json`: `Plugin 'word-count' enabled and activated.`, or the reason it did not start.
+3. `/plugin list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent. `/plugin disable word-count` stops it.
 
 ### Instructions and personality
 
@@ -275,10 +267,10 @@ On top of the files under "Project instructions", the Agent applies:
 | `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. |
 | `/model`, `/provider` | `/provider add <name> <baseURL> [apiKey]` also takes an API key. |
 | `/settings` | `/settings [category|key|list|get <key>|set <key> <value>|reset <key>]` reads and writes settings directly; `/config` is hidden. |
-| `/memory` (alias `/mem`) | The same command as the terminal app's `/recall`, so every `/recall` subcommand works (`add`, `search`, `get`, `list`, `queue`, `review`, `stale`, `contradict`, `promote`, `link`, `remove`, `export`, `import`, `snapshots`, `restore` and the others). Bare `/memory` lists the records instead of opening a view. |
+| `/memory` (alias `/mem`) | The same command as the terminal app's `/recall`, so every `/recall` subcommand works (`add`, `search`, `get`, `edit`, `list`, `queue`, `review`, `stale`, `contradict`, `promote`, `link`, `remove`, `export`, `import`, `snapshots`, `restore` and the others). Bare `/memory` lists the records instead of opening a view. |
 | `/session` | `link-task`, `handoff` and `cancel` are refused: `[session] Local cross-session task graph mutation is blocked in GoodVibes Agent.` with pointers to `/session graph` (read only) and `/delegate`. `/session export <id\|.> [markdown\|text]` prints the redacted transcript into the conversation and writes no file; it has no `--out` or `--print`. To get a file, use `/export [markdown\|text] [path]` or `goodvibes-agent sessions export <id> <path>` (JSON). |
 | `/skills` | Agent-local skills (see "`goodvibes-agent skills` (aliases `skill`, `agent-skills`)" below), not the skill files of the terminal app. |
-| `/plugin` | `list`, `trust <name> <untrusted|limited|trusted> [note]`, `trust-key <name> <key.pem>`, `verify <name>`, `capabilities <name>`. |
+| `/plugin` | `list`, `enable <name>`, `disable <name>`, `reload`, `quarantine <name> [add|lift] [reason]`, `trust <name> <untrusted|limited|trusted> [note]`, `trust-key <name> <key.pem>`, `verify <name>`, `capabilities <name>`. No `dirs`, `inspect`, `review` or catalog subcommands. |
 | `/notify` | Every change needs `--yes`: `add <url> --yes`, `remove <n|url> --yes`, `list [--show --yes]`, `clear --yes`, `test --yes`; `send <message> --yes` sends a notification. |
 | `/schedule` | `list`, `edit <id> --cron <expr> --yes`, `remind --at <iso> --message <text> --yes`, `receipts`, `reconcile`, `receipt <id>`, `promote-routine <routine-id> --cron <expr> --yes` (see "Automation and host actions" below). |
 | `/calendar` | Agent-local events, calendar subscriptions and connected calendar accounts (see "Personal operations" below). |
@@ -287,7 +279,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `/qrcode` | `[--name <device name>]` mints a named device token and shows its link and QR. |
 | `/intelligence` | Only `install <file|language>`. |
 | `/tts` | `<prompt>` and `stop` only. |
-| `/undo`, `/redo`, `/retry` | Conversation turns only; `/retry` re-sends the last message. |
+| `/undo`, `/redo`, `/retry` | `/undo` and `/redo` take `file` (as in the terminal app) but not `rewind`; `/retry` re-sends the last message. |
 | `/approval` | Adds `approve <id> --yes`, `deny <id> --yes`, `cancel <id> --yes`. |
 | `/health` | Domains `review`, `setup`, `approvals`, `host`, `provider`, `accounts`, `auth`, `settings`, `remote`, `mcp`, `memory`, `continuity`, `maintenance`, `repair [domain]`, or a symptom. |
 | `/status` | The current model and its context window with where the window came from, and the worktrees the start-up pass removed or kept. |
@@ -304,7 +296,7 @@ On top of the files under "Project instructions", the Agent applies:
 
 Some shared commands are hidden in the Agent (they run when typed but are left out of `/commands`): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/mcp`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/skills`, `/routines`, `/channels`, `/delegate`, `/media`.
 
-Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, `/onboarding` for `/setup` and `/memory`, is not listed): `/agents`, `/bootstrap`, `/branch`, `/bridge`, `/changes`, `/checkin`, `/checkpoint`, `/checkpoints`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/handoff`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/login`, `/logout`, `/mail`, `/managed`, `/marketplace`, `/memory-review`, `/memory-sync`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-memory`, `/project-plan`, `/provider-opt`, `/queue`, `/recall`, `/relay`, `/release`, `/remote`, `/remote-env`, `/remote-setup`, `/replay`, `/resume`, `/review`, `/rewind`, `/runner-pool`, `/sandbox`, `/scan`, `/search`, `/secret`, `/session-memory`, `/settings-sync`, `/share`, `/storage`, `/team-memory`, `/teamwork`, `/teleport`, `/template`, `/test`, `/tool`, `/tools`, `/tunnel`, `/usage`, `/work-plan`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/memory` for `/recall`, `/network-scan` for `/scan`, `/workplan` for `/work-plan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
+Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, `/onboarding` for `/setup` and `/memory`, is not listed): `/agents`, `/bootstrap`, `/branch`, `/bridge`, `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/handoff`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/login`, `/logout`, `/mail`, `/managed`, `/marketplace`, `/memory-review`, `/memory-sync`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-memory`, `/project-plan`, `/provider-opt`, `/queue`, `/recall`, `/relay`, `/release`, `/remote`, `/remote-env`, `/remote-setup`, `/replay`, `/resume`, `/review`, `/rewind`, `/runner-pool`, `/sandbox`, `/scan`, `/search`, `/secret`, `/session-memory`, `/settings-sync`, `/share`, `/storage`, `/team-memory`, `/teamwork`, `/teleport`, `/template`, `/test`, `/tool`, `/tools`, `/tunnel`, `/usage`, `/work-plan`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/memory` for `/recall`, `/network-scan` for `/scan`, `/workplan` for `/work-plan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
 
 ## The Agent's command line
 
@@ -440,6 +432,7 @@ Agent memory uses the durable memory store (`~/.goodvibes/shared/memory.sqlite`)
 | `memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <fresh\|reviewed\|stale\|contradicted>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>] [--label <text>]` | Add one. `--review-state` sets its review state at once (`reviewed` makes it eligible for the prompt). `--session`, `--turn`, `--task` and `--file` record where the fact came from (its provenance); `--label` names that link and is the one option not shown in the program's help. |
 | `memory show <id>`, `memory queue [limit]` | One record; the review queue. |
 | `memory review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]`, `memory stale <id> <reason>`, `memory contradict <id> <reason>` | Review. |
+| `memory edit <id> [--summary <text>] [--detail <text>] [--tags a,b] [--scope <scope>] --yes` | Correct a record in place. |
 | `memory promote <id> <session|project|team> --yes`, `memory link <fromId> <toId> <relation> --yes`, `memory delete <id> --yes` | Change. |
 | `memory export <path> [--scope <scope>] [--cls <class>] --yes`, `memory import <path> --yes`, `memory handoff-inspect <path>` | Move records. |
 | `memory vector [status|doctor|rebuild]` | The vector index. |
@@ -457,15 +450,12 @@ Agent memory matching "morning briefings" (1)
 
 A new record starts at `Needs review`; only reviewed records with enough confidence are applied to the prompt.
 
-There is no command that edits a record's text. To correct a fact, in order:
+To correct a fact, edit the record in place:
 
 1. Find it: `goodvibes-agent memory search "office"` (or `/memory search office`), and note its id.
-2. Mark the old record wrong, so it is no longer applied: `goodvibes-agent memory contradict <old-id> "Office moved to Denver"` (prints `Agent memory marked contradicted`). `memory stale <old-id> <reason>` is the softer form for a fact that is out of date.
-3. Add the corrected fact: `goodvibes-agent memory add fact "Office is in Denver" --scope project` (prints the new id).
-4. Review it so it is applied: `goodvibes-agent memory review <new-id> reviewed --confidence 90` (prints `review Reviewed`, `confidence 90%`).
-5. Optionally remove the old one: `goodvibes-agent memory delete <old-id> --yes`.
+2. Correct it: `goodvibes-agent memory edit <id> --summary "Office is in Denver" --yes` (prints `Agent memory edited` with the id and the new summary), or in the Agent `/memory edit <id> --summary Office is in Denver`. `--detail <text>`, `--tags a,b` and `--scope <scope>` change those fields; what is not given is kept, and the record keeps its id, class, provenance and links.
 
-Inside the Agent the same steps are `/memory contradict <id> <reason>`, `/memory add fact <summary>`, `/memory review <id> reviewed --confidence 90`, `/memory remove <id>`.
+To keep the old fact on record instead, mark it wrong and add the new one: `memory contradict <old-id> "Office moved to Denver"` (or `memory stale <old-id> <reason>` for a fact that is merely out of date), then `memory add fact "Office is in Denver" --scope project` and `memory review <new-id> reviewed --confidence 90` so it is applied. Inside the Agent these are `/memory contradict <id> <reason>`, `/memory add fact <summary>`, `/memory review <id> reviewed --confidence 90`, `/memory remove <id>`.
 The model can also change a record's text in place: ask it (for example "correct the memory about my office: it is in Denver now"); its `memory` tool has an `update` action, which needs your request and the permission gate's admission like any change.
 
 #### `goodvibes-agent knowledge` (aliases `know`, `kb`), `ask`, `search` (alias `find`)
@@ -572,7 +562,7 @@ GoodVibes Agent browser
 
 #### `goodvibes-agent relay` and `fleet`
 
-`relay status` reads the connected host's relay registration and the Agent's imported `relay.*` settings; `relay pair` mints the payload a phone scans to reach the host through the relay.
+`relay status` reads the connected host's relay registration and the Agent's imported `relay.*` settings; `relay pair [name]` mints the payload one phone scans to reach the host through the relay, carrying a relay code for that phone alone; `relay codes` lists the phones' relay codes (id, name, created, last used; never the code) and `relay revoke <id>` cuts one phone off the relay at its next request while every other keeps working.
 `fleet attempts list [--workstream <id>]` lists best-of-N attempt groups held for a winner pick; `fleet attempts judge <groupId>` asks the judge model to propose a winner (labelled as a proposal); `fleet attempts pick <groupId> <winnerItemId> --yes` merges the winner and removes the losing worktrees.
 Both need the connected host; without it they print the reason and exit `1`.
 

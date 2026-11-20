@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -25,8 +25,8 @@ import { createHash } from 'node:crypto';
 import { assertPermissionActive, awaitPermission } from './cancellation.js';
 import { analyzePermissionRequest, withReading } from './analysis.js';
 
-import { effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
-import { permissionDecisionModelReady } from './decision-model-readiness.js';
+import { effectivePermissionMode, normalizePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
+import { describePermissionModeInForce, permissionDecisionModelReady, type PermissionModeInForce } from './decision-model-readiness.js';
 import { judgmentInputBoundary, runBoundary, type BoundaryCheckName } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
@@ -41,6 +41,7 @@ import { stableStringify } from '../providers/registry-helpers.js';
 import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { undeclaredSendRecipients } from '../gate/send-recipients.js';
+import { callShellTexts, neverRunMatchIn, parseNeverRunPattern, type CallShellTexts, type NeverRunMatch, type NeverRunPattern } from '../gate/never-run.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
@@ -202,6 +203,34 @@ function userModeConstraints(lookup: CompiledRules): readonly PolicyRule[] {
     modeConstraintsOf.set(lookup, found);
   }
   return found;
+}
+
+/** The owner's never-run rules in a compiled list, parsed once per list. */
+const neverRunOf = new WeakMap<CompiledRules, readonly NeverRunPattern[]>();
+function neverRunPatterns(lookup: CompiledRules): readonly NeverRunPattern[] {
+  let found = neverRunOf.get(lookup);
+  if (!found) {
+    found = Object.freeze(lookup.rules.flatMap((rule) => rule.type === 'never-run' && rule.effect === 'deny'
+      ? rule.commands.map(parseNeverRunPattern).filter((pattern): pattern is NeverRunPattern => pattern !== undefined) : []));
+    neverRunOf.set(lookup, found);
+  }
+  return found;
+}
+
+/**
+ * A call the owner's own rule outside the gate asks about (a `Pre:tool` hook's
+ * `ask`, an `ask-on-risk` MCP server called outside its scope) is his to
+ * decide, in every mode: it is put to him as his standing "ask me" (held for
+ * him in just-vibes). A refusal still stands; nothing else settles it.
+ */
+function askedByOwnerRule(decided: CallClass, asked: boolean): CallClass {
+  if (!asked || (decided.kind === 'fact' && !decided.allow)) return decided;
+  return decided.kind === 'owner-only' ? decided : { kind: 'owner-only', item: 'standing-ask' };
+}
+
+/** Why the owner's own rule outside the gate asks him, shown to him with the call. */
+function withOwnerAsk(analysis: PermissionRequestAnalysis, ownerAsk: string | undefined): PermissionRequestAnalysis {
+  return ownerAsk === undefined ? analysis : { ...analysis, reasons: [...analysis.reasons, ownerAsk] };
 }
 
 /** Managed policy's verdict: allowed or refused by a policy rule, or undefined when none decided the call. */
@@ -418,10 +447,14 @@ export interface PermissionConfigReader {
    * shipped default rather than one the owner chose, a calibration run
    * measured the gate's decisions on it (gate/calibration.ts). `chosen`: the
    * mode in force was chosen for this session (Shift+Tab, a hosted session's
-   * mode), which counts as the owner's choice like a saved one. Absent counts
-   * as ready.
+   * mode), which counts as the owner's choice like a saved one. A set model
+   * counts as working only while it answers; `assumeAnswering` takes it as
+   * answering through a failure episode, for comparing modes across one
+   * decision. Absent counts as ready.
    */
-  isDecisionModelReady?(chosen?: boolean): boolean;
+  isDecisionModelReady?(chosen?: boolean, assumeAnswering?: boolean): boolean;
+  /** Why the mode in force differs from a chosen mode, read from the same settings (decision-model-readiness.ts). Absent: no reason is given. */
+  describeModeInForce?(chosen: GatePresetName, explicitlyChosen: boolean): PermissionModeInForce;
   getSnapshot(): PermissionConfigSnapshot;
   getWorkingDirectory(): string | null;
   /**
@@ -485,7 +518,9 @@ export function createPermissionConfigReader(
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
     ...(permissionSnapshot ? { getAutonomousSnapshot: permissionSnapshot } : {}),
     isAutoApproveEnabled: () => isAutoApproveEnabled(configManager),
-    isDecisionModelReady: (chosen) => permissionDecisionModelReady(configManager, chosen === true ? { chosen: true } : {}),
+    isDecisionModelReady: (chosen, assumeAnswering) => permissionDecisionModelReady(configManager,
+      { ...(chosen === true ? { chosen: true } : {}), ...(assumeAnswering === true ? { assumeAnswering: true } : {}) }),
+    describeModeInForce: (chosen, explicitlyChosen) => describePermissionModeInForce(configManager, { chosen, explicitlyChosen }),
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),
@@ -789,9 +824,9 @@ export class PermissionManager {
     const owner = this.userRuleStore;
     // Production stores distinguish load failure from their legacy empty-rule
     // fallback. Older embedding stores retain their existing init contract.
-    // Yolo consults no remembered rule, so an unreadable rule file does not
-    // refuse its calls.
-    const ready = this.getMode() === 'yolo' ? undefined : owner?.awaitReady ?? owner?.init;
+    // Yolo consults no remembered rule but does keep the owner's never-run
+    // rules, so the file is read in every mode and an unreadable one refuses.
+    const ready = owner?.awaitReady ?? owner?.init;
     if (ready) await awaitPermission(() => ready.call(owner), signal);
     assertPermissionActive(signal);
     this.configReader.flushPendingChanges?.();
@@ -816,7 +851,10 @@ export class PermissionManager {
     if (!scope) throw new Error('Autonomous execution requires a coherent permission owner snapshot');
     assertAutonomousData(scope);
     const executionOwner = currentExecutionModeOwner();
-    const mode = executionOwner ? this.ownerMode(executionOwner) : effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks());
+    // The frame is compared whole across one call's projection and admission, so it holds the mode
+    // a decision-model failure cannot move; the decision applies the failure itself (failureAware).
+    const mode = this.steady(() => executionOwner ? this.ownerMode(executionOwner)
+      : effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks()));
     const frame = { ...scope, permissions: { ...scope.permissions, mode }, autoApprove: false,
       executionOwnerRevision: executionOwner?.getRevision(), source, surface, rulePublication, policyPublication, policyEnabled,
       exposure,
@@ -1050,15 +1088,25 @@ export class PermissionManager {
       assertWorkspace();
     };
     assertCurrent();
-    const analysis = analyzePermissionRequest(toolName, args, category);
+    const ownerAsk = projectionProperty(options, 'ownerAsk');
+    const analysis = withOwnerAsk(analyzePermissionRequest(toolName, args, category), typeof ownerAsk === 'string' ? ownerAsk : undefined);
     this.policyRuntimeState.recordPermissionRequest({ callId: sourceId, tool: toolName, category, analysis });
     const permissions = capturedAuthority.permissions;
-    const mode = effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true, this.decisionModelWorks());
+    // The frame holds the mode in force with the model taken as answering (owner choice and calibration applied).
+    const mode = this.failureAware(effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true));
     const preset = presetForMode(mode);
     const effectReadOnly = preset.readOnly;
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
+    // The owner's never-run rules decide first, in every mode: nothing below may run what they forbid.
+    const neverRun = await this.neverRunMatch(callShellTexts(toolName, args, definition), capturedAuthority.directory ?? undefined, signal);
+    if (neverRun) {
+      const refused = this.neverRunResult(neverRun, analysis);
+      this.policyRuntimeState.recordPermissionDecision({ callId: sourceId, tool: toolName, category, result: refused });
+      assertCurrent();
+      return Object.freeze({ result: refused, revisionIds: Object.freeze([]), claim: () => { throw new Error('Owner policy denied this tool call'); } });
+    }
     const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, admissionEvidence);
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
@@ -1066,12 +1114,12 @@ export class PermissionManager {
       policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner, sessionId: options.hookOwner?.sessionId,
     });
     const exposure = (rawAuthority as Readonly<Record<string, unknown>>)['exposure'];
-    const decided = classifyCall(mode, this.callFacts({
+    const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface: effectSurface, definition, ownerOnly,
       directory: capturedAuthority.directory, rule,
       untrustedRead: Array.isArray(exposure) && exposure.length > 0,
       declaredReadOnly: preparedCall?.registry.isPreparedReadOnly(preparedCall.call) === true,
-    }));
+    })), typeof ownerAsk === 'string');
     const policyResult = this.policyResultOf(decided, analysis);
     const safety = await this.assessExecutionSafety({
       callId: sourceId, toolName, args, category, policyResult, decided, mode, signal, assertCurrent,
@@ -1352,8 +1400,9 @@ export class PermissionManager {
     }
     // Plan mode reached here only for a read the defaults did not settle (outside the directories).
     if (input.mode === 'plan') return { result: input.policyResult };
-    // just-vibes with no working decision model: nobody can decide now without interrupting the owner.
-    if (input.mode === 'just-vibes' && !this.decisionModelWorks()) {
+    // just-vibes with no decision model set up: nobody can decide now without interrupting the owner.
+    // A set model that is failing is still asked (it is how its recovery is seen); a failure holds the call below.
+    if (input.mode === 'just-vibes' && !this.steady(() => this.decisionModelWorks())) {
       return this.queuedForOwner(input, input.policyResult.analysis, 'held for you: this needs a decision and no decision model is set up');
     }
     const privacy = judgmentInputBoundary(input.toolName, input.args, input.workingDirectory);
@@ -1365,14 +1414,23 @@ export class PermissionManager {
     if (privacy.passed) {
       const base = judgmentPort('engine.gate.execution-safety');
       const installed = input.decoratePort?.(base) ?? base;
+      // One deadline for the whole decision (judgment.decisionDeadlineMs): every request it makes
+      // gets what is left of it. A model that has not answered by then fails the request as
+      // `deadline-missed`, and the decision takes its fallback like any other decision: under
+      // Hybrid the no-model path decides with a notice; under Decision Model Only the call stops
+      // with that reason. One clock read per request.
+      const deadlineAt = performance.now() + (installed.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS);
       port = {
         get model() { return installed.model; },
+        get decisionDeadlineMs() { return installed.decisionDeadlineMs; },
         ...(installed.recorder ? { recorder: installed.recorder } : {}),
         async ask(request) {
           // Checked before every attempt, the first included. The one caller that brings
           // its own attempt guard (decideAutonomous) runs this same check in it.
           const prior = request.beforeAttempt;
-          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() {
+          const left = Math.max(1, Math.ceil(deadlineAt - performance.now()));
+          const deadlineMs = request.deadlineMs === undefined ? left : Math.min(request.deadlineMs, left);
+          const result = await awaitPermission(() => installed.ask({ ...request, deadlineMs, beforeAttempt() {
             if (prior) assertSynchronousJudgmentGuard(() => prior()); else input.assertCurrent();
           } }), input.signal);
           input.assertCurrent();
@@ -1614,6 +1672,13 @@ export class PermissionManager {
     const hook = request.hook;
     const mode = this.getMode();
     const { args, analysis } = describeHookChange(request);
+    // A command hook runs its command on every event it matches: the owner's never-run rules apply to it in every mode.
+    if (request.action === 'add' || request.action === 'enable') {
+      const command = hook.type === 'command' && typeof (hook as { readonly command?: unknown }).command === 'string' ? (hook as { readonly command: string }).command : undefined;
+      const neverRun = command === undefined ? undefined
+        : await this.neverRunMatch({ commands: [command], argv: [], code: [], pieces: [] }, this.configReader.getWorkingDirectory() ?? undefined, signal);
+      if (neverRun) return { approved: false, reason: this.neverRunResult(neverRun, analysis).detail ?? `the never-run rule "${neverRun.rule}" refuses this hook` };
+    }
     const configured = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions?.tools;
     const underlying = hook.type === 'command' || hook.type === 'ts' ? 'exec' : hook.type === 'http' ? 'fetch' : 'agent';
     const ownerOnly: OwnerOnlyKind = 'grant-access';
@@ -1669,7 +1734,8 @@ export class PermissionManager {
     const signal = options?.signal;
     const owner = options?.hookOwner;
     const definition = options?.definition;
-    const check = () => sessionOfCheck.run(owner?.sessionId, () => withExecutionMode(this.getMode(), () => this.checkActive(toolName, args, attribution, signal, owner, definition)));
+    const ownerAsk = options?.ownerAsk;
+    const check = () => sessionOfCheck.run(owner?.sessionId, () => withExecutionMode(this.getMode(), () => this.checkActive(toolName, args, attribution, signal, owner, definition, ownerAsk)));
     // The cancellation race may release the permission caller, but the owning
     // turn still joins the actual check and any admitted hook/approval cleanup.
     return awaitPermission(() => owner ? owner.admit(check) : check(), signal);
@@ -1688,12 +1754,12 @@ export class PermissionManager {
     return tools?.[key] === 'deny' || (category === 'write' && tools?.write === 'deny');
   }
 
-  private async checkActive(toolName: string, borrowedArgs: Record<string, unknown>, attribution: PermissionAttribution | undefined, signal?: AbortSignal, hookOwner?: TurnHookOwner, definition?: ToolDefinition): Promise<PermissionCheckResult> {
+  private async checkActive(toolName: string, borrowedArgs: Record<string, unknown>, attribution: PermissionAttribution | undefined, signal?: AbortSignal, hookOwner?: TurnHookOwner, definition?: ToolDefinition, ownerAsk?: string): Promise<PermissionCheckResult> {
     assertPermissionActive(signal);
     const duplicate = isInvocationAdmitted(toolName, borrowedArgs);
     const args = captureOwnedJson(borrowedArgs) as Record<string, unknown>;
     const category = this.getCategory(toolName, args, definition);
-    const analysis = analyzePermissionRequest(toolName, args, category);
+    const analysis = withOwnerAsk(analyzePermissionRequest(toolName, args, category), ownerAsk);
     const callId = crypto.randomUUID();
     const mode = this.getMode();
     // isInvocationAdmitted already revalidates the exact private invocation's
@@ -1717,22 +1783,28 @@ export class PermissionManager {
       exposure.assertCurrent(); assertWorkspace();
       if (this.gate.surfaceOf?.() !== surface) throw new Error('Execution source authority changed while deciding');
       assertConfiguration();
-      if (mode !== this.getMode() || owner?.getRevision() !== ownerRevision) throw new Error('Execution mode or owner changed while deciding');
+      if (!this.sameModeInForce(mode, () => this.getMode()) || owner?.getRevision() !== ownerRevision) throw new Error('Execution mode or owner changed while deciding');
     };
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
+    // The owner's never-run rules decide first, in every mode: nothing below may run what they forbid.
+    const neverRun = await this.neverRunMatch(callShellTexts(toolName, args, definition), config.directory ?? undefined, signal);
+    if (neverRun) {
+      assertCurrent();
+      return this.emitAndReturn(callId, toolName, category, this.neverRunResult(neverRun, analysis), hookOwner);
+    }
     const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category);
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal, assertCurrent },
     });
-    const decided = classifyCall(mode, this.callFacts({
+    const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly,
       directory: config.directory, rule,
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
-    }));
+    })), ownerAsk !== undefined);
     const policyResult = this.policyResultOf(decided, analysis);
     const safety = await this.assessExecutionSafety({
       callId, sourceId: callId, toolName, args, category, policyResult, decided, mode, signal, assertCurrent,
@@ -1742,6 +1814,36 @@ export class PermissionManager {
     assertCurrent();
     this.noteJevDecision(toolName, args, safety.result, definition);
     return this.emitAndReturn(callId, toolName, category, safety.result, hookOwner);
+  }
+
+  /**
+   * The owner's `Pre:tool:<tool>` hooks on a call one tool makes inside
+   * another (the registry's nested and ordinary on-behalf calls): the same
+   * point a model's own call fires, in every permission mode. A deny or a
+   * failing hook refuses the call; an ask is handed to the gate (`ownerAsk`)
+   * so the owner decides; a rewrite is what is admitted and run. Nothing is
+   * fired when no hook dispatcher is wired.
+   */
+  async preToolHooks(callId: string, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<{
+    readonly args: Record<string, unknown>; readonly refusal?: string; readonly ask?: string;
+  }> {
+    const dispatcher = this.hookDispatcher;
+    if (!dispatcher) return { args };
+    let result: Awaited<ReturnType<HookDispatcher['fire']>>;
+    try {
+      result = await dispatcher.fire({
+        path: `Pre:tool:${toolName}`, phase: 'Pre', category: 'tool', specific: toolName,
+        sessionId: sessionOfCheck.getStore() ?? 'nested', timestamp: Date.now(),
+        payload: { callId, tool: toolName, args, nested: true },
+      });
+    } catch (error) {
+      assertPermissionActive(signal);
+      return { args, refusal: `Tool '${toolName}' was not run because its Pre hook failed (${summarizeError(error)}). Fix or remove the hook, then retry.` };
+    }
+    assertPermissionActive(signal);
+    if (result.decision === 'deny') return { args, refusal: result.reason ?? `Tool '${toolName}' was refused by its Pre hook.` };
+    const next = result.updatedInput ? captureOwnedJson(result.updatedInput) as Record<string, unknown> : args;
+    return { args: next, ...(result.decision === 'ask' ? { ask: `Your Pre:tool:${toolName} hook asks you about this call${result.reason ? `: ${result.reason}` : '.'}` } : {}) };
   }
 
   /** Surface restrictions are declared by the host; Jev does not grant tool access. */
@@ -1768,6 +1870,14 @@ export class PermissionManager {
     const mode = this.getMode();
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
+    const neverRun = await this.neverRunMatch(callShellTexts(toolName, captured, definition), this.configReader.getWorkingDirectory() ?? undefined, signal);
+    if (neverRun) {
+      const description = `your never-run rule "${neverRun.rule}" (${neverRun.why})`;
+      return { mode, category, decided: { kind: 'fact', allow: false, basis: 'owner-rule',
+        rule: { effect: 'deny', source: 'user-rule', description },
+        decision: { state: 'refused', decidedBy: 'rule', reason: `refused by ${description}`, limit: description,
+          next: ['carry on without this call and report that it was not run', 'only the owner can remove the rule'] } } };
+    }
     const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition, category));
     const rule = await this.ruleFactOf({
       toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
@@ -1982,6 +2092,32 @@ export class PermissionManager {
     }
   }
 
+  /**
+   * The owner's never-run rule this call's shell texts match, read in every
+   * mode (yolo included). The rule store is loaded first; a file that cannot
+   * be read refuses, since a never-run rule in it cannot be checked. Costs
+   * nothing beyond a list read when no never-run rule exists.
+   */
+  private async neverRunMatch(texts: CallShellTexts, directory: string | undefined, signal: AbortSignal | undefined): Promise<NeverRunMatch | undefined> {
+    const store = this.userRuleStore;
+    if (!store) return undefined;
+    if (texts.commands.length === 0 && texts.argv.length === 0 && texts.code.length === 0 && texts.pieces.length === 0) return undefined;
+    // Not loaded yet (nothing published): wait for the load, which throws while the file cannot be read.
+    if ((store.committedRevision?.() ?? store.getPublicationRevision?.() ?? 1) === 0) {
+      const ready = store.awaitReady ?? store.init;
+      if (ready) await awaitPermission(() => ready.call(store), signal);
+    }
+    return neverRunMatchIn(texts, neverRunPatterns(this.ruleView().lookup), directory);
+  }
+
+  /** The refusal a never-run match gives, recorded as the owner's rule. */
+  private neverRunResult(match: NeverRunMatch, analysis: PermissionRequestAnalysis): PermissionCheckResult {
+    return this.result(false, true, 'user_rule', 'user_rule_deny', analysis, {
+      detail: `Your never-run rule "${match.rule}" refuses this call: ${match.why} (${match.command}). It applies in every permission mode, yolo included; `
+        + 'only you can remove it, with /permissions rules.',
+    });
+  }
+
   /** The rules kept from the owner's answers that apply in this project. */
   private rememberedRulesHere(): readonly PolicyRule[] {
     const project = this.configReader.getWorkingDirectory();
@@ -2030,7 +2166,7 @@ export class PermissionManager {
     return Object.freeze({ mode, assertCurrent: () => {
       assertConfiguration();
       if (currentExecutionModeOwner() !== owner || owner?.getRevision() !== ownerRevision
-        || (owner && this.ownerMode(owner) !== mode)) {
+        || (owner && !this.sameModeInForce(mode, () => this.ownerMode(owner)))) {
         throw new Error('Execution mode owner or configuration changed during the invocation');
       }
     } });
@@ -2038,7 +2174,37 @@ export class PermissionManager {
 
   private assertSelectedModeCurrent(): void {
     const selected = currentExecutionMode();
-    if (selected !== undefined && selected !== this.getMode()) throw new Error('Execution mode changed during the invocation');
+    if (selected !== undefined && !this.sameModeInForce(selected, () => this.getMode())) throw new Error('Execution mode changed during the invocation');
+  }
+
+  /**
+   * Whether `captured` is still the mode in force `now` reads, either side of a
+   * decision-model failure episode: the first failure turns jev-decides into
+   * ask-me and an answer turns it back, for the next call. A call already being
+   * decided keeps the mode it started under; a settings or owner change still
+   * counts. Synchronous reads only.
+   */
+  private sameModeInForce(captured: GatePresetName, now: () => GatePresetName): boolean {
+    if (captured === now()) return true;
+    const steady = this.steady(now);
+    return steady === captured || (steady === 'jev-decides' && captured === 'ask-me');
+  }
+
+  /** Reads `read` with a set decision model taken as answering through its failure episode. */
+  private steady<T>(read: () => T): T {
+    const prior = this.assumeAnswering;
+    this.assumeAnswering = true;
+    try { return read(); } finally { this.assumeAnswering = prior; }
+  }
+
+  /**
+   * The mode in force for a mode settled with the decision model taken as
+   * answering: jev-decides is ask-me while the set model is failing, until it
+   * answers again.
+   */
+  private failureAware(mode: GatePresetName): GatePresetName {
+    if (mode !== 'jev-decides' || this.decisionModelWorks(true)) return mode;
+    return this.steady(() => this.decisionModelWorks(true)) ? 'ask-me' : mode;
   }
 
   /** The gate preset the current `permissions.mode` selects. */
@@ -2085,8 +2251,11 @@ export class PermissionManager {
    * than read from settings.
    */
   private decisionModelWorks(chosen = false): boolean {
-    return this.configReader.isDecisionModelReady?.(chosen) ?? true;
+    return this.configReader.isDecisionModelReady?.(chosen, this.assumeAnswering) ?? true;
   }
+
+  /** Set only inside {@link steady}: a set decision model is taken as answering. */
+  private assumeAnswering = false;
 
   /**
    * The mode in force for a mode a session or surface chose: jev-decides is
@@ -2100,6 +2269,19 @@ export class PermissionManager {
    */
   modeInForce(chosen: unknown, explicitlyChosen = false): GatePresetName {
     return effectivePermissionMode(chosen, false, this.decisionModelWorks(explicitlyChosen));
+  }
+
+  /**
+   * The mode in force for a chosen mode, as {@link modeInForce} decides it,
+   * with the chosen mode and why they differ, for the surfaces that report it
+   * (sessions.permissionMode.get). A few settings reads; no request.
+   */
+  describeModeInForce(chosen: unknown, explicitlyChosen = false): PermissionModeInForce {
+    const selected = normalizePermissionMode(chosen);
+    const mode = this.modeInForce(selected, explicitlyChosen);
+    if (mode === selected) return { chosen: selected, mode };
+    const reason = this.configReader.describeModeInForce?.(selected, explicitlyChosen).reason;
+    return { chosen: selected, mode, ...(reason !== undefined ? { reason } : {}) };
   }
 
   /** A session owner's mode in force; the owner holds the mode the session chose, or the settings' when it chose none. */

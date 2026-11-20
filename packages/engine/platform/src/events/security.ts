@@ -81,6 +81,23 @@ export type SecurityEvent =
       type: 'COMPANION_TOKEN_REVOKED';
       clientIp: string;
       reason?: string | undefined;
+    }
+  // ── Authority record ─────────────────────────────────────────────
+  /**
+   * The authority record (which keys, credentials and grants are current) changed:
+   * here, in another process of this home, or merged from another machine.
+   * Names the entries by kind and id only, never a value.
+   */
+  | {
+      type: 'AUTHORITY_CHANGED';
+      /** Entry kinds touched, one per id. */
+      kinds: string[];
+      ids: string[];
+      change: 'issued' | 'updated' | 'revoked' | 'absorbed';
+      rev: number;
+      origin: string;
+      /** Ids of entries revoked with a revoked parent. */
+      cascade: string[];
     };
 
 /** All security event type literals as a union. */

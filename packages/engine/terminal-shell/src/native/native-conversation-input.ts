@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { isImageFile } from '../input-content.js';
 import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
 /** Source text is captured before trim, expansion, model directives or shell context. */
@@ -32,6 +33,17 @@ function isExpandableContextReference(raw: string, projectRoot: string): boolean
   }
 }
 
+/** A typed reference to an image file is an image source, as a pasted image is: the composer sends it as an image. */
+function isImageReference(raw: string, projectRoot: string): boolean {
+  const core = raw.replace(CONTEXT_TRAILING_PUNCTUATION, '');
+  if (!core || core.startsWith('model:')) return false;
+  try {
+    return isImageFile(resolveAndValidatePath(core, projectRoot));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * What the user sent, as the native intake receives it. A collapsed paste is
  * display only: each `[TEXT: pN, ...]` marker whose paste is in `pastes` is
@@ -55,7 +67,8 @@ export function captureNativeConversationInput(
     add(match[1] === 'IMAGE' ? 'image' : 'context', match[0]);
   }
   for (const match of text.matchAll(/(?:^|\s)(!@|@)(\S+)/g)) {
-    if (match[1] === '!@') add('file', match[0].trim());
+    if (isImageReference(match[2] ?? '', projectRoot)) add('image', match[0].trim());
+    else if (match[1] === '!@') add('file', match[0].trim());
     else if (isExpandableContextReference(match[2] ?? '', projectRoot)) add('context', match[0].trim());
   }
   if (content?.some(part => part.type !== 'text')) add('image', 'attached-content');

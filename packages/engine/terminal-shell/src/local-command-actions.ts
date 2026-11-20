@@ -22,7 +22,6 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
   requireProviderApi: (context: Context) => ProviderApi,
   policy: {
     readonly hidden: boolean;
-    readonly liveDiscovery: boolean;
     readonly unpinByModelId: boolean;
     readonly imageHint: string;
     readonly supportedFormats: string;
@@ -171,33 +170,30 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
         } catch (e) {
           ctx.print(policy.imageFailure('Token limits refresh failed', summarizeError(e)));
         }
-        let discoveryOk = !policy.liveDiscovery;
-        if (policy.liveDiscovery) {
-          ctx.print('Refreshing live provider model lists...');
-
-          try {
-            // Explicit user refresh → force past each provider's TTL cache and
-            // report the delta ("3 new, 1 retired") or the honest fallback reason.
-            const reports = await providerApi.refreshLiveModelDiscovery(undefined, { force: true });
-            discoveryOk = reports.every((report) => !report.error);
-            if (reports.length === 0) {
-              ctx.print('No providers perform live model discovery.');
-            } else {
-              for (const report of reports) {
-                if (report.source === 'live' || report.error || report.unclassifiedModels?.length)
-                  ctx.print(`  ${formatModelDiscoveryReport(report.providerId, report)}`);
-              }
-              const absent = reports.filter((report) => report.skippedReason === 'local-endpoint-unavailable');
-              if (absent.length > 0)
-                ctx.print(`Local servers not running: ${absent.map((report) => report.providerId).join(', ')} (skipped).`);
-              const unchanged = reports.filter(
-                (report) => report.source !== 'live' && !report.error && !report.skippedReason && !report.unclassifiedModels?.length,
-              ).length;
-              if (unchanged > 0) ctx.print(`${unchanged} providers kept their last listed models or the pinned catalog (no live refresh).`);
+        let discoveryOk = false;
+        ctx.print('Refreshing live provider model lists...');
+        try {
+          // Explicit user refresh → force past each provider's TTL cache and
+          // report the delta ("3 new, 1 retired") or the honest fallback reason.
+          const reports = await providerApi.refreshLiveModelDiscovery(undefined, { force: true });
+          discoveryOk = reports.every((report) => !report.error);
+          if (reports.length === 0) {
+            ctx.print('No providers perform live model discovery.');
+          } else {
+            for (const report of reports) {
+              if (report.source === 'live' || report.error || report.unclassifiedModels?.length)
+                ctx.print(`  ${formatModelDiscoveryReport(report.providerId, report)}`);
             }
-          } catch (e) {
-            ctx.print(policy.imageFailure('Live model discovery failed', summarizeError(e)));
+            const absent = reports.filter((report) => report.skippedReason === 'local-endpoint-unavailable');
+            if (absent.length > 0)
+              ctx.print(`Local servers not running: ${absent.map((report) => report.providerId).join(', ')} (skipped).`);
+            const unchanged = reports.filter(
+              (report) => report.source !== 'live' && !report.error && !report.skippedReason && !report.unclassifiedModels?.length,
+            ).length;
+            if (unchanged > 0) ctx.print(`${unchanged} providers kept their last listed models or the pinned catalog (no live refresh).`);
           }
+        } catch (e) {
+          ctx.print(policy.imageFailure('Live model discovery failed', summarizeError(e)));
         }
         // Each step above printed what it did; a step that failed makes the refresh a refusal.
         if (!catalogOk || !benchmarksOk || !limitsOk || !discoveryOk) throw commandRefusal(policy.partialRefresh);

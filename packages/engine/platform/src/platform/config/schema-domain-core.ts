@@ -35,7 +35,6 @@ export const coreConfigDefaults = {
     staleContextWarnings: true,
     saveHistory: true,
     notifyOnComplete: true,
-    suggestAlternativeOnProviderFail: false,
     hitlMode: 'balanced',
     toolResultReconciliation: 'reconcile',
     returnContextMode: 'off',
@@ -814,12 +813,6 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description: 'Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)',
-  },
-  {
-    key: 'behavior.suggestAlternativeOnProviderFail',
-    type: 'boolean',
-    default: false,
-    description: 'Show alternative model suggestion when current provider fails non-transiently',
   },
   {
     key: 'behavior.hitlMode',

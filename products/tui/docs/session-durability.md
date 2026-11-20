@@ -53,7 +53,7 @@ removes the file while still holding it. Nothing refreshes it and no process id 
 so a crashed terminal never reads as open and a crash relaunched at once is offered at once. The
 owner inbox reads the same lock to tell whether the session that asked a question is open now.
 
-Two things read it: `/session resume`, `/load`, `/sessions` and the session browser refuse (or, in
+Two things read it: `/resume` and the session browser refuse (or, in
 the browser, ask before resuming) a session another running terminal has open, and the recovery
 offer skips a snapshot whose session another running terminal has open, since it is that
 terminal's live state. Reading it costs one `stat` and, when the file exists, one lock attempt
@@ -64,7 +64,7 @@ that never waits. The start-up housekeeping removes lock files a crashed process
 On the next start the TUI offers the newest snapshot that is not older than its session's own
 saved file, skipping one whose session another running terminal has open. The same offer is made
 whenever a session is opened later by any path (`--continue`, `--resume`, `sessions resume`,
-`/session resume`, `/load`, `/sessions`, the session browser) and that session has a snapshot newer
+`/resume`, the session browser) and that session has a snapshot newer
 than its saved file: the saved copy is opened, and the snapshot is offered on top of it. A session
 that crashed before its first save has only the snapshot; opening it says so and offers the
 snapshot. Choosing Remove deletes that one snapshot; a later crash of the same session is offered
@@ -91,7 +91,7 @@ that turn that had not finished. A completed turn is never lost.
 
 ## Side branches left out of a restore
 
-A saved side branch (made with `/branch`) that this version cannot read is left out of a resume or
+A saved side branch (made with `/session branch`) that this version cannot read is left out of a resume or
 crash restore, and the transcript names it and the reason. The rest of the session is restored;
 the next save of that session is written without the branch.
 

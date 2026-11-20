@@ -52,14 +52,13 @@ import {
 import { useSettingsDraft } from "../../hooks/useSettingsDraft";
 import { SettingsDraftConflict } from "./SettingsDraftConflict";
 import { maskSecretValue } from "../../lib/config-redaction";
-import { settingLabelForKey } from "../../lib/setting-label";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Input, Textarea } from "../ui/Field";
 import { Select } from "../ui/Select";
 import { Toggle } from "../ui/Toggle";
 import { isMoneyField } from "../../lib/money";
-import type { ConfigFieldModel } from "../../lib/settings-model";
+import { appliesWhenWords, type ConfigFieldModel } from "../../lib/settings-model";
 import type { ConfigSetOutcome } from "../../lib/goodvibes";
 import { ModelPricesEditor } from "./ModelPricesEditor";
 import { TimezonePicker } from "./TimezonePicker";
@@ -359,7 +358,7 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
       data-daemon-owned={field.daemonOwned}
     >
       <div className="settings-field-text">
-        <div className="settings-field-label">{settingLabelForKey(field.key)}</div>
+        <div className="settings-field-label">{field.label}</div>
         <div className="settings-field-head">
           <code className="settings-field-key">{field.key}</code>
           {field.daemonOwned && (
@@ -377,6 +376,7 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
           )}
         </div>
         {field.description && <p className="settings-field-desc">{field.description}</p>}
+        {appliesWhenWords(field) && <p className="settings-field-desc settings-field-applies">{appliesWhenWords(field)}</p>}
       </div>
       <div className="settings-field-control">
         {control}

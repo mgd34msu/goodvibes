@@ -92,6 +92,8 @@ interface PendingNtfyChatReply {
 }
 
 interface DaemonSurfaceActionContext {
+  /** Whether the daemon takes new work (work-admission.ts): a message that arrives while it does not is held for after the restart. */
+  readonly workAdmission?: Pick<import('./work-admission.js').DaemonWorkAdmission, 'open'> | undefined;
   readonly telegramSourceAccounts?: import('../channels/telegram/source-account.js').TelegramSourceAccountReader | undefined;
   readonly delegatedTelegram?: import('./delegated-telegram-intake.js').DelegatedTelegramIntake | undefined;
   readonly serviceRegistry: ServiceRegistry;
@@ -365,7 +367,8 @@ export class DaemonSurfaceActionHelper {
     let resumed = 0;
     for (const proposal of store.listAcceptedUnstarted()) {
       try {
-        await startAgreedWork(this.conversationGateDeps(), proposal);
+        // Held again (admission closed meanwhile): it stays accepted and unstarted for the next start.
+        if (await startAgreedWork(this.conversationGateDeps(), proposal) === 'held') continue;
         store.markStarted(proposal.id);
         resumed += 1;
       } catch (error) {
@@ -397,6 +400,7 @@ export class DaemonSurfaceActionHelper {
         };
       },
       deliverSurfaceNotice: this.context.deliverSurfaceNotice,
+      workAdmitted: () => this.context.workAdmission?.open !== false,
       ownerConversations: (surface: string) => this.ownerConversations(surface),
       senderIsGuest: (surface: string, userId: string | undefined) => this.senderIsGuest(surface, userId),
     };

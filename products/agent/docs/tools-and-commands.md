@@ -423,14 +423,14 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
 | `/email` | Configure direct email, read inbox summaries read-only, and send a confirmed message. |
 | `/expand` | Expand rendered blocks by type. |
-| `/export` | Export the current conversation to Markdown. |
+| `/session` | Sessions: resume, save, copy, save the conversation as a Markdown or text file, read the cross-session task graph. |
 | `/google` | Connect the Google account behind mail and calendar: adopt credentials already on this machine, or run the setup flow. |
 | `/health` | Review startup posture, connected-host readiness, provider health, and Agent continuity. |
 | `/help` | Show available commands and keyboard shortcuts. |
 | `/image` | Attach an image file to the next message. |
 | `/keybindings` | List keyboard bindings and the config file path. |
 | `/knowledge` | Use isolated Agent Knowledge. |
-| `/load` | Load a saved Agent session. |
+| `/resume` | Resume a saved Agent session. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
 | `/media` | Inspect media providers or generate media through configured providers; `/media generate collect <provider> <task-id> [key=value ...]` collects a job that was still running when the wait ended. |
 | `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone. |
@@ -461,7 +461,6 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/secrets` | Manage secrets, external secret refs, and storage policy. |
 | `/security` | Inspect security posture, attack paths, and review state. |
 | `/session` | Inspect session continuity and cross-session graph state. |
-| `/sessions` | List saved sessions. |
 | `/settings` | Open, inspect, set, or reset Agent settings. |
 | `/setup` | Open the Agent workspace; on a fresh Agent home the workspace opens into setup first. |
 | `/shortcuts` | Show keyboard shortcuts. |

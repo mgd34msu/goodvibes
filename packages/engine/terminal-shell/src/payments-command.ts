@@ -195,7 +195,7 @@ function ownerOnly(what: string): { readonly reason: string; readonly instead: s
 export const PAYMENTS_COMMAND: CommandDescription<PaymentsCommandContext> = {
   name: 'payments',
   title: 'Payments',
-  summary: 'Cards, purchases waiting for your answer, and what may be bought without asking',
+  summary: 'Cards, purchases, and what may be bought without asking',
   group: 'Payments',
   report: 'see-cards',
   firstScreenRows: [

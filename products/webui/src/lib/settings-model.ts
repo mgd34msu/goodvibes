@@ -47,6 +47,10 @@ import { asRecord } from './object';
 /** A single typed, editable config field: schema metadata merged with its live value. */
 export interface ConfigFieldModel {
   readonly key: string;
+  /** The setting's name in plain words, from the schema ("Show the model's thinking"); the key shows small beneath it. */
+  readonly label: string;
+  /** When a change takes effect, only where the engine declares it. */
+  readonly appliesWhen?: ConfigSchemaEntry['appliesWhen'];
   readonly type: ConfigSchemaEntry['type'];
   readonly enumValues?: readonly string[];
   readonly default: unknown;
@@ -178,6 +182,8 @@ function buildField(entry: ConfigSchemaEntry, config: unknown): ConfigFieldModel
   const { present, value } = readConfigPath(config, entry.key);
   return {
     key: entry.key,
+    label: entry.label || entry.key,
+    appliesWhen: entry.appliesWhen,
     type: entry.type,
     enumValues: entry.enumValues,
     default: entry.default,
@@ -352,7 +358,19 @@ export function buildSettingsModel(liveConfig: unknown): SettingsGroupModel[] {
 // ---------------------------------------------------------------------------
 
 function fieldMatches(field: ConfigFieldModel, q: string): boolean {
-  return field.key.toLowerCase().includes(q) || field.description.toLowerCase().includes(q);
+  return field.label.toLowerCase().includes(q) || field.key.toLowerCase().includes(q) || field.description.toLowerCase().includes(q);
+}
+
+const APPLIES_WHEN_WORDS: Readonly<Record<NonNullable<ConfigFieldModel['appliesWhen']>, string>> = {
+  'now': 'Takes effect at once.',
+  'next-answer': 'Takes effect on the next answer.',
+  'next-session': 'Takes effect in the next session.',
+  'restart': 'Takes effect after a restart.',
+};
+
+/** When a change to the setting takes effect, in a sentence; '' when the engine does not declare it. */
+export function appliesWhenWords(field: Pick<ConfigFieldModel, 'appliesWhen'>): string {
+  return field.appliesWhen ? APPLIES_WHEN_WORDS[field.appliesWhen] : '';
 }
 
 function unitMatches(unit: FeatureUnitModel, q: string): boolean {

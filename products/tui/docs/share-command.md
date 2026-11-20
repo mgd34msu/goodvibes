@@ -1,11 +1,13 @@
-# /share: session export
+# Saving and uploading a session
 
-Export the current session to a local file and optionally share it.
+`/session save-file` writes the current session to a local file; `/session upload`
+also uploads it as a secret GitHub Gist and prints the link.
 
 ## Syntax
 
 ```
-/share <html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]
+/session save-file [markdown|text|html|json] [path] [--keep-secrets] [--replace] [--then open|copy]
+/session upload [html|md|json] [--keep-secrets] [--then open|copy]
 ```
 
 ## Formats
@@ -14,23 +16,19 @@ Export the current session to a local file and optionally share it.
 |--------|-------------|
 | `html` | Self-contained HTML with syntax highlighting, best for sharing |
 | `json` | Structured JSON (machine-readable), includes token/cost summary |
-| `md`   | Markdown, portable plain-text format |
+| `markdown` (`md` for an upload) | Markdown, portable plain-text format |
+| `text` | Plain text (save-file only; always redacted) |
 
 ## Options
 
-| Flag       | Description |
+| Option | Description |
 |------------|-------------|
-| `--redact` | Redact API keys, tokens, and this account's home-directory path and login name from the output |
-| `--upload` | Upload the export as a secret GitHub Gist and print the share link. An upload is always redacted, whether or not `--redact` is given |
-| `--no-redact` | With `--upload` only: upload the transcript as stored. You are asked first, with a list of what it exposes (a secret gist is readable by anyone with the link); `--yes` answers in advance |
-| `--copy`   | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
-| `--open`   | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
+| `--keep-secrets` | Keep API keys, tokens, and this account's home-directory path and login name as stored. Without it they are hidden, in a local file and in an upload alike |
+| `--replace` | save-file only: write over a file already at the path (asks first); without it an existing file is kept and nothing is written |
+| `--then copy` | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
+| `--then open` | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
 
-Flags can be combined:
-
-```
-/share html --upload --copy
-```
+`upload` sends something outside this machine, so it always asks first, and it only counts when you type it (a model cannot run it).
 
 The result line says which happened: `(redacted before upload)`, `(uploaded unredacted, as stored)`, `(sensitive data redacted)` or `(not redacted)` for a local file.
 
@@ -41,7 +39,7 @@ computed with the same pricing formula the Usage modal uses (USD per 1M
 tokens), applied to the session's accumulated input, output, and cache token counts.
 
 When the active model has no pricing data, cost is left out entirely rather than
-shown as $0. The `/share` command prints an inline note (`Note: cost omitted from
+shown as $0. The export prints an inline note (`Note: cost omitted from
 export; no pricing data for model "<model>".`) and the export itself carries no cost
 field: `metadata.costUsd` is absent from JSON, no cost row appears in the HTML usage
 table, and no `## Cost` section is appended to Markdown.
@@ -52,7 +50,7 @@ is greater than $0.
 
 ## Redaction guarantees
 
-With `--redact` the exporter applies server-side redaction patterns to every message
+Unless `--keep-secrets` is given, the exporter applies server-side redaction patterns to every message
 before serialising. Each pattern class is replaced with its own typed placeholder, so
 a redacted export still shows what kind of value was removed:
 
@@ -81,14 +79,11 @@ conversation is never modified.
 
 Gist upload creates a **secret** (unlisted) Gist. It is not indexed by GitHub search
 and is not shown on your profile. However, **anyone with the URL can view it**. Do not
-upload sessions containing secrets without first using `--redact`.
+upload sessions containing secrets with `--keep-secrets`.
 
 ## Option checking
 
-Any word that starts with `--` and is not one of the four options is refused before
-anything is written or uploaded (a mistyped `--reddact` would otherwise become the
-output file name and upload an unredacted export). To use a path that starts with `--`,
-write it as `./--name`. More than one path is also refused.
+An option the command does not know is refused before anything is written or uploaded, and so is more than one path.
 
 ## Upload receipt and unconfirmed uploads
 
@@ -101,10 +96,10 @@ instead.
 If GitHub's answer is lost or not OK, the command prints
 `Upload unconfirmed: ... GitHub may have received it; check before retrying.` The
 gist may exist even though no link was returned. Check your gists at
-`gist.github.com` before running `/share` again, otherwise you can create a duplicate
+`gist.github.com` before running `/session upload` again, otherwise you can create a duplicate
 secret gist with the same content. The local export is kept either way.
 
-## Token resolution for --upload
+## Token resolution for an upload
 
 The uploader looks for a GitHub PAT in this order:
 
@@ -128,12 +123,12 @@ The directory is created automatically.
 ## Examples
 
 ```
-/share html                          # export to default path
-/share html /tmp/session.html        # export to explicit path
-/share json --redact                 # JSON with sensitive data removed
-/share html --upload                 # export + redacted Gist link
-/share html --upload --copy --open   # export + link + clipboard + open browser
-/share md --upload --no-redact       # unredacted Markdown Gist (asks first)
+/session save-file html                          # web page at the default path, keys and paths hidden
+/session save-file html /tmp/session.html        # to an explicit path
+/session save-file json --keep-secrets           # JSON as stored
+/session upload html                             # redacted Gist link (asks first)
+/session upload html --then open                 # link, then open the local copy
+/session upload md --keep-secrets                # unredacted Markdown Gist (asks first)
 ```
 
 ## Related

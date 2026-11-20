@@ -270,7 +270,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/sandbox` | Review and configure VM isolation policy for MCP and evaluation runtimes |
 | `/plugin` | Manage plugins, trust, review, and ecosystem paths |
 | `/marketplace` | Browse the unified plugin and skill marketplace |
-| `/share` | Export the current session to a shareable HTML, JSON, or Markdown file |
+| `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
 | `/schedule` | Manage automation jobs and scheduled runs |
 | `/voice` | Toggle always-speak mode and provision the managed local voice runtime and wake-word models |
 | `/tts` | Submit a prompt for live TTS playback, or control always-speak mode |
@@ -407,7 +407,7 @@ Every view opens as a modal over the dimmed conversation, and `Esc` closes one l
 | `/usage` | Usage: context bar with the compaction threshold, session totals, per-turn bars, fleet cost split, compact now |
 | `/changes` | Changes: changed files with +/- counts, a tinted syntax-colored diff, the semantic summary, hunk navigation (`]` `[`), stage hunk (`space`), review comments (`c`), mark reviewed (`m`), open in editor (`o`) |
 | `/notifications` | Notification history |
-| `/sessions` | Session picker, with hosted sessions in a Hosted group |
+| `/resume` | Session picker, with hosted sessions in a Hosted group |
 
 An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
 

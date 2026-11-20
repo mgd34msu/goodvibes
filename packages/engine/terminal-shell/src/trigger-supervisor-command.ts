@@ -210,7 +210,7 @@ async function definitionOf(values: ActionValues, ctx: TriggerCommandContext): P
 export const TRIGGERS_COMMAND: CommandDescription<TriggerCommandContext> = {
   name: 'triggers',
   title: 'Triggers',
-  summary: 'Act when something happens: a command ends, a line appears, a page or a file changes',
+  summary: 'Act when something happens',
   group: 'Automation',
   report: 'see-triggers',
   firstScreenRows: ['see-triggers', 'watch', 'history', 'stop', 'restart', { label: 'Commands triggers may run', actions: ['see-commands', 'allow-command'] }],

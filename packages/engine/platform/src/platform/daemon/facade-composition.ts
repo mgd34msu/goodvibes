@@ -688,7 +688,11 @@ export function createDaemonFacadeCollaborators(
 
   const terminalPaymentSpan = options.paymentReplies?.mayRetireReceiveSpan.bind(options.paymentReplies);
   const telegramSourceAccounts = createTelegramSourceAccountOwner(purchaseId => terminalPaymentSpan?.(purchaseId) === true);
+  // The one admission (work-admission.ts), shared with the schedulers the runtime graph built: closed by the
+  // auto-updater for its restart, asked by the router, the WebSocket calls, the agent spawn and every scheduler.
+  const workAdmission = runtime.runtimeServices.workAdmission ?? new DaemonWorkAdmission();
   const surfaceActionHelper = new DaemonSurfaceActionHelper({
+    workAdmission,
     telegramSourceAccounts: telegramSourceAccounts.reader,
     delegatedTelegram: composeDelegatedTelegramIntake(runtime, telegramSourceAccounts.reader),
     paymentReplies: options.paymentReplies,
@@ -737,6 +741,7 @@ export function createDaemonFacadeCollaborators(
     dispatchApiRoutes: options.dispatchApiRoutes,
     parseJsonBody: options.parseJsonBody,
     requireAuthenticatedSession: options.requireAuthenticatedSession,
+    workAdmission,
   });
   const transportEventsHelper = new DaemonTransportEventsHelper({
     runtimeBus: runtime.runtimeBus,
@@ -772,8 +777,13 @@ export function createDaemonFacadeCollaborators(
     secretsManager: runtime.runtimeServices.secretsManager,
   });
   cloudflareTunnel.start();
-  // Closed by the auto-updater for its restart; the router refuses new work while it is.
-  const workAdmission = new DaemonWorkAdmission();
+  // Messages and agreed work held while admission was closed start when a refused handover reopens it.
+  workAdmission.onReopen(() => {
+    runtime.sessionBroker.startWaitingMessages();
+    void surfaceActionHelper.resumeAgreedWork().catch((error: unknown) => {
+      logger.warn('Agreed work held for a restart could not be started after admission reopened', { error: summarizeError(error) });
+    });
+  });
   const httpRouter = new DaemonHttpRouter({
     workAdmission,
     idempotentReplay,

@@ -33,10 +33,6 @@ const approvalMatrixCommand = createApprovalCommand<CommandContext>({
   },
 });
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
-  description:
-    'Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and export or import the voice settings',
-  usage: '[review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
-  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   reportFailure: false,
   paths: requireShellPaths,
   async wake(args, ctx, shellPaths) {
@@ -50,7 +46,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       settings: resolveWakeRuntimeSettings(
         (key: string) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
         'tui',
-        // Read from disk, so `/voice wake status` reports the speech gate as
+        // Read from disk, so `/voice wake-status` reports the speech gate as
         // available exactly when its artifact is there and verified.
         terminalWakeCapabilities(wakeProvisionStatus({ managedRoot })),
       ),
@@ -83,7 +79,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       }
       ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt
         ? [resolution.available
-          ? '(yes: /voice wake setup yes installs it now)'
+          ? '(/voice wake-setup --with-speech-to-text installs it now)'
           : `(speech-to-text is installed through the daemon, which is not reachable here: ${resolution.reason})`]
         : [])].join('\n'));
       return;
@@ -92,7 +88,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       printWakeStatus(runner);
       return;
     }
-    ctx.print('Usage: /voice wake [status|setup]');
+    ctx.print('Use /voice wake-status or /voice wake-setup.');
     return;
   },
   async provision(sub, _args, ctx, _shellPaths) {
@@ -118,7 +114,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   review: (enabled) => [
     'Voice Review',
     `  always-speak: ${enabled ? 'on' : 'off'}`,
-    '  config key: ui.voiceEnabled (same as /tts on|off)',
+    '  setting: ui.voiceEnabled (/voice on and /voice off)',
     '  posture: optional local TTS output; disabled by default',
     '  note: voice remains an optional operator convenience, not a required SaaS dependency',
   ],

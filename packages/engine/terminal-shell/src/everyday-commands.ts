@@ -20,7 +20,7 @@ function stepChoices(undo: boolean, rewind: boolean): readonly FixedChoice[] {
     { value: 'turn', label: undo ? 'The last turn' : 'The turn undone last', help: undo ? 'Your last message and its answer' : 'Your message and its answer come back' },
     { value: 'file', label: undo ? 'The last file change' : 'The file change undone last', help: undo ? 'Every file the last write or edit changed goes back' : 'The files it changed are written again' },
     { value: 'set-aside', label: 'Set aside a blocked file change', help: 'A later change blocks it; set it aside without changing a file' },
-    ...(rewind ? [{ value: 'rewind', label: undo ? 'The last rewind' : 'The rewind undone last', help: undo ? 'The conversation and files go back to before it' : 'It is applied again' }] : []),
+    ...(rewind ? [{ value: 'rewind', label: undo ? 'The last rewind' : 'The rewind undone last', help: undo ? 'The conversation and files go back to before the last /checkpoint rewind' : 'The last /checkpoint rewind that was undone is applied again' }] : []),
   ];
 }
 
@@ -36,7 +36,7 @@ export function createUndoCommands<Ctx extends CommandActionContext>(policy: {
   const make = (undo: boolean): DescribedCommand<Ctx> => defineCommand<Ctx>({
     name: undo ? 'undo' : 'redo',
     title: undo ? 'Undo' : 'Redo',
-    summary: undo ? 'Take back the last turn, file change or rewind' : 'Bring back what was undone last',
+    summary: undo ? 'Take back the last turn, file change or /checkpoint rewind' : 'Bring back what was undone last',
     group: 'Conversation',
     actions: [doAction<Ctx>({
         id: undo ? 'undo' : 'redo', label: undo ? 'Undo the last step' : 'Redo the step undone last', word: '',

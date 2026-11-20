@@ -6,9 +6,7 @@ import { toolsCommand } from './tools-command.ts';
 import { requireProviderApi } from './runtime-services.ts';
 
 export const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
-  hidden: false,
   unpinByModelId: false,
-  imageHint: '<path> [prompt text]',
   supportedFormats: '\nSupported: .png, .jpg, .jpeg, .webp, .gif',
   maximumImageSize: 'Maximum: 20MB',
   error: (detail) => 'Error: ' + detail,

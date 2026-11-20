@@ -37,7 +37,6 @@ import { registerControlRoomRuntimeCommands } from './commands/control-room-runt
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
 import { registerSessionContentCommands } from './commands/session-content.ts';
 import { registerCheckpointRuntimeCommands } from './commands/checkpoint-runtime.ts';
-import { registerRewindRuntimeCommands } from './commands/rewind-runtime.ts';
 import { registerWorkstreamRuntimeCommands } from './commands/workstream-runtime.ts';
 import { registerCodebaseRuntimeCommands } from './commands/codebase-runtime.ts';
 import { registerLocalRuntimeCommands } from './commands/local-runtime.ts';
@@ -57,7 +56,6 @@ import { registerLocalAuthRuntimeCommands } from './commands/local-auth-runtime.
 import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
 import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
-import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
 import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime.ts';
 import { registerWorkPlanRuntimeCommands } from './commands/work-plan-runtime.ts';
 import { registerCostRuntimeCommands } from './commands/cost-runtime.ts';
@@ -137,7 +135,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Intelligence', register: registerIntelligenceRuntimeCommands },
   { category: 'Devices', register: registerDevicesRuntimeCommands },
   { category: 'Onboarding', register: registerOnboardingRuntimeCommands },
-  { category: 'Voice & TTS', register: registerTtsRuntimeCommands },
   { category: 'Cloudflare', register: registerCloudflareRuntimeCommands },
   { category: 'Work Plans', register: registerWorkPlanRuntimeCommands },
   { category: 'Cost', register: registerCostRuntimeCommands },
@@ -148,7 +145,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Scheduling', register: registerScheduleRuntimeCommands },
   { category: 'Session Content', register: registerSessionContentCommands },
   { category: 'Checkpoints', register: registerCheckpointRuntimeCommands },
-  { category: 'Checkpoints', register: registerRewindRuntimeCommands },
   { category: 'Workstreams', register: registerWorkstreamRuntimeCommands },
   { category: 'Codebase', register: registerCodebaseRuntimeCommands },
   { category: 'Web Search', register: registerWebSearchRuntimeCommands },

@@ -49,12 +49,17 @@ export interface WorkBoardListSources {
   readonly tasks?: (() => readonly WorkBoardTask[]) | undefined;
   /** When this run of the program began: older finished rows are not listed. */
   readonly sessionStartedAt?: number | undefined;
+  /**
+   * How many calendar events fall today (the Agent's own calendar), read once
+   * when the panel opens; a line under Scheduled says so and opens them.
+   */
+  readonly eventsToday?: (() => number) | undefined;
   /** The archived nodes (the terminal app's archive view), each read as a finished row. */
   readonly archived?: (() => readonly WorkBoardNode[]) | undefined;
   readonly now?: (() => number) | undefined;
 }
 
-export type WorkBoardSection = 'waiting' | 'agents' | 'scheduled' | 'service';
+export type WorkBoardSection = 'waiting' | 'agents' | 'scheduled' | 'calendar' | 'service';
 
 /** A row the cursor can rest on. */
 export interface WorkBoardSelectable {
@@ -69,6 +74,15 @@ const SERVICE_STATE_WORDS: Readonly<Record<string, string>> = {
   thinking: 'working', 'executing-tool': 'working', streaming: 'working', retrying: 'retrying', queued: 'starting',
   idle: 'between checks', paused: 'paused', done: 'up to date', 'awaiting-approval': 'waiting',
 };
+
+/** The line under Scheduled for today's calendar events: "1 event today". */
+function eventsTodayRow(count: number): BoardRow {
+  return {
+    ref: { type: 'schedule', id: 'calendar-today' }, group: 'scheduled',
+    title: `${count} event${count === 1 ? '' : 's'} today`, meta: { short: '', full: 'from your calendar' },
+    tone: 'quiet', actions: ['open'],
+  };
+}
 
 export function boardKey(row: BoardRow): string {
   return `${row.ref.type}:${row.ref.id}`;
@@ -109,6 +123,8 @@ export class WorkBoardList {
   archive = false;
   private cache: { board: WorkBoard | null; error: string | null; nodes: readonly WorkBoardNode[] } | null = null;
   private archiveCache: { rows: BoardRow[]; nodes: readonly WorkBoardNode[] } | null = null;
+  /** Read once per open: the calendar is a file read, not a fact the fleet ticks. */
+  private eventsTodayCache: number | null = null;
 
   constructor(private readonly sources: WorkBoardListSources) {}
 
@@ -187,6 +203,8 @@ export class WorkBoardList {
     const finished = nestRows(agents.filter((row) => row.group === 'finished'));
     for (const { row, depth } of [...running, ...finished]) out.push({ key: boardKey(row), row, depth, section: 'agents' });
     for (const row of board.groups.scheduled) if (this.matches(row)) out.push({ key: boardKey(row), row, depth: 0, section: 'scheduled' });
+    const events = this.eventsToday();
+    if (events > 0 && !this.query) out.push({ key: 'calendar:today', row: eventsTodayRow(events), depth: 0, section: 'calendar' });
     for (const row of board.services.unhealthy) out.push({ key: boardKey(row), row, depth: 0, section: 'service' });
     return out;
   }
@@ -215,6 +233,14 @@ export class WorkBoardList {
     const current = all.findIndex((entry) => entry.key === this.selectedKey);
     const next = Math.max(0, Math.min(all.length - 1, (current < 0 ? 0 : current) + delta));
     this.selectedKey = all[next]!.key;
+  }
+
+  /** Calendar events today, read once per open; 0 when this program keeps no calendar or it cannot be read. */
+  eventsToday(): number {
+    if (this.eventsTodayCache === null) {
+      try { this.eventsTodayCache = this.sources.eventsToday?.() ?? 0; } catch { this.eventsTodayCache = 0; }
+    }
+    return this.eventsTodayCache;
   }
 
   toggleServices(): void {
@@ -262,7 +288,7 @@ export class WorkBoardList {
     if (this.archive) {
       const archived = this.readArchive().rows.length;
       return {
-        waiting: [], agents: agents.map(entry), finishedEmpty: false, empty: agents.length === 0, scheduled: [],
+        waiting: [], agents: agents.map(entry), finishedEmpty: false, empty: agents.length === 0, scheduled: [], eventsToday: null,
         services: { healthy: 0, unhealthy: [], open: false, rows: [] }, error: null,
         filter: this.filtering || this.query ? { query: this.query, active: this.filtering, count: `${agents.length} of ${archived}` } : null,
         archive: true,
@@ -276,6 +302,7 @@ export class WorkBoardList {
       finishedEmpty: !agents.some((item) => item.row.group === 'finished'),
       empty: !all.some((item) => item.section === 'waiting' || item.section === 'agents'),
       scheduled: all.filter((item) => item.section === 'scheduled').map(entry),
+      eventsToday: all.filter((item) => item.section === 'calendar').map(entry)[0] ?? null,
       services: {
         healthy: board?.services.healthy ?? 0,
         unhealthy: all.filter((item) => item.section === 'service').map(entry),
@@ -358,6 +385,8 @@ export interface WorkBoardModalDeps {
   readonly resume?: ((id: string) => boolean) | undefined;
   readonly confirm?: ((options: ConfirmOptions) => Promise<boolean>) | undefined;
   readonly spawn?: FleetSpawn | null | undefined;
+  /** Open today's calendar events (the line under Scheduled). */
+  readonly openEventsToday?: (() => void) | undefined;
   /** The selected row's detail on wide screens. */
   readonly detail?: ((row: BoardRow, node: WorkBoardNode | undefined) => PanelDetail | null) | undefined;
 }
@@ -450,6 +479,7 @@ export class WorkBoardModal implements SurfaceModal {
       this.say(`${row.title}. It can't be restarted from here.`, 'faint');
       return;
     }
+    if (selected.section === 'calendar') { host.close(this, 'done'); this.deps.openEventsToday?.(); return; }
     if (selected.section === 'waiting' && this.deps.openAsk?.(row)) { host.close(this, 'done'); return; }
     const node = this.list.node(row);
     const target = node?.kind === 'agent' ? { kind: 'agent' as const, id: node.id }

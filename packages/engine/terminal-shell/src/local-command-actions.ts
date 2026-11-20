@@ -2,14 +2,13 @@ import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { ContentPart, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext } from './command-actions/types.js';
-import { listInput, readAction } from './described-command-kit.js';
+import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -41,9 +40,7 @@ const PINNED_MODELS = defineList<PinListContext>({
 export function createLocalCommandActions<Context extends LocalCommandContext>(
   requireProviderApi: (context: Context) => ProviderApi,
   policy: {
-    readonly hidden: boolean;
     readonly unpinByModelId: boolean;
-    readonly imageHint: string;
     readonly supportedFormats: string;
     readonly maximumImageSize: string;
     readonly error: (detail: string) => string;
@@ -103,58 +100,58 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
   }
   return {
     toggleBlocks,
-    image: {
-      name: 'image',
-      effect: 'external-network',
-      firstScreen: !policy.hidden,
-      aliases: ['img'],
-      description: 'Attach an image file to the next message',
-      usage: '<path> [prompt text]',
-      argsHint: policy.imageHint,
-      // The prompt after the path is free text, sent as typed.
-      rawRest: 1,
-      async handler(args: string[], ctx: Context) {
-        if (args.length === 0) throw commandRefusal('Usage: /image <path> [prompt text]', 'Supported formats: PNG, JPEG, WebP, GIF');
-        const rawPath = args[0];
-        if (rawPath === undefined) return;
-        const promptText = args.slice(1).join(' ') || `Attached image: ${rawPath.split('/').pop() ?? rawPath}`;
-        const projectRoot = ctx.workspace.shellPaths?.workingDirectory ?? ctx.platform.configManager.getWorkingDirectory();
-        if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
-        let resolvedPath: string;
-        try {
-          resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
-        } catch (err) {
-          throw commandRefusal(policy.error(summarizeError(err)));
-        }
-        if (!existsSync(resolvedPath)) throw commandRefusal(policy.imageFailure('File not found', rawPath));
-        const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase();
-        const mediaType = (
-          { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<
-            string,
-            string
-          >
-        )[ext];
-        if (!mediaType) throw commandRefusal(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
-        const stat = statSync(resolvedPath);
-        if (stat.size > MAX_IMAGE_ATTACH_BYTES) throw commandRefusal(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB).`, policy.maximumImageSize);
-        let data: string;
-        try {
-          data = (await readFile(resolvedPath)).toString('base64');
-        } catch (err) {
-          throw commandRefusal(policy.imageFailure('Failed to read image', summarizeError(err)));
-        }
-        const currentModel = await requireProviderApi(ctx).getCurrentModel();
-        if (!currentModel.capabilities.multimodal) {
-          ctx.print(`Warning: ${currentModel.displayName} does not support image input. The image will be stripped when sending.`);
-        }
-        const content: ContentPart[] = [
-          { type: 'text', text: promptText },
-          { type: 'image', data, mediaType },
-        ];
-        if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
-        ctx.submitTurn(promptText, content);
-      },
-    } satisfies TerminalSlashCommand<Context>,
+    // `/image <file> [message]`: a single-action command (command-actions/).
+    image: defineCommand<Context & CommandActionContext>({
+      name: 'image', leadingFlagsOnly: true, title: 'Attach an image', summary: 'Send an image file to the model with your next message', group: 'Conversation',
+      actions: [doAction<Context & CommandActionContext>({
+        id: 'attach', label: 'Send an image with a message', word: '', touches: 'another-machine',
+        inputs: [
+          { id: 'path', label: 'Image file', help: 'A .png, .jpg, .jpeg, .webp or .gif file in this project, up to 20 MB', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 } },
+          textInput({ id: 'message', label: 'Message', help: 'What to ask about it', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: '"Attached image:" and its file name' } }),
+        ],
+        sentence: '{path} is sent to the model with your message, as a new turn.',
+        operator: { terminalOnly: 'It sends a turn in the terminal app\'s open conversation.' }, example: { path: 'screenshots/error.png', message: 'what is wrong here?' },
+        async run(values, ctx) {
+          const rawPath = values.path!;
+          const promptText = values.message || `Attached image: ${rawPath.split('/').pop() ?? rawPath}`;
+          const projectRoot = ctx.workspace.shellPaths?.workingDirectory ?? ctx.platform.configManager.getWorkingDirectory();
+          if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
+          let resolvedPath: string;
+          try {
+            resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
+          } catch (err) {
+            throw commandRefusal(policy.error(summarizeError(err)));
+          }
+          if (!existsSync(resolvedPath)) throw commandRefusal(policy.imageFailure('File not found', rawPath));
+          const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase();
+          const mediaType = (
+            { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<
+              string,
+              string
+            >
+          )[ext];
+          if (!mediaType) throw commandRefusal(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
+          const stat = statSync(resolvedPath);
+          if (stat.size > MAX_IMAGE_ATTACH_BYTES) throw commandRefusal(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB).`, policy.maximumImageSize);
+          let data: string;
+          try {
+            data = (await readFile(resolvedPath)).toString('base64');
+          } catch (err) {
+            throw commandRefusal(policy.imageFailure('Failed to read image', summarizeError(err)));
+          }
+          const currentModel = await requireProviderApi(ctx).getCurrentModel();
+          if (!currentModel.capabilities.multimodal) {
+            ctx.print(`Warning: ${currentModel.displayName} does not support image input. The image will be stripped when sending.`);
+          }
+          const content: ContentPart[] = [
+            { type: 'text', text: promptText },
+            { type: 'image', data, mediaType },
+          ];
+          if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
+          ctx.submitTurn(promptText, content);
+        },
+      })],
+    }),
     // `/pin`: pin and unpin models in the favourites the model picker shows first (command-actions/).
     pin: defineCommand<Context & CommandActionContext>({
       name: 'pin', title: 'Pinned models', summary: 'Keep models you use at the top of the model picker', group: 'Models', report: 'see-pinned',

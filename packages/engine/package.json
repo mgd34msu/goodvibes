@@ -3033,6 +3033,21 @@
       "types": "./terminal-shell/dist/everyday-commands.d.ts",
       "import": "./terminal-shell/dist/everyday-commands.js"
     },
+    "./terminal-shell/checkpoint-command": {
+      "bun": "./terminal-shell/src/checkpoint-command.ts",
+      "types": "./terminal-shell/dist/checkpoint-command.d.ts",
+      "import": "./terminal-shell/dist/checkpoint-command.js"
+    },
+    "./terminal-shell/media-command": {
+      "bun": "./terminal-shell/src/media-command.ts",
+      "types": "./terminal-shell/dist/media-command.d.ts",
+      "import": "./terminal-shell/dist/media-command.js"
+    },
+    "./terminal-shell/notes-command": {
+      "bun": "./terminal-shell/src/notes-command.ts",
+      "types": "./terminal-shell/dist/notes-command.d.ts",
+      "import": "./terminal-shell/dist/notes-command.js"
+    },
     "./terminal-shell/health-command": {
       "bun": "./terminal-shell/src/health-command.ts",
       "types": "./terminal-shell/dist/health-command.d.ts",

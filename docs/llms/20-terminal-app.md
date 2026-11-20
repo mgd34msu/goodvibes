@@ -25,7 +25,7 @@ Terms used in this part:
 | helper agent | A subagent the model starts with the `agent` tool. It has its own conversation and a narrower tool set. |
 | contract | A tracked unit of delegated work with acceptance criteria that are checked before it counts as done. |
 | workstream | A contract started from an owner request, planned into units and run by helper agents. |
-| checkpoint | A snapshot of the workspace files that `/rewind` can return to (see "Restoring a checkpoint"). |
+| checkpoint | A snapshot of the workspace files that `/checkpoint restore` and `/checkpoint rewind` can return to (see "Restoring a checkpoint"). |
 | view | A full-screen modal over the conversation, such as Agents, Usage or Changes. `Esc` closes it. |
 
 ## Launching the terminal app
@@ -652,13 +652,13 @@ While more than one session exists (a helper agent or background process is runn
 
 Text that was not typed into the composer (a skill body, `/retry`, a template, `/image`, a form, speech) is sent as written and never read for these markers.
 In the terminal app, `@<path>` is plain text that names the file; the model reads it with its tools. (The Agent expands `@<path>` itself; see "Composer differences" in the Agent part.)
-A paste of more than 8 lines folds into a marker `[TEXT: pN, M lines]`; `/pastes` shows what each fold holds before sending.
+A paste of more than 8 lines folds into a marker `[TEXT: pN, M lines]`; `/paste list` shows what each fold holds before sending.
 
 Images in the terminal app:
 
-- An image pasted from the clipboard (`Ctrl+V`, or `/paste`) becomes a marker `[IMAGE: img1, clipboard, <size>KB]` in the composer and is sent with the message as an image.
+- An image pasted from the clipboard (`Ctrl+V`, or `/paste clipboard`) becomes a marker `[IMAGE: img1, clipboard, <size>KB]` in the composer and is sent with the message as an image.
 - Pasting the path of an image file (ending in `.png`, `.jpg`, `.jpeg`, `.webp` or `.gif`) that exists and is at most 20 MB attaches the file the same way: `[IMAGE: img2, photo.png, <size>]`. A larger file stays a plain pasted path.
-- `/image <path> [prompt text]` sends the image with the prompt at once. A file over 20 MB is refused with its size. When the current model does not accept images, it prints `Warning: <model> does not support image input. The image will be stripped when sending.` and the image is not sent to that model.
+- `/image <file> [message]` sends the image with the message at once. A file over 20 MB is refused with its size. When the current model does not accept images, it prints `Warning: <model> does not support image input. The image will be stripped when sending.` and the image is not sent to that model.
 - Deleting a marker with `Backspace` removes that image.
 - `@photo.png` typed in the composer is plain text (the model can read the file with its tools); `!@photo.png` attaches the image, at most 20 MB, as a pasted path does.
 
@@ -695,7 +695,7 @@ The default table of the terminal app:
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search this conversation's transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
-| `bookmark` | `Ctrl+B` | Bookmark or unbookmark the nearest block (`/bookmarks` lists them). |
+| `bookmark` | `Ctrl+B` | Bookmark or unbookmark the nearest block (`/session bookmarks` lists them). |
 | `block-save` | `Ctrl+S` | Save the nearest block to a file. |
 | `delete-word` | `Ctrl+W` | Delete the word before the cursor (whitespace-delimited) into the kill ring. |
 | `line-start` | `Ctrl+A` | Move to the start of the line. |
@@ -760,8 +760,8 @@ Every view opens as a modal over the dimmed conversation; `Esc` closes one level
 | --- | --- | --- |
 | Command palette | `Ctrl+P`, `Ctrl+K`, `?`, `/help` | Every command, view and setting, searchable. Old pane names (fleet, tokens, git) are search words. |
 | Your agents | `F2`, `Ctrl+O`, `/agents` | The work board, the same panel as the Agent's: rows waiting for you first (`Waiting for you`), then one line per running agent (`● Helper agent   Writing docs/usage.md   15s  2 files read`, sub-agents indented under their parent), the agents that finished this session (or `no finished agents this session`), `Scheduled` (schedules and watches with their cadence and last run), and one line `Background services  N healthy ›`. The platform's own heartbeats, pollers and the code index are counted there, never as running; an unhealthy one is listed under that line by itself (`Daemon heartbeat stopped answering · 3 min ago`). Keys: `Enter` opens the selected row (an agent or background process full screen; a contract, workflow or hosted agent full height in the panel; a pick or merge conflict acts; a stalled service restarts where it can), `s` stops it and what it started (asks first; `Ctrl+X` too), `n` starts a new agent (a coding agent found on `PATH`, hosted by the GoodVibes service), `b` opens or closes the background services, `p` pauses or resumes a schedule. Also: `i` interrupts, `D` discards a contract's worktree, `f` follows the newest running agent, `v` shows the archive (`a` archives or restores one, `A` archives everything finished), `/` filters. Empty: `nothing running` and `Ask for something and helper agents show up here.` A fleet that cannot be read: `Couldn't read what is running: <reason>` with `r` to try again. On a screen 90 columns or wider the selected row's detail is on the right: model, time, files read and changed, tokens, and cost only when priced. |
-| Usage | `/usage`, `/cost` | Context bar with the compaction threshold, session tokens and cost, per-turn bars, per-agent cost and the budget alert. |
-| Changes | `/changes`, `/diff`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
+| Usage | `/usage` | Context bar with the compaction threshold, session tokens and cost, per-turn bars, per-agent cost and the budget alert. |
+| Changes | `/changes`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
 | Notifications | `/notifications` | Every notice, newest first; `Enter` goes to its subject. |
 | Sessions | `/session`, `/resume` | Saved sessions, with hosted sessions in a Hosted group. |
 | Settings | `/settings` | Every setting by category, searchable. |
@@ -813,7 +813,7 @@ A provider failure may move to another sign-in, another backend of a `synthetic`
 
 A slash command is typed in the composer and run with Enter: `/model use openai:gpt-5.4`.
 Typing `/` opens autocomplete; `Tab` completes the selected command.
-A command that is not yet described may have aliases (`/d` is `/diff`); a described command has only its name.
+Every command has one name and no aliases.
 Arguments are separated by spaces; quote an argument that contains spaces with `"` or `'` at the start of the word (`/title "Release prep"`).
 A quote character inside a word is an ordinary character, so `["a","b"]` is one word.
 A backslash outside quotes is an ordinary character (`C:\dir`).
@@ -829,16 +829,15 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 ### Help, navigation and display
 
 `?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
-`/find` (alias `/findtext`) searches this conversation's transcript, the same as `Ctrl+F`. `/search` searches the web instead.
-
-`/expand [all|thinking|tool|code]` and `/collapse [all|thinking|tool|code]` open or fold every transcript block of that type. Without an argument they act on all blocks.
-`/bookmarks` (alias `/bm`) lists blocks bookmarked with `Ctrl+B`.
-`/next-error` (alias `/ne`) and `/prev-error` (alias `/pe`) scroll to the next or previous error line in the transcript.
+Looking through the conversation is under `/session` (its group "Look through this conversation"): `/session find [--kind <kind>] [<words>]` lists the entries that hold the words (with none, it searches in place, the same as `Ctrl+F`); `/web-search` searches the web instead.
+`/session expand [all|thinking|tool|code]` and `/session collapse [all|thinking|tool|code]` open or fold every block of that type (all of them when none is given).
+`/session bookmarks` lists the blocks bookmarked with `Ctrl+B` and jumps to one.
+`/session next [<kind>]` and `/session prev [<kind>]` scroll to the next or previous entry of a kind; `error` is the kind for error lines (`/session next error`).
 
 `/verbosity` sets how much the app prints, the same in both apps: `/verbosity set quiet|balanced|operator` writes `behavior.hitlMode` (default `balanced`); `/verbosity show` (what `/verbosity` alone gives a model or script) prints the current level and the per-domain verbosity; `/verbosity set-domain <domain> <minimal|normal|verbose>` sets one domain's verbosity for this session.
 
 `/notifications` opens the notification history.
-`/conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]` (aliases `/transcript`, `/composer`) reviews the transcript's structure: event kinds, groups, the busiest regions, the composer's state, and jumps between events of one kind. A wrong form prints its usage.
+The conversation's record is also under `/session`: `/session events [<kind>] [<from row>] [--last <n>]` entry by entry, `/session groups` turn by turn, `/session hotspots [<kind>]` what took the most entries, `/session composer` what the composer waits on, and `/session restored` what a resume brought back.
 
 `/guidance` lists contextual guidance (`review`, the report), dismisses one item for what it reports now (`dismiss <item>`, picked from what is showing), or shows dismissed items again (`reset [<item>]`, every one when none is named).
 `/guidance dismiss g1` on an item that is not showing is refused with `Guidance g1 is not showing now, so there is nothing to dismiss.`
@@ -863,26 +862,35 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 
 ### The conversation
 
-`/clear` (aliases `/cls`, `/reset`) saves the current conversation as its own session and starts a fresh one.
-While a turn runs it refuses: `A turn is still running. Stop it with Esc or let it finish, then /clear.`
+`/clear` saves the current conversation as its own session and starts a fresh one; `/resume` brings the saved one back.
+While a turn runs it refuses: `A turn is still running, so nothing was cleared.` with `Stop it with Esc or let it finish, then /clear.`
 When the save fails nothing is cleared: `Could not save the current conversation, so nothing was cleared: <reason>`.
 
 `/compact` summarizes older messages to free the context window. The transcript shows a before and after notice.
 When the model's context window is too small to summarize, the oldest messages are dropped without a summary and the notice says so: `[Context] Dropped the N oldest message(s) without a summary and kept the last M ...`.
 When there is nothing to compact: `[Context] Nothing was compacted: <reason>.`
 The app also compacts on its own when context use reaches `behavior.autoCompactThreshold` percent (default `80`, range 10 to 100).
-`/compact-history` (alias `/compaction-history`) lists this session's compactions.
+`/session compactions` lists this session's compactions: when, how much each removed and what it kept.
 
-`/keep <text>` pins text to session memory; pinned text survives compaction. `/keep` with no text prints its usage. Blank text prints `[Pin] Nothing pinned: text was blank.`
-`/note [list|add <text>|remove <id>]` manages session notes, which are also kept across compaction. `/note add Ask about the staging DNS` prints `Note added: [<id>] Ask about the staging DNS`; `/note remove <id>` prints `Note removed: [<id>]` or `Note not found: <id>`.
+`/notes` keeps notes beside the conversation; in the terminal app they last for this session and the model keeps seeing them after a compaction (a message that starts with `!#` writes one too). It is the same command as the Agent's, with the same actions:
+
+| Action | Line | What it does here |
+| --- | --- | --- |
+| See your notes | `/notes list` | Every note with its id (`mem-1`, ...); what `/notes` alone gives a model or script. |
+| Write a note | `/notes create [--title <title>] [--url <page>] [--tags <tags>] <text>` | Keeps the note: `Note mem-1: "Ask about the staging DNS"` and how many notes the model keeps seeing after the next compaction. |
+| Read one note, Find a note | `/notes show <note>`, `/notes search <words>` | The note's text; the notes that mention the words. |
+| Change a note, Delete a note | `/notes edit <note> [<text>]`, `/notes delete <note>` | Replaces its text; removes it (asks first). |
+| Keep a note as a memory | `/notes to-memory <note> [--kind <kind>] [--scope <where>]` | Adds a durable memory record from it (`/memory`); the note stays. |
+| Mark reviewed or out of date; make a persona, skill or routine; add its page to Agent Knowledge | `/notes review`, `stale`, `to-persona`, `to-skill`, `to-routine`, `to-knowledge` | The Agent's; here each is refused with the reason and `/notes to-memory` named instead. |
+
 `/title [text]` shows or sets the conversation title.
 
-`/retry [modified text]` (alias `/r`) sends the last request again, keeping the work already done; with text it sends that text instead.
-`/queue [list | edit <n> <text> | delete <n>]` (alias `/q`) manages messages typed while a turn is streaming; they wait in a queue until the turn ends. With an empty queue: `No queued messages. (Messages typed while a turn is streaming queue here until it finishes.)`
+`/retry [changed message]` sends the last message again, keeping the work already done; with text it sends that text instead.
+`/queue` holds the messages typed while a turn is streaming; they wait until the turn ends. `/queue list` (what `/queue` alone gives a model or script) lists them numbered from 1: with none, `No queued messages. (Messages typed while a turn is streaming queue here until it finishes.)`. `/queue edit <n> <new text>` changes one; `/queue delete <n>` takes one back (asks first). A message already sent is refused: `Message #<n> was already sent, so it was not changed.`
 
-`/paste` (alias `/clip`) inserts the clipboard's text or image into the composer. Use it when the terminal's own paste does not carry images. With nothing usable: `Clipboard does not contain supported text or image data.`
-`/pastes [pN]` (alias `/pending-pastes`) shows the text behind each `[TEXT: pN, M lines]` fold. With no folds: `[Pastes] No folded pastes are currently in the composer (pastes over 8 lines fold to [TEXT: pN, M lines]).`
-`/image <path> [prompt text]` (alias `/img`) attaches an image file (PNG, JPEG, WebP, GIF) to the next message, optionally with the prompt. Without a path it refuses with `Usage: /image <path> [prompt text]`.
+`/paste clipboard` puts the clipboard's text or image into the composer. Use it when the terminal's own paste does not carry images. With nothing usable: `The clipboard holds no text or image this app can paste.`
+`/paste list [pN]` (what `/paste` alone gives a model or script) shows what each `[TEXT: pN, M lines]` fold holds. With no folds: `No paste is folded in the prompt (a paste over 8 lines folds to [TEXT: pN, M lines]).`
+`/image <file> [message]` sends an image file (PNG, JPEG, WebP, GIF, up to 20 MB, inside the project) to the model with the message at once (`Attached image: <name>` when no message is given). Bare `/image` opens a form for the file and the message.
 `/editor` opens the composer draft in `$VISUAL` or `$EDITOR`, suspends the interface while the editor runs, and puts the saved text back in the composer. Set `export EDITOR=nvim` first.
 
 `/template` manages prompt templates: `list` (the report; picking one sends it, Del deletes, Ctrl+E edits), `use <template> [name=value ...]`, `save <name>` (your last message), `show <template>`, `edit <template>` and `delete <template> [--everywhere]` (asks first; `--everywhere` deletes the one every project shares).
@@ -959,60 +967,51 @@ With nothing joined: `No hosted session is joined in this terminal, so nothing w
 
 `/remote session-export <file>`, `session-inspect <file>` and `session-import <file>` save, inspect or bring in a remote session bundle (runner pools, contracts, artifacts, never the conversation); `session-import` asks first, since it replaces anything held here with the same ids.
 
-`/replay [load [runId] | step [n] | seek <rev> | diff <runId> | export <path>]` (alias `/rep`) loads a recorded run, steps or seeks through its revisions, compares two runs and exports one.
+`/replay` steps through recorded runs: every turn is recorded as a run. Bare, it opens its actions with "See the loaded run" first (`status`; a model or a script running it bare gets that line). `runs` lists the recorded runs; `load <run>` loads one (the guided path lists them, newest first); `step [<n>]` goes forward one event or `n`; `seek <revision>` jumps to an event (0 is the start); `diff <other run>` compares the loaded run with another event by event; `export <file>` writes the report as JSON. A step that needs a loaded run without one is refused: `No run loaded. Use /replay load <runId> first.`
 
 ### Undo, rewind and checkpoints
 
 The terminal app records a checkpoint of the workspace files at each turn and each helper-agent run, in any workspace.
-`/checkpoint [label]` creates a manual checkpoint kept for forensic retention: `Checkpoint created: <id> "<label>" (forensic retention).` With no file changes since the last one: `No changes since the last checkpoint; nothing to save.`
-`/checkpoints` (alias `/ckpts`) lists checkpoints, newest first, numbered from 1. With none: `No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.`
+`/checkpoint` holds them, described once for both programs. Bare, it opens its actions with "See your checkpoints" first (`list`, with how many are kept on the right; a model or a script running it bare gets the list):
 
-`/rewind` with no argument lists the turns completed in this run of the app (a resumed session restores its turn list: `Rewind: restored N turn anchor(s)`).
-`/rewind <n|turnId> [files|conversation|both]` rewinds to the end of that turn. `files` restores workspace files, `conversation` removes the later messages, `both` (the default) does both.
-The rewind is previewed in the Changes view: `Previewing rewind of turn "<label>" (<scope>: ...). Enter or y rewinds, n or Esc cancels.`
-Cancelling prints `Rewind cancelled: nothing changed.`
-A wrong scope prints `Unknown scope "<word>". Use one of: files | conversation | both.`
-`/rewind` refuses while a turn is running.
-`/undo rewind` reverses the last `/rewind`; `/redo rewind` applies it again. Each replaces the whole conversation, so each refuses, changing nothing, when messages were added since (`/undo rewind` since the rewind, `/redo rewind` since the undo), naming how many; both check again after asking about files, and both report when the restored conversation could not be saved.
+| Action | Line | What it does |
+| --- | --- | --- |
+| See your checkpoints | `/checkpoint list` | Lists them, newest first, numbered from 1, with kind (`turn`, `agent-run` or `manual`), label, age and size. With none: `No checkpoints yet. Turns and agent runs take one by themselves; /checkpoint make takes one now.` |
+| Make a checkpoint now | `/checkpoint make [<name>]` | Keeps the files as they are, held longer than the automatic ones: `Checkpoint <id> "<name>" made; it is kept longer than the automatic ones.` With no change since the last one: `Nothing has changed since the last checkpoint, so none was made.` |
+| Put the files back to a checkpoint | `/checkpoint restore <n\|id>` | Files only, after you see what changes (below). |
+| Go back to an earlier turn | `/checkpoint rewind <n\|turn> [files\|conversation\|both]` | Files, conversation or both (the default) go back to the end of that turn, after you see the plan (below). |
+
+`/checkpoint rewind` without a turn lists the turns completed in this run of the app, newest first (a resumed session restores its turn list: `Rewind: restored N turn anchor(s)`). `files` restores workspace files, `conversation` removes the later messages, `both` does both.
+It reads the plan, shows it in the Changes view (`Previewing going back to turn "<label>" (<scope>: ...). Enter or y goes back, n or Esc cancels.`) and applies exactly the plan shown: the plan carries a single-use token, and a conversation that changed after the preview is refused (`Nothing changed: <reason>.`). Cancelling prints `Nothing changed: you chose not to go back.` It cannot be undone once new messages are added; until then `/undo rewind` takes it back.
+It refuses while a turn is running, and when no turn has completed in this run (`No completed turns are recorded for this conversation yet, so there is nothing to go back to.` with `/checkpoint restore` named instead).
+`/undo rewind` reverses the last `/checkpoint rewind`; `/redo rewind` applies it again. Each replaces the whole conversation, so each refuses, changing nothing, when messages were added since (`/undo rewind` since the rewind, `/redo rewind` since the undo), naming how many; both check again after asking about files, and both report when the restored conversation could not be saved.
 
 ### Restoring a checkpoint
 
-`/checkpoints restore <n|id>` restores the files of one checkpoint at any time: `<n>` is its number in `/checkpoints`, or give its id or an unambiguous id prefix.
-It previews the files the restore would change in Changes; `Enter` or `y` restores, `n` or `Esc` cancels (`Restore cancelled: nothing changed.`). `--yes` typed by you skips the question; from the model it is ignored, so a model-run restore is always put to you.
-Only files are restored; the conversation is unchanged. The current files are first kept in a safety checkpoint (`pre-restore safety (before <id>)`), which `/checkpoints restore` can bring back. The receipt is `[Checkpoint] Restored files from checkpoint <id> ("<label>"). Files only: the conversation is unchanged.`
-Refusals: `No checkpoint #9. Run /checkpoints to list checkpoints (1–N).`, `Checkpoint ref "8e" is ambiguous (2 matches). Use the list number instead.`, `Unknown checkpoint ref "x". Run /checkpoints to list checkpoints.`, and the busy refusal while a turn runs; a partial restore names the paths that failed.
-
-When no turn has completed in this run of the app, `/rewind` also lists the workspace checkpoints instead of turns, and `/rewind <n|id>` restores one the same way:
-
-```text
-/rewind
-No completed turns recorded this run yet; falling back to workspace checkpoints (FILES ONLY, no conversation state):
-   1. 3f2a9c1b     turn      after: add rate limiting  (12 min ago)
-   2. 8e01d4aa     manual    before refactor  (1 h ago)
-Restore one: /rewind <n|id>; files only; conversation history is untouched.
-```
-
-The kind column is `turn`, `agent-run` or `manual`; the ids and labels above are examples.
+`/checkpoint restore <n|id>` restores the files of one checkpoint at any time: `<n>` is its number in `/checkpoint list`, or give its id or an unambiguous id prefix; the guided path lists them.
+It previews the files the restore would change in Changes; `Enter` or `y` restores, `n` or `Esc` cancels (`Restore cancelled: nothing changed.`). It always asks, whoever runs it.
+Only files are restored; the conversation is unchanged. The current files are first kept in a safety checkpoint (`pre-restore safety (before <id>)`), which `/checkpoint restore` can bring back. The receipt is `[Checkpoint] Restored files from checkpoint <id> ("<label>"). Files only: the conversation is unchanged.`
+Refusals: `No checkpoint #9. Run /checkpoint list to list checkpoints (1–N).`, `Checkpoint ref "8e" is ambiguous (2 matches). Use the list number instead.`, `Unknown checkpoint ref "x". Run /checkpoint list to list checkpoints.`, and the busy refusal while a turn runs; a partial restore names the paths that failed.
 
 (The daemon's operator API also has `checkpoints.restorePreview` and `checkpoints.restore`; the API part describes them.)
 
 ### Undoing file changes and turns
 
-`/undo [rewind|file]` and `/redo [rewind|file]`:
+`/undo [turn|file|set-aside|rewind]` and `/redo [turn|file|set-aside|rewind]` take back, or bring back, one step of the kind chosen; bare, they open the choice, and the last turn is the default:
 
 | Form | Effect | Output |
 | --- | --- | --- |
-| `/undo` | Remove the last conversation turn. Refused while a turn runs: `A turn is still running. Stop it with Esc or let it finish, then /undo.` | `Last turn undone. Use /redo to restore. Tip: /undo file to revert a file write/edit.`, or `Nothing to undo. Tip: use /undo file to revert the last file write/edit.` |
+| `/undo` | Remove the last conversation turn. Refused while a turn runs: `A turn is still running, so /undo did nothing.` | `Last turn undone; /redo brings it back.`, or `There is nothing to undo.` with `To take back the last file write or edit: /undo file` |
 | `/undo file` | Revert every file the most recent not-yet-undone `write` or `edit` call changed. | `File reverted (last edit call):` or `N files reverted (last write call):` with the paths, then `Use /redo file to re-apply.`; with nothing recorded: `Nothing to undo. No file operations recorded.` |
-| `/undo rewind` | Reverse the last `/rewind`. | The rewind's result. |
-| `/redo` | Restore the last undone turn. Refused while a turn runs. | `Turn restored. Tip: /redo file to re-apply a reverted file.`, or `Nothing to redo. ...` |
+| `/undo rewind` | Reverse the last `/checkpoint rewind`. | The rewind's result. |
+| `/redo` | Restore the last undone turn. Refused while a turn runs. | `Turn restored.`, or `There is nothing to redo.` |
 | `/redo file` | Re-apply the most recently reverted file change. | `File re-applied (<tool> call):` with the paths, or `Nothing to redo.` |
-| `/redo rewind` | Re-apply the last undone `/rewind`. | |
+| `/redo rewind` | Re-apply the last undone `/checkpoint rewind`. | |
 
 `/undo file` and `/redo file` work on a stack of tool calls kept in memory for this run of the app (up to 50 entries; changes from earlier runs cannot be undone this way, and changes made by `exec` commands are not recorded).
 Each `/undo file` steps one call further back: to undo the last three edit calls, run `/undo file` three times.
-The Agent has the same `/undo file` and `/redo file` (and `/checkpoints restore`), with the same lines.
-When a file was changed after that call (by you, another tool or another program), nothing is changed and the entry is kept: `File undo failed: Cannot undo the change to <path>: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and undo again, or drop the entry (/undo file drop) to reach the one before it.` `/undo file drop` (and `/redo file drop`) sets the newest entry aside without changing any file: `Dropped the newest undo entry (<tool> call) without changing any file:` with its paths, then `The next /undo file acts on the one before it.`; with none, `Nothing to drop: no undo entries are recorded.`
+The Agent has the same `/undo` and `/redo` (its `rewind` is refused: the Agent does not go back to a turn) and the same `/checkpoint list` and `/checkpoint restore`.
+When a file was changed after that call (by you, another tool or another program), nothing is changed and the entry is kept: `File undo failed: Cannot undo the change to <path>: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and undo again, or set the entry aside (/undo set-aside) to reach the one before it.` `/undo set-aside` (and `/redo set-aside`) sets the newest entry aside without changing any file: `Dropped the newest undo entry (<tool> call) without changing any file:` with its paths, then `The next /undo file acts on the one before it.`; with none, `Nothing to drop: no undo entries are recorded.`
 `/undo file`, `/redo file`, `/undo rewind` and `/redo rewind` do not wait for a running turn; use them between turns.
 
 ### Models, providers and sign-in
@@ -1029,8 +1028,8 @@ The model picker (its key, or a failed turn's `alt+o`) is unchanged; its left ra
 A level the model does not offer is refused: `<Model> does not offer reasoning effort 'xhigh'; nothing was changed.` followed by `Levels it offers: ...`.
 A model with no configurable reasoning refuses with the reason it has none.
 
-`/context [window [<size>|clear]]` (alias `/ctx`) shows context use with a token breakdown per message.
-`/context window 200000` sets a custom context window for the current model; `/context window clear` removes it.
+`/context` shows what fills the model's context, in both programs: `/context show` (what `/context` alone gives a model or script) breaks the context use down per message; `/context files` lists the project instruction files read into each turn; `/context given` shows what the last turns were given (memories, personas, skills, routines); `/context window` shows the current model's window.
+`/context set-window 200000` sets a custom context window for the current model; `/context clear-window` goes back to the automatic size.
 
 `/provider` is described once for both programs: where your models come from and how you are signed in to them. Bare, it opens its actions with "See your providers" first (`list`: the provider in use, every provider, subscription sign-ins and how requests are routed; a model or a script running it bare gets that report), then:
 - `use <provider> [--model <model>]` ("Switch provider"; without `--model` its first model).
@@ -1045,7 +1044,7 @@ A provider without subscription sign-in is refused: `<provider> has no subscript
 `/provider export <file>` warns `The file holds working sign-in tokens: keep it private and delete it after use.`
 `/provider sign-out openai` prints `Signed out of openai. An API key you set for it is used again.`
 `/scan` probes localhost and the local network for model servers and registers each one it finds (see "Local model servers").
-`/pin <model-id>` and `/unpin <model-id>` add a model to, or remove it from, the pinned favorites.
+`/pin add <model>` and `/pin remove <model>` add a model to, or remove it from, the pinned favorites at the top of the model picker; `/pin list` (what `/pin` alone gives a model or script) lists them.
 
 `/accounts` is described once for both programs: bare, it opens its list of actions with "See your provider accounts" first (a model or a script running it bare gets that report). The actions are `review` (each provider's routes, sign-in freshness and issues), `show <provider>`, `routes <provider>`, `repair <provider>` (what to fix, with the steps as rows to run), `open` (the providers screen), `sign-in <daemon|listener> <address> --user <name>` and `sign-out <daemon|listener> <address>` (a listener session may be kept under another name with `--key <name>`).
 `/accounts sign-in daemon https://host.example:3421 --user admin` asks for the password on a hidden line, then asks "Sign in to a daemon or listener?" with the sentence `Your password for admin will be sent to https://host.example:3421 to sign in to the daemon; the session it gives is kept until you change it (signing out ends it).` (it sends something outside this machine).
@@ -1065,8 +1064,7 @@ In the Agent a credential the daemon reads is filed in the daemon's tier whateve
 
 While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <name> <value>` and `/secrets use <name> <value>`, `/local-auth add` and `password` with `--password`, `/accounts sign-in` with `--password`, `/settings set` for a credential key (in either program), `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`. The line a guided action shows ("This will run", "The command for this is") leaves a secret out, so typing it back asks for the secret on a hidden line.
 
-`/usage [turns|agents]` opens the Usage view on a tab.
-`/cost [panel|budget <usd>|attribution [24h|7d] [--json]]` opens Usage, sets the session budget alert (`/cost budget 5` prints `Cost budget alert set to $5.00.`; `0` disables it), or prints cost attributed per agent over the last 24 hours or 7 days from the daemon.
+`/usage` holds tokens, cost and the spending alert: `/usage open [overview|turns|agents]` opens the Usage view on a tab; `/usage alert <dollars>` warns you when this session's cost passes that amount (`0` turns the warning off); `/usage by-source [24h|7d] [--as text|json]` prints what the daemon spent over the last 24 hours or 7 days, split by agent, model and provider.
 `/status` prints the session status: model, tools, token totals and cost, context use, surfaces and safety states. It takes no words.
 
 ### Settings and configuration
@@ -1120,8 +1118,7 @@ An untrusted folder does not load its hooks file or its project MCP servers.
 Outside a repository: `Not a git repository: <dir>. Nothing was changed. Run /git init to create one.`
 `/git init` inside one: `<dir> is already inside a git repository; nothing was changed.`
 
-`/diff [session|head|working|staged]` (alias `/d`) opens Changes on this session's file changes (the default), everything against `HEAD`, the working tree or the staged set. The session view holds only files this session's tools wrote; before the first one it is empty (`this session · no files changed yet`), and `v` switches to the other views.
-`/changes [session|working|staged|head]` opens the same view.
+`/changes [session|working|staged|head]` opens Changes on this session's file changes (the default), the working tree, the staged set or everything against `HEAD`. The session view holds only files this session's tools wrote; before the first one it is empty (`this session · no files changed yet`), and `v` switches to the other views.
 `/review` (one action, "Review this session's changes") opens this session's diff hunk by hunk to comment for the model or revert a hunk.
 
 `/git` (terminal app) is described: `status` ("See what changed", the report: staged, changed, new and deleted files, then what committing every change would include), `log` (the last ten commits), `diff` (counts the changes not yet staged and opens them in Changes), `init` ("Start a repository here"; never done implicitly) and `commit` ("Commit every change": stages every change, new files included, and commits it; a set already staged by hand is committed as it is; a model cannot run it).
@@ -1137,8 +1134,8 @@ A second `/test` while one runs prints `A test run is already going; Esc stops i
 
 `/tools` works with the model's tools: `list` (the report; a picker shows what each does), `contract <tool>`, `verify <tool>`, `verify-all` and `activity` (opens Your agents, where each agent's tool calls show). An unknown tool is refused with `No tool <name> is registered.`
 
-`/search <query> [--limit <n>]` runs a web search and prints ranked results with source labels. A failed search prints `Search failed: <detail>`.
-`/imagine [--out <path>] <prompt>` generates an image with the first configured image provider, writes it to `generated/<prompt words>-<time>.<ext>` (or `--out`), and opens it where a desktop exists. A file already at the path is never replaced. A job the provider has not finished is reported with the command that collects it: `/imagine --collect <provider> <task-id> [key=value ...]`. With no image provider configured it lists each generation provider's status and the key it needs.
+`/web-search [--limit <n>] <words>` runs a web search and prints ranked results with source labels. A failed search is refused with `Search failed: <detail>`.
+`/media` makes images and video with a configured media provider, the same in both programs. Bare, it opens its actions with "See the media providers" first (`providers`: each provider, what it makes and whether it is set up). `/media make [--as image|video] [--provider <id>] [--model <id>] [--out <file>] <description>` asks a provider to make it (it may charge, so it asks first), keeps it in the artifact store, writes it to `generated/<words>-<time>.<ext>` (or `--out`) and, in the terminal app, opens it where a desktop exists. A file already at the path is never replaced. A job the provider has not finished is reported with the line that collects it: `/media collect <provider> <job> [--out <file>] [key=value ...]` (it was paid for when it was accepted). With no provider that makes it set up, the refusal names the providers that could.
 
 `/eval` evaluates the product on real tasks:
 
@@ -1235,8 +1232,7 @@ With no daemon: `Schedules are kept and run by the GoodVibes daemon, so each run
 `/devices pair` asks what to pair. `/devices pair device` opens the device-pairing view (a QR of an offer; `r` there shows a new one). `/devices pair host [--bootstrap-shared] [--name <name>] [--apply]` pairs this terminal with a daemon on another machine; only the owner typing it counts, and `--apply` reviews and confirms. `/devices pair relay [--name <name>]` mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name); with `relay.enabled` off it answers `Relay is disabled: turn on relay.enabled in /settings open relay first.` `/devices pair channel <channel>` asks for each of a channel's required values with masked input, then switches it on. `/devices unpair-host` forgets this terminal's host credential (the owner's only); `/devices relay-revoke <code>` refuses that device through the relay from its next request while every other keeps working.
 `/cluster` shares inbound channel work with other machines: `status` (what `/cluster` alone shows a model or script), `groups`, `join <group> --key <key>`, `create [--name ...]`, `nodes`, `key [--qr]`, `rename <name>`, `rotate [--now]`, `forget <machine>`, `leave`, `publish <setting>`, `accept <setting>`. Every action takes "Which machine" (`--host https://host:port`, this machine when left out) and, for another machine whose token is not stored, `--token`. `forget`, `leave`, `publish`, `accept` and `rotate --now` ask first.
 `/cloudflare` manages the optional Cloudflare integration, in both programs. Bare in the terminal it opens its list; from a model or script it runs `status`. Its actions: `status`, `setup` (the guided setup; the Agent has none), `requirements [--component <part>]... [--all]`, `create-token` (`--bootstrap-token` hidden as typed, or `--bootstrap-env <name>`; `--account`, `--zone-id`, `--zone`, `--new`), `discover`, `validate`, `provision` (asks first: it spends money), `verify` and `disable`. The token flags are `--token` (hidden), `--token-env` and `--token-ref`; parts are chosen with `--component` and left out with `--no-component`. `create-token`, `provision` and `disable` count only when the owner types them: `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> --new`.
-`/voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]` manages always-speak mode and installs the managed local voice runtime and wake-word models.
-`/tts <prompt>|stop|on|off` sends one prompt whose answer is also spoken, stops playback, or turns always-speak on or off. Live local playback needs `mpv` or `ffplay` on `PATH`.
+`/voice` is one command in both programs. Bare, it opens its actions with "See your voice settings" first (`review`; a model or a script running it bare gets that report). `speak <message>` sends one message whose answer is also spoken; `stop` stops playback; `on` and `off` speak every answer, or stop doing so (`ui.voiceEnabled`); `status` and `setup` show and install the managed local voice runtime; `wake-status` and `wake-setup [--with-speech-to-text]` show and set up the wake-word models (and install speech-to-text too when asked); `export <file>`, `inspect <file>` and `import <file>` keep the voice settings you changed as a file, read one, or apply one. Live local playback needs `mpv` or `ffplay` on `PATH`.
 
 ## Sessions
 
@@ -1428,7 +1424,7 @@ Files in that directory are read again when they change; no restart is needed.
 | Main chat | Main Chat | `provider.provider`, `provider.model` | Normal turns. |
 | Helper | Helper Model | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries; empty values use the main model. |
 | Tool model | Tool LLM | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | Model calls made inside tools; selecting a model turns it on. |
-| TTS model | TTS LLM | `tts.llmProvider`, `tts.llmModel` | The model that answers `/tts` prompts; empty uses the main model. |
+| TTS model | TTS LLM | `tts.llmProvider`, `tts.llmModel` | The model that answers `/voice speak` messages; empty uses the main model. |
 | Embeddings | Embeddings | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. |
 
 `goodvibes doctor routing` prints which provider and model serve each role.
@@ -1795,7 +1791,7 @@ Changes are the owner's: a model running a `/todo` change is refused and keeps i
 ### Session memory
 
 Session memory is text pinned to this session; it survives compaction.
-Add to it with `/keep <text>`, `/note add <text>`, `!# <text>` (pins and sends) or `# <text>` (saves and sends nothing).
+Add to it with `/notes create <text>`, `!# <text>` (pins and sends) or `# <text>` (saves and sends nothing); `/notes` lists, changes and deletes it.
 Durable records that apply to this session only are `/memory` records with `--scope session` (`/memory add <kind> <summary> --scope session`, `/memory queue --scope session`).
 
 ### Durable memory

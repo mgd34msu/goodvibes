@@ -26,7 +26,7 @@ const FIXED_KEYS: readonly { readonly key: string; readonly description: string;
   { key: 'Tab', description: 'Autocomplete slash command or file mention', chords: [{ key: 'tab' }] },
   { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
   { key: '?', description: 'Open help: every command and keyboard shortcut in one list', chords: [{ key: '?' }] },
-  { key: 'F2', description: 'Open runtime activity monitor', chords: [{ key: 'f2' }] },
+  { key: 'F2', description: 'Open Your agents (the same as Ctrl+O)', chords: [{ key: 'f2' }] },
   { key: '/help keys', description: 'List every key and the file that changes them', chords: [] },
 ];
 const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = FIXED_KEYS.map(({ key, description }) => ({ key, description }));
@@ -539,7 +539,7 @@ function fixedShortcutModelRoute(shortcut: Record<string, string>): string {
   switch (shortcut.key) {
     case '/help keys': return 'workspace action:"keybindings"';
     case '?': return 'workspace action:"open" surfaceId:"help-overlay"';
-    case 'F2': return 'workspace action:"open" surfaceId:"process-monitor"';
+    case 'F2': return 'run_command command:"/agents"';
     case 'Tab': return 'workspace action:"commands"';
     case 'Enter':
     case 'Shift+Enter / Ctrl+J': return 'main conversation';

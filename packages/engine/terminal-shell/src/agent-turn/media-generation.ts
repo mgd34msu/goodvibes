@@ -253,7 +253,7 @@ export function mediaCollectToolCall(task: MediaProviderTask): string {
 /** The `/media` command that collects a pending job. */
 export function mediaCollectCommand(task: MediaProviderTask): string {
   const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
-  return `/media generate collect ${task.providerId} ${task.taskId}${resume}`;
+  return `/media collect ${task.providerId} ${task.taskId}${resume}`;
 }
 
 /**

@@ -46,6 +46,7 @@ import { applyConversationOverlays, buildConversationLayers } from './renderer/c
 import { WorkBoardModal } from '@goodvibes-jev/engine/terminal-shell/work-board-input';
 import { createVerbSpawnGateway, FleetSpawn } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
 import { confirmThrough } from './input/confirm-dialog.ts';
+import { AgentCalendarRegistry } from './agent/calendar-registry.ts';
 import { envFlag, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
@@ -781,10 +782,16 @@ async function main(prepared: PreparedShellCliRuntime) {
     notify: (message) => systemMessageRouter.high(message),
     markDirty: () => render(),
   });
-  commandContext.openAgents = () => {
-    const open = input.surfaceModals.modals().find((modal) => modal instanceof WorkBoardModal);
-    input.surfaceModals.push(open ?? new WorkBoardModal({
-      sources: { nodes: () => ctx.services.fleetUnion.nodes(), sessionStartedAt },
+  commandContext.openAgents = (opts = {}) => {
+    const open = input.surfaceModals.modals().find((modal): modal is WorkBoardModal => modal instanceof WorkBoardModal);
+    const modal = open ?? new WorkBoardModal({
+      sources: {
+        nodes: () => ctx.services.fleetUnion.nodes(),
+        sessionStartedAt,
+        // What the old "Coming up" showed from the calendar: today's events, one line under Scheduled.
+        eventsToday: () => AgentCalendarRegistry.fromShellPaths(ctx.services.shellPaths).upcoming(0).length,
+      },
+      openEventsToday: () => { void commandContext.executeCommand?.('calendar', ['upcoming', '--days', '1']).finally(() => render()); },
       subscribe: (listener) => ctx.services.processRegistry.subscribe(() => listener()),
       requestRender: () => render(),
       openSessionView: (target) => {
@@ -798,7 +805,9 @@ async function main(prepared: PreparedShellCliRuntime) {
       resume: (id) => ctx.services.processRegistry.resume(id),
       confirm: (options) => confirmThrough(input.surfaceModals, options),
       spawn: agentSpawn,
-    }));
+    });
+    if (opts.target && !modal.list.selectId(opts.target)) modal.status = { text: `${opts.target} is no longer running here.`, tone: 'warning' };
+    input.surfaceModals.push(modal);
     render();
   };
   // see shell/terminal-focus-mode.ts

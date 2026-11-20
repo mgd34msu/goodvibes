@@ -59,11 +59,6 @@ const approvalMatrixCommand = createApprovalCommand<CommandContext>({
   },
 });
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
-  description:
-    'Review or toggle always-speak mode, manage the managed local-voice runtime and the wake-word models, and export or import the voice settings',
-  usage:
-    '[review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
-  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   reportFailure: true,
   paths: requireShellPaths,
   async wake(args, ctx, _shellPaths) {
@@ -71,13 +66,13 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     // runtime, in its `wake` subdirectory, and are served by the same
     // voiceSetup service, so this reads and provisions through the platform's
     // own wake service rather than a second provisioning path. Nothing
-    // downloads until `/voice wake setup` is run.
+    // downloads until `/voice wake-setup` is run.
     const voiceSetup = requireVoiceSetup(ctx);
     const wakeSub = (args[1] ?? 'status').toLowerCase();
     // Read the artifact state BEFORE resolving: whether the speech gate is on
     // disk decides whether voice.wake.vadThreshold above 0 is honoured or
     // refused, so resolving first would report a blocker that does not match
-    // what /voice wake setup has already downloaded.
+    // what /voice wake-setup has already downloaded.
     const status = voiceSetup.wakeStatus();
     const settings = resolveWakeRuntimeSettings(
       (key: string) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
@@ -98,14 +93,14 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       try {
         const outcome = await runWakeSetupPlan(voiceSetup, args[2]?.toLowerCase() === 'yes');
         const proposesStt = proposesSpeechToText(outcome);
-        ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup yes installs it now)'] : [])].join('\n'));
+        ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(/voice wake-setup --with-speech-to-text installs it now)'] : [])].join('\n'));
       } catch (error) {
         if (readRefusal(error)) throw error;
         throw commandRefusal(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
     }
-    throw commandRefusal('Usage: /voice wake [status|setup]');
+    throw commandRefusal('Use /voice wake-status or /voice wake-setup.');
   },
   async provision(sub, _args, ctx, _shellPaths) {
     if (sub === 'status') {

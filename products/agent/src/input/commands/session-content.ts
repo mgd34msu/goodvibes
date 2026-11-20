@@ -9,7 +9,8 @@ import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
-import { createCheckpointsCommand, dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
+import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
+import { createCheckpointCommand } from '@goodvibes-jev/engine/terminal-shell/checkpoint-command';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -44,12 +45,12 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 
 
 
-  // /checkpoints and /checkpoints restore: the same lines the terminal app runs.
-  registry.register(createCheckpointsCommand<CommandContext>({
-    manager: (ctx) => ctx.workspace.workspaceCheckpointManager,
+  // `/checkpoint` is one description shared with the terminal app (terminal-shell/checkpoint-command.ts).
+  registry.register(createCheckpointCommand<CommandContext>({
     record: (ctx, text) => ctx.print(text),
     emptyHint: 'The Agent takes checkpoints only in a registered workspace (goodvibes-agent workspaces register --yes).',
-    listFooter: '',
+    make: { refused: 'The Agent takes checkpoints by itself, at the end of each turn, and only in a registered workspace (goodvibes-agent workspaces register --yes); it makes none on request.' },
+    rewind: { refused: 'The Agent does not go back to an earlier turn; /undo takes back the last turn.' },
   }));
 
   registry.register(contentCommands.retryCommand);
@@ -80,7 +81,7 @@ const undoCommands = createUndoCommands<CommandContext>({
     const print = (text: string) => ctx.print(text);
     if (values.what === 'file') { undoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
     if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'undo', print); return; }
-    if (values.what === 'rewind')  throw commandRefusal('The Agent has no rewind to undo.'); 
+    if (values.what === 'rewind') throw commandRefusal('The Agent has no rewind to undo: /checkpoint rewind goes back to a turn only in the terminal app.');
     refuseWhileTurnRuns(ctx, '/undo');
     if (!ctx.session.conversationManager.undo()) throw commandRefusal('There is nothing to undo.', 'To take back the last file write or edit: /undo file');
     ctx.renderRequest();
@@ -90,7 +91,7 @@ const undoCommands = createUndoCommands<CommandContext>({
     const print = (text: string) => ctx.print(text);
     if (values.what === 'file') { redoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
     if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'redo', print); return; }
-    if (values.what === 'rewind')  throw commandRefusal('The Agent has no rewind to redo.'); 
+    if (values.what === 'rewind') throw commandRefusal('The Agent has no rewind to redo: /checkpoint rewind goes back to a turn only in the terminal app.');
     refuseWhileTurnRuns(ctx, '/redo');
     if (!ctx.session.conversationManager.redo()) throw commandRefusal('There is nothing to redo.', 'To write a reverted file change again: /redo file');
     ctx.renderRequest();

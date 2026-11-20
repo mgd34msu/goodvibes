@@ -203,7 +203,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   indicator: (context, token) => handleIndicatorFocusToken(
     {
       ...captureIndicatorFeedState(context),
-      processModal: context.processModal,
+      openAgentsView: () => { context.commandContext?.openAgents?.(); },
       syncModals: () => context.surfaceModals?.sync(),
     },
     token,
@@ -213,7 +213,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     {
       ...capturePromptKeyState(context),
       commandRegistry: context.commandRegistry,
-      processModal: context.processModal,
+      openAgentsView: () => { context.commandContext?.openAgents?.(); },
       syncModals: () => context.surfaceModals?.sync(),
     },
     token,

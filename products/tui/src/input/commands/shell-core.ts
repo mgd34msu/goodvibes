@@ -2,12 +2,10 @@ import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/she
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
+import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
 import {
   buildCompactionPreview,
   buildCompactionAfterNotice,
-  buildPinUsageText,
-  buildPinSuccessText,
 } from '../../renderer/compaction-preview.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { createCompactCommand } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
@@ -50,33 +48,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(compactCommand);
 
-
-  registry.register({
-    name: 'keep',
-    // The pinned text is kept exactly as typed.
-    rawRest: 0,
-    aliases: [],
-    description: 'Pin text to session memory (survives compaction)',
-    usage: '<text>',
-    argsHint: '<text to preserve>',
-    handler(args, ctx) {
-      const text = args.join(' ').trim();
-      if (!text) {
-        ctx.print(buildPinUsageText());
-        ctx.renderRequest();
-        return;
-      }
-      const memStore = requireSessionMemoryStore(ctx);
-      const id = memStore.add(text);
-      if (!id) {
-        ctx.print('[Pin] Nothing pinned: text was blank.');
-      } else {
-        const count = memStore.list().length;
-        ctx.print(buildPinSuccessText(id, text, count));
-      }
-      ctx.renderRequest();
-    },
-  });
 
   registry.register(navigation.quit);
 

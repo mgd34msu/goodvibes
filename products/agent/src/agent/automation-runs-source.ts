@@ -23,6 +23,7 @@ import { createConnectedHost, isHostFailure, type ConnectedHost } from '@goodvib
 import { connectedHostOf, type AgentConnectedHostConfigReader, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';
+export const AUTOMATION_JOBS_LIST_METHOD = 'automation.jobs.list';
 
 /**
  * The full run status enum per the operator contract (packages/contracts
@@ -94,8 +95,8 @@ function readRun(value: unknown): AutomationRunOutcome | null {
   const jobId = readString(value, 'jobId');
   const status = value.status;
   if (!id || !jobId || typeof status !== 'string' || !RUN_STATUSES.has(status)) return null;
-  const triggeredBy = isRecord(value.triggeredBy) ? value.triggeredBy : {};
-  const jobName = readString(triggeredBy, 'label') ?? jobId;
+  // The job's name comes from the jobs list (listAutomationRunsSince); the trigger's label names what started it.
+  const jobName = jobId;
   return {
     id,
     jobId,
@@ -148,7 +149,18 @@ export async function listAutomationRunsSince(
       if (run) runs.push(run);
       if (isRecord(raw)) deliveries.push(...readDeliveries(raw));
     }
-    return { runs, deliveries };
+    // A run names its job only by id: the owner knows the job by its name. One
+    // more request, only at a launch that found runs; on failure the id stays.
+    if (runs.length === 0) return { runs, deliveries };
+    const names = await client.invoke(AUTOMATION_JOBS_LIST_METHOD, {}, { signal: options.signal }).then((jobs: unknown) => {
+      const list = isRecord(jobs) && Array.isArray(jobs.jobs) ? jobs.jobs : [];
+      return new Map(list.filter(isRecord).flatMap((job) => {
+        const id = readString(job, 'id');
+        const name = readString(job, 'name');
+        return id && name ? [[id, name] as const] : [];
+      }));
+    }, () => new Map<string, string>());
+    return { runs: runs.map((run) => ({ ...run, jobName: names.get(run.jobId) ?? run.jobName })), deliveries };
   } catch (error) {
     if (!isHostFailure(error)) return unavailableResult(error instanceof Error ? error.message : String(error), 'no_answer');
     const notConfigured = error.kind === 'auth_required'

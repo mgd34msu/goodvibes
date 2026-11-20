@@ -24,7 +24,6 @@ import { registerHealthRuntimeCommands } from './commands/health-runtime.ts';
 import { registerStatusRuntimeCommands } from './commands/status-runtime.ts';
 import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
-import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
 import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspace-runtime.ts';
 import { registerAgentRuntimeProfileRuntimeCommands } from './commands/agent-runtime-profile-runtime.ts';
 import { registerDelegationRuntimeCommands } from './commands/delegation-runtime.ts';
@@ -107,7 +106,6 @@ export function registerBuiltinCommands(
   registerUpdateCommand(registry);
   registerProviderAccountsRuntimeCommands(registry);
   registerOnboardingRuntimeCommands(registry);
-  registerTtsRuntimeCommands(registry);
   registerLocalRuntimeCommands(registry);
   registerDevicesRuntimeCommands(registry);
   registerScheduleRuntimeCommands(registry);

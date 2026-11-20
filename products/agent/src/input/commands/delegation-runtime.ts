@@ -13,6 +13,17 @@ import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/pl
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { AgentDelegationRegistry, type AgentDelegationRecord } from '../../agent/delegation-registry.ts';
 import { commandRefusal } from './confirmation.ts';
+import { requireShellPaths } from './runtime-services.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
+import { createVerbSpawnGateway, type AcpSpawnGateway } from '@goodvibes-jev/engine/terminal-shell/fleet-spawn';
+import { isAbsolute, resolve } from 'node:path';
+
+/** The ACP calls over this Agent's connected host, the same daemon `n` in Your agents hosts on. */
+function codingGateway(ctx: CommandContext): AcpSpawnGateway {
+  const resolution = createVerbSpawnGateway(createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }));
+  if (!resolution.available) throw commandRefusal(resolution.reason);
+  return resolution.gateway;
+}
 
 function buildDelegationBody(input: HandOffInput): string {
   return [
@@ -197,11 +208,24 @@ const TERMINAL_APP_ONLY = 'This belongs to the terminal app, which runs the agen
 
 export function registerDelegationRuntimeCommands(registry: CommandRegistry): void {
   registerAgentsCommand<CommandContext>(registry, {
-    openPanel(ctx) {
+    openPanel(ctx, target) {
       if (!ctx.openAgents) throw commandRefusal('Your agents needs the interactive shell.');
-      ctx.openAgents();
+      ctx.openAgents({ target: target.split(':')[0] ?? '' });
     },
-    coding: { unavailable: 'Coding agents are hosted by the terminal app\'s daemon: run /agents host in the terminal app.' },
+    coding: {
+      async list(ctx) {
+        try { return await codingGateway(ctx).listAgents(); } catch (error) { throw commandRefusal(summarizeError(error)); }
+      },
+      async host(ctx, agentId, directory) {
+        const here = requireShellPaths(ctx).workingDirectory;
+        const cwd = directory ? (isAbsolute(directory) ? directory : resolve(here, directory)) : here;
+        let answer;
+        try { answer = await codingGateway(ctx).createSession({ agentId, cwd }); } catch (error) { throw commandRefusal(summarizeError(error)); }
+        const { hosted, started } = answer;
+        if (hosted.error) throw commandRefusal(`Could not host ${hosted.title || agentId}: the ${hosted.error.stage} stage failed for ${hosted.error.binary}; ${hosted.error.message}`);
+        return `Hosting ${hosted.title || agentId} in ${cwd} on the connected host${started ? '' : ' (queued)'}; it shows as a row in Your agents, where you open and stop it.`;
+      },
+    },
     handOff: {
       send: sendHandOff,
       recorded(ctx) {

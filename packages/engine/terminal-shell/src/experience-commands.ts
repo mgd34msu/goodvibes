@@ -3,12 +3,11 @@ import { dirname } from 'node:path';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { TerminalSlashCommand } from './command-registry.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
-import type { CommandActionContext, FixedChoice } from './command-actions/types.js';
-import { choiceInput, doAction, readAction } from './described-command-kit.js';
+import type { ActionValues, CommandActionContext, FixedChoice } from './command-actions/types.js';
+import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
 interface ExperienceContext {
@@ -68,10 +67,26 @@ export function createApprovalCommand<Context extends CommandActionContext>(host
     ],
   });
 }
-export function createVoiceExperienceCommand<Context extends ExperienceContext>(policy: {
-  readonly description: string;
-  readonly usage: string;
-  readonly help: string;
+interface VoiceContext extends ExperienceContext, CommandActionContext {
+  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
+  /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
+  readonly stopSpokenOutput?: (() => boolean | void) | undefined;
+  readonly submitSpokenInput?: ((prompt: string) => void) | undefined;
+  readonly renderRequest: () => void;
+}
+
+const VOICE_LOCAL = { terminalOnly: 'Voice runs in the terminal app.' } as const;
+const BUNDLE_FILE = (help: string) => ({
+  id: 'path', label: 'File', help, kind: 'path' as const, freeTextReason: 'a file path', required: true as const, typed: { position: 1 as const },
+});
+
+/**
+ * `/voice`, described once (command-actions/) for both terminal apps: hear an
+ * answer spoken, speak every answer, stop what is playing, the local voice
+ * runtime and the wake word, and the voice settings as a file. Each app
+ * supplies how it reads and sets up its voice runtime and wake word.
+ */
+export function createVoiceExperienceCommand<Context extends VoiceContext>(policy: {
   readonly reportFailure: boolean;
   readonly paths: (context: Context) => ShellPathService;
   readonly wake: (args: string[], ctx: Context, shellPaths: ShellPathService) => void | Promise<void>;
@@ -82,90 +97,151 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
     shellPaths: ShellPathService,
   ) => void | Promise<void>;
   readonly review: (enabled: boolean) => string[];
-}): TerminalSlashCommand<Context> {
-  return {
-    name: 'voice',
-    effect: 'mixed',
-    description: policy.description,
-    usage: policy.usage,
-    async handler(args, ctx) {
-      try {
-        const { rest } = stripYesFlag(args);
-        const commandArgs = [...rest],
-          shellPaths = policy.paths(ctx),
-          sub = (commandArgs[0] ?? 'review').toLowerCase();
-        if (sub === 'wake') {
-          await policy.wake(commandArgs, ctx, shellPaths);
-          return;
-        }
-        if (sub === 'status' || sub === 'setup') {
-          await policy.provision(sub, commandArgs, ctx, shellPaths);
-          return;
-        }
-        if (sub === 'review') {
-          ctx.print(policy.review(Boolean(ctx.platform.configManager.get('ui.voiceEnabled') ?? false)).join('\n'));
-          return;
-        }
-        if (sub === 'enable' || sub === 'disable') {
-          // Same switch, same rule as /tts on|off: a reversible preference, so no confirmation.
-          ctx.print(switchAlwaysSpeak(ctx, sub === 'enable'));
-          return;
-        }
-        if (sub === 'bundle') {
-          const mode = commandArgs[1],
-            path = commandArgs[2];
-          if (mode === 'export' || mode === 'inspect' || mode === 'import') {
-            if (!path) {
-              throw commandRefusal(`Usage: /voice bundle ${mode} <path>`);
-            }
-            const target = shellPaths.resolveWorkspacePath(path);
-            if (mode === 'export') {
-              const config = ctx.platform.configManager;
-              const settings: Record<string, unknown> = {};
-              for (const setting of config.getSchema()) {
-                if (!isVoiceBundleKey(setting.key)) continue;
-                const value = config.get(setting.key);
-                if (JSON.stringify(value) !== JSON.stringify(setting.default)) settings[setting.key] = value;
-              }
-              const bundle: VoiceBundle = { version: 2, exportedAt: Date.now(), settings };
-              mkdirSync(dirname(target), { recursive: true });
-              writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-              ctx.print(`Voice bundle exported to ${target} (${Object.keys(settings).length} changed voice setting${Object.keys(settings).length === 1 ? '' : 's'}).`);
-              return;
-            }
-            if (!existsSync(target)) throw commandRefusal('File not found: ' + target);
-            let value: unknown;
-            try {
-              value = JSON.parse(readFileSync(target, 'utf-8'));
-            } catch (error) {
-              throw commandRefusal('Could not read the voice bundle: ' + (error instanceof Error ? error.message : String(error)));
-            }
-            if (mode === 'inspect') {
-              ctx.print(inspectVoiceBundle(value));
-              return;
-            }
-            const read = readVoiceBundle(value);
-            if ('problem' in read) throw commandRefusal('Nothing was applied. ' + read.problem);
-            const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
-            const result = ctx.platform.configManager.setMany(changes, localOwnerActor());
-            if (!result.ok) throw commandRefusal(`Voice bundle not applied: ${result.refusal.reason}`, result.refusal.next.join(' ') || undefined);
-            // The daemon's settings in the bundle went to it as one update; it is applied only once the daemon took it.
-            const refused = result.pending ? await result.pending.settle() : [];
-            if (refused.length > 0) {
-              const first = refused[0]!;
-              const kept = result.saved.length - refused.length;
-              throw commandRefusal(`Voice bundle not fully applied: the daemon refused ${refused.map(refusal => refusal.key).join(', ')} (${first.error instanceof Error ? first.error.message : String(first.error)}), which keep their previous values${kept > 0 ? `; the other ${kept} setting${kept === 1 ? ' was' : 's were'} saved` : ''}.`);
-            }
-            ctx.print(`Voice bundle applied: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`);
-            return;
-          }
-        }
-        ctx.print(policy.help);
-      } catch (error) {
-        // A refusal already says what was not done; anything else is reported as one.
-        if (!policy.reportFailure || readRefusal(error)) throw error;
-        throw commandRefusal('voice command failed: ' + (error instanceof Error ? error.message : String(error)));
-      }
-    },
+}): DescribedCommand<Context> {
+  /** A failure that is not a refusal is reported as one, where the app asks for that. */
+  const guarded = (work: (values: ActionValues, ctx: Context) => Promise<string | void>) => async (values: ActionValues, ctx: Context): Promise<string | void> => {
+    try {
+      return await work(values, ctx);
+    } catch (error) {
+      if (!policy.reportFailure || readRefusal(error)) throw error;
+      throw commandRefusal('voice command failed: ' + (error instanceof Error ? error.message : String(error)));
+    }
   };
+  const alwaysSpeak = (enabled: boolean) => async (_values: ActionValues, ctx: Context): Promise<string> => {
+    const said = switchAlwaysSpeak(ctx, enabled);
+    ctx.renderRequest();
+    return said;
+  };
+  return defineCommand<Context>({
+    name: 'voice',
+    leadingFlagsOnly: true,
+    title: 'Voice',
+    summary: 'Hear answers spoken, set up the local voice runtime and the wake word, and keep the voice settings as a file',
+    group: 'Experience',
+    report: 'review',
+    firstScreenRows: [
+      'review', 'speak', 'stop', 'on', 'off',
+      { label: 'The local voice runtime…', actions: ['status', 'setup'] },
+      { label: 'The wake word…', actions: ['wake-status', 'wake-setup'] },
+      { label: 'Voice settings as a file…', actions: ['export', 'inspect', 'import'] },
+    ],
+    actions: [
+      readAction<Context>({
+        id: 'review', label: 'See your voice settings', readsOnlyThisMachine: true, word: 'review', operator: VOICE_LOCAL,
+        sentence: 'Shows whether every answer is spoken aloud and how voice is set up here.',
+        async rowValue(ctx) { return ctx.platform.configManager.get('ui.voiceEnabled') ? 'answers spoken' : 'answers not spoken'; },
+        async run(_values, ctx) { return policy.review(Boolean(ctx.platform.configManager.get('ui.voiceEnabled') ?? false)).join('\n'); },
+      }),
+      doAction<Context>({
+        id: 'speak', label: 'Ask and hear the answer spoken', word: 'speak', touches: 'another-machine', operator: VOICE_LOCAL,
+        inputs: [textInput({ id: 'prompt', label: 'Message', help: 'What to ask', why: 'your own words', kind: 'long-text', typed: { tail: true } })],
+        sentence: '{prompt} is sent as a message and the answer is played aloud.', example: { prompt: 'summarise the last change' },
+        async run(values, ctx) {
+          if (!ctx.submitSpokenInput) throw commandRefusal('Speech output is not available in this session; nothing was sent.', undefined, 'UNAVAILABLE');
+          ctx.submitSpokenInput(values.prompt!);
+        },
+      }),
+      doAction<Context>({
+        id: 'stop', label: 'Stop what is being spoken', word: 'stop', operator: VOICE_LOCAL,
+        sentence: 'Whatever is being played aloud now stops.',
+        async run(_values, ctx) {
+          if (!ctx.stopSpokenOutput) throw commandRefusal('Speech output is not available in this session.', undefined, 'UNAVAILABLE');
+          return ctx.stopSpokenOutput() === false ? 'Nothing is playing.' : 'Stopped speaking.';
+        },
+      }),
+      {
+        id: 'on', label: 'Speak every answer aloud', word: 'on', inputs: [],
+        sentence: 'Every answer will be played aloud until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'off', operator: VOICE_LOCAL, example: {},
+        run: alwaysSpeak(true),
+      },
+      {
+        id: 'off', label: 'Stop speaking every answer', word: 'off', inputs: [],
+        sentence: 'Answers will no longer be played aloud, until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'on', operator: VOICE_LOCAL, example: {},
+        run: alwaysSpeak(false),
+      },
+      readAction<Context>({
+        id: 'status', label: 'See the local voice runtime', word: 'status', operator: VOICE_LOCAL,
+        sentence: 'Shows whether speech output and speech-to-text are installed here, and an install in progress.',
+        run: guarded(async (_values, ctx) => { await policy.provision('status', [], ctx, policy.paths(ctx)); }),
+      }),
+      doAction<Context>({
+        id: 'setup', label: 'Install the local voice runtime', word: 'setup', touches: 'another-machine', operator: VOICE_LOCAL,
+        sentence: 'The local speech output and, where this machine has a published bundle, speech-to-text are downloaded and set up; it can be hundreds of megabytes.',
+        run: guarded(async (_values, ctx) => { await policy.provision('setup', [], ctx, policy.paths(ctx)); }),
+      }),
+      readAction<Context>({
+        id: 'wake-status', label: 'See wake-word detection', word: 'wake-status', operator: VOICE_LOCAL,
+        sentence: 'Shows whether the wake-word models are here and how listening for the wake word is set.',
+        run: guarded(async (_values, ctx) => { await policy.wake(['wake', 'status'], ctx, policy.paths(ctx)); }),
+      }),
+      doAction<Context>({
+        id: 'wake-setup', label: 'Set up the wake word', word: 'wake-setup', touches: 'another-machine', operator: VOICE_LOCAL,
+        inputs: [choiceInput({
+          id: 'stt', label: 'Speech-to-text', help: 'What makes a wake word useful', typed: { flag: '--with-speech-to-text', switchOn: 'yes' },
+          choices: [{ value: 'no', label: 'Only say whether it is needed' }, { value: 'yes', label: 'Install it too' }],
+          optional: { default: 'no', means: 'only say whether it is needed' },
+        })],
+        sentence: 'The wake-word models are downloaded and checked, and speech-to-text is installed too when chosen.', example: { stt: 'yes' },
+        run: guarded(async (values, ctx) => { await policy.wake(['wake', 'setup', ...(values.stt === 'yes' ? ['yes'] : [])], ctx, policy.paths(ctx)); }),
+      }),
+      doAction<Context>({
+        id: 'export', label: 'Save your voice settings to a file', word: 'export', operator: VOICE_LOCAL,
+        inputs: [BUNDLE_FILE('Where to write them')],
+        sentence: 'The voice settings you changed from their defaults are written to {path}.', example: { path: 'voice.json' },
+        run: guarded(async (values, ctx) => {
+          const target = policy.paths(ctx).resolveWorkspacePath(values.path!);
+          const config = ctx.platform.configManager;
+          const settings: Record<string, unknown> = {};
+          for (const setting of config.getSchema()) {
+            if (!isVoiceBundleKey(setting.key)) continue;
+            const value = config.get(setting.key);
+            if (JSON.stringify(value) !== JSON.stringify(setting.default)) settings[setting.key] = value;
+          }
+          const bundle: VoiceBundle = { version: 2, exportedAt: Date.now(), settings };
+          mkdirSync(dirname(target), { recursive: true });
+          writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+          return `Voice settings written to ${target} (${Object.keys(settings).length} changed voice setting${Object.keys(settings).length === 1 ? '' : 's'}).`;
+        }),
+      }),
+      readAction<Context>({
+        id: 'inspect', label: 'Read a voice settings file', word: 'inspect', operator: VOICE_LOCAL,
+        inputs: [BUNDLE_FILE('The file to read')],
+        sentence: 'Shows the settings in {path} without applying them.', example: { path: 'voice.json' },
+        run: guarded(async (values, ctx) => inspectVoiceBundle(readBundleFile(policy.paths(ctx).resolveWorkspacePath(values.path!)))),
+      }),
+      {
+        id: 'import', label: 'Apply voice settings from a file', word: 'import', inputs: [BUNDLE_FILE('The file to apply')],
+        sentence: 'The voice settings in {path} are applied until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', operator: VOICE_LOCAL, example: { path: 'voice.json' },
+        run: guarded(async (values, ctx) => {
+          const target = policy.paths(ctx).resolveWorkspacePath(values.path!);
+          const read = readVoiceBundle(readBundleFile(target));
+          if ('problem' in read) throw commandRefusal('Nothing was applied. ' + read.problem);
+          const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
+          const result = ctx.platform.configManager.setMany(changes, localOwnerActor());
+          if (!result.ok) throw commandRefusal(`Voice settings not applied: ${result.refusal.reason}`, result.refusal.next.join(' ') || undefined);
+          // The daemon's settings in the file went to it as one update; it is applied only once the daemon took it.
+          const refused = result.pending ? await result.pending.settle() : [];
+          if (refused.length > 0) {
+            const first = refused[0]!;
+            const kept = result.saved.length - refused.length;
+            throw commandRefusal(`Voice settings not fully applied: the daemon refused ${refused.map(refusal => refusal.key).join(', ')} (${first.error instanceof Error ? first.error.message : String(first.error)}), which keep their previous values${kept > 0 ? `; the other ${kept} setting${kept === 1 ? ' was' : 's were'} saved` : ''}.`);
+          }
+          return `Voice settings applied: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`;
+        }),
+      },
+    ],
+  });
+}
+
+/** A voice settings file as JSON; refused when it is missing or unreadable. */
+function readBundleFile(target: string): unknown {
+  if (!existsSync(target)) throw commandRefusal('File not found: ' + target);
+  try {
+    return JSON.parse(readFileSync(target, 'utf-8'));
+  } catch (error) {
+    throw commandRefusal('Could not read the voice settings file: ' + (error instanceof Error ? error.message : String(error)));
+  }
 }

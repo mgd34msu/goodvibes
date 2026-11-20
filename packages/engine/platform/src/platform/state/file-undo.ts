@@ -59,7 +59,7 @@ const MAX_STACK_SIZE = 50;
  */
 export class FileUndoConflictError extends Error {
   constructor(readonly path: string, readonly direction: 'undo' | 'redo', readonly paths: readonly string[] = [path]) {
-    super(`Cannot ${direction} the change to ${path}${paths.length > 1 ? ` (one of the ${paths.length} files that tool call changed)` : ''}: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and ${direction} again, or drop the entry (/${direction} file drop) to reach the one before it.`);
+    super(`Cannot ${direction} the change to ${path}${paths.length > 1 ? ` (one of the ${paths.length} files that tool call changed)` : ''}: the file was changed after that operation (by you, another tool or another program). No file was changed and the history entry is kept: put the file back as that operation left it and ${direction} again, or set the entry aside (/${direction} set-aside) to reach the one before it.`);
     this.name = 'FileUndoConflictError';
   }
 }

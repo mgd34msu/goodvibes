@@ -2,6 +2,7 @@
  * /replay command handler.
  *
  * Handles the subcommands of the /replay slash command:
+ *   /replay runs            , list the recorded runs
  *   /replay load <runId>    , load a recorded run by ID
  *   /replay step [n]        , advance n steps (default 1)
  *   /replay seek <rev>      , jump to a specific revision
@@ -185,7 +186,7 @@ export async function handleReplayCommand(
         if (ids.length === 0) {
           return {
             ok: true,
-            output: 'No recorded runs yet.\n\nEvery turn is recorded as a run once it starts; send a message, then run /replay load again.',
+            output: 'No recorded runs yet.\n\nEvery turn is recorded as a run once it starts; send a message, then run /replay runs again.',
           };
         }
         const list = ids.map((id, i) => `  ${i + 1}. ${id}`).join('\n');
@@ -206,7 +207,7 @@ export async function handleReplayCommand(
       if (entries.length === 0) {
         return {
           ok: false,
-          output: `No ledger entries found for run "${runId}".\n\nVerify the run ID is correct with /replay load (no arguments).`,
+          output: `No ledger entries found for run "${runId}".\n\n/replay runs lists the recorded runs.`,
         };
       }
 
@@ -339,13 +340,13 @@ export async function handleReplayCommand(
       if (!otherRunId) {
         return {
           ok: false,
-          output: `Usage: /replay diff <runId>\n\nCompares the loaded run "${snap.runId}" with another recorded run, event by event. List recorded runs with /replay load.`,
+          output: `Usage: /replay diff <runId>\n\nCompares the loaded run "${snap.runId}" with another recorded run, event by event. /replay runs lists the recorded runs.`,
         };
       }
       if (otherRunId === snap.runId) {
         return {
           ok: false,
-          output: `Run "${otherRunId}" is the loaded run; nothing was compared. Name a different recorded run (list them with /replay load).`,
+          output: `Run "${otherRunId}" is the loaded run; nothing was compared. Name a different recorded run (/replay runs lists them).`,
         };
       }
       if (!ledger) {
@@ -358,7 +359,7 @@ export async function handleReplayCommand(
       if (otherEntries.length === 0) {
         return {
           ok: false,
-          output: `No ledger entries found for run "${otherRunId}"; nothing was compared.\n\nVerify the run ID with /replay load (no arguments).`,
+          output: `No ledger entries found for run "${otherRunId}"; nothing was compared.\n\n/replay runs lists the recorded runs.`,
         };
       }
 
@@ -432,7 +433,8 @@ export async function handleReplayCommand(
           `Unknown /replay subcommand: '${subcommand}'.`,
           '',
           'Available commands:',
-          '  /replay load [runId]      - load a recorded run (omit runId to list)',
+          '  /replay runs              - list the recorded runs',
+          '  /replay load <runId>      - load a recorded run',
           '  /replay step [n]          - advance n steps (default 1)',
           '  /replay seek <rev>        - jump to a specific revision',
           '  /replay diff <runId>      - compare the loaded run with another recorded run',

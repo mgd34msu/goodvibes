@@ -26,6 +26,15 @@ export class SessionMemoryStore {
     return id;
   }
 
+  /** Replace a memory's text, keeping its ID; false when the ID is unknown or the text is blank. */
+  update(id: string, text: string): boolean {
+    const trimmed = text.trim();
+    const memory = this.memories.find(m => m.id === id);
+    if (!memory || !trimmed) return false;
+    memory.text = trimmed;
+    return true;
+  }
+
   /** Remove a memory by ID, returns true if found */
   remove(id: string): boolean {
     const idx = this.memories.findIndex(m => m.id === id);

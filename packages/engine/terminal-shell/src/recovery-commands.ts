@@ -1,23 +1,21 @@
 // ---------------------------------------------------------------------------
-// The owner's file recovery lines, shared by the terminal app and the Agent:
-// `/undo file` and `/redo file` over the per-call file undo stack, and
-// `/checkpoints` (list) with `/checkpoints restore <n|id>` over the workspace
-// checkpoint store. Each app supplies its own command context; the lines,
+// The owner's file recovery steps, shared by the terminal app and the Agent:
+// `/undo file` and `/redo file` over the per-call file undo stack, and the
+// checkpoint restore `/checkpoint restore` (checkpoint-command.ts) runs over
+// the workspace checkpoint store. Each app supplies its own command context;
 // the questions and the refusals are the same in both.
 // ---------------------------------------------------------------------------
 
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
-import type { TerminalSlashCommand } from './command-registry.js';
-import type { CommandSubcommandHints } from './command-args-hint.js';
-import { commandRefusal, stripYesFlag, type ConfirmationHost } from './command-confirmation.js';
+import { commandRefusal, type ConfirmationHost } from './command-confirmation.js';
 
-/** The file undo stack calls the two lines use; `discard` backs `/undo file drop` and `/redo file drop`. */
+/** The file undo stack calls the two lines use; `discard` backs `/undo set-aside` and `/redo set-aside`. */
 export type FileUndoControls = Pick<FileUndoManager, 'undo' | 'redo'> & Partial<Pick<FileUndoManager, 'discard'>>;
 
 /**
- * `/undo file drop` and `/redo file drop`: set aside the newest entry, which a
+ * `/undo set-aside` and `/redo set-aside`: set aside the newest entry, which a
  * later change to one of its files keeps from applying, without touching any
  * file, so the next one is the one before it.
  */
@@ -90,12 +88,6 @@ export function formatCheckpointAge(createdAtMs: number, nowMs: number = Date.no
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
 /** Resolve a ref ('1'..'N' newest first, or a checkpoint id or id prefix) against the newest-first list. */
 export function resolveCheckpointRef(checkpoints: readonly WorkspaceCheckpoint[], ref: string, listLine: string): WorkspaceCheckpoint | { readonly error: string } {
   if (/^\d+$/.test(ref)) {
@@ -158,7 +150,7 @@ export async function restoreCheckpointFiles(
         ...listed,
         ...(files.length > listed.length ? [`  ... and ${files.length - listed.length} more`] : []),
         '',
-        'Files only: the conversation is unchanged. The current files are kept in a safety checkpoint first, so /checkpoints restore can bring them back.',
+        'Files only: the conversation is unchanged. The current files are kept in a safety checkpoint first, so /checkpoint restore can bring them back.',
       ].join('\n');
       confirmed = await context.confirm({ title: `Restore checkpoint "${checkpoint.label}"?`, body, confirmLabel: 'Restore', tone: 'warning' });
     } else {
@@ -188,72 +180,4 @@ export async function restoreCheckpointFiles(
   }
   options.record(`[Checkpoint] Restored files from checkpoint ${shortCheckpointId(checkpoint.id)} ("${checkpoint.label}"). Files only: the conversation is unchanged.`);
   context.renderRequest();
-}
-
-export interface CheckpointsCommandPolicy<Context> {
-  readonly manager: (context: Context) => CheckpointControls | undefined;
-  /** Puts the restore receipt where this app keeps such lines (the conversation, or the transcript). */
-  readonly record: (context: Context, text: string) => void;
-  /** What the list's last line says about creating and other restore paths in this app. */
-  readonly listFooter: string;
-  /** Said when there is no checkpoint yet. */
-  readonly emptyHint: string;
-  readonly aliases?: readonly string[];
-}
-
-/** `/checkpoints [list] | restore <n|id> [--yes]` over the workspace checkpoint store. */
-export function createCheckpointsCommand<Context extends CheckpointCommandContext>(
-  policy: CheckpointsCommandPolicy<Context>,
-): TerminalSlashCommand<Context> & CommandSubcommandHints {
-  return {
-    name: 'checkpoints',
-    effect: 'mixed' as const,
-    readVerbs: ['', 'list'],
-    aliases: [...(policy.aliases ?? [])],
-    description: 'List workspace checkpoints, newest first, and restore the files of one',
-    usage: '[list] | restore <n|id> [--yes]',
-    argsHint: '[list|restore <n|id>]',
-    subcommands: { list: '', restore: '<n|id> [--yes]' },
-    async handler(args: string[], context: Context): Promise<void> {
-      const manager = policy.manager(context);
-      if (!manager) throw commandRefusal('Checkpoints are not available in this session.', undefined, 'UNAVAILABLE');
-      const { rest, yes } = stripYesFlag(args);
-      const sub = rest[0] ?? 'list';
-      if (sub !== 'list' && sub !== 'restore') throw commandRefusal(`Unknown /checkpoints subcommand: ${sub}`, 'Usage: /checkpoints [list] | restore <n|id> [--yes]');
-      let checkpoints: WorkspaceCheckpoint[];
-      try {
-        checkpoints = await manager.list();
-      } catch (error) {
-        throw commandRefusal(`Failed to list checkpoints: ${summarizeError(error)}`, undefined, 'NOT_DONE');
-      }
-      if (sub === 'restore') {
-        const ref = rest[1];
-        if (!ref) throw commandRefusal('Usage: /checkpoints restore <n|id> [--yes]', '/checkpoints lists them, newest first, numbered from 1.');
-        const resolved = resolveCheckpointRef(checkpoints, ref, '/checkpoints');
-        if ('error' in resolved) throw commandRefusal(resolved.error, undefined, 'NOT_FOUND');
-        await restoreCheckpointFiles(context, manager, resolved, { yes, record: (text) => policy.record(context, text) });
-        return;
-      }
-      const trimmed = manager.historyTrimmed();
-      const retentionFailure = manager.retentionFailure();
-      const notes = [
-        ...(trimmed ? [`${trimmed.reason} (${trimmed.count} removed ${formatCheckpointAge(trimmed.at)}; the newest is always kept).`] : []),
-        ...(retentionFailure ? [`Automatic retention is failing: ${retentionFailure.error}`] : []),
-      ];
-      if (checkpoints.length === 0) {
-        context.print([`No checkpoints yet. ${policy.emptyHint}`, ...notes].join('\n'));
-        return;
-      }
-      const lines = [`Checkpoints (${checkpoints.length}, newest first):`];
-      checkpoints.forEach((checkpoint, index) => {
-        lines.push(`  ${String(index + 1).padStart(2)}. ${shortCheckpointId(checkpoint.id).padEnd(12)} ${checkpoint.kind.padEnd(9)} ${checkpoint.label}  ${formatCheckpointAge(checkpoint.createdAt)}  ~${formatBytes(checkpoint.sizeBytes)} new`);
-      });
-      // Files-changed counts are not shown per row: each would cost one diff
-      // spawn per checkpoint. A restore loads exactly one diff and shows it.
-      lines.push(...notes);
-      lines.push('Restore the files of one: /checkpoints restore <n|id> (shows what changes and asks first; files only, the conversation is unchanged).');
-      if (policy.listFooter) lines.push(policy.listFooter);
-      context.print(lines.join('\n'));
-    },
-  };
 }

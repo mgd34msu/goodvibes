@@ -13,9 +13,9 @@ import type { FooterTarget } from '../renderer/footer-targets.ts';
  * at once (syncModals), while the indicator still has focus, so Esc on the
  * monitor returns focus to the indicator.
  */
-export type IndicatorFocusRouteState = SharedIndicatorState & { processModal: { open: () => void }; syncModals: () => void };
+export type IndicatorFocusRouteState = SharedIndicatorState & { openAgentsView: () => void; syncModals: () => void };
 export type TextRouteState = SharedTextState<CommandContext>;
-export type KeyRouteState = SharedKeyState<CommandContext> & { processModal: { open: () => void }; syncModals: () => void };
+export type KeyRouteState = SharedKeyState<CommandContext> & { openAgentsView: () => void; syncModals: () => void };
 export type MouseRouteState = SharedMouseState<FooterTarget>;
 export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKeyToken, handleMouseToken } = createFeedTokenRoutes<
   CommandContext,
@@ -25,12 +25,14 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
   FooterTarget,
   MouseRouteState
 >({
+  // The running indicator and F2 open Your agents, as in the terminal app;
+  // a background process opens in the process monitor from there.
   openIndicator(state) {
-    state.processModal.open();
+    state.openAgentsView();
     state.syncModals();
   },
   openKeyIndicator(state) {
-    state.processModal.open();
+    state.openAgentsView();
     state.syncModals();
   },
   // InputTokenizer already reports zero-based rows.

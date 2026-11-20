@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
-// rewind-runtime.ts, /rewind (message-anchored, unified files + conversation),
-// plus the /undo rewind and /redo rewind reversals over the last receipt.
+// rewind-runtime.ts, /checkpoint rewind (message-anchored, unified files +
+// conversation), plus the /undo rewind and /redo rewind reversals over the
+// last receipt.
 //
 // The rewind engine is the platform's UnifiedRewindService (platform/rewind:
 // plan() previews + issues a single-use confirm token; apply() is token-gated
@@ -9,7 +10,7 @@
 // service to the TUI's in-process stores through the two ports the service
 // defines:
 //   • RewindWorkspacePort  ← the in-process WorkspaceCheckpointManager (the
-//     same store /checkpoints and the daemon's own files-rewind use). The port
+//     same store /checkpoint and the daemon's own files-rewind use). The port
 //     resolves an anchor's checkpoint by turnId across the session's turn
 //     checkpoints; the TUI does not stamp checkpoints with a sessionId, so the
 //     adapter returns the full checkpoint list and lets the shared turnId do the
@@ -35,22 +36,18 @@ import {
   type RewindCheckpointView,
   type RewindReceipt,
   type RewindRestoreResult,
-  type RewindScope as PlatformRewindScope,
   type RewindWorkspacePort,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { logger, readDocument, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 import { join } from 'node:path';
-import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { RewindScope } from '@goodvibes-jev/engine/terminal-shell/checkpoint-command';
+import type { CommandContext } from '../command-registry.ts';
 import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
 import { getTurnAnchors, type TurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { createConversationRewindPort, type ConversationRewindPort } from '../../runtime/conversation-rewind-port.ts';
-import { shortId } from './checkpoint-runtime.ts';
-import { resolveCheckpointRef, restoreCheckpointFiles } from '@goodvibes-jev/engine/terminal-shell/recovery-commands';
-
-export type RewindScope = PlatformRewindScope;
-const REWIND_SCOPES: readonly RewindScope[] = ['files', 'conversation', 'both'];
 
 // ---------------------------------------------------------------------------
 // Ports, bridge the platform rewind service onto the TUI's in-process stores.
@@ -199,7 +196,7 @@ const BUSY_MESSAGE = (what: string): string =>
 
 /**
  * Shows what restoring `checkpointId` would do to the working tree and asks,
- * the same Changes preview /rewind uses. Work done since the rewind (turns or
+ * the same Changes preview /checkpoint rewind uses. Work done since the rewind (turns or
  * hand edits) is in that diff, so it is never replaced unseen.
  */
 async function confirmFileRestore(
@@ -416,254 +413,122 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
 }
 
 // ---------------------------------------------------------------------------
-// Recent-turns picker + anchor resolution
+// /checkpoint rewind: resolve the turn, read the plan, show it, ask, apply it.
 // ---------------------------------------------------------------------------
 
-function formatAge(atMs: number, nowMs = Date.now()): string {
-  const s = Math.max(0, Math.floor((nowMs - atMs) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-/** Recent turns, NEWEST first, numbered 1..N for the picker. */
+/** Recent turns, NEWEST first, numbered 1..N as the picker lists them. */
 function recentTurnsNewestFirst(sessionId: string): TurnAnchor[] {
   return [...getTurnAnchors(sessionId)].reverse();
 }
 
-function renderTurnList(sessionId: string): string {
-  const turns = recentTurnsNewestFirst(sessionId);
-  if (turns.length === 0) {
-    return 'No completed turns recorded this run yet. /rewind targets turns completed in the current session run.';
-  }
-  const lines = ['Recent turns (newest first): /rewind <n> [files|conversation|both]:'];
-  turns.slice(0, 20).forEach((t, i) => {
-    lines.push(`  ${String(i + 1).padStart(2)}. ${t.label}  (${formatAge(t.at)}, ${t.messageCount} msgs)`);
-  });
-  lines.push('Default scope is "both" (files + conversation). Files resolve only for turns that changed files.');
-  return lines.join('\n');
-}
-
 /** Resolve a user ref ('1'..'N' newest-first, or a turnId / turnId prefix) to an anchor turn. */
-function resolveRef(sessionId: string, ref: string): TurnAnchor | { error: string } {
-  const turns = recentTurnsNewestFirst(sessionId);
-  if (turns.length === 0) return { error: 'No completed turns recorded this run yet.' };
+function resolveRef(turns: readonly TurnAnchor[], ref: string): TurnAnchor | { error: string } {
   if (/^\d+$/.test(ref)) {
-    const idx = Number(ref) - 1;
-    const turn = turns[idx];
-    return turn ? turn : { error: `No turn #${ref}. Run /rewind to list recent turns (1–${turns.length}).` };
+    const turn = turns[Number(ref) - 1];
+    return turn ? turn : { error: `No turn #${ref}; this conversation has ${turns.length} (/checkpoint rewind lists them, newest first).` };
   }
   const exact = turns.find((t) => t.turnId === ref);
   if (exact) return exact;
   const prefix = turns.filter((t) => t.turnId.startsWith(ref));
   if (prefix.length === 1) return prefix[0]!;
-  if (prefix.length > 1) return { error: `Turn ref "${ref}" is ambiguous (${prefix.length} matches). Use the list number instead.` };
-  return { error: `Unknown turn ref "${ref}". Run /rewind to list recent turns.` };
-}
-
-function parseScope(token: string | undefined): RewindScope | null {
-  if (token === undefined) return 'both';
-  const lower = token.toLowerCase();
-  return (REWIND_SCOPES as readonly string[]).includes(lower) ? (lower as RewindScope) : null;
-}
-
-// ---------------------------------------------------------------------------
-// Checkpoint-only fallback, no completed turns recorded THIS run (e.g. right
-// after a restart) means the message-anchored picker above has nothing to
-// list, even though real workspace checkpoints exist on disk. Rather than
-// dead-ending on "no completed turns" while /checkpoints and the boot notice
-// both point back here, /rewind falls back to listing and restoring
-// checkpoints directly, a FILES-ONLY restore (there is no turn anchor to
-// join a conversation boundary against), reusing the same diff
-// preview/confirm idiom as the turn-anchored path above.
-// ---------------------------------------------------------------------------
-
-const CHECKPOINT_FALLBACK_NO_ANCHORS_MESSAGE = 'No completed turns recorded this run yet. /rewind targets turns completed in the current session run.';
-
-function renderCheckpointFallbackList(checkpoints: readonly WorkspaceCheckpoint[]): string {
-  const lines = [
-    'No completed turns recorded this run yet; falling back to workspace checkpoints (FILES ONLY, no conversation state):',
-    ...checkpoints.slice(0, 20).map((cp, i) => `  ${String(i + 1).padStart(2)}. ${shortId(cp.id).padEnd(12)} ${cp.kind.padEnd(9)} ${cp.label}  (${formatAge(cp.createdAt)})`),
-    'Restore one: /rewind <n|id>; files only; conversation history is untouched.',
-  ];
-  return lines.join('\n');
+  if (prefix.length > 1) return { error: `Turn "${ref}" is ambiguous (${prefix.length} match); use its number from the list instead.` };
+  return { error: `No turn "${ref}" in this conversation (/checkpoint rewind lists them, newest first).` };
 }
 
 /**
- * Handles bare `/rewind` and `/rewind <ref>` when this run has recorded no
- * turn anchors at all. Returns true if it handled the invocation (always,
- * once called), false is never returned, kept boolean-shaped only to mirror
- * the calling convention at the call site.
+ * Goes back to a completed turn: the platform rewind service plans it (and
+ * issues a single-use token bound to that plan), the plan is shown on the
+ * Changes preview with the question, and only a yes applies it, with that
+ * token. The service refuses the token when the conversation changed after
+ * the preview, so what is applied is exactly what was shown.
  */
-async function handleCheckpointOnlyRewind(args: string[], ctx: CommandContext): Promise<void> {
-  const mgr = ctx.workspace.workspaceCheckpointManager;
-  if (!mgr) {
-    ctx.print(CHECKPOINT_FALLBACK_NO_ANCHORS_MESSAGE);
-    return;
+export async function rewindToTurn(ctx: CommandContext, input: { readonly turn: string; readonly scope: RewindScope }): Promise<string | void> {
+  const sessionId = ctx.session.runtime.sessionId;
+  const { scope } = input;
+  const turns = recentTurnsNewestFirst(sessionId);
+  if (turns.length === 0) {
+    throw commandRefusal('No completed turns are recorded for this conversation yet, so there is nothing to go back to.', 'Put the files back to a workspace checkpoint instead: /checkpoint restore');
   }
-  let checkpoints: WorkspaceCheckpoint[];
+  if (ctx.isGenerating?.()) throw commandRefusal(BUSY_MESSAGE('going back to a turn'), undefined, 'BUSY');
+  const resolved = resolveRef(turns, input.turn);
+  if ('error' in resolved) throw commandRefusal(resolved.error, undefined, 'NOT_FOUND');
+  const anchor: RewindAnchor = { sessionId, turnId: resolved.turnId };
+  if (wants(scope, 'files') && !ctx.workspace.workspaceCheckpointManager) {
+    throw commandRefusal('Checkpoints are not available in this session, so the files cannot go back.', `Take back only the conversation: /checkpoint rewind ${input.turn} conversation`, 'UNAVAILABLE');
+  }
+  if (!ctx.previewChanges) {
+    throw commandRefusal('Going back needs the Changes preview to show what would change, and it is not available in this session. Nothing changed.', undefined, 'UNAVAILABLE');
+  }
+
+  const state = stateFor(ctx);
+  let plan: Awaited<ReturnType<UnifiedRewindService['plan']>>;
   try {
-    checkpoints = await mgr.list();
-  } catch {
-    checkpoints = [];
+    plan = await state.service.plan(anchor, scope);
+  } catch (error) {
+    throw commandRefusal(`Could not plan going back: ${summarizeError(error)}`, undefined, 'NOT_DONE');
   }
-  if (checkpoints.length === 0) {
-    ctx.print(CHECKPOINT_FALLBACK_NO_ANCHORS_MESSAGE);
-    return;
-  }
-
-  if (args.length === 0) {
-    ctx.print(renderCheckpointFallbackList(checkpoints));
-    return;
+  const filesAvailable = plan.files?.available ?? false;
+  const conversationAvailable = plan.conversation?.available ?? false;
+  if (!filesAvailable && !conversationAvailable) {
+    throw commandRefusal([`Nothing to take back after turn "${resolved.label}" (${scope}).`, ...plan.warnings.map((w) => `  note: ${w}`)].join('\n'));
   }
 
-  const resolved = resolveCheckpointRef(checkpoints, args[0]!, '/rewind');
-  if ('error' in resolved) {
-    ctx.print(resolved.error);
-    return;
+  // The plan's diff, shown on Changes with the question on it.
+  let diff: string | undefined;
+  let note: string | undefined;
+  const checkpointId = plan.files?.checkpointId ?? null;
+  if (filesAvailable && checkpointId && ctx.workspace.workspaceCheckpointManager) {
+    try {
+      const result = await ctx.workspace.workspaceCheckpointManager.diff(checkpointId);
+      if (result.unifiedDiff.trim()) diff = result.unifiedDiff;
+      else note = 'The working tree already matches this checkpoint.';
+    } catch {
+      note = 'Could not load the checkpoint diff.';
+    }
+  } else {
+    const drop = plan.conversation?.messagesToDrop ?? 0;
+    const remaining = plan.conversation?.messagesRemaining ?? 0;
+    note = `Conversation only: ${remaining} message(s) stay, ${drop} after this turn are dropped. No files change.`;
   }
-  // The same preview, question and restore as /checkpoints restore.
-  await restoreCheckpointFiles(ctx, mgr, resolved, {
-    yes: false,
-    record: (text) => ctx.session.conversationManager.addTypedSystemMessage(text, 'operational'),
+  const summaryParts: string[] = [];
+  if (wants(scope, 'files')) summaryParts.push(filesAvailable ? `${plan.files?.affectedFileCount ?? 0} file(s)` : 'files: none');
+  if (wants(scope, 'conversation')) summaryParts.push(conversationAvailable ? `${plan.conversation?.messagesToDrop ?? 0} message(s)` : 'conversation: unavailable');
+
+  ctx.print(`Previewing going back to turn "${resolved.label}" (${scope}: ${summaryParts.join(', ')}). Enter or y goes back, n or Esc cancels.`);
+  for (const w of plan.warnings) ctx.print(`  note: ${w}`);
+  ctx.renderRequest();
+  const confirmed = await ctx.previewChanges({
+    title: `go back to ${resolved.label}`,
+    diff,
+    note,
+    question: { text: `Go back to "${resolved.label}" (${scope}: ${summaryParts.join(', ')})? Dropped messages come back with /undo rewind only while no new message is added.`, confirmLabel: 'Go back', tone: 'warning' },
   });
-}
-
-// ---------------------------------------------------------------------------
-// Command registration
-// ---------------------------------------------------------------------------
-
-export function registerRewindRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'rewind',
-    description: 'Rewind files, conversation, or both to a completed turn (preview + confirm)',
-    usage: '[<n|turnId> [files|conversation|both]]',
-    argsHint: '[<n> [files|conversation|both]]',
-    handler: async (args, ctx: CommandContext) => {
-      const sessionId = ctx.session.runtime.sessionId;
-
-      // No turn anchors recorded this run (most commonly: right after a
-      // restart, before /session resume has restored any), fall back to a
-      // files-only restore over the real workspace checkpoints instead of a
-      // dead end (see handleCheckpointOnlyRewind's header doc).
-      if (recentTurnsNewestFirst(sessionId).length === 0) {
-        await handleCheckpointOnlyRewind(args, ctx);
-        return;
-      }
-
-      if (args.length === 0) {
-        ctx.print(renderTurnList(sessionId));
-        return;
-      }
-
-      if (ctx.isGenerating?.()) {
-        ctx.print(BUSY_MESSAGE('/rewind'));
-        return;
-      }
-
-      const scope = parseScope(args[1]);
-      if (scope === null) {
-        ctx.print(`Unknown scope "${args[1]}". Use one of: files | conversation | both.`);
-        return;
-      }
-      const resolved = resolveRef(sessionId, args[0]!);
-      if ('error' in resolved) {
-        ctx.print(resolved.error);
-        return;
-      }
-      const anchor: RewindAnchor = { sessionId, turnId: resolved.turnId };
-
-      if (wants(scope, 'files') && !ctx.workspace.workspaceCheckpointManager) {
-        ctx.print('Checkpoints are not available in this session; files rewind cannot run. Try /rewind <n> conversation.');
-        return;
-      }
-
-      const state = stateFor(ctx);
-      const plan = await state.service.plan(anchor, scope).catch((err) => {
-        ctx.print(`Could not plan rewind: ${summarizeError(err)}`);
-        return null;
-      });
-      if (!plan) return;
-
-      const filesAvailable = plan.files?.available ?? false;
-      const conversationAvailable = plan.conversation?.available ?? false;
-      if (!filesAvailable && !conversationAvailable) {
-        ctx.print(`Nothing to rewind for turn "${resolved.label}" at scope ${scope}.`);
-        for (const w of plan.warnings) ctx.print(`  note: ${w}`);
-        return;
-      }
-
-      // Preview what changes in Changes, with the question on it.
-      let diff: string | undefined;
-      let note: string | undefined;
-      const checkpointId = plan.files?.checkpointId ?? null;
-      if (filesAvailable && checkpointId && ctx.workspace.workspaceCheckpointManager) {
-        try {
-          const result = await ctx.workspace.workspaceCheckpointManager.diff(checkpointId);
-          if (result.unifiedDiff.trim()) diff = result.unifiedDiff;
-          else note = 'The working tree already matches this checkpoint.';
-        } catch {
-          note = 'Could not load the checkpoint diff.';
-        }
-      } else {
-        const drop = plan.conversation?.messagesToDrop ?? 0;
-        const remaining = plan.conversation?.messagesRemaining ?? 0;
-        note = `Conversation rewind: keep ${remaining} message(s), drop ${drop} after this turn. No files change.`;
-      }
-
-      const summaryParts: string[] = [];
-      if (wants(scope, 'files')) summaryParts.push(filesAvailable ? `${plan.files?.affectedFileCount ?? 0} file(s)` : 'files: none');
-      if (wants(scope, 'conversation')) summaryParts.push(conversationAvailable ? `${plan.conversation?.messagesToDrop ?? 0} message(s)` : 'conversation: unavailable');
-      if (!ctx.previewChanges) {
-        ctx.print('Previewing a rewind needs the Changes view, which is not available in this session.');
-        return;
-      }
-
-      ctx.print(`Previewing rewind of turn "${resolved.label}" (${scope}: ${summaryParts.join(', ')}). Enter or y rewinds, n or Esc cancels.`);
-      for (const w of plan.warnings) ctx.print(`  note: ${w}`);
-      ctx.renderRequest();
-      const confirmed = await ctx.previewChanges({
-        title: `rewind ${resolved.label}`,
-        diff,
-        note,
-        question: { text: `Rewind ${scope} to "${resolved.label}"? (${summaryParts.join(', ')})`, confirmLabel: 'Rewind', tone: 'warning' },
-      });
-      if (!confirmed) {
-        ctx.print('Rewind cancelled: nothing changed.');
-        ctx.renderRequest();
-        return;
-      }
-      // The preview waits on the owner; a turn may have started meanwhile.
-      if (ctx.isGenerating?.()) {
-        ctx.print(BUSY_MESSAGE('applying the rewind'));
-        return;
-      }
-      try {
-        const result = await state.service.apply(anchor, scope, { confirmToken: plan.token });
-        const receipt = result.receipt;
-        if (!receipt) {
-          ctx.print(`Rewind not applied: ${result.refusal?.reason ?? 'confirmation was refused.'}`);
-          return;
-        }
-        if (undoAvailable(receipt)) {
-          state.undo.push(receipt);
-          state.redo.length = 0; // a fresh apply invalidates the redo stack
-          saveStacks(state, anchor.sessionId);
-        }
-        // addTypedSystemMessage persists the receipt into real session
-        // history (indexed by getTranscriptEventIndex + save/load), and the
-        // [Rewind] prefix is force-surfaced inline (system-message-router.ts).
-        ctx.session.conversationManager.addTypedSystemMessage(
-          buildRewindReceiptBlock({ ...receipt, undoAvailable: undoAvailable(receipt) }),
-          'operational',
-        );
-        ctx.renderRequest();
-      } catch (err) {
-        ctx.print(`Rewind failed: ${summarizeError(err)}`);
-      }
-    },
-  });
+  if (!confirmed) {
+    ctx.renderRequest();
+    return 'Nothing changed: you chose not to go back.';
+  }
+  // The preview waits on the owner; a turn may have started meanwhile.
+  if (ctx.isGenerating?.()) throw commandRefusal(BUSY_MESSAGE('going back to the turn'), undefined, 'BUSY');
+  let result: Awaited<ReturnType<UnifiedRewindService['apply']>>;
+  try {
+    // The token binds the apply to the plan shown: a conversation changed since is refused.
+    result = await state.service.apply(anchor, scope, { confirmToken: plan.token });
+  } catch (error) {
+    throw commandRefusal(`Going back failed: ${summarizeError(error)}`, undefined, 'NOT_DONE');
+  }
+  const receipt = result.receipt;
+  if (!receipt) throw commandRefusal(`Nothing changed: ${result.refusal?.reason ?? 'the plan shown no longer matches the conversation'}.`, '/checkpoint rewind shows the plan again.');
+  if (undoAvailable(receipt)) {
+    state.undo.push(receipt);
+    state.redo.length = 0; // a fresh apply invalidates the redo stack
+    saveStacks(state, anchor.sessionId);
+  }
+  // addTypedSystemMessage persists the receipt into real session history
+  // (indexed by getTranscriptEventIndex + save/load), and the [Rewind] prefix
+  // is force-surfaced inline (system-message-router.ts).
+  ctx.session.conversationManager.addTypedSystemMessage(
+    buildRewindReceiptBlock({ ...receipt, undoAvailable: undoAvailable(receipt) }),
+    'operational',
+  );
+  ctx.renderRequest();
 }

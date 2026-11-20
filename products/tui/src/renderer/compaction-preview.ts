@@ -123,32 +123,16 @@ function fmtN(n: number): string {
 }
 
 /**
- * Build the /keep command usage text (shown when no args are provided).
+ * What `/notes create` says once a note is written: the model keeps seeing it after a compaction.
  *
- * Exported for testability, the shell-core handler renders this string directly.
- */
-export function buildPinUsageText(): string {
-  return (
-    '[Pin] Usage: /keep <text>\n' +
-    'Pinned entries are stored as session memories and included in the compaction handoff as pinned memories.\n' +
-    'What pinning guarantees: the text survives the next compaction.\n' +
-    'What pinning does NOT guarantee: recovery after process restart (session memories are in-memory only).'
-  );
-}
-
-/**
- * Build the /keep command success text.
- *
- * @param id - The assigned memory ID (e.g. "mem-1")
- * @param text - The pinned text
- * @param count - Total pinned memory count after adding
- *
- * Exported for testability, the shell-core handler renders this string directly.
+ * @param id - The assigned note ID (e.g. "mem-1")
+ * @param text - The note's text
+ * @param count - How many notes there are after adding
  */
 export function buildPinSuccessText(id: string, text: string, count: number): string {
   return (
-    `[Pin] Pinned as ${id}: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"\n` +
-    `  ${count} pinned memor${count === 1 ? 'y' : 'ies'} will survive the next compaction.\n` +
-    '  Note: session memories are in-memory only and do not persist across restarts.'
+    `Note ${id}: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"\n` +
+    `  ${count} note${count === 1 ? '' : 's'} the model keeps seeing after the next compaction.\n` +
+    '  They last for this session only.'
   );
 }

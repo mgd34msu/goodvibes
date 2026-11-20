@@ -88,6 +88,8 @@ export interface WorkBoardListView {
   /** Nothing waiting, running or finished. */
   readonly empty: boolean;
   readonly scheduled: readonly WorkBoardEntry[];
+  /** "1 event today ›" under Scheduled, opening the calendar's events; null when none. */
+  readonly eventsToday: WorkBoardEntry | null;
   readonly services: {
     readonly healthy: number;
     readonly unhealthy: readonly WorkBoardEntry[];
@@ -422,10 +424,11 @@ function bodyLines(list: WorkBoardListView): { lines: BodyLine[]; selectedAt: nu
       for (const entry of list.agents) push({ kind: 'entry', entry, layout: 'agent' });
       if (list.finishedEmpty && list.agents.length > 0) push({ kind: 'note', text: 'no finished agents this session', tone: 'muted', indent: 3 });
     }
-    if (list.scheduled.length > 0) {
+    if (list.scheduled.length > 0 || list.eventsToday) {
       if (lines.length > 0 && lines[lines.length - 1]!.kind !== 'blank') push({ kind: 'blank' });
       push({ kind: 'label', text: 'Scheduled' });
       for (const entry of list.scheduled) push({ kind: 'entry', entry, layout: 'scheduled' });
+      if (list.eventsToday) push({ kind: 'entry', entry: { ...list.eventsToday, row: { ...list.eventsToday.row, title: `${list.eventsToday.row.title} ›` } }, layout: 'scheduled' });
     }
   }
   if (!list.archive) {

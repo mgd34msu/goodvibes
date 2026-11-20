@@ -123,7 +123,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openKnowledgeWorkspace?: () => void;
   openSubscriptionWorkspace?: () => void;
   /** Open Your agents (Ctrl+O, /agents). */
-  openAgents?: () => void;
+  openAgents?: (opts?: { readonly target?: string }) => void;
   /** Open the notification history (/notifications): every system notice in full. */
 
   /**

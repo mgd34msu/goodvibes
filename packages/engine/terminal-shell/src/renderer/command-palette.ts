@@ -1,39 +1,45 @@
 /**
- * renderCommandPalette, the command palette drawn with the surface kit.
+ * renderCommandPalette, the one help list (`?`, `/help`, `/commands`, Ctrl+P)
+ * drawn with the surface kit.
  *
  *   ✦ Commands                                                     esc
  *
- *   ▏Type a command, setting, model or session          156 commands
+ *   ▏Type a command, setting, model or key              156 commands
  *
- *   ✦ suggested                                ┌ preview ────────────┐
- *     Changes                        /diff      Changes
- *     Switch model  opus 5.5        /model      /diff [path]
- *   ✦ session                                   Show the working-tree
- *     Resume a session             /resume      diff. …
+ *   ✦ suggested                                Switch model
+ *     Changes                     /changes     /model
+ *     Switch model  rt-1            /model     rt-1
+ *   ✦ session
+ *     Resume a session             /resume     Choose the model new turns use.
+ *   …
+ *   ✦ keyboard shortcuts                       Finds: provider, llm
+ *     Open the command palette      Ctrl+P
  *
  *   ↑↓ move   ⏎ run   tab fill composer                   120 more ↓
  *
- * The preview shows what the selected command will do before it runs:
- * its full description, usage, aliases, category and what Enter will do.
+ * Each row is a plain title with the slash command (or a shortcut's key)
+ * right-aligned and dim. The detail pane shows the selected command's summary,
+ * its actions by label, and the words that find it. Below 70 columns there is
+ * no detail pane: the selected row's summary is one dim line under the list.
  */
 
 import type { PaletteEntry, PaletteView } from '../command-palette-types.js';
 import { activeTokens } from './theme.js';
-import { beginModal, finishModal, scrollCountText, searchRow, type SurfaceLayer } from './surface-kit.js';
+import { beginModal, clipText, finishModal, scrollCountText, searchRow, type SurfaceLayer } from './surface-kit.js';
 import { drawList, type KitRow } from './surface-kit-list.js';
 import { inset, insetLines, type KitInset } from './surface-kit-parts.js';
 
-function rowsFor(palette: PaletteView, showDetail: boolean): KitRow[] {
+function rowsFor(palette: PaletteView): KitRow[] {
   const selected = palette.getSelected();
   const rows: KitRow[] = [];
   const searching = palette.query.trim().length > 0;
   for (const section of palette.sections()) {
-    if (!searching) rows.push({ header: section.group });
+    if (!searching || section.group === 'Keyboard shortcuts') rows.push({ header: section.group });
     for (const entry of section.entries) {
+      const live = entry.kind === 'command' ? palette.describe(entry.id) : undefined;
       rows.push({
-        label: entry.title,
-        detail: showDetail ? [palette.describe(entry.id), entry.description, entry.argsHint ? `/${entry.id} ${entry.argsHint}` : ''].filter(Boolean).join('\n') : undefined,
-        right: entry.right ?? `/${entry.id}`,
+        label: live ? `${entry.title}  ${live}` : entry.title,
+        right: entry.right,
         selected: entry === selected,
       });
     }
@@ -42,51 +48,59 @@ function rowsFor(palette: PaletteView, showDetail: boolean): KitRow[] {
   return rows;
 }
 
-function drawPreview(palette: PaletteView, entry: PaletteEntry | null, canvas: Parameters<typeof insetLines>[0], p: KitInset): void {
+function drawDetail(palette: PaletteView, entry: PaletteEntry | null, canvas: Parameters<typeof insetLines>[0], p: KitInset): void {
   const t = activeTokens();
   if (!entry) {
-    insetLines(canvas, p, p.l, p.top, [{ text: 'Type to search every command by its name, its title or what it does.', style: { fg: t.textMuted } }]);
+    insetLines(canvas, p, p.l, p.top, [{ text: 'Type to search every command and key by its name, its title or what it does.', style: { fg: t.textMuted } }]);
     return;
   }
   const blank = { text: '', style: {} };
+  if (entry.kind === 'shortcut') {
+    insetLines(canvas, p, p.l, p.top, [
+      { text: entry.right, style: { fg: t.brand, bold: true } },
+      blank,
+      { text: entry.title, style: { fg: t.textMuted } },
+    ]);
+    return;
+  }
   const live = palette.describe(entry.id);
   insetLines(canvas, p, p.l, p.top, [
     { text: entry.title, style: { fg: t.text, bold: true } },
-    { text: `/${entry.id}${entry.argsHint ? ` ${entry.argsHint}` : ''}`, style: { fg: t.brand } },
+    { text: `/${entry.id}`, style: { fg: t.brand } },
     ...(live ? [{ text: live, style: { fg: t.textMuted } }] : []),
     blank,
-    ...(entry.description ? [{ text: entry.description, style: { fg: t.textMuted } }, blank] : []),
-    {
-      text: entry.needsArgs
-        ? `Enter fills the composer: it needs ${entry.argsHint ?? 'arguments'}.`
-        : 'Enter runs it now; tab fills the composer to add arguments.',
-      style: { fg: t.textFaint },
-    },
-    blank,
-    ...(entry.aliases.length > 0 ? [{ text: `Also: ${entry.aliases.map((a) => `/${a}`).join('  ')}`, style: { fg: t.textFaint } }] : []),
+    ...(entry.summary ? [{ text: entry.summary, style: { fg: t.textMuted } }, blank] : []),
+    ...entry.actions.map((label) => ({ text: label, style: { fg: t.text } })),
+    ...(entry.actions.length > 0 ? [blank] : []),
     ...(entry.keywords.length > 0 ? [{ text: `Finds: ${entry.keywords.join(', ')}`, style: { fg: t.textFaint } }] : []),
-    { text: entry.category, style: { fg: t.textFaint } },
   ]);
 }
 
 export function renderCommandPalette(palette: PaletteView, screenWidth: number, screenHeight: number): SurfaceLayer {
+  const selected = palette.getSelected();
   const f = beginModal(screenWidth, screenHeight, {
     title: 'Commands',
-    hints: [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer']],
+    hints: selected?.kind === 'shortcut'
+      ? [['↑↓', 'move']]
+      : [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer']],
   });
-  const total = palette.entries.length;
+  const total = palette.entries.filter((entry) => entry.kind === 'command').length;
   const shown = palette.flat().length;
-  searchRow(f, f.top, palette.query, 'Type a command, setting, model or session', palette.query ? `${shown} of ${total}` : `${total} commands`);
+  searchRow(f, f.top, palette.query, 'Type a command, setting, model or key', palette.query ? `${shown} of ${palette.entries.length}` : `${total} commands`);
 
   const body = f.top + 2;
   const inner = f.r - f.l + 1;
-  // A preview when there is room for it; below that the list takes the width.
+  // A detail pane when there is room for it; below that the list takes the
+  // width and the selected row's summary is one line under it.
   const sideBySide = inner >= 70;
   const x1 = sideBySide ? f.l + Math.floor(inner * 0.55) - 1 : f.r;
-  const result = drawList(f.canvas, { mouseNavigation: true, rows: rowsFor(palette, !sideBySide), top: body, bottom: f.bottom, x0: f.l, x1, scrollKey: { owner: palette, name: 'list' } });
+  const listBottom = sideBySide ? f.bottom : f.bottom - 2;
+  const result = drawList(f.canvas, { mouseNavigation: true, rows: rowsFor(palette), top: body, bottom: listBottom, x0: f.l, x1, scrollKey: { owner: palette, name: 'list' } });
   if (sideBySide) {
     const p = inset(f.canvas, x1 + 3, body, f.r + 2 - (x1 + 3) + 1, f.bottom - body + 1);
-    drawPreview(palette, palette.getSelected(), f.canvas, p);
+    drawDetail(palette, selected, f.canvas, p);
+  } else if (selected?.summary) {
+    f.canvas.put(f.l, f.bottom, clipText(selected.summary, inner), { fg: activeTokens().textMuted });
   }
   f.hintRight = scrollCountText(result.above, result.below);
   return finishModal(f);

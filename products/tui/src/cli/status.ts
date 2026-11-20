@@ -414,8 +414,8 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       id: 'onboarding-incomplete',
       area: 'onboarding',
       severity: 'warning',
-      summary: 'Onboarding has not been shown for this user.',
-      cause: 'No global user onboarding check marker was found.',
+      summary: 'First run has not been finished for this user.',
+      cause: 'No global user onboarding check marker was found: no model was ready at a start, and first run was left before a model was chosen.',
       impact: 'Important service, network, provider, auth, or permission choices may still be implicit defaults.',
       action: 'Run /onboarding in the TUI or goodvibes onboarding status to review setup state.',
     });

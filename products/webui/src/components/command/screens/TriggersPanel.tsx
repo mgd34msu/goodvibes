@@ -87,7 +87,7 @@ export function TriggersPanel() {
             <li key={row.id} className="gv-command-screen__group">
               <ul className="gv-rows">
                 <Row
-                  leading={<StatusDot tone={row.gaveUp || row.state === 'failed' ? 'bad' : row.lastError || row.state === 'backoff' ? 'warn' : row.state === 'running' || row.state === 'firing' || row.state === 'idle' ? 'ok' : 'idle'} srLabel={row.state} />}
+                  leading={<StatusDot tone={row.gaveUp || row.state === 'failed' || row.lastError || row.state === 'backoff' ? 'warn' : row.state === 'running' || row.state === 'firing' || row.state === 'idle' ? 'ok' : 'idle'} srLabel={row.state} />}
                   title={row.label}
                   meta={[row.watching, row.state, `fired ${row.fired}`, row.lastError ? `last error: ${row.lastError}` : ''].filter(Boolean).join(' · ')}
                   trailing={(

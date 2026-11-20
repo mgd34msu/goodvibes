@@ -175,19 +175,6 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   registry.register(servicesCommand);
 
   registry.register({
-    name: 'agents',
-    effect: 'ui-navigation',
-    description: 'Open Your agents: what is running, what waits for you, what is scheduled',
-    handler(_args, ctx) {
-      if (ctx.openAgents) {
-        ctx.openAgents();
-        return;
-      }
-      ctx.print('Your agents needs the interactive shell.');
-    },
-  });
-
-  registry.register({
     name: 'notifications',
     effect: 'ui-navigation',
     description: 'Show every notice and notification in full, newest first',

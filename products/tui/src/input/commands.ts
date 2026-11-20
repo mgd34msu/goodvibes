@@ -32,7 +32,6 @@ import { registerProfileSyncRuntimeCommands } from './commands/profile-sync-runt
 import { registerManagedRuntimeCommands } from './commands/managed-runtime.ts';
 import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
 import { registerPlatformServicesRuntimeCommands } from './commands/platform-services-runtime.ts';
-import { registerTeamworkRuntimeCommands } from './commands/teamwork-runtime.ts';
 import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
 import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
@@ -127,7 +126,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Managed Runtime', register: registerManagedRuntimeCommands },
   { category: 'Platform Access', register: registerPlatformAccessRuntimeCommands },
   { category: 'Platform Services', register: registerPlatformServicesRuntimeCommands },
-  { category: 'Teamwork', register: registerTeamworkRuntimeCommands },
   { category: 'Marketplace', register: registerMarketplaceRuntimeCommands },
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
   { category: 'Diagnostics', register: registerStateRuntimeCommands },

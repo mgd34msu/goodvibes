@@ -53,40 +53,6 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
   registry.register(basicCommands.paste);
 
-  registry.register({
-    name: 'pastes',
-    aliases: ['pending-pastes'],
-    description: 'Preview the actual content behind each [TEXT: pN, M lines] fold in the composer, before you submit',
-    usage: '[pN]',
-    argsHint: '[pN]',
-    handler(args, ctx) {
-      const pending = ctx.getPendingPastes?.();
-      if (!pending || pending.size === 0) {
-        ctx.print('[Pastes] No folded pastes are currently in the composer (pastes over 8 lines fold to [TEXT: pN, M lines]).');
-        return;
-      }
-      const requestedId = args[0]?.trim();
-      if (requestedId) {
-        const content = pending.get(requestedId);
-        if (!content) {
-          ctx.print(`[Pastes] No pending paste with id "${requestedId}". Pending: ${[...pending.keys()].join(', ')}`);
-          return;
-        }
-        ctx.print(`[Pastes] ${requestedId} (${content.split('\n').length} lines):\n${content}`);
-        return;
-      }
-      const lines = ['[Pastes] Folded in the composer right now:'];
-      for (const [id, content] of pending) {
-        const contentLines = content.split('\n');
-        const preview = contentLines[0].slice(0, 80);
-        lines.push(
-          `  ${id} (${contentLines.length} lines): ${preview}${contentLines.length > 1 || preview.length < contentLines[0].length ? '…' : ''}`,
-        );
-      }
-      lines.push('', 'Full text: /pastes <id>');
-      ctx.print(lines.join('\n'));
-    },
-  });
 
   registry.register({
     name: 'help',

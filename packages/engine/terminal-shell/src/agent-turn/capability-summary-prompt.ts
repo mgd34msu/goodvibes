@@ -40,14 +40,30 @@ export const CAPABILITY_CLAIM_RULE = [
  * you do" whenever the running build is not the source tree. So the live
  * route is named here, and the wrong remedy is ruled out by name.
  */
-export const CAPABILITY_ROUTE_RULE = [
-  'When the user asks what you can do with Google, Gmail, mail, calendar, or a browser, call the capability_status tool and answer from what it returns.',
-  'Do not answer that question from a code search, a file listing, a knowledge lookup, or this summary alone; those describe a source tree or a moment that has passed, not what is wired right now.',
-  'Gmail and Google Calendar are reached through the built-in google tool in this process.',
-  'Never tell the user to set up an MCP server, a plugin, or an SMTP server in order to reach Gmail or Google Calendar; none of those is the route, and offering one sends them to configure something that will not work.',
-  'A direct IMAP/SMTP mailbox is a separate feature for accounts that are not Google; only offer it when the account is not a Google account.',
-  'When capability_status says a capability is absent from this build, say exactly that, that the build does not have it, rather than describing something to configure.',
-].join(' ');
+/**
+ * The route rule for the tools this turn has: a sentence that names a tool is
+ * left out when the turn's registry does not have it (a daemon-hosted turn has
+ * no capability_status and may have no browser), so the prompt never tells
+ * the model to call a tool its registry refuses.
+ */
+export function capabilityRouteRule(hasTool: (name: string) => boolean = () => true): string {
+  const capability = hasTool('capability_status');
+  const browser = hasTool('browser');
+  const google = hasTool('google');
+  return [
+    capability
+      ? `When the user asks what you can do with Google, Gmail, mail, calendar${browser ? ', or a browser' : ''}, call the capability_status tool and answer from what it returns.`
+      : `When the user asks what you can do with Google, Gmail, mail, calendar${browser ? ', or a browser' : ''}, answer from the tools this turn has and say that the full capability report is in the GoodVibes Agent itself.`,
+    'Do not answer that question from a code search, a file listing, a knowledge lookup, or this summary alone; those describe a source tree or a moment that has passed, not what is wired right now.',
+    ...(google ? ['Gmail and Google Calendar are reached through the built-in google tool in this process.'] : []),
+    'Never tell the user to set up an MCP server, a plugin, or an SMTP server in order to reach Gmail or Google Calendar; none of those is the route, and offering one sends them to configure something that will not work.',
+    'A direct IMAP/SMTP mailbox is a separate feature for accounts that are not Google; only offer it when the account is not a Google account.',
+    ...(capability ? ['When capability_status says a capability is absent from this build, say exactly that, that the build does not have it, rather than describing something to configure.'] : []),
+  ].join(' ');
+}
+
+/** The route rule for a turn that has every tool (the Agent's own process). */
+export const CAPABILITY_ROUTE_RULE = capabilityRouteRule();
 
 /** Standing trust rule. Ships in the prompt whether or not anything has been read yet. */
 export const UNTRUSTED_INPUT_RULE = [
@@ -61,7 +77,7 @@ function line(prefix: string, text: string): string {
   return `${prefix} ${text}`;
 }
 
-export function buildCapabilitySummaryPrompt(report: CapabilityIndexReport | null): string | null {
+export function buildCapabilitySummaryPrompt(report: CapabilityIndexReport | null, hasTool?: (name: string) => boolean): string | null {
   const sections: string[] = ['## What you can do right now'];
 
   if (!report) {
@@ -69,7 +85,7 @@ export function buildCapabilitySummaryPrompt(report: CapabilityIndexReport | nul
     // conclude anything from silence.
     sections.push('The capability index has not been resolved for this session, so this list is unknown rather than empty.');
     sections.push(CAPABILITY_CLAIM_RULE);
-    sections.push(CAPABILITY_ROUTE_RULE);
+    sections.push(capabilityRouteRule(hasTool));
     sections.push(UNTRUSTED_INPUT_RULE);
     return sections.join('\n\n');
   }
@@ -112,7 +128,7 @@ export function buildCapabilitySummaryPrompt(report: CapabilityIndexReport | nul
   }
 
   sections.push(CAPABILITY_CLAIM_RULE);
-  sections.push(CAPABILITY_ROUTE_RULE);
+  sections.push(capabilityRouteRule(hasTool));
   sections.push(UNTRUSTED_INPUT_RULE);
   return sections.join('\n\n');
 }

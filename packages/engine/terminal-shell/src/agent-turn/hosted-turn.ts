@@ -445,6 +445,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         shellPaths: createShellPathService({ workingDirectory: input.workspaceRoot, homeDirectory: deps.homeDirectory }),
         memoryRegistry: deps.memoryRegistry,
         capabilityIndex: null,
+        // The rules name only tools this hosted registry has: no capability_status here, and no browser without one.
+        hasTool: (name: string) => !AGENT_SHELL_TOOL_NAMES.includes(name) && !AGENT_NOT_YET_HOSTED_TOOL_NAMES.includes(name) && (name !== 'browser' || Boolean(deps.browser)),
         turnText: input.turnText,
       });
       signal?.throwIfAborted();

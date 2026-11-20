@@ -82,6 +82,9 @@ export interface FeatureSettingSnapshot {
   readonly settings: readonly string[];
   readonly restartRequired: boolean;
   readonly defaultEnabled: boolean;
+  /** False when the feature cannot work in this build whatever its setting says; the web UI shows the reason. */
+  readonly operable: boolean;
+  readonly inoperableDetail: string | null;
 }
 
 export interface ConfigSchemaSnapshot {
@@ -114,6 +117,8 @@ export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
     settings: [...f.settings],
     restartRequired: f.restartRequired,
     defaultEnabled: f.defaultEnabled,
+    operable: f.operable,
+    inoperableDetail: f.inoperableDetail,
   }));
 
   return { entries, features };
@@ -166,6 +171,10 @@ export function renderTs(snapshot: ConfigSchemaSnapshot): string {
     '  readonly settings: readonly string[];',
     '  readonly restartRequired: boolean;',
     '  readonly defaultEnabled: boolean;',
+    '  /** False when the feature cannot work in this build whatever its setting says. */',
+    '  readonly operable: boolean;',
+    '  /** Why it cannot work, when it cannot: shown where the control is. */',
+    '  readonly inoperableDetail: string | null;',
     '}',
     '',
     `export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = ${json(snapshot.entries)} as const;`,

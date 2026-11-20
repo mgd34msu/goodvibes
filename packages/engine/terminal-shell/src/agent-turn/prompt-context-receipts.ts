@@ -120,6 +120,8 @@ export interface RuntimePromptCompositionInput {
    * is unknown rather than implying the agent can do nothing.
    */
   readonly capabilityIndex?: CapabilityIndexReport | null | undefined;
+  /** Whether this turn's tool registry has a tool; the capability rules name only tools it has (absent: every tool). */
+  readonly hasTool?: ((name: string) => boolean) | undefined;
   /** The active turn's raw text (TURN_SUBMITTED's `prompt`), used only to rank the
    *  already-eligible memory set by relevance to this turn, see rankMemoryForTurn.
    *  Null/undefined when there is no active turn (e.g. a follow-up composition). */
@@ -346,7 +348,7 @@ function buildRuntimePromptReceiptSegments(
   const activePersona = personaSnapshot.activePersona;
   const personaPrompt = composed.persona;
   const tierPrompt = input.tierPrompt;
-  const capabilitySummaryText = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null) ?? '';
+  const capabilitySummaryText = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null, input.hasTool) ?? '';
 
   return [
     receiptSegment({
@@ -561,7 +563,7 @@ export async function composeRuntimePromptWithReceipt(
   const memoryPrompt = renderReviewedMemoryPrompt(memoryRanking) ?? '';
   const currentModel = modelLabel(input.model);
   const supplement = input.tierPrompt;
-  const capabilitySummary = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null);
+  const capabilitySummary = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null, input.hasTool);
   // Each store is read once; the prompt text and the receipt are both derived from these reads.
   const projectContextFiles = discoverProjectContextFiles(input.shellPaths);
   const routineSnapshot = AgentRoutineRegistry.fromShellPaths(input.shellPaths).snapshot();

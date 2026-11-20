@@ -284,6 +284,27 @@ export function listOutputSchema(
   return objectSchema({ [key]: arraySchema(itemSchema) }, [key], { additionalProperties: false });
 }
 
+/**
+ * The listing envelope a daemon route sends (daemon-api pagination.ts
+ * `listingEnvelope`): one object holding the page (`items`, `hasMore`,
+ * `nextCursor` while more remain) and the same items again under the
+ * resource's own key, with or without `limit`/`cursor`. `extra` adds the
+ * route's own optional fields.
+ */
+export function listingOutputSchema(
+  key: string,
+  itemSchema: Record<string, unknown>,
+  extra: Record<string, Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return objectSchema({
+    items: arraySchema(itemSchema),
+    hasMore: BOOLEAN_SCHEMA,
+    nextCursor: STRING_SCHEMA,
+    [key]: arraySchema(itemSchema),
+    ...extra,
+  }, ['items', 'hasMore', key]);
+}
+
 export function entityOutputSchema(
   key: string,
   entitySchema: Record<string, unknown>,

@@ -179,6 +179,17 @@ For a typed reference the message names the reference (`@photo.png`); for `/imag
 
 The text goes back into the composer; remove the image marker or reference and describe the image in words.
 
+### What the conversation shows besides messages
+
+Other notices go to toasts and `/notifications`; these lines are drawn in the conversation itself, where they happened:
+
+- Why a turn ended without an answer, with what to do next, for example `sample chat request failed 500: ...` then `Hint: ...`, or `openrouter chat request failed: Connection error.` then `Next: send it again, or choose another provider or model with /model.`
+- The first time a model request fails and is retried, why, and how long the retries can take: `Retrying up to 5 times over about 2 minutes. Next: wait, press Esc to stop, or choose another model with /model.` The row under the conversation counts the attempts (`Retrying (attempt 2/5)...`).
+- Why a message was not sent and what to do, for example when the connected host refuses it because the workspace is not registered. The text stays in the composer.
+- The output of a `!` command: the command, its output and its exit status.
+
+The status line keeps one short chip for the power state (`sleep disabled`, `sleep held`, `keep-awake refused` or `sleep hooks off`, with `+1` when two apply); the full note is in `/notifications`, posted when it changes.
+
 ### Keys
 
 The Agent's rebindable keys differ from the terminal app's. Its file is `~/.goodvibes/agent/keybindings.json`, in the format described under "Changing a key".

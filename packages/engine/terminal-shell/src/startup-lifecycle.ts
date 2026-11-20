@@ -4,10 +4,14 @@ import {
   confirmRecoveryRestore,
   isSessionOpenElsewhere,
   readLastSessionPointer,
+  sessionIdentityFile,
+  findSessionCrashSnapshot,
   writeLastSessionPointer,
   type SessionSurface,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+import { existsSync } from 'node:fs';
+
 import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 import { whenCrashSnapshotFound } from './session-crash-offer.js';
 import { restoreCrashSnapshot, type CrashRecoveryReport } from './session-crash-recovery.js';
@@ -72,6 +76,17 @@ export function resumeSessionAndRender<Context>(
 
 /** The refusal code of a run resuming a session another running copy has open. */
 export const SESSION_OPEN_ELSEWHERE = 'SESSION_OPEN_ELSEWHERE';
+/** The refusal code of a run told to resume a session that does not exist (or, for --continue, of having none). */
+export const SESSION_NOT_FOUND = 'SESSION_NOT_FOUND';
+
+function sessionNotFound(named: string | undefined): RefusalError {
+  return new RefusalError(refusal({
+    code: SESSION_NOT_FOUND,
+    state: named ? `there is no saved session ${named}; nothing was sent` : 'there is no saved session to continue; nothing was sent',
+    reason: 'The run was told to continue a session, and a new one is never started in its place.',
+    next: ['Run with the id of a saved session', 'Run without --resume, --continue or --session to start a new session'],
+  }));
+}
 
 function sessionOpenElsewhere(sessionId: string): RefusalError {
   return new RefusalError(refusal({
@@ -111,8 +126,12 @@ function headlessResumeTarget(flags: HeadlessResumeFlags, surface: SessionSurfac
  * is taking the same lock at that instant, at most a second).
  */
 export async function claimHeadlessSession(flags: HeadlessResumeFlags, surface: SessionSurface): Promise<string | undefined> {
-  const { target } = headlessResumeTarget(flags, surface);
-  if (target === undefined) return undefined;
+  const { requested, target } = headlessResumeTarget(flags, surface);
+  if (!requested) return undefined;
+  // Checked before anything is sent: a run told to continue a session that does not exist is refused here,
+  // so native intake never records work for it. A session whose only copy is a crash snapshot exists.
+  if (target === undefined) throw sessionNotFound(undefined);
+  if (!existsSync(sessionIdentityFile(surface, target)) && !findSessionCrashSnapshot(surface, target)) throw sessionNotFound(target);
   if (isSessionOpenElsewhere(surface, target) || !(await claimSessionHere(surface, target))) throw sessionOpenElsewhere(target);
   return target;
 }

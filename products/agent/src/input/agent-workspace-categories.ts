@@ -115,11 +115,11 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       // Top-level approval policy
       settingAction({ id: 'permissions-mode', label: 'Execution mode', detail: 'Choose ask-me, jev-decides, just-vibes or yolo. plan is a separate read-only posture.', key: 'permissions.mode' }),
       // Common per-tool overrides for file and shell work
-      settingAction({ id: 'permissions-read', label: 'File reads', detail: 'Cycle allow, prompt, or deny for file read operations.', key: 'permissions.tools.read' }),
-      settingAction({ id: 'permissions-write', label: 'File writes', detail: 'Cycle allow, prompt, or deny for file write operations.', key: 'permissions.tools.write' }),
-      settingAction({ id: 'permissions-edit', label: 'File edits', detail: 'Cycle allow, prompt, or deny for edit and patch operations.', key: 'permissions.tools.edit' }),
-      settingAction({ id: 'permissions-exec', label: 'Shell commands', detail: 'Cycle allow, prompt, or deny for shell execution.', key: 'permissions.tools.exec' }),
-      settingAction({ id: 'permissions-fetch', label: 'Network fetches', detail: 'Cycle allow, prompt, or deny for outbound fetch requests.', key: 'permissions.tools.fetch' }),
+      settingAction({ id: 'permissions-read', label: 'File reads', detail: 'deny refuses file reads; prompt leaves each read to the execution mode; allow also runs reads without asking when no decision model works.', key: 'permissions.tools.read' }),
+      settingAction({ id: 'permissions-write', label: 'File writes', detail: 'deny refuses file writes; prompt leaves each write to the execution mode (ask-me runs an undoable change inside the workspace without asking); allow also runs writes without asking when no decision model works.', key: 'permissions.tools.write' }),
+      settingAction({ id: 'permissions-edit', label: 'File edits', detail: 'deny refuses file edits; prompt leaves each edit to the execution mode (ask-me runs an undoable edit inside the workspace without asking); allow also runs edits without asking when no decision model works.', key: 'permissions.tools.edit' }),
+      settingAction({ id: 'permissions-exec', label: 'Shell commands', detail: 'deny refuses shell commands; prompt leaves each command to the execution mode; allow also runs commands without asking when no decision model works.', key: 'permissions.tools.exec' }),
+      settingAction({ id: 'permissions-fetch', label: 'Network fetches', detail: 'deny refuses network fetches; prompt leaves each fetch to the execution mode; allow also runs fetches without asking when no decision model works.', key: 'permissions.tools.fetch' }),
       // MCP servers + secrets (forms that open inside the modal)
       { id: 'onboarding-mcp-server', label: 'Add an MCP server', detail: 'Add or update one MCP server with command, args, role, trust, env refs, paths, and hosts.', editorKind: 'mcp-server', kind: 'editor', safety: 'safe' },
       { id: 'onboarding-secret-link', label: 'Link a secret reference', detail: 'Link one config key to a goodvibes secret reference.', editorKind: 'secret-link', kind: 'editor', safety: 'safe' },

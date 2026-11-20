@@ -85,7 +85,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'knowledge.sources.list',
     title: 'List Knowledge Sources',
-    description: 'Return ingested structured knowledge sources. Without ?limit/?cursor returns { sources: [...] } (backward compatible). With ?limit=N (1–1000, default 100) and optional ?cursor=<opaque> returns a PaginatedResponse envelope { items, hasMore, nextCursor? }. Fetch cap is 5 000 items per request (knowledge store does not support cursor/offset range queries natively). Invalid cursors return HTTP 400.',
+    description: 'Return ingested structured knowledge sources. Always returns { items, hasMore, nextCursor?, sources } (sources repeats items), newest first: ?limit=N (1–1000, default 100) sets the page size and ?cursor=<opaque> (the nextCursor of the previous page) reads the next page. Invalid cursors return HTTP 400.',
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/knowledge/sources' },
@@ -95,7 +95,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'knowledge.nodes.list',
     title: 'List Knowledge Nodes',
-    description: 'Return compiled knowledge nodes. Without ?limit/?cursor returns { nodes: [...] } (backward compatible). With ?limit=N (1–1000, default 100) and optional ?cursor=<opaque> returns a PaginatedResponse envelope { items, hasMore, nextCursor? }. Fetch cap is 5 000 items per request (knowledge store does not support cursor/offset range queries natively). Invalid cursors return HTTP 400.',
+    description: 'Return compiled knowledge nodes. Always returns { items, hasMore, nextCursor?, nodes } (nodes repeats items), newest first: ?limit=N (1–1000, default 100) sets the page size and ?cursor=<opaque> (the nextCursor of the previous page) reads the next page. Invalid cursors return HTTP 400.',
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/knowledge/nodes' },
@@ -105,11 +105,11 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'knowledge.issues.list',
     title: 'List Knowledge Issues',
-    description: 'Return current knowledge lint and health issues.',
+    description: 'Return current knowledge lint and health issues as { items, hasMore, nextCursor?, issues } (issues repeats items), newest first: ?limit=N (1–1000, default 100) sets the page size and ?cursor=<opaque> (the nextCursor of the previous page) reads the next page. Invalid cursors return HTTP 400.',
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/knowledge/issues' },
-    inputSchema: objectSchema({ limit: NUMBER_SCHEMA, ...KNOWLEDGE_SPACE_INPUT_FIELDS }),
+    inputSchema: objectSchema({ limit: NUMBER_SCHEMA, cursor: STRING_SCHEMA, ...KNOWLEDGE_SPACE_INPUT_FIELDS }),
     outputSchema: KNOWLEDGE_ISSUES_OUTPUT_SCHEMA,
   }),
   methodDescriptor({

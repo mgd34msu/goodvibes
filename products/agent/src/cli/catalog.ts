@@ -390,8 +390,10 @@ export const AGENT_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, FlagField, GoodV
     if (command !== 'run' && (flags.continueLast || flags.session !== undefined)) {
       errors.push(`${flags.continueLast ? '--continue' : '--session'} is only supported with run in goodvibes-agent. Use --resume to reopen a session in the interactive shell.`);
     }
-    if (flags.continueLast && flags.resume !== undefined) {
-      errors.push('Conflicting session lifecycle flags: --continue and --resume. Use only one of --continue or --resume.');
+    // One session selector per run: --session names one exactly as --resume <id> does.
+    const selectors = [flags.continueLast ? '--continue' : '', flags.resume !== undefined ? '--resume' : '', flags.session !== undefined ? '--session' : ''].filter(Boolean);
+    if (selectors.length > 1) {
+      errors.push(`Conflicting session lifecycle flags: ${selectors.join(' and ')}. Use only one of --continue, --resume or --session.`);
     }
     if ((flags.port !== undefined || flags.hostname !== undefined) && command !== 'pair' && command !== 'unknown') {
       const given = [flags.port !== undefined ? '--port' : '', flags.hostname !== undefined ? '--hostname' : ''].filter(Boolean).join(' and ');

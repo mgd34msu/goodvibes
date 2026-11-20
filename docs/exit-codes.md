@@ -53,6 +53,7 @@ Branching rules that hold for every program:
 | `tool_loop_circuit_breaker` | `1` | The turn was stopped by a turn limit or budget before the request was complete; `error` says which. Raise the limit or narrow the request. |
 | `unexpected_error` | `1` | The turn failed with an error that is not a provider's (in the turn loop, or in this process after the host admitted the turn); `error` says why. The outcome is known: it failed. |
 | `session-open-elsewhere` | `1` | `--resume`, `--continue` or `--session` named a session another running copy has open; nothing was sent. Close it there and run again, or run without the flag. `refusal` says which session. |
+| `session-not-found` | `1` | `--resume <id>` or `--session <id>` named a session that does not exist, or `--continue`/`--resume` found none to continue; nothing was sent and no input was recorded. `refusal` says which. |
 | `invalid-input` | `2` | Fix the command line. |
 | `native-blocked`, `native-refused` | `1` | The host recorded the input and blocked or refused it; it will not run. |
 | `native-cancelled` | `130` | The recorded input was cancelled. |

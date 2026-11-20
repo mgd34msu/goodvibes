@@ -1,4 +1,5 @@
 import type { ConversationMessageSnapshot, ConversationTitleSource } from '../core/conversation.js';
+import { extractUserDisplayText } from '../core/conversation-utils.js';
 import type { HelperModel } from '../config/helper-model.js';
 import type { ConfigManager } from '../config/manager.js';
 import { reportsPendingApproval } from './batteries/pending-approval.js';
@@ -114,7 +115,8 @@ export function buildReturnContextFromFacts(
   const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
   const lastMessage = messages[messages.length - 1];
 
-  const lastUserPrompt = truncate(textContent(lastUser), 120);
+  // What the person typed: `!` command output carried in front of it for the model is not their prompt.
+  const lastUserPrompt = truncate(lastUser?.role === 'user' ? extractUserDisplayText(lastUser.content) : textContent(lastUser), 120);
   const lastAssistantReply = truncate(textContent(lastAssistant), 120);
 
   let activityLabel = 'Fresh session';

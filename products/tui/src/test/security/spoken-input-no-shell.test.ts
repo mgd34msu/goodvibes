@@ -35,6 +35,7 @@ function shell() {
     answerOptions: () => ({}),
     sendTurn: (text) => { turns.push(text); },
     notify: () => {},
+    showShellOutput: () => {},
     render: () => {},
   });
   // The command context's ports, built from the same two functions main() passes.

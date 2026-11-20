@@ -89,7 +89,7 @@ export async function routeNativeConversationInput(deps: {
     return failed;
   }
   if (deps.runLocal && nativeIntakeUnreachable(state)) {
-    await deps.runLocal(`${state!.message} Messages run in this process until it can.`);
+    await deps.runLocal(`${state!.message} Until the host can take them, messages run in this process.`);
     return { status: 'recorded', message: 'Ran in this process.' };
   }
   const quiet = deps.record !== undefined && nativeConversationIntakeAccepted(state);

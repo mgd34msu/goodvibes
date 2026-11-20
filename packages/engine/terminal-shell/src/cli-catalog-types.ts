@@ -33,6 +33,8 @@ export type CliFlagValue = string | number | boolean | readonly string[] | undef
 export interface CommandFlagSpec<TField extends string> {
   /** Every spelling that selects this flag, longest-lived first. */
   readonly tokens: readonly string[];
+  /** Spellings that are accepted but not offered (help, completion). */
+  readonly unlistedTokens?: readonly string[] | undefined;
   readonly field: TField;
   readonly kind: CliFlagKind;
   /** Placeholder shown in help for a value-taking flag. */

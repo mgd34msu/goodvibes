@@ -7,6 +7,7 @@ import {
   branchedSchema,
   entityOutputSchema,
   listOutputSchema,
+  listingOutputSchema,
   objectSchema,
   requirementBranch,
   stringEnumSchema,
@@ -538,35 +539,10 @@ export const KNOWLEDGE_ASK_OUTPUT_SCHEMA = objectSchema({
   results: arraySchema(KNOWLEDGE_SEARCH_RESULT_SCHEMA),
 }, ['ok', 'spaceId', 'query', 'answer', 'results'], { additionalProperties: true });
 
-// The same route retains its legacy response when pagination is omitted.
-// Typed clients must also accept the host's bounded cursor envelope.
-export const KNOWLEDGE_SOURCES_OUTPUT_SCHEMA = {
-  anyOf: [
-    listOutputSchema('sources', KNOWLEDGE_SOURCE_SCHEMA),
-    objectSchema({
-      items: arraySchema(KNOWLEDGE_SOURCE_SCHEMA),
-      hasMore: BOOLEAN_SCHEMA,
-      nextCursor: STRING_SCHEMA,
-      truncated: BOOLEAN_SCHEMA,
-      total: NUMBER_SCHEMA,
-      loaded: NUMBER_SCHEMA,
-    }, ['items', 'hasMore']),
-  ],
-};
-export const KNOWLEDGE_NODES_OUTPUT_SCHEMA = {
-  anyOf: [
-    listOutputSchema('nodes', KNOWLEDGE_NODE_SCHEMA),
-    objectSchema({
-      items: arraySchema(KNOWLEDGE_NODE_SCHEMA),
-      hasMore: BOOLEAN_SCHEMA,
-      nextCursor: STRING_SCHEMA,
-      truncated: BOOLEAN_SCHEMA,
-      total: NUMBER_SCHEMA,
-      loaded: NUMBER_SCHEMA,
-    }, ['items', 'hasMore']),
-  ],
-};
-export const KNOWLEDGE_ISSUES_OUTPUT_SCHEMA = listOutputSchema('issues', KNOWLEDGE_ISSUE_SCHEMA);
+// Each listing route sends one envelope (daemon-api knowledge-routes.ts readKnowledgeListing).
+export const KNOWLEDGE_SOURCES_OUTPUT_SCHEMA = listingOutputSchema('sources', KNOWLEDGE_SOURCE_SCHEMA);
+export const KNOWLEDGE_NODES_OUTPUT_SCHEMA = listingOutputSchema('nodes', KNOWLEDGE_NODE_SCHEMA);
+export const KNOWLEDGE_ISSUES_OUTPUT_SCHEMA = listingOutputSchema('issues', KNOWLEDGE_ISSUE_SCHEMA);
 export const KNOWLEDGE_ISSUE_REVIEW_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,
   issue: KNOWLEDGE_ISSUE_SCHEMA,

@@ -226,6 +226,8 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                     releaseTurnClaim: (binding, command, revision) => journal.releaseTurnClaim(binding, command, revision),
                     discardUncaptured: (binding, command) => journal.discardUncaptured(binding, command),
                     saveExecutionIntent: (binding, command, intent) => journal.saveExecutionIntent(binding, command, intent),
+                    // A hosted reply needs its durable source identity recorded, as in the interactive app.
+                    saveHostedSource: (binding, command, source) => journal.saveHostedSource(binding, command, source),
                     async save(binding, command, expected) {
                         await journal.save(binding, command, expected);
                         // Ownership starts at proven durable publication, not principal lookup or old-input discovery.

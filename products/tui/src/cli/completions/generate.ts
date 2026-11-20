@@ -9,6 +9,7 @@
  */
 
 import type { GoodVibesCliCommand } from '@goodvibes-jev/engine/terminal-shell';
+import { GOODVIBES_CLI_CATALOG } from '@goodvibes-jev/engine/terminal-shell/cli-command-catalog';
 import {
   runCompletionCommand,
   type CompletionCommandResult,
@@ -52,88 +53,20 @@ export interface CompletionCommand {
 // Derived from parser.ts branch-by-branch inspection (each `if (name === ...)`).
 // ---------------------------------------------------------------------------
 
-export const GLOBAL_FLAGS: readonly CompletionFlag[] = [
-  { name: '--help', short: '-h', takesValue: false, description: 'Print help' },
-  { name: '--version', short: '-v', takesValue: false, description: 'Print version' },
-  {
-    name: '--model',
-    short: '-m',
-    takesValue: true,
-    description: 'Override model (provider:model infers --provider)',
-  },
-  { name: '--provider', takesValue: true, description: 'Override provider' },
-  {
-    name: '--cd',
-    short: '-C',
-    aliases: ['--working-dir'],
-    takesValue: true,
-    description: 'Set working directory for this launch',
-  },
-  { name: '--daemon-home', takesValue: true, description: 'Override daemon home' },
-  {
-    name: '--config',
-    short: '-c',
-    takesValue: true,
-    description: 'Override a config value (key=value)',
-  },
-  { name: '--enable', takesValue: true, description: 'Enable a platform feature for this launch (writes its domain setting)' },
-  { name: '--disable', takesValue: true, description: 'Disable a platform feature for this launch (writes its domain setting)' },
-  {
-    name: '--prompt',
-    short: '-p',
-    takesValue: true,
-    description: 'Run a non-interactive prompt',
-  },
-  { name: '--print', takesValue: false, description: 'Alias for non-interactive run mode' },
-  {
-    name: '--output',
-    short: '-o',
-    aliases: ['--output-format'],
-    takesValue: true,
-    valueEnum: ['text', 'json', 'stream-json'],
-    description: 'Output format: text, json, or stream-json',
-  },
-  {
-    name: '--json',
-    takesValue: false,
-    description: 'Alias for --output-format json',
-  },
-  {
-    name: '--just-vibes', takesValue: false, description: 'Work without interrupting you; anything that needs you is held for the end',
-  },
-  {
-    name: '--yolo', takesValue: false, description: 'Run every action without safety denials for this launch',
-  },
-  {
-    name: '--no-alt-screen',
-    takesValue: false,
-    description: 'Keep output in normal terminal scrollback',
-  },
-  { name: '--port', takesValue: true, description: 'Port for server/web commands' },
-  { name: '--hostname', aliases: ['--host'], takesValue: true, description: 'Hostname for server/web commands' },
-  { name: '--open', takesValue: false, description: 'Open browser when supported' },
-  {
-    name: '--resume',
-    short: '-r',
-    takesValue: true,
-    description: 'Resume saved session (optional id or "latest")',
-  },
-  {
-    name: '--session',
-    short: '-s',
-    takesValue: true,
-    description: 'Use a specific session',
-  },
-  { name: '--continue', takesValue: false, description: 'Continue the latest session' },
-  { name: '--fork', takesValue: false, description: 'Fork session when supported' },
-  { name: '--timeout', takesValue: true, description: 'run: stop after this long (90, 90s, 5m, 1h)' },
-  { name: '--max-turns', takesValue: true, description: 'run: stop after n model answers that still ask for tools' },
-  { name: '--omit-accumulated', takesValue: false, description: 'run: with stream-json, leave accumulated out of STREAM_DELTA' },
-  { name: '--answer-permissions', takesValue: false, description: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts' },
-  { name: '--yes', short: '-y', takesValue: false, description: 'Auto-confirm prompts (non-interactive)' },
-  { name: '--non-interactive', takesValue: false, description: 'Disable all interactive prompts (implies --yes)' },
-  { name: '--strict', takesValue: false, description: 'doctor: also fail on advisory findings, for CI' },
-] as const;
+/** Every global flag the parser accepts, read from the shared CLI catalog (the parser's own table), so completion offers exactly what parses. */
+export const GLOBAL_FLAGS: readonly CompletionFlag[] = GOODVIBES_CLI_CATALOG.globalFlags.map((spec): CompletionFlag => {
+  const offered = spec.tokens.filter((token) => !(spec.unlistedTokens ?? []).includes(token));
+  const long = offered.filter((token) => token.startsWith('--'));
+  const short = offered.find((token) => /^-[^-]/.test(token));
+  return {
+    name: long[0] ?? offered[0]!,
+    ...(short !== undefined ? { short } : {}),
+    ...(long.length > 1 ? { aliases: long.slice(1) } : {}),
+    takesValue: spec.kind !== 'boolean' && spec.kind !== 'const',
+    ...(spec.enumValues !== undefined ? { valueEnum: spec.enumValues } : {}),
+    description: spec.summary,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Command table
@@ -158,6 +91,12 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     name: 'run',
     aliases: ['run', 'exec', 'e'],
     description: 'Run non-interactively with text/json/stream-json output',
+    subcommands: [],
+  },
+  {
+    name: 'serve',
+    aliases: ['serve', 'daemon', 'server'],
+    description: 'Run the GoodVibes daemon in this terminal',
     subcommands: [],
   },
   {
@@ -325,12 +264,20 @@ const DIRECTORY_FLAGS: ReadonlySet<string> = new Set(['--cd', '--daemon-home']);
 export function tuiCompletionTable(binary = 'goodvibes'): CompletionTable {
   return {
     binary,
-    commands: COMPLETION_COMMANDS.map((command) => ({
-      name: command.name,
-      aliases: command.aliases,
-      description: command.description,
-      subcommands: command.subcommands,
-    })),
+    // Every command the parser knows, with its spellings from the parser's catalog; the
+    // descriptions and subcommand words are this table's. `acp` and `host` are served before the parser.
+    commands: [
+      ...GOODVIBES_CLI_CATALOG.commands.map((spec) => {
+        const described = COMPLETION_COMMANDS.find((command) => command.name === spec.name);
+        return {
+          name: spec.name,
+          aliases: [spec.name, ...spec.aliases],
+          description: described?.description ?? spec.summary ?? spec.name,
+          subcommands: described?.subcommands ?? [],
+        };
+      }),
+      ...COMPLETION_COMMANDS.filter((command) => !GOODVIBES_CLI_CATALOG.commands.some((spec) => spec.name === command.name)),
+    ],
     globalFlags: GLOBAL_FLAGS.map((flag) => ({
       tokens: [flag.name, ...(flag.aliases ?? []), ...(flag.short !== undefined ? [flag.short] : [])],
       takesValue: flag.takesValue,

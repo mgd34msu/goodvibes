@@ -10,7 +10,6 @@ import { MODEL_PICKER_CHROME_LINES } from '../renderer/model-workspace.ts';
 import { ensureProviderKeyThenSelect } from './provider-key-intake.ts';
 export const handleModelPickerToken = createModelPickerTokenHandler<CommandContext, ModelPickerModal>({
   chromeLines: MODEL_PICKER_CHROME_LINES,
-  extraControls: true,
   commitBeforeClose: false,
   commit(state, selection) {
     const context = state.commandContext;

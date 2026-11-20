@@ -382,7 +382,7 @@ export function installRemoteConversationRouting(
         if (nativeIntakeUnreachable(state)) {
           settleOwnerLatch(state);
           activity.end();
-          return { local: true, reason: `${state!.message} Messages run in this process until it can.` };
+          return { local: true, reason: `${state!.message} Until the host can take them, messages run in this process.` };
         }
         if (state?.request && !state.notSent) pending.request = { ...state.request };
         report(state);

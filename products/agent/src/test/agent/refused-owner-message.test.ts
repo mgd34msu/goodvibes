@@ -75,7 +75,7 @@ function agent() {
     runTurn: async (text) => { localTurns.push(text); },
     dispatchNativeTurn: async () => {},
     isBusy: () => false,
-    messages: { high: () => {}, userAction: () => {}, activity: (line) => { activity.push(line); } },
+    messages: { high: () => {}, userAction: () => {}, activity: (line) => { activity.push(line); }, aboutInput: () => {} },
     render: () => {},
   });
   disposers.push(() => sender.dispose(), () => route.dispose());

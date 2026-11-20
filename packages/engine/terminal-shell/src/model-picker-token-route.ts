@@ -49,7 +49,6 @@ export function closeModelPickerRoute(state: {
 }
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;
-  readonly extraControls: boolean;
   readonly commitBeforeClose: boolean;
   readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>) => void;
   readonly commitEmbedding?: ((state: ModelPickerTokenState<Context, Picker>, provider: string) => void) | undefined;
@@ -198,8 +197,9 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         else if (token.logicalName === 'a') picker.toggleAvailableOnly();
         else if (token.logicalName === 'b') picker.cycleBenchmarkSort();
         else if (token.logicalName === 'g') picker.cycleGroupBy();
-        else if (policy.extraControls && token.logicalName === 'f') togglePin(state);
-        else if (policy.extraControls && token.logicalName === 'r') {
+        // Pin and refresh work in both apps: Ctrl+R reads every provider's model list again (as /refresh-models does).
+        else if (token.logicalName === 'f') togglePin(state);
+        else if (token.logicalName === 'r') {
           const context = state.commandContext;
           if (context) {
             void runPickedCommand(context.executeCommand, 'refresh-models', [], (message) => {

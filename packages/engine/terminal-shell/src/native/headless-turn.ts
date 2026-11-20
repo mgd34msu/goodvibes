@@ -8,7 +8,7 @@ import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/ru
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { redactDiagnosticText } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
-import { SESSION_OPEN_ELSEWHERE } from '../startup-lifecycle.js';
+import { SESSION_NOT_FOUND, SESSION_OPEN_ELSEWHERE } from '../startup-lifecycle.js';
 import { HEADLESS_SCHEMA_VERSION, createHeadlessPermissionInput, observeHeadlessTurn, type HeadlessTurnObserverOptions } from './headless-turn-events.js';
 import { dispatchNativeConversationTurn } from './native-conversation-ingress.js';
 import type { NativeConversationIntakeState } from './native-conversation-intake.js';
@@ -285,13 +285,13 @@ export function announceHeadlessRecovery(
  * other error, which stays the run's error.
  */
 export function refusedHeadlessRun(error: unknown): NativeHeadlessTurnResult | undefined {
-  if (!(error instanceof RefusalError) || error.refusal.code !== SESSION_OPEN_ELSEWHERE) return undefined;
+  if (!(error instanceof RefusalError) || (error.refusal.code !== SESSION_OPEN_ELSEWHERE && error.refusal.code !== SESSION_NOT_FOUND)) return undefined;
   const { code, state, reason, next } = error.refusal;
   return {
     exitCode: 1,
     response: '',
     error: `Refused: ${state}. ${reason} Next: ${next.join('; or ')}.`,
-    stopReason: 'session-open-elsewhere',
+    stopReason: code === SESSION_NOT_FOUND ? 'session-not-found' : 'session-open-elsewhere',
     refusal: { code, state, reason, next },
   };
 }

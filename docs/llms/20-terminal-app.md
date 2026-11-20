@@ -643,7 +643,7 @@ While more than one session exists (a helper agent or background process is runn
 | --- | --- |
 | Plain text | It is sent to the model as a prompt. |
 | A line that starts with `/` | It runs as a slash command. Typing `/` opens command autocomplete. |
-| A line that starts with `!` | The rest runs as a shell command in the working directory, beside the composer. Its output is shown and is placed in front of the next prompt as context. `Esc` stops a command that is still running. Spoken input is never run as a shell command. |
+| A line that starts with `!` | The rest runs as a shell command in the working directory, beside the composer. The command, its output and its exit status are shown in the conversation where it ran, and the output is placed in front of the next prompt as context for the model (the conversation shows that prompt, and the session title takes it, as typed). `Esc` stops a command that is still running. Spoken input is never run as a shell command. |
 | `!# <text>` | `<text>` is pinned to session memory and also sent as the prompt. `[Memory] Pinned: "<text>" (<id>)` confirms it. |
 | A single line `# <text>` (hash and space) | `<text>` is saved as a session-memory note and nothing is sent. `✓ Note saved → session memory: "<text>" (<id>)` confirms it. `#482 is failing`, `## heading` and text of more than one line are sent as prompts. |
 | `@model:<id>` as the first or last word | The model switches exactly as `/model <id>` would, then the rest is sent. Only a whole word at either end counts. When the switch does not happen, the text stays in the composer. |
@@ -2588,6 +2588,7 @@ For each tool call the gate decides first, so `PERMISSION_REQUESTED` and `PERMIS
 | `unexpected_error` | 1 | The turn failed in an unexpected way (the run's own error is in `error`), including a turn admitted through native intake that then failed in this process (`The turn failed in this process: <reason>`). |
 | `turn-unsettled` | 3 | The turn ended without a completion, error, cancellation or refusal event. |
 | `session-open-elsewhere` | 1 | The session named by `--continue`, `--resume` or `--session` is open in another running copy. |
+| `session-not-found` | 1 | The session named by `--resume <id>` or `--session <id>` does not exist, or `--continue` found none to continue; refused before anything is sent, so native intake records nothing. `--session` with `--continue`, `--resume` or `--fork` is refused as conflicting flags. |
 | `invalid-input` | 2 | No prompt, or a prompt given with an `--intake-*` flag. |
 | `native-<kind>` | varies | An `--intake-*` run: `<kind>` is the kind of the host's record. `--intake-status` exits `0` whenever the host has a record. Otherwise `native-work` exits `0` when the work has an execution state, `native-blocked` and `native-refused` exit `1`, `native-cancelled` exits `130`, and any other kind (`native-captured`, `native-processing`, `native-turn` not run by this process) exits `3`. With no record kind the reason is `native-<status>`: `native-invalid` exits `2`, `native-unavailable` exits `1`, and `native-pending` (another intake action is already in progress), `native-recorded` (the host recorded the input without a result kind) and `native-detached` (no intake state came back at all) exit `3`. |
 | `native-unknown` | 3 | The outcome on the host is unknown. |

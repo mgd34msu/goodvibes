@@ -291,6 +291,8 @@ function hintsFor(mode: ModelPickerModal['mode']): KitHint[] {
     ['↑↓', 'move'],
     ['⏎', 'select'],
     ['tab', 'target'],
+    ['ctrl+f', 'pin'],
+    ['ctrl+r', 'refresh catalog'],
     ['ctrl+t', 'price'],
     ['ctrl+k', 'caps'],
     ['ctrl+a', 'available'],

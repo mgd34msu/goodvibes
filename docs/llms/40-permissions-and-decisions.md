@@ -262,6 +262,8 @@ In the terminal app, an ask appears as an amber card that shows the whole call: 
 
 A request that offers no remembering (a channel request, a one-call boundary ask) shows only allow once, deny and a reason.
 
+In the Agent the card's keys are: `y` allows once; `a` then Enter allows for the session (after `a` the card says that Enter now allows for the rest of the session and any other key goes back); `n` or Esc denies; Ctrl+C denies and stops the turn. Enter alone is never the broadest answer: it allows once, and for a call that cannot be undone (a delete with no undo record, an irreversible operator action, money spent, a payment step, a message sent as you) it denies. A denial is the call's answer: the model is told the call was refused and the turn goes on. The same keys answer a turn that runs on the daemon.
+
 The same asks appear in the web UI, in `/questions` (the owner inbox), on Telegram, and in the channel conversation the request came from, where that channel's owner can answer.
 
 ## Remembered rules

@@ -86,6 +86,8 @@ export function chooseFailover(request: FailoverRequest): FailoverChoice {
   const models = request.registry.listModels();
   const skipped: string[] = [];
   for (const [position, entry] of order.entries()) {
+    // An entry may name its provider by id or display name: tried-ness is compared on the
+    // registry key it resolves to (below), the same key the turn records as tried.
     if (visited.has(entry)) continue;
     const separator = entry.indexOf(':');
     const providerId = separator > 0 ? entry.slice(0, separator) : '';
@@ -98,9 +100,11 @@ export function chooseFailover(request: FailoverRequest): FailoverChoice {
     // The person's own words: a model no list names yet is still attempted.
     const listed = models.find((model) => model.registryKey === entry)
       ?? models.find((model) => model.id === modelId && model.provider === provider!.name);
+    const registryKey = listed?.registryKey ?? `${provider!.name}:${modelId}`;
+    if (visited.has(registryKey)) continue;
     return {
       kind: 'switch',
-      registryKey: listed?.registryKey ?? `${provider!.name}:${modelId}`,
+      registryKey,
       provider: provider!.name,
       displayName: listed?.displayName ?? modelId,
       because: `entry ${position + 1} of your fallback order (provider.fallbackModels)`,

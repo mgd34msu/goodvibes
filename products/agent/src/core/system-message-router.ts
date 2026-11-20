@@ -4,37 +4,54 @@ import {
   type SystemMessageKind,
   type SystemMessageTarget,
 } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { declaredNoticeLevel, type SystemMessageActivityFeed } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import type { NoiseGateDeps } from './system-message-noise.ts';
 import type { ConversationManager } from './conversation.ts';
+import { publishNotice } from './notices.ts';
+import { getSharedNotificationFeed } from './notifications-feed.ts';
 export type {
   SystemMessageKind,
   SystemMessageTarget,
   SystemMessagePriority,
 } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
-import type { ActivityFeed } from './activity-feed.ts';
+
 /**
- * The Activity view is this product's panel, and the default target sends
- * system lines there. A high-priority line is one the person must see or act
- * on, so it also lands on the main screen unless the person chose `panel`
- * themselves (`targetChosen`); errors and warnings land there even then.
+ * The panel is the Notifications history, as in the terminal app: a line whose
+ * target is `panel` is recorded (and toasted) there and kept out of the
+ * transcript. Every transcript notice is already recorded there by the
+ * conversation's notice sink, so it is not pushed twice. A high-priority line,
+ * one the person must see or act on, also lands on the main screen unless the
+ * person chose `panel` themselves (`targetChosen`); errors and warnings land
+ * there even then.
  */
-export class SystemMessageRouter extends TerminalSystemMessageRouter<ActivityFeed> {
+const notificationsPanel: SystemMessageActivityFeed = {
+  push(message, priority) {
+    void publishNotice(getSharedNotificationFeed(), message, { notice: { level: declaredNoticeLevel(message), priority } });
+  },
+};
+
+export class SystemMessageRouter extends TerminalSystemMessageRouter {
   constructor(
     conversation: ConversationManager,
-    feed: ActivityFeed | null,
     target: (kind: SystemMessageKind) => SystemMessageTarget = defaultSystemMessageTarget,
     noise: NoiseGateDeps = {},
     targetChosen?: (kind: SystemMessageKind) => boolean,
   ) {
-    super(conversation, feed, target, noise, { typedConversation: false, forceConversationPrefixes: [], suppressCapturedOutput: true, targetChosen });
+    super(conversation, null, target, noise, {
+      typedConversation: false,
+      forceConversationPrefixes: [],
+      suppressCapturedOutput: true,
+      targetPanel: notificationsPanel,
+      conversationFeedsPanel: true,
+      targetChosen,
+    });
   }
 }
 export function createSystemMessageRouter(
   conversation: ConversationManager,
-  feed: ActivityFeed | null = null,
   target: (kind: SystemMessageKind) => SystemMessageTarget = defaultSystemMessageTarget,
   noise: NoiseGateDeps = {},
   targetChosen?: (kind: SystemMessageKind) => boolean,
 ): SystemMessageRouter {
-  return new SystemMessageRouter(conversation, feed, target, noise, targetChosen);
+  return new SystemMessageRouter(conversation, target, noise, targetChosen);
 }

@@ -13,6 +13,7 @@
  * with their note, and the tool rounds a reply made.
  */
 
+import { turnFailureText } from '../core/turn-failure.js';
 import { ConversationManager } from '../core/conversation.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
@@ -116,7 +117,7 @@ function replayReply(conversation: ConversationManager, reply: CompanionChatMess
     return;
   }
   if (reply.deliveryState === 'failed') {
-    conversation.addAssistantMessage(reply.content + turnFailureNote(reply.failureReason ?? 'unknown error'));
+    conversation.addAssistantMessage(reply.content + turnFailureNote(reply.failureReason ? turnFailureText(reply.failureReason) : 'unknown error'));
   } else if (reply.deliveryState === 'cancelled') {
     if (reply.content.trim()) conversation.addAssistantMessage(reply.content + TURN_INTERRUPTION_NOTE);
   } else {

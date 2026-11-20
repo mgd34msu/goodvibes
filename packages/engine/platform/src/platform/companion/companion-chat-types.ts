@@ -7,6 +7,7 @@
  * via CompanionChatPersistence so they survive daemon restarts.
  */
 
+import type { TurnFailureReading } from '../core/turn-failure.js';
 import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { ArtifactDescriptor } from '../artifacts/index.js';
 import type { ToolActivityWords } from '@goodvibes-jev/engine/contracts';
@@ -102,8 +103,12 @@ export interface CompanionChatMessage {
    * by its text (two sends of the same words are two messages).
    */
   readonly clientMessageId?: string | undefined;
-  /** On a `'failed'` reply: why it failed, in words a person can act on. */
-  readonly failureReason?: string | undefined;
+  /**
+   * On a `'failed'` reply: why it failed, as the one failure reading every
+   * program draws its failure row from (core/turn-failure.ts): headline,
+   * cause, what changed, next steps, the tip, and the details.
+   */
+  readonly failureReason?: TurnFailureReading | undefined;
   /**
    * On a reply whose turn used tools: what the turn added to the model's
    * history, in order (each tool-calling round with its results, then the

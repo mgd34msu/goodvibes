@@ -600,7 +600,7 @@ export class CompanionChatManager {
         createdAt: Date.now(),
         inReplyTo: stoppedIn,
         deliveryState: 'failed',
-        failureReason: DAEMON_STOPPED_REASON,
+        failureReason: readTurnFailure({ turnId: '', error: DAEMON_STOPPED_REASON, stopReason: 'unexpected_error' }),
       });
       messages.push(failed);
       changed.push(failed);
@@ -1603,7 +1603,19 @@ export class CompanionChatManager {
     const raw = turn.error instanceof Error ? turn.error.message : String(turn.error);
     const modelReason = turn.failoverStop ? `${raw}\n${turn.failoverStop}` : raw;
     const stopped = turn.failoverStop?.replace(/^\[Failover\]\s*/, '');
-    const reason = personFacingTurnFailure(turn.error, raw) + (stopped ? ` ${stopped}` : '');
+    const normalized = normalizeError(turn.error);
+    const providerFailed = normalized.provider !== undefined || normalized.source === 'provider';
+    // The same reading a terminal's failure row draws; the provider's own words go to its details.
+    const failure = readTurnFailure({
+      turnId: turn.turnId,
+      error: raw,
+      stopReason: providerFailed ? 'provider_error' : 'unexpected_error',
+      ...(normalized.statusCode !== undefined ? { status: normalized.statusCode } : {}),
+      ...(normalized.provider ? { provider: normalized.provider, providerName: providerDisplayLabel(normalized.provider) } : {}),
+      fallbackOrderSet: readFallbackOrder(this.configManager?.get('provider.fallbackModels')).some((entry) => entry.trim().length > 0),
+      ...(stopped ? { fallbackNote: stopped } : {}),
+    });
+    const reason = providerFailed ? turnFailureText(failure) : personFacingTurnFailure(turn.error, raw) + (stopped ? ` ${stopped}` : '');
     if (turn.writer) {
       turn.writer.dropHeld();
       turn.writer.addAssistantMessage(turn.uncommittedContent + turnFailureNote(modelReason));
@@ -1622,7 +1634,7 @@ export class CompanionChatManager {
         createdAt: Date.now(),
         inReplyTo: turn.userMessageId,
         deliveryState: 'failed',
-        failureReason: reason,
+        failureReason: failure,
         ...(modelHistory ? { modelHistory } : {}),
       });
     } catch (error) {

@@ -10,7 +10,7 @@
  * mutations. A daemon without a verb (METHOD_NOT_FOUND) degrades to "none",
  * never an error banner.
  */
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetAttemptGroup } from '../../lib/goodvibes';
@@ -18,7 +18,13 @@ import { queryKeys } from '../../lib/queries';
 import { isMethodUnavailableError } from '../../lib/errors';
 import { sortApprovalsNewestFirst } from '../../lib/approvals';
 import { hostedSessionsFromListResult, sortHostedSessionsNewestFirst } from '../../lib/hosted-sessions';
-import { sortUnionSessions, unionSessionsFromListResponse } from '../../lib/sessions-union';
+import { sortUnionSessions, unionSessionFromRecord, unionSessionsFromListResponse } from '../../lib/sessions-union';
+import { companionSessionsFromListResponse } from '../../lib/companion-chat';
+
+/** The daemon's session snapshot (sessions.list) holds this many, newest first. */
+const SESSION_SNAPSHOT_SIZE = 50;
+/** One sessions.search page read by "Show older sessions". */
+const OLDER_SESSIONS_PAGE = 100;
 import { useEventStreamState } from '../../lib/event-stream';
 import { useContractList } from '../../hooks/useContracts';
 import { readSessionList } from '../../hooks/useSessionLifecycle';
@@ -108,7 +114,33 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
   );
   const liveNodes = useMemo(() => snapshot.data?.nodes ?? [], [snapshot.data]);
   const approvalRecords = useMemo(() => sortApprovalsNewestFirst(approvals.data?.approvals ?? []), [approvals.data]);
-  const sessionRecords = useMemo(() => sortUnionSessions(unionSessionsFromListResponse(sessions.data)), [sessions.data]);
+  // The session snapshot holds the newest 50; "Show older sessions" reads sessions.search a page at a
+  // time with its cursor, so every open session is reachable (and opens) here. No read until pressed.
+  const [olderSessions, setOlderSessions] = useState<{ readonly records: readonly unknown[]; readonly cursor: string; readonly started: boolean; readonly loading: boolean; readonly done: boolean }>(
+    { records: [], cursor: '', started: false, loading: false, done: false });
+  const snapshotFull = companionSessionsFromListResponse(sessions.data).length >= SESSION_SNAPSHOT_SIZE;
+  const loadOlderSessions = useCallback(() => {
+    if (olderSessions.loading || olderSessions.done) return;
+    setOlderSessions((current) => ({ ...current, loading: true }));
+    platformClient.operator.sessions.search({ limit: OLDER_SESSIONS_PAGE, ...(olderSessions.cursor ? { cursor: olderSessions.cursor } : {}) }).then((page) => {
+      const record = page as { sessions?: unknown[]; nextCursor?: unknown; hasMore?: unknown };
+      const next = typeof record.nextCursor === 'string' ? record.nextCursor : '';
+      setOlderSessions((current) => ({
+        records: [...current.records, ...(Array.isArray(record.sessions) ? record.sessions : [])],
+        cursor: next, started: true, loading: false, done: record.hasMore !== true || !next,
+      }));
+    }, () => setOlderSessions((current) => ({ ...current, loading: false })));
+  }, [olderSessions.loading, olderSessions.done, olderSessions.cursor]);
+  const sessionRecords = useMemo(() => {
+    const newest = unionSessionsFromListResponse(sessions.data);
+    if (olderSessions.records.length === 0) return sortUnionSessions(newest);
+    const listed = new Set(newest.map((record) => record.id));
+    const older = olderSessions.records.map(unionSessionFromRecord).filter((record) => record.id && !listed.has(record.id) && (listed.add(record.id), true));
+    return sortUnionSessions([...newest, ...older]);
+  }, [sessions.data, olderSessions.records]);
+  const moreSessions = snapshotFull && !olderSessions.done
+    ? { loading: olderSessions.loading, load: loadOlderSessions }
+    : null;
   const hostedRecords = useMemo(
     () => sortHostedSessionsNewestFirst(hostedSessionsFromListResult(hosted.data)),
     [hosted.data],
@@ -150,6 +182,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
     liveNodes,
     approvalRecords,
     sessionRecords,
+    moreSessions,
     hostedRecords,
     taskRecords,
     watchRecords,

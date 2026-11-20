@@ -56,17 +56,22 @@ const TITLE = 'Phone capability grants';
 
 /** Grant activity rows drawn at first, and how many more each "Show older" adds. */
 const AUDIT_PAGE = 25;
+/** Activity records read at first (the daemon's default), and how many more a further read takes. */
+const AUDIT_READ = 100;
 
 export function DeviceGrants() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [sweep, setSweep] = useState<HousekeepingResult | null>(null);
-  // Grant activity rows drawn; "Show older" draws the next ones from the list already read.
+  // Grant activity rows drawn; "Show older" draws the next ones, reading further back when the read ones run out.
   const [auditShown, setAuditShown] = useState(AUDIT_PAGE);
+  const [auditRead, setAuditRead] = useState(AUDIT_READ);
 
   const grants = useQuery<GrantsResult>({
-    queryKey: deviceGrantsQueryKey,
-    queryFn: () => invokeMethod('devices.grants.list', {}),
+    queryKey: [...deviceGrantsQueryKey, auditRead],
+    // The newest `auditRead` activity records; "Show older" reads more once the read ones are all shown.
+    queryFn: () => invokeMethod('devices.grants.list', { limit: auditRead }),
+    placeholderData: (previous) => previous,
   });
   const nodes = useQuery<NodesResult>({
     queryKey: deviceNodesQueryKey,
@@ -304,11 +309,15 @@ export function DeviceGrants() {
                 trailing={<span className="device-panel__when">{whenLabel(entry.at)}</span>}
               />
             ))}
-            {audit.length > auditShown && (
+            {(audit.length > auditShown || audit.length >= auditRead) && (
               <Row
                 title="Show older"
-                meta={`${audit.length - auditShown} more`}
-                onSelect={() => setAuditShown((shown) => shown + AUDIT_PAGE)}
+                meta={audit.length > auditShown ? `${audit.length - auditShown}${audit.length >= auditRead ? '+' : ''} more` : undefined}
+                onSelect={() => {
+                  const next = auditShown + AUDIT_PAGE;
+                  setAuditShown(next);
+                  if (next > audit.length && audit.length >= auditRead) setAuditRead((read) => read + AUDIT_READ);
+                }}
               />
             )}
           </RowList>

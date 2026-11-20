@@ -56,6 +56,16 @@ export type FleetTranscriptMode = 'live' | 'frozen' | 'unavailable';
 export interface FleetTranscriptRender {
   readonly mode: FleetTranscriptMode;
   readonly lines: Line[];
+  /** Rows the view can scroll up from its bottom: the first row is reached at this scroll. */
+  readonly maxScroll?: number;
+}
+
+/** The window of `body` that fits `budget` rows, `scroll` rows up from the bottom (clamped), and how far up it can go. */
+function windowFromBottom<T>(body: readonly T[], budget: number, scroll: number): { readonly visible: T[]; readonly maxScroll: number } {
+  const maxScroll = Math.max(0, body.length - budget);
+  const up = Math.max(0, Math.min(scroll, maxScroll));
+  const end = body.length - up;
+  return { visible: body.slice(Math.max(0, end - budget), end), maxScroll };
 }
 
 /**
@@ -100,6 +110,7 @@ export function renderFleetAgentTranscript(
   width: number,
   height: number,
   configManager: ConfigManager | null,
+  scrollFromBottom = 0,
 ): FleetTranscriptRender {
   if (snapshot.length === 0) {
     if (isTerminal) return { mode: 'unavailable', lines: [] };
@@ -138,10 +149,9 @@ export function renderFleetAgentTranscript(
   // through to the full, un-sliced history, which the caller would then
   // head-clip, silently swapping in the OLDEST lines instead of the
   // most-recent tail this view promises.
-  const visible = historyLines.length > budgetHeight
-    ? historyLines.slice(historyLines.length - budgetHeight)
-    : historyLines;
-  return { mode: isTerminal ? 'frozen' : 'live', lines: [...notice, ...visible] };
+  // Scrolled up `scrollFromBottom` rows from the tail; every row back to the first is reachable.
+  const { visible, maxScroll } = windowFromBottom(historyLines, budgetHeight, scrollFromBottom);
+  return { mode: isTerminal ? 'frozen' : 'live', lines: [...notice, ...visible], maxScroll };
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +332,8 @@ export function renderFleetLedgerFallback(
   entries: readonly Record<string, unknown>[],
   width: number,
   height: number,
+  scrollFromBottom = 0,
+  onMaxScroll?: (maxScroll: number) => void,
 ): Line[] {
   const palette = DEFAULT_VIEW_PALETTE;
   const notice = renderConversationNotice(
@@ -333,9 +345,8 @@ export function renderFleetLedgerFallback(
     ? [buildViewLine(width, [[' (no activity recorded)', palette.dim]])]
     : entries.map((entry) => renderLedgerEntry(width, entry, palette));
   const budgetHeight = Math.max(0, height - notice.length);
-  const visible = body.length > budgetHeight
-    ? body.slice(body.length - budgetHeight)
-    : body;
+  const { visible, maxScroll } = windowFromBottom(body, budgetHeight, scrollFromBottom);
+  onMaxScroll?.(maxScroll);
   return [...notice, ...visible];
 }
 

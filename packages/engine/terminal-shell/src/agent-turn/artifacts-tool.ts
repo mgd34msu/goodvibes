@@ -36,6 +36,8 @@ export interface AgentArtifactsToolArgs {
   readonly purpose?: unknown | undefined;
   readonly source?: unknown | undefined;
   readonly limit?: unknown | undefined;
+  /** List mode: matches to skip, newest first, to read the page after a previous one. */
+  readonly offset?: unknown | undefined;
   readonly includeContent?: unknown | undefined;
   readonly previewBytes?: unknown | undefined;
   readonly confirm?: unknown | undefined;
@@ -720,6 +722,10 @@ export function createAgentArtifactsTool(
             type: 'number',
             description: 'Maximum artifacts to return in list mode; clamped to 1..100.',
           },
+          offset: {
+            type: 'number',
+            description: 'List mode: how many matches (newest first) to skip, to read the page after one already read. Every artifact is reachable this way.',
+          },
           includeContent: {
             type: 'boolean',
             description: 'For mode:"show", include a bounded text preview when possible.',
@@ -748,10 +754,16 @@ export function createAgentArtifactsTool(
         if (mode === 'list') {
           if (!artifactStore.list) return failure('Artifact list is unavailable in this runtime.');
           const limit = clamp(readNumber(args.limit, DEFAULT_LIST_LIMIT), 1, 100);
-          const source = artifactStore.list(ARTIFACT_SCAN_CAP);
+          const offset = Math.max(0, Math.floor(readNumber(args.offset, 0)));
+          // Every stored artifact is searched (the store's records are in memory); a page of `limit` from `offset`.
+          const source = artifactStore.list(Number.MAX_SAFE_INTEGER);
           const filtered = source.filter((artifact) => matchesFilter(artifact, args));
-          const selected = filtered.slice(0, limit);
-          const text = await formatList(selected, filtered.length, source.length, args, source.length >= ARTIFACT_SCAN_CAP ? ARTIFACT_SCAN_CAP : null, executionOptions?.signal);
+          const selected = filtered.slice(offset, offset + limit);
+          const listed = await formatList(selected, filtered.length, source.length, args, null, executionOptions?.signal);
+          const rest = filtered.length - offset - selected.length;
+          const text = rest > 0
+            ? `${listed}\nOlder: ${rest} more; read them with agent_artifacts mode:"list" offset:${offset + selected.length} (/artifacts list --from ${offset + selected.length}).`
+            : listed;
           executionOptions?.signal?.throwIfAborted();
           return output(`${UNTRUSTED_ARTIFACT_NOTICE}\n${text}`);
         }

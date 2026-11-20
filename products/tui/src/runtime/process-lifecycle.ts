@@ -21,7 +21,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createTerminalLifecycle, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
+import { createTerminalLifecycle, ignoreGoneTerminalWrites, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
 import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from '../core/format-user-error.ts';
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { buildPersistedSessionContext, deleteRecoveryFile } from '@/runtime/index.ts';
@@ -259,6 +259,8 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   // set so the exact bytes the TUI has always emitted are preserved. The no-alt
   // exit deliberately uses the package's CLEAR_VIEWPORT_HOME ('\x1b[2J\x1b[H',
   // no ESC[3J), never ansi.CLEAR_SCREEN, which carries the scrollback-wiping 3J.
+  // A closed window or hung-up pty ends the session through stdin, not as a crash.
+  ignoreGoneTerminalWrites(stdout);
   const terminalLifecycle = createTerminalLifecycle({
     write: (data) => { stdout.write(data); },
     noAltScreen,

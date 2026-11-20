@@ -874,9 +874,17 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const kinds = filter.kinds && filter.kinds.length > 0 ? new Set(filter.kinds) : null;
     const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, Math.trunc(filter.limit ?? DEFAULT_LIST_LIMIT)));
     const items: OwnerItem[] = [];
-    if (!kinds || kinds.has('approval')) {
-      for (const row of this.#approvalActions?.list(this.#viewer(filter.viewer), MAX_LIST_LIMIT) ?? []) {
-        const item = projectApproval(row.record, row.reading, this.#approvalActions?.homeNode);
+    const afterCursor = (item: OwnerItem): boolean => !after || sortTime(item) < after.time || (sortTime(item) === after.time && item.id > after.id);
+    const actions = this.#approvalActions;
+    if (actions && (!kinds || kinds.has('approval'))) {
+      const viewer = this.#viewer(filter.viewer);
+      // Every approval a person decided is kept, so only this page's rows (and one past it, to know
+      // there is more) are read for the viewer; the rest are only matched against the filter.
+      const rows = actions.page
+        ? actions.page(viewer, { limit: limit + 1, include: (record) => { const item = projectApproval(record, undefined, actions.homeNode); return matchesFilter(item, filter, kinds) && afterCursor(item); } })
+        : actions.list(viewer, MAX_LIST_LIMIT);
+      for (const row of rows) {
+        const item = projectApproval(row.record, row.reading, actions.homeNode);
         if (matchesFilter(item, filter, kinds)) items.push(item);
       }
     }
@@ -885,7 +893,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       if (matchesFilter(item, filter, kinds)) items.push(item);
     }
     items.sort(newestFirst);
-    const from = after ? items.filter((item) => sortTime(item) < after.time || (sortTime(item) === after.time && item.id > after.id)) : items;
+    const from = after ? items.filter(afterCursor) : items;
     const page = from.length > limit ? from.slice(0, limit) : from;
     const last = page[page.length - 1];
     return {

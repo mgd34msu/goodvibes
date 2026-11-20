@@ -520,7 +520,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
           )}
 
           {openSessions.length > 0 && (
-            <Disclosure summary={`Open sessions between turns: ${openSessions.length}`}>
+            <Disclosure summary={`Open sessions between turns: ${openSessions.length}${data.moreSessions ? '+' : ''}`}>
               <RowList aria-label="Open sessions">
                 {openSessions.map((session) => (
                   <Row
@@ -531,6 +531,13 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
                     onSelect={() => openItem(`session:${session.id}`)}
                   />
                 ))}
+                {data.moreSessions && (
+                  <Row
+                    className="work-row work-row--board"
+                    title={data.moreSessions.loading ? 'Loading…' : 'Show older sessions'}
+                    onSelect={data.moreSessions.loading ? undefined : data.moreSessions.load}
+                  />
+                )}
               </RowList>
             </Disclosure>
           )}

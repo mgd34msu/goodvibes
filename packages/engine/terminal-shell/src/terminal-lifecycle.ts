@@ -208,3 +208,21 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
     isTerminalRestored: () => terminalRestored,
   };
 }
+
+/**
+ * A terminal that has gone away (its window closed, its pty hung up) answers
+ * every write with EIO or EPIPE, which the output stream raises as an 'error'
+ * event after the write call returned, so no try around the write sees it.
+ * Without a listener that event is an uncaught exception: closing the window
+ * would end the session with a crash record and a "crashed" line. The session
+ * ends through stdin's end instead. Any other stream error is raised as before.
+ */
+export function ignoreGoneTerminalWrites(stream: {
+  on(event: 'error', listener: (error: Error) => void): unknown;
+}): void {
+  stream.on('error', (error) => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EIO' || code === 'EPIPE') return;
+    throw error;
+  });
+}

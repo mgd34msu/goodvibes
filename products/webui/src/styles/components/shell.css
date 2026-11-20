@@ -641,3 +641,17 @@
     transition: none;
   }
 }
+
+/* Earlier notices (account menu): every toast this page showed, newest first. */
+.shell-notices__title {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: 24px;
+}
+
+.shell-notices__empty {
+  margin: 0;
+  color: var(--text-3);
+}

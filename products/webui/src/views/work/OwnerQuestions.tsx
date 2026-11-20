@@ -59,7 +59,8 @@ interface InboxPage extends InboxLists {
 /** One page of answers and Jev's decisions, newest first, split here. */
 async function readInboxPage(cursor: string): Promise<InboxPage> {
   // A report (the answer of a scheduled run or a trigger's turn that named no surface) is answered `read`.
-  const kinds = ['question', 'report', 'decision'] as const;
+  // Permission asks the person approved or denied are answers too: kept for good by the daemon, paged here.
+  const kinds = ['question', 'approval', 'report', 'decision'] as const;
   // `cursor` is on inbox.list's schema; the generated input type gains it when the contract is regenerated.
   const input: OperatorMethodInput<'inbox.list'> & { readonly cursor?: string } = {
     status: 'all', kinds, limit: LIST_LIMIT, ...(cursor ? { cursor } : {}),
@@ -84,7 +85,8 @@ interface AnsweredQuestion {
   readonly id: string;
   readonly title: string;
   readonly answer: string;
-  readonly delivery: AnswerDelivery;
+  /** Where a question's answer went; a permission ask the person approved or denied has none. */
+  readonly delivery?: AnswerDelivery;
 }
 
 const DELIVERY_STATES = new Set(['delivered', 'waiting', 'undeliverable']);
@@ -106,10 +108,11 @@ function readAnswered(value: unknown): AnsweredQuestion[] {
   return items.flatMap((raw): AnsweredQuestion[] => {
     const item = raw as Record<string, unknown>;
     const delivery = readDelivery(item.delivery);
-    if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.kind !== 'question' || item.status !== 'answered' || !delivery) return [];
+    if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.status !== 'answered') return [];
+    if (!(item.kind === 'question' && delivery) && item.kind !== 'approval') return [];
     const answer = item.answer as { option?: unknown; text?: unknown } | undefined;
     const words = [answer?.option, answer?.text].filter((part): part is string => typeof part === 'string' && part.length > 0).join(': ');
-    return [{ id: item.id, title: item.title, answer: words, delivery }];
+    return [{ id: item.id, title: item.title, answer: words, ...(delivery ? { delivery } : {}) }];
   });
 }
 
@@ -128,8 +131,8 @@ function AnsweredRow({ question }: { question: AnsweredQuestion }) {
       <div className="gv-row__text work-question__body">
         <div className="gv-row__title">{question.title}</div>
         <div className="gv-row__meta">{question.answer}</div>
-        <Chip size="sm" tone={DELIVERY_TONE[delivery.state]}>{deliveryLabel(delivery)}</Chip>
-        {delivery.state !== 'delivered' && delivery.reason && <p className="work-question__detail">{delivery.reason}</p>}
+        {delivery && <Chip size="sm" tone={DELIVERY_TONE[delivery.state]}>{deliveryLabel(delivery)}</Chip>}
+        {delivery && delivery.state !== 'delivered' && delivery.reason && <p className="work-question__detail">{delivery.reason}</p>}
       </div>
     </li>
   );

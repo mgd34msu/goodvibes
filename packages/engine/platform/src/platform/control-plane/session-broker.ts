@@ -1538,7 +1538,7 @@ export class SharedSessionBroker {
   /**
    * The inputs matching `state`/`since`, oldest first: every match without
    * `limit`, the oldest `limit` with it. A reader that pages (a live surface on
-   * the wire) uses {@link getInputsPage}, which also says whether more remain.
+   * the wire) uses {@link SharedSessionBroker.getInputsPage}, which also says whether more remain.
    */
   getInputsSince(
     sessionId: string,

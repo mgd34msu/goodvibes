@@ -135,9 +135,9 @@ export interface DeviceGrantPolicy {
   readonly maxGrantsPerNode: number;
   /** Absolute count cap across all nodes. */
   readonly maxGrantsTotal: number;
-  /** Age TTL for the audit ledger. */
+  /** Age TTL for the audit ledger's `used` entries (grants and removals are kept for good). */
   readonly auditRetentionMs: number;
-  /** Count cap for the audit ledger. */
+  /** Count cap for the audit ledger's `used` entries. */
   readonly maxAuditRecords: number;
 }
 
@@ -631,8 +631,12 @@ export class DeviceGrantStore {
     let auditTrimmed = 0;
     const auditCutoff = now - policy.auditRetentionMs;
     await this.recordRemovals(written.value.removals, 'housekeeping', (snapshot) => {
-      const aged = snapshot.audit.filter((entry) => entry.at >= auditCutoff);
-      const kept = aged.slice(-policy.maxAuditRecords);
+      // Who was granted what and how it ended is a security record: every `granted` and `removed`
+      // entry is kept. Only `used` entries age out (past the retention window, then past the newest
+      // maxAuditRecords uses); each grant keeps its use count and last use in `usage`.
+      const uses = snapshot.audit.filter((entry) => entry.action === 'used' && entry.at >= auditCutoff);
+      const keptUses = new Set(uses.slice(-policy.maxAuditRecords));
+      const kept = snapshot.audit.filter((entry) => entry.action !== 'used' || keptUses.has(entry));
       auditTrimmed = snapshot.audit.length - kept.length;
       return { audit: kept };
     });

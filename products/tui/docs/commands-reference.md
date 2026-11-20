@@ -5,7 +5,7 @@
 
 # Command Reference
 
-GoodVibes ships **102** built-in slash commands across **62** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+P` (or `?`, or run `/help`) to search them all in the command palette.
+GoodVibes ships **96** built-in slash commands across **61** categories. Every command below is generated directly from the command registry, so this list is always complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+P` (or `?`, or run `/help`) to search them all in the command palette.
 
 ## Categories
 
@@ -13,15 +13,15 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 - [Automation](#automation): 2
 - [Channels](#channels): 2
 - [Check-in](#check-in): 1
-- [Checkpoints](#checkpoints): 3
+- [Checkpoints](#checkpoints): 1
 - [CI](#ci): 1
 - [Cloudflare](#cloudflare): 1
 - [Cluster](#cluster): 1
 - [Codebase](#codebase): 1
 - [Control Room](#control-room): 1
-- [Cost](#cost): 2
+- [Cost](#cost): 1
 - [Devices](#devices): 1
-- [Diff & Review](#diff--review): 3
+- [Diff & Review](#diff--review): 2
 - [Discovery](#discovery): 1
 - [Editor](#editor): 1
 - [Eval](#eval): 1
@@ -62,11 +62,10 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 - [Session Content](#session-content): 6
 - [Sessions & Replay](#sessions--replay): 5
 - [Settings Sync](#settings-sync): 1
-- [Shell & Session](#shell--session): 10
+- [Shell & Session](#shell--session): 9
 - [Skills](#skills): 1
 - [Tasks](#tasks): 1
 - [Testing](#testing): 1
-- [Voice & TTS](#voice--tts): 1
 - [Web Search](#web-search): 1
 - [Work Plans](#work-plans): 1
 - [Workstreams](#workstreams): 1
@@ -200,9 +199,18 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/checkpoint` | None | `[label]` | Create a manual workspace checkpoint (forensic retention) |
-| `/checkpoints` | `/ckpts` | `[list] \| restore <n\|id> [--yes]` | List workspace checkpoints, newest first, and restore the files of one |
-| `/rewind` | None | `[<n\|turnId> [files\|conversation\|both]]` | Rewind files, conversation, or both to a completed turn (preview + confirm) |
+| `/checkpoint` | None | `list \| make [<name...>] \| restore <checkpoint> \| rewind <turn> [<what goes back>]` | Snapshots of the workspace's files: see them, make one, put the files back, or go back to an earlier turn |
+
+### /checkpoint: Checkpoints
+
+`/checkpoint` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See your checkpoints | `/checkpoint list` | Lists the workspace checkpoints, newest first, with how old each is and how much it added. | None |
+| Make a checkpoint now | `/checkpoint make [<name...>]` | The workspace's files as they are now are kept as a checkpoint, held longer than the automatic ones; nothing changes in the files. | None |
+| Put the files back to a checkpoint | `/checkpoint restore <checkpoint>` | The workspace's files go back to checkpoint <checkpoint> after you see what changes; the current files are kept in a safety checkpoint first, and the conversation is unchanged. | None |
+| Go back to an earlier turn | `/checkpoint rewind <turn> [<what goes back>]` | What changed after turn <turn> is taken back (<what goes back>) once you have seen the plan and said yes: messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added. | cannot be undone |
 
 ## CI
 
@@ -303,8 +311,17 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/cost` | None | `[panel\|budget <usd>\|attribution [24h\|7d] [--json]]` | Open Usage, set the session budget alert, or show windowed cost attribution |
-| `/usage` | None | `[turns\|agents]` | Context pressure, session tokens and cost, per-turn history, per-agent costs and the budget alert |
+| `/usage` | None | `open [<show>] \| alert <dollars> \| by-source [<over>] [--as <as>]` | Tokens, cost and context pressure, the spending alert, and cost by who spent it |
+
+### /usage: Usage
+
+`/usage` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See usage and cost | `/usage open [<show>]` | Opens the Usage view: context pressure, this session's tokens and cost, turn by turn and per agent. | None |
+| Set a spending alert | `/usage alert <dollars>` | You will be warned when this session's cost passes $<dollars> (0 turns the warning off), until you change it. | None |
+| See cost by who spent it | `/usage by-source [<over>] [--as <as>]` | Shows what the daemon spent, split by agent, model, provider and the other ways it records cost. | None |
 
 ## Devices
 
@@ -339,9 +356,16 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/changes` | None | `[session\|working\|staged\|head]` | Changed files with a tinted diff and semantic summary: stage hunks, comment for the model, mark reviewed |
-| `/diff` | `/d` | `[session\|head\|working\|staged]` | Show the diff of this session's file changes (or working, staged, or everything vs HEAD) in Changes |
+| `/changes` | None | `[<which changes>]` | Changed files with their diff: stage hunks, comment for the model, mark reviewed |
 | `/review` | None | None | Review this session's file changes hunk by hunk: comment to steer the model, or revert a hunk |
+
+### /changes: Changes
+
+`/changes` runs its one action; it asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See changed files and their diff | `/changes [<which changes>]` | Opens the Changes view with the changed files and their diff. | None |
 
 ### /review: Review this session's changes
 
@@ -401,7 +425,7 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/approval` | None | `kinds [<kind>] \| waiting` | What each kind of approval asks about, and the approvals waiting on you |
-| `/voice` | None | `[review\|status\|setup\|enable\|disable\|wake status\|wake setup [yes]\|bundle export <path>\|bundle inspect <path>\|bundle import <path>]` | Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and export or import the voice settings |
+| `/voice` | None | `review \| speak <message...> \| stop \| on \| off \| status \| setup \| wake-status \| wake-setup [--with-speech-to-text] \| export <file> \| inspect <file> \| import <file>` | Hear answers spoken, set up the local voice runtime and the wake word, and keep the voice settings as a file |
 
 ### /approval: Approvals
 
@@ -411,6 +435,25 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | --- | --- | --- | --- |
 | See the kinds of approval | `/approval kinds [<kind>]` | Shows what each kind of approval asks about <kind>, and what to check before you answer one. | None |
 | Open the approvals waiting on you | `/approval waiting` | Opens the list of approvals waiting on your answer. | None |
+
+### /voice: Voice
+
+`/voice` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See your voice settings | `/voice review` | Shows whether every answer is spoken aloud and how voice is set up here. | None |
+| Ask and hear the answer spoken | `/voice speak <message...>` | <message> is sent as a message and the answer is played aloud. | None |
+| Stop what is being spoken | `/voice stop` | Whatever is being played aloud now stops. | None |
+| Speak every answer aloud | `/voice on` | Every answer will be played aloud until you change it. | None |
+| Stop speaking every answer | `/voice off` | Answers will no longer be played aloud, until you change it. | None |
+| See the local voice runtime | `/voice status` | Shows whether speech output and speech-to-text are installed here, and an install in progress. | None |
+| Install the local voice runtime | `/voice setup` | The local speech output and, where this machine has a published bundle, speech-to-text are downloaded and set up; it can be hundreds of megabytes. | None |
+| See wake-word detection | `/voice wake-status` | Shows whether the wake-word models are here and how listening for the wake word is set. | None |
+| Set up the wake word | `/voice wake-setup [--with-speech-to-text]` | The wake-word models are downloaded and checked, and speech-to-text is installed too when chosen. | None |
+| Save your voice settings to a file | `/voice export <file>` | The voice settings you changed from their defaults are written to <file>. | None |
+| Read a voice settings file | `/voice inspect <file>` | Shows the settings in <file> without applying them. | None |
+| Apply voice settings from a file | `/voice import <file>` | The voice settings in <file> are applied until you change it. | None |
 
 ## Git
 
@@ -506,7 +549,17 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/imagine` | None | `[--out <path>] <prompt> \| [--out <path>] --collect <provider> <task-id> [key=value ...]` | Generate an image from a prompt via a configured media provider |
+| `/media` | None | `providers \| make [--as <make>] [--provider <provider>] [--model <model>] [--out <save as>] <description...> \| collect <provider> <job> [--out <save as>] [<resume values...>]` | Make an image or a video with a configured media provider, and see the providers |
+
+### /media: Images and video
+
+`/media` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See the media providers | `/media providers` | Lists the media providers, what each makes, and whether each is set up. | None |
+| Make an image or a video | `/media make [--as <make>] [--provider <provider>] [--model <model>] [--out <save as>] <description...>` | A media provider is asked to make <make> of "<description>" and may charge for it; what it makes is saved as a file. | spends money |
+| Collect a job that was still being made | `/media collect <provider> <job> [--out <save as>] [<resume values...>]` | Job <job> is collected from <provider> and saved as a file; it was paid for when it was accepted, so nothing new is spent. | None |
 
 ## Intelligence
 
@@ -622,10 +675,18 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/image` | `/img` | `<path> [prompt text]` | Attach an image file to the next message |
+| `/image` | None | `<image file> [<message...>]` | Send an image file to the model with your next message |
 | `/pin` | None | `list \| add <model> \| remove <model>` | Keep models you use at the top of the model picker |
 | `/secrets` | None | `list \| set <name> <value> [--scope <where to keep it>] [--storage <how to keep it>] \| link <name> <reference> [--scope <where to keep it>] [--storage <how to keep it>] \| get <secret> \| test <reference> \| providers \| storage \| trust <secret> \| delete <secret> [--scope <from>] [--storage <kept as>] \| use <name> <value>` | Keep passwords and keys where programs can read them, without showing them |
 | `/tools` | None | `list \| contract <tool> \| verify <tool> \| verify-all \| activity` | The tools the model can call here: see them, read one's contract, check that tools keep their contracts |
+
+### /image: Attach an image
+
+`/image` runs its one action; it asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| Send an image with a message | `/image <image file> [<message...>]` | <image file> is sent to the model with your message, as a new turn. | None |
 
 ### /pin: Pinned models
 
@@ -1387,12 +1448,32 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/note` | None | `[list\|add <text>\|remove <id>]` | Manage session notes (pinned across context compaction) |
+| `/notes` | None | `list \| show <note> \| search <words...> \| create [--title <title>] [--url <web page>] [--tags <tags>] <text...> \| edit <note> [--title <title>] [--url <web page>] [--tags <tags>] [<text...>] \| review <note> \| stale <note> <why...> \| delete <note> \| to-memory <note> [--kind <kind>] [--scope <where it applies>] \| to-persona <note> \| to-skill <note> [--enable] \| to-routine <note> [--enable] \| to-knowledge <note>` | Notes you keep beside your work: write, find and change them, and keep one as a memory, a persona, a skill or a routine |
 | `/redo` | None | `[<what>]` | Bring back what was undone last |
 | `/retry` | None | `[<changed message...>]` | Send your last message again, as it was or changed |
 | `/template` | None | `list \| use <template> [<blanks...>] \| save <name> \| show <template> \| edit <template> \| delete <template> [--everywhere]` | Prompts you keep and reuse: save your last message as one, use one as your next message, edit or delete one |
 | `/title` | None | `[<title...>]` | See or change the conversation's title |
-| `/undo` | None | `[<what>]` | Take back the last turn, file change or rewind |
+| `/undo` | None | `[<what>]` | Take back the last turn, file change or /checkpoint rewind |
+
+### /notes: Notes
+
+`/notes` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See your notes | `/notes list` | Lists your notes, newest last, with whether you reviewed each. | None |
+| Read one note | `/notes show <note>` | Shows note <note> in full, with what was made from it. | None |
+| Find a note | `/notes search <words...>` | Lists the notes that mention <words>. | None |
+| Write a note | `/notes create [--title <title>] [--url <web page>] [--tags <tags>] <text...>` | A note with the text "<text>" is kept until you change it; in the terminal app it lasts for this session, and the model keeps seeing it after a compaction. | None |
+| Change a note | `/notes edit <note> [--title <title>] [--url <web page>] [--tags <tags>] [<text...>]` | Note <note> takes the changes given and is no longer marked reviewed, until you change it. | None |
+| Mark a note reviewed | `/notes review <note>` | Note <note> is marked reviewed, until you change it. | None |
+| Mark a note out of date | `/notes stale <note> <why...>` | Note <note> is marked out of date because "<why>", until you change it. | None |
+| Delete a note | `/notes delete <note>` | Note <note> is removed. | cannot be undone |
+| Keep a note as a memory | `/notes to-memory <note> [--kind <kind>] [--scope <where it applies>]` | Note <note> becomes a memory record (its title the summary, its text the detail), until you change it; the note stays. | None |
+| Make a persona from a note | `/notes to-persona <note>` | Note <note> becomes a persona (its text the instructions), not in use, until you change it; the note stays. | None |
+| Make a skill from a note | `/notes to-skill <note> [--enable]` | Note <note> becomes a skill (its text the steps), until you change it; the note stays. | None |
+| Make a routine from a note | `/notes to-routine <note> [--enable]` | Note <note> becomes a routine (its text the steps), until you change it; the note stays. | None |
+| Add a note's web page to Agent Knowledge | `/notes to-knowledge <note>` | The web page of note <note> is fetched and added to Agent Knowledge, until you change it; the note stays. | None |
 
 ### /redo: Redo
 
@@ -1444,7 +1525,7 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/hosted` | None | `status \| new [--on-leave <when everyone leaves>] [<first message...>] \| list [--all] \| attach <session> \| send <message...> \| send-later <message...> \| stop-tool [<tool>] \| leave \| end <session>` | Conversations that run in the daemon, so they go on when this window closes |
-| `/replay` | `/rep` | `[load [runId] \| step [n] \| seek <rev> \| diff <runId> \| export <path>]` | Replay recorded runs: load, step, seek, compare two runs, and export |
+| `/replay` | None | `status \| runs \| load <run> \| step [<steps>] \| seek <revision> \| diff <other run> \| export <file>` | Every turn is recorded as a run: load one, step through it, compare it with another, and save the report |
 | `/resume` | None | `<session> [--force]` | Continue a saved session here |
 | `/save` | None | `[--switch] [--replace] [<name...>]` | Save this conversation under a name to come back to |
 | `/session` | None | `current \| list \| resume <session> [--force] \| save [--switch] [--replace] [<name...>] \| fork [<name...>] \| rename <name...> \| info [<session>] \| search <words...> \| delete <session> \| events [<kind>] [<from row>] [--last <how many>] \| groups [<kind>] [<from row>] [--last <how many>] \| hotspots [<kind>] \| find [--kind <kind>] [<words...>] \| next [<to>] \| prev [<to>] \| expand [<blocks>] \| collapse [<blocks>] \| bookmarks \| composer \| restored \| compactions \| save-file [<as>] [<file>] [--keep-secrets] [--replace] [--then <then>] \| save-saved <session> [<as>] [--print] [--out <file>] \| upload [<as>] [--keep-secrets] [--then <then>] \| branch [<name...>] \| branches \| switch-branch <branch> \| merge-branch <branch> \| graph [--session <session>] [--format <as>] \| link-task <task> [--session <in session>] [--depends-on <waits on>] [--label <label>] \| hand-off <task> [--to <to session>] [--session <in session>] [--reason <why>] \| accept <handoff> \| withdraw <handoff> \| cancel <task> [--scope <what>] [--task <task>] [--session <in session>] [--reason <why>]` | This conversation and your saved ones: resume, save, copy, export, branch and hand off work |
@@ -1464,6 +1545,20 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | Stop the tool that is running | `/hosted stop-tool [<tool>]` | The tool call <tool> in the hosted session will be stopped; the turn goes on without its result. | None |
 | Leave the hosted session | `/hosted leave` | This terminal leaves the hosted session; it keeps running or ends, as its "when everyone leaves" setting says. | None |
 | End a hosted session | `/hosted end <session>` | Hosted session <session> and the turn it is running will end, whatever its setting says. | cannot be undone |
+
+### /replay: Replay recorded runs
+
+`/replay` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See the loaded run | `/replay status` | Shows which recorded run is loaded and where in it you are. | None |
+| See the recorded runs | `/replay runs` | Lists the runs recorded so far, one per turn. | None |
+| Load a recorded run | `/replay load <run>` | Run <run> is loaded for stepping through, from its first event. | None |
+| Step through the loaded run | `/replay step [<steps>]` | The loaded run goes forward by the number of events given, each one shown. | None |
+| Jump to a point in the loaded run | `/replay seek <revision>` | The loaded run jumps to revision <revision>. | None |
+| Compare the loaded run with another | `/replay diff <other run>` | Compares the loaded run with run <other run>, event by event, and lists where they differ. | None |
+| Save the replay report to a file | `/replay export <file>` | The report of the loaded run, with every difference found, is written to <file>. | None |
 
 ### /resume: Resume a session
 
@@ -1552,11 +1647,10 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | `/compact` | None | None | Summarise the older part of the conversation to free the context window |
 | `/effort` | None | `show \| set <level>` | How hard the model thinks before it answers |
 | `/help` | None | `[<about>]` | Every command and every key in one searchable list |
-| `/keep` | None | `<text>` | Pin text to session memory (survives compaction) |
 | `/model` | None | `list \| use <model> \| refresh \| backup <model> \| drop-backup <backup model>` | Choose the model your conversations use and its backups, and read the list of models again |
 | `/paste` | None | `list [<paste>] \| clipboard` | Put the clipboard into the prompt, and read folded pastes before you send them |
 | `/power` | None | `status \| on \| off` | See whether this computer may sleep, and keep it awake |
-| `/queue` | `/q` | `[list \| edit <n> <text> \| delete <n>]` | Mid-turn message queue: list, edit, or delete still-undelivered messages |
+| `/queue` | None | `list \| edit <message> <new text...> \| delete <message>` | The messages you typed while a turn runs: see, change or take back one before it is sent |
 | `/quit` | None | None | Close this program |
 
 ### /clear: Start a fresh conversation
@@ -1622,6 +1716,16 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | See whether this computer may sleep | `/power status` | Shows who holds this computer awake and why, and whether keep-awake is on. | None |
 | Keep this computer awake | `/power on` | This computer will not sleep when idle, until you change it; the status bar shows it while it holds. | None |
 | Let this computer sleep again | `/power off` | This computer may sleep when idle again, until you change it; work that holds it awake still does. | None |
+
+### /queue: Queued messages
+
+`/queue` alone opens these actions to choose from; each asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| See your queued messages | `/queue list` | Lists the messages waiting to be sent after the running turn, in the order they will go. | None |
+| Change a queued message | `/queue edit <message> <new text...>` | Queued message <message> is sent as <new text> instead, when the running turn ends. | None |
+| Take back a queued message | `/queue delete <message>` | Queued message <message> is taken back and never sent. | cannot be undone |
 
 ### /quit: Quit
 
@@ -1691,17 +1795,19 @@ GoodVibes ships **102** built-in slash commands across **62** categories. Every 
 | --- | --- | --- | --- |
 | Run the project's tests | `/test [<only...>]` | The project's test command (the test gate, or the package.json test script) runs here and its results are shown; Esc stops it. | None |
 
-## Voice & TTS
-
-| Command | Aliases | Usage | Description |
-| --- | --- | --- | --- |
-| `/tts` | None | `<prompt>\|stop\|on\|off` | Submit a prompt for live TTS playback, or control always-speak mode |
-
 ## Web Search
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/search` | None | `<query> [--limit <n>]` | Web search, ranked results with source labels (searching THIS transcript? use /find) |
+| `/web-search` | None | `[--limit <how many>] <words...>` | Search the web and list ranked results with where each came from |
+
+### /web-search: Search the web
+
+`/web-search` runs its one action; it asks for what it needs.
+
+| Action | Line | What happens | Risk |
+| --- | --- | --- | --- |
+| Search the web for words | `/web-search [--limit <how many>] <words...>` | <words> is sent to the web search provider and the ranked results are listed here. | None |
 
 ## Work Plans
 

@@ -6,7 +6,11 @@
  * sign out. Admin and Providers are no longer pages: they are the Account and
  * Models and providers sections of the settings dialog.
  */
-import { BellRing, ChevronDown, LogOut, Settings, Smartphone, Sparkles, SunMoon, Users } from 'lucide-react';
+import { useState } from 'react';
+import { BellRing, ChevronDown, History, LogOut, Settings, Smartphone, Sparkles, SunMoon, Users } from 'lucide-react';
+import { useToastHistory, type ToastRecord } from '../../lib/toast';
+import { Row, RowList } from '../ui/Row';
+import { Sheet } from '../ui/Sheet';
 import type { DaemonHealth } from '../../lib/daemon-health';
 import { useTheme } from '../../hooks/useTheme';
 import { Menu, MenuCheckboxItem, MenuItem, MenuMeta, MenuRadioGroup, MenuSeparator } from '../ui/Menu';
@@ -79,8 +83,11 @@ export function AccountMenu({ name, health, running, compact = false, onOpenSett
   const phrase = connectionPhrase(health);
   const latency = latencyPhrase(health.latencyMs);
   const accountLabel = `Account: ${name}. ${phrase}`;
+  const notices = useToastHistory();
+  const [noticesOpen, setNoticesOpen] = useState(false);
 
   return (
+    <>
     <Menu
       label="Account"
       placement={compact ? 'right-start' : 'top-start'}
@@ -108,6 +115,7 @@ export function AccountMenu({ name, health, running, compact = false, onOpenSett
       <MenuItem icon={<Smartphone />} onSelect={() => onOpenSettings('devices')}>Devices and pairing</MenuItem>
       <MenuItem icon={<Users />} onSelect={() => onOpenSettings('people')}>People and channels</MenuItem>
       <MenuItem icon={<BellRing />} onSelect={() => onOpenSettings('checkins')}>Check-ins</MenuItem>
+      <MenuItem icon={<History />} hint={notices.length > 0 ? String(notices.length) : undefined} onSelect={() => setNoticesOpen(true)}>Earlier notices</MenuItem>
       <MenuSeparator />
       <MenuRadioGroup
         icon={<SunMoon />}
@@ -145,5 +153,36 @@ export function AccountMenu({ name, health, running, compact = false, onOpenSett
       <MenuSeparator />
       <MenuItem icon={<LogOut />} onSelect={onSignOut}>Sign out</MenuItem>
     </Menu>
+    <EarlierNotices open={noticesOpen} notices={notices} onClose={() => setNoticesOpen(false)} />
+    </>
+  );
+}
+
+const NOTICE_TONE: Record<ToastRecord['tone'], StatusTone> = { info: 'info', success: 'ok', warning: 'warn', danger: 'bad' };
+
+/**
+ * Every toast this page showed, newest first: a toast leaves the screen after a
+ * few seconds (or when a sixth arrives), and what it said stays readable here
+ * until the page is closed or another account signs in.
+ */
+function EarlierNotices({ open, notices, onClose }: { open: boolean; notices: readonly ToastRecord[]; onClose: () => void }) {
+  return (
+    <Sheet open={open} onClose={onClose} label="Earlier notices">
+      <h2 className="shell-notices__title">Earlier notices</h2>
+      {notices.length === 0 ? (
+        <p className="shell-notices__empty">Nothing has been said on this page yet.</p>
+      ) : (
+        <RowList aria-label="Earlier notices">
+          {[...notices].reverse().map((notice) => (
+            <Row
+              key={notice.id}
+              leading={<StatusDot tone={NOTICE_TONE[notice.tone]} />}
+              title={notice.title}
+              meta={`${new Date(notice.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${notice.description ? ` · ${notice.description}` : ''}`}
+            />
+          ))}
+        </RowList>
+      )}
+    </Sheet>
   );
 }

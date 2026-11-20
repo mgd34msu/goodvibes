@@ -34,8 +34,6 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { HostedSessionStreamEvent } from '../runtime/client/hosted-session-stream.ts';
 
-/** How many transcript rows are kept before the oldest are dropped. */
-export const MAX_HOSTED_ROWS = 400;
 
 export type HostedRowKind = 'user' | 'assistant' | 'system' | 'tool' | 'error';
 
@@ -138,11 +136,12 @@ export class HostedSessionFeed {
     this.streamingRowIndex = null;
     this.state = {
       record,
-      rows: history.map(historyRow).slice(-MAX_HOSTED_ROWS),
+      // Every row of the backfilled history is kept: the opened view scrolls back to the first.
+      rows: history.map(historyRow),
       runningToolCalls: [],
       streaming: false,
       streamNote: null,
-      droppedRows: Math.max(0, history.length - MAX_HOSTED_ROWS),
+      droppedRows: 0,
     };
     this.emit();
   }
@@ -364,15 +363,9 @@ export class HostedSessionFeed {
   }
 
   private appendRow(row: HostedSessionRow): void {
+    // No row is dropped: the conversation grows by what was said, and the opened view scrolls back to its first row.
     const rows = [...this.state.rows, row];
-    let dropped = this.state.droppedRows;
-    while (rows.length > MAX_HOSTED_ROWS) {
-      rows.shift();
-      dropped += 1;
-      if (this.streamingRowIndex !== null) this.streamingRowIndex -= 1;
-    }
-    if (this.streamingRowIndex !== null && this.streamingRowIndex < 0) this.streamingRowIndex = null;
-    this.state = { ...this.state, rows, droppedRows: dropped };
+    this.state = { ...this.state, rows };
     this.emit();
   }
 

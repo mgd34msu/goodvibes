@@ -1819,7 +1819,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         }
       ],
-      "revision": 0
+      "revision": 0,
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "inbox.post": {
@@ -7904,7 +7906,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessions": 0,
         "active": 0,
         "closed": 0
-      }
+      },
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "companion.chat.sessions.reopen": {

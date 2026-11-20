@@ -48,8 +48,19 @@ export const TOAST_EXIT_DURATION_MS = 180;
 
 // ─── Reducer ──────────────────────────────────────────────────────────────────
 
+/** A toast as it was said, kept for the page's life so it can be read after it left the screen. */
+export interface ToastRecord {
+  readonly id: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly tone: ToastTone;
+  readonly at: number;
+}
+
 interface ToastState {
   toasts: ToastEntry[];
+  /** Every toast this page showed, oldest first (the account menu's "Earlier notices" lists them). */
+  history: readonly ToastRecord[];
   /** IDs currently playing their exit animation, still mounted, present=false. */
   leavingIds: ReadonlySet<string>;
 }
@@ -63,8 +74,13 @@ export function toastReducer(state: ToastState, action: ToastAction_Dispatch): T
   switch (action.type) {
     case 'ADD': {
       const toasts = [...state.toasts, action.toast];
+      const record: ToastRecord = {
+        id: action.toast.id, title: action.toast.title, tone: action.toast.tone, at: Date.now(),
+        ...(action.toast.description ? { description: action.toast.description } : {}),
+      };
       return {
         ...state,
+        history: [...state.history, record],
         toasts: toasts.length > MAX_VISIBLE ? toasts.slice(toasts.length - MAX_VISIBLE) : toasts,
       };
     }
@@ -79,6 +95,7 @@ export function toastReducer(state: ToastState, action: ToastAction_Dispatch): T
       const next = new Set(state.leavingIds);
       next.delete(action.id);
       return {
+        ...state,
         toasts: state.toasts.filter((t) => t.id !== action.id),
         leavingIds: next,
       };
@@ -94,6 +111,7 @@ interface ToastContextValue {
   toasts: ToastEntry[];
   /** IDs that are animating out (present=false, still mounted). */
   leavingIds: ReadonlySet<string>;
+  history: readonly ToastRecord[];
   toast: (options: ToastOptions) => string;
   dismiss: (id: string) => void;
   dismissAll: () => void;
@@ -110,7 +128,7 @@ function nextId(): string {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(toastReducer, { toasts: [], leavingIds: new Set<string>() });
+  const [state, dispatch] = useReducer(toastReducer, { toasts: [], history: [], leavingIds: new Set<string>() });
 
   const toast = useCallback((options: ToastOptions): string => {
     const id = nextId();
@@ -147,12 +165,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   return createElement(
     ToastContext.Provider,
-    { value: { toasts: state.toasts, leavingIds: state.leavingIds, toast, dismiss, dismissAll } },
+    { value: { toasts: state.toasts, leavingIds: state.leavingIds, history: state.history, toast, dismiss, dismissAll } },
     children,
   );
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
+
+/** Every toast this page showed, oldest first; empty outside a ToastProvider. */
+export function useToastHistory(): readonly ToastRecord[] {
+  return useContext(ToastContext)?.history ?? [];
+}
 
 export function useToast(): {
   toast: (options: ToastOptions) => string;

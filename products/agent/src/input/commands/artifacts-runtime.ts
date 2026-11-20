@@ -18,7 +18,7 @@ export const ARTIFACTS = defineList<CommandContext>({
   async read(ctx) {
     const store = ctx.platform?.artifactStore;
     if (!store?.list) return [];
-    return store.list(100).map((artifact): ListRow => ({
+    return store.list(Number.MAX_SAFE_INTEGER).map((artifact): ListRow => ({
       value: artifact.id, label: artifact.filename ?? artifact.id,
       detail: `${artifact.kind}, ${artifact.mimeType}`, state: new Date(artifact.createdAt).toISOString().slice(0, 10),
     }));
@@ -66,11 +66,14 @@ export function registerArtifactsRuntimeCommands(registry: CommandRegistry): voi
           textInput({ id: 'purpose', label: 'Made for', help: 'What it was saved for, such as agent-model-compare', why: 'a purpose word', typed: { flag: '--purpose' }, optional: { default: '', means: 'anything' } }),
           textInput({ id: 'source', label: 'Came from', help: 'Where it came from (a web address or a source name)', why: 'a source', typed: { flag: '--source' }, optional: { default: '', means: 'anywhere' } }),
           { id: 'limit', label: 'At most', help: 'How many to show', kind: 'number', freeTextReason: 'a whole number', required: { default: '25', defaultMeans: '25' }, typed: { flag: '--limit' } },
+          { id: 'from', label: 'Starting after', help: 'How many of the newest to skip, to see older ones', kind: 'number', freeTextReason: 'a whole number', required: { default: '0', defaultMeans: 'the newest' }, typed: { flag: '--from' } },
         ],
         sentence: 'Lists your saved artifacts that match {words}, newest first.', example: { words: 'report' },
         async run(values, ctx) {
           const limit = positiveNumber(values.limit);
-          return runOwnerToolCall(ctx, TOOL, { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}) }, 'list saved artifacts');
+          const skipped = Number(values.from ?? '0');
+          const from = Number.isFinite(skipped) && skipped > 0 ? Math.trunc(skipped) : 0;
+          return runOwnerToolCall(ctx, TOOL, { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}), ...(from ? { offset: from } : {}) }, 'list saved artifacts');
         },
       })),
       ownerRead(TOOL, readAction<CommandContext>({

@@ -48,7 +48,7 @@ export class SessionManager {
   }
 
   /**
-   * {@link login}, also saying whether the token was stored: `persisted` is
+   * {@link SessionManager.login}, also saying whether the token was stored: `persisted` is
    * true only when it was written to the token store, so an observer never
    * reads a login that stored nothing as a stored token.
    */

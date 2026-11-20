@@ -2224,7 +2224,7 @@
           "id": "list",
           "label": "See your saved artifacts",
           "word": "list",
-          "line": "/artifacts list [--kind <kind>] [--type <file type>] [--purpose <made for>] [--source <came from>] [--limit <at most>] [<words...>]",
+          "line": "/artifacts list [--kind <kind>] [--type <file type>] [--purpose <made for>] [--source <came from>] [--limit <at most>] [--from <starting after>] [<words...>]",
           "sentence": "Lists your saved artifacts that match {words}, newest first.",
           "done": "",
           "touches": "reads",
@@ -2349,6 +2349,20 @@
               },
               "typed": {
                 "flag": "--limit"
+              }
+            },
+            {
+              "id": "from",
+              "label": "Starting after",
+              "help": "How many of the newest to skip, to see older ones",
+              "kind": "number",
+              "freeTextReason": "a whole number",
+              "required": {
+                "default": "0",
+                "defaultMeans": "the newest"
+              },
+              "typed": {
+                "flag": "--from"
               }
             }
           ]
@@ -3705,6 +3719,61 @@
       ]
     },
     {
+      "name": "changes",
+      "title": "Changes",
+      "summary": "Changed files with their diff: stage hunks, comment for the model, mark reviewed",
+      "group": "Conversation",
+      "actions": [
+        {
+          "id": "changes",
+          "label": "See changed files and their diff",
+          "word": "",
+          "line": "/changes [<which changes>]",
+          "sentence": "Opens the Changes view with the changed files and their diff.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "It is a terminal screen."
+          },
+          "inputs": [
+            {
+              "id": "source",
+              "label": "Which changes",
+              "help": "This session's edits, or the repository's",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "session",
+                  "label": "This session's edits"
+                },
+                {
+                  "value": "working",
+                  "label": "Not staged yet"
+                },
+                {
+                  "value": "staged",
+                  "label": "Staged"
+                },
+                {
+                  "value": "head",
+                  "label": "Everything since the last commit"
+                }
+              ],
+              "required": {
+                "default": "session",
+                "defaultMeans": "this session's edits"
+              },
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "channels",
       "title": "Channels",
       "summary": "Your channels (Slack, Telegram, ntfy, ...): their state and setup, who may reach the assistant, and what each one's sessions get",
@@ -4839,6 +4908,154 @@
             "fields": {}
           },
           "inputs": []
+        }
+      ]
+    },
+    {
+      "name": "checkpoint",
+      "title": "Checkpoints",
+      "summary": "Snapshots of the workspace's files: see them, make one, put the files back, or go back to an earlier turn",
+      "group": "Conversation",
+      "report": "list",
+      "actions": [
+        {
+          "id": "list",
+          "label": "See your checkpoints",
+          "word": "list",
+          "line": "/checkpoint list",
+          "sentence": "Lists the workspace checkpoints, newest first, with how old each is and how much it added.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Checkpoints of this workspace are kept by the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "make",
+          "label": "Make a checkpoint now",
+          "word": "make",
+          "line": "/checkpoint make [<name...>]",
+          "sentence": "The workspace's files as they are now are kept as a checkpoint, held longer than the automatic ones; nothing changes in the files.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Checkpoints of this workspace are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "label",
+              "label": "Name",
+              "help": "What to call it",
+              "kind": "text",
+              "freeTextReason": "a name you choose",
+              "required": {
+                "default": "",
+                "defaultMeans": "a name made from the time"
+              },
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        },
+        {
+          "id": "restore",
+          "label": "Put the files back to a checkpoint",
+          "word": "restore",
+          "line": "/checkpoint restore <checkpoint>",
+          "sentence": "The workspace's files go back to checkpoint {checkpoint} after you see what changes; the current files are kept in a safety checkpoint first, and the conversation is unchanged.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Checkpoints of this workspace are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "checkpoint",
+              "label": "Checkpoint",
+              "help": "Your checkpoints, newest first",
+              "kind": "choice",
+              "choices": {
+                "list": "checkpoints",
+                "allowOther": {
+                  "reason": "a number from the list, newest first, or a checkpoint id"
+                }
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "rewind",
+          "label": "Go back to an earlier turn",
+          "word": "rewind",
+          "line": "/checkpoint rewind <turn> [<what goes back>]",
+          "sentence": "What changed after turn {turn} is taken back ({scope}) once you have seen the plan and said yes: messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
+          "operator": {
+            "terminalOnly": "It rewinds the conversation open in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "turn",
+              "label": "Turn",
+              "help": "The turns of this conversation, newest first",
+              "kind": "choice",
+              "choices": {
+                "list": "checkpoint.turns",
+                "allowOther": {
+                  "reason": "a number from the list, newest first, or a turn id"
+                }
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "scope",
+              "label": "What goes back",
+              "help": "The files, the conversation, or both",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "both",
+                  "label": "Files and conversation"
+                },
+                {
+                  "value": "files",
+                  "label": "Files only",
+                  "help": "The conversation stays as it is"
+                },
+                {
+                  "value": "conversation",
+                  "label": "Conversation only",
+                  "help": "No file changes"
+                }
+              ],
+              "required": {
+                "default": "both",
+                "defaultMeans": "files and conversation"
+              },
+              "typed": {
+                "position": 2
+              }
+            }
+          ]
         }
       ]
     },
@@ -13129,6 +13346,55 @@
       ]
     },
     {
+      "name": "image",
+      "title": "Attach an image",
+      "summary": "Send an image file to the model with your next message",
+      "group": "Conversation",
+      "actions": [
+        {
+          "id": "attach",
+          "label": "Send an image with a message",
+          "word": "",
+          "line": "/image <image file> [<message...>]",
+          "sentence": "{path} is sent to the model with your message, as a new turn.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "It sends a turn in the terminal app's open conversation."
+          },
+          "inputs": [
+            {
+              "id": "path",
+              "label": "Image file",
+              "help": "A .png, .jpg, .jpeg, .webp or .gif file in this project, up to 20 MB",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "message",
+              "label": "Message",
+              "help": "What to ask about it",
+              "kind": "long-text",
+              "freeTextReason": "your own words",
+              "required": {
+                "default": "",
+                "defaultMeans": "\"Attached image:\" and its file name"
+              },
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "intelligence",
       "title": "Code intelligence",
       "summary": "Look up symbols, definitions and references in your code, install the language server a language needs, and see what is ready",
@@ -17599,6 +17865,199 @@
       ]
     },
     {
+      "name": "media",
+      "title": "Images and video",
+      "summary": "Make an image or a video with a configured media provider, and see the providers",
+      "group": "Conversation",
+      "report": "providers",
+      "actions": [
+        {
+          "id": "providers",
+          "label": "See the media providers",
+          "word": "providers",
+          "line": "/media providers",
+          "sentence": "Lists the media providers, what each makes, and whether each is set up.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The media providers are the terminal app's own."
+          },
+          "inputs": []
+        },
+        {
+          "id": "make",
+          "label": "Make an image or a video",
+          "word": "make",
+          "line": "/media make [--as <make>] [--provider <provider>] [--model <model>] [--out <save as>] <description...>",
+          "sentence": "A media provider is asked to make {kind} of \"{prompt}\" and may charge for it; what it makes is saved as a file.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "spends-money",
+          "riskWords": "spends money",
+          "operator": {
+            "terminalOnly": "The media providers are the terminal app's own."
+          },
+          "inputs": [
+            {
+              "id": "prompt",
+              "label": "Description",
+              "help": "What it should show",
+              "kind": "long-text",
+              "freeTextReason": "your own words",
+              "required": true,
+              "typed": {
+                "tail": true
+              }
+            },
+            {
+              "id": "kind",
+              "label": "Make",
+              "help": "A picture or a video",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "image",
+                  "label": "An image"
+                },
+                {
+                  "value": "video",
+                  "label": "A video"
+                }
+              ],
+              "required": {
+                "default": "image",
+                "defaultMeans": "an image"
+              },
+              "typed": {
+                "flag": "--as"
+              }
+            },
+            {
+              "id": "provider",
+              "label": "Provider",
+              "help": "The providers that make media",
+              "kind": "choice",
+              "choices": {
+                "list": "media.providers",
+                "allowOther": {
+                  "reason": "a provider id"
+                }
+              },
+              "required": {
+                "default": "",
+                "defaultMeans": "the first set-up provider that makes it"
+              },
+              "typed": {
+                "flag": "--provider"
+              }
+            },
+            {
+              "id": "model",
+              "label": "Model",
+              "help": "One of the provider's models",
+              "kind": "text",
+              "freeTextReason": "a model id the provider names",
+              "required": {
+                "default": "",
+                "defaultMeans": "the provider's own choice"
+              },
+              "typed": {
+                "flag": "--model"
+              }
+            },
+            {
+              "id": "out",
+              "label": "Save as",
+              "help": "The file to write; a number is added for each further one",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": {
+                "default": "",
+                "defaultMeans": "a new file under generated/ named from the description"
+              },
+              "typed": {
+                "flag": "--out"
+              }
+            }
+          ]
+        },
+        {
+          "id": "collect",
+          "label": "Collect a job that was still being made",
+          "word": "collect",
+          "line": "/media collect <provider> <job> [--out <save as>] [<resume values...>]",
+          "sentence": "Job {task} is collected from {provider} and saved as a file; it was paid for when it was accepted, so nothing new is spent.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The media providers are the terminal app's own."
+          },
+          "inputs": [
+            {
+              "id": "provider",
+              "label": "Provider",
+              "help": "The provider the job was given to",
+              "kind": "choice",
+              "choices": {
+                "list": "media.providers",
+                "allowOther": {
+                  "reason": "a provider id"
+                }
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "task",
+              "label": "Job",
+              "help": "The task id the provider gave",
+              "kind": "text",
+              "freeTextReason": "the id the pending result printed",
+              "required": true,
+              "typed": {
+                "position": 2
+              }
+            },
+            {
+              "id": "out",
+              "label": "Save as",
+              "help": "The file to write; a number is added for each further one",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": {
+                "default": "",
+                "defaultMeans": "a new file under generated/ named from the description"
+              },
+              "typed": {
+                "flag": "--out"
+              }
+            },
+            {
+              "id": "resume",
+              "label": "Resume values",
+              "help": "key=value words, exactly as the pending result printed them",
+              "kind": "text",
+              "freeTextReason": "values the provider gave",
+              "required": {
+                "default": "",
+                "defaultMeans": "none"
+              },
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "memory",
       "title": "Memory",
       "summary": "What the project remembers: decisions, constraints, incidents and patterns, with where each came from",
@@ -20319,8 +20778,8 @@
     {
       "name": "notes",
       "title": "Notes",
-      "summary": "Your scratchpad notes: working context you can later keep as memory, a persona, a skill or a routine",
-      "group": "Agent",
+      "summary": "Notes you keep beside your work: write, find and change them, and keep one as a memory, a persona, a skill or a routine",
+      "group": "Conversation",
       "report": "list",
       "actions": [
         {
@@ -20334,7 +20793,7 @@
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": []
         },
@@ -20349,7 +20808,7 @@
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20381,7 +20840,7 @@
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20402,27 +20861,16 @@
           "label": "Write a note",
           "word": "create",
           "line": "/notes create [--title <title>] [--url <web page>] [--tags <tags>] <text...>",
-          "sentence": "A note \"{title}\" is kept with the text \"{body}\", until you change it.",
+          "sentence": "A note with the text \"{body}\" is kept until you change it; in the terminal app it lasts for this session, and the model keeps seeing it after a compaction.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
           "risk": "none",
           "undoneBy": "delete",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
-            {
-              "id": "title",
-              "label": "Title",
-              "help": "What it is called",
-              "kind": "text",
-              "freeTextReason": "your own words",
-              "required": true,
-              "typed": {
-                "flag": "--title"
-              }
-            },
             {
               "id": "body",
               "label": "Text",
@@ -20432,6 +20880,20 @@
               "required": true,
               "typed": {
                 "tail": true
+              }
+            },
+            {
+              "id": "title",
+              "label": "Title",
+              "help": "What it is called",
+              "kind": "text",
+              "freeTextReason": "your own words",
+              "required": {
+                "default": "",
+                "defaultMeans": "its first words"
+              },
+              "typed": {
+                "flag": "--title"
               }
             },
             {
@@ -20475,7 +20937,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20564,7 +21026,7 @@
           "risk": "none",
           "undoneBy": "stale",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20596,7 +21058,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20633,14 +21095,14 @@
           "label": "Delete a note",
           "word": "delete",
           "line": "/notes delete <note>",
-          "sentence": "Note {note} is removed from this Agent.",
+          "sentence": "Note {note} is removed.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
           "risk": "cannot-be-undone",
           "riskWords": "cannot be undone",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20672,7 +21134,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20782,7 +21244,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20814,7 +21276,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20870,7 +21332,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -20926,7 +21388,7 @@
           "lasts": "kept",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Notes are kept in this Agent's home."
+            "terminalOnly": "Notes are kept by the terminal app."
           },
           "inputs": [
             {
@@ -24929,6 +25391,100 @@
       ]
     },
     {
+      "name": "queue",
+      "title": "Queued messages",
+      "summary": "The messages you typed while a turn runs: see, change or take back one before it is sent",
+      "group": "Conversation",
+      "report": "list",
+      "actions": [
+        {
+          "id": "list",
+          "label": "See your queued messages",
+          "word": "list",
+          "line": "/queue list",
+          "sentence": "Lists the messages waiting to be sent after the running turn, in the order they will go.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The queue is the terminal app's composer."
+          },
+          "inputs": []
+        },
+        {
+          "id": "edit",
+          "label": "Change a queued message",
+          "word": "edit",
+          "line": "/queue edit <message> <new text...>",
+          "sentence": "Queued message {message} is sent as {text} instead, when the running turn ends.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "The queue is the terminal app's composer."
+          },
+          "inputs": [
+            {
+              "id": "message",
+              "label": "Message",
+              "help": "The messages waiting, in order",
+              "kind": "choice",
+              "choices": {
+                "list": "queue.messages"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "text",
+              "label": "New text",
+              "help": "What it says instead",
+              "kind": "long-text",
+              "freeTextReason": "your own words",
+              "required": true,
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        },
+        {
+          "id": "delete",
+          "label": "Take back a queued message",
+          "word": "delete",
+          "line": "/queue delete <message>",
+          "sentence": "Queued message {message} is taken back and never sent.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
+          "operator": {
+            "terminalOnly": "The queue is the terminal app's composer."
+          },
+          "inputs": [
+            {
+              "id": "message",
+              "label": "Message",
+              "help": "The messages waiting, in order",
+              "kind": "choice",
+              "choices": {
+                "list": "queue.messages"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "quit",
       "title": "Quit",
       "summary": "Close this program",
@@ -24999,7 +25555,7 @@
                 {
                   "value": "rewind",
                   "label": "The rewind undone last",
-                  "help": "It is applied again"
+                  "help": "The last /checkpoint rewind that was undone is applied again"
                 }
               ],
               "required": {
@@ -26145,6 +26701,193 @@
               "help": "A bundle written by /remote session-export",
               "kind": "path",
               "freeTextReason": "a file path in this project",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "replay",
+      "title": "Replay recorded runs",
+      "summary": "Every turn is recorded as a run: load one, step through it, compare it with another, and save the report",
+      "group": "Sessions",
+      "report": "status",
+      "actions": [
+        {
+          "id": "status",
+          "label": "See the loaded run",
+          "word": "status",
+          "line": "/replay status",
+          "sentence": "Shows which recorded run is loaded and where in it you are.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "runs",
+          "label": "See the recorded runs",
+          "word": "runs",
+          "line": "/replay runs",
+          "sentence": "Lists the runs recorded so far, one per turn.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "load",
+          "label": "Load a recorded run",
+          "word": "load",
+          "line": "/replay load <run>",
+          "sentence": "Run {run} is loaded for stepping through, from its first event.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "run",
+              "label": "Run",
+              "help": "The recorded runs, newest first",
+              "kind": "choice",
+              "choices": {
+                "list": "replay.runs",
+                "allowOther": {
+                  "reason": "a run id"
+                }
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "step",
+          "label": "Step through the loaded run",
+          "word": "step",
+          "line": "/replay step [<steps>]",
+          "sentence": "The loaded run goes forward by the number of events given, each one shown.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "count",
+              "label": "Steps",
+              "help": "How many events to go forward",
+              "kind": "number",
+              "freeTextReason": "a whole number from 1",
+              "required": {
+                "default": "1",
+                "defaultMeans": "one event"
+              },
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "seek",
+          "label": "Jump to a point in the loaded run",
+          "word": "seek",
+          "line": "/replay seek <revision>",
+          "sentence": "The loaded run jumps to revision {rev}.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "rev",
+              "label": "Revision",
+              "help": "The event number to jump to; 0 is the start",
+              "kind": "number",
+              "freeTextReason": "a whole number from 0",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "diff",
+          "label": "Compare the loaded run with another",
+          "word": "diff",
+          "line": "/replay diff <other run>",
+          "sentence": "Compares the loaded run with run {run}, event by event, and lists where they differ.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "run",
+              "label": "Other run",
+              "help": "The recorded runs, newest first",
+              "kind": "choice",
+              "choices": {
+                "list": "replay.runs",
+                "allowOther": {
+                  "reason": "a run id"
+                }
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "export",
+          "label": "Save the replay report to a file",
+          "word": "export",
+          "line": "/replay export <file>",
+          "sentence": "The report of the loaded run, with every difference found, is written to {path}.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Recorded runs are kept by the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "path",
+              "label": "File",
+              "help": "Where to write the JSON report",
+              "kind": "path",
+              "freeTextReason": "a file path",
               "required": true,
               "typed": {
                 "position": 1
@@ -36085,7 +36828,7 @@
     {
       "name": "undo",
       "title": "Undo",
-      "summary": "Take back the last turn, file change or rewind",
+      "summary": "Take back the last turn, file change or /checkpoint rewind",
       "group": "Conversation",
       "actions": [
         {
@@ -36126,7 +36869,7 @@
                 {
                   "value": "rewind",
                   "label": "The last rewind",
-                  "help": "The conversation and files go back to before it"
+                  "help": "The conversation and files go back to before the last /checkpoint rewind"
                 }
               ],
               "required": {
@@ -36340,6 +37083,154 @@
       ]
     },
     {
+      "name": "usage",
+      "title": "Usage",
+      "summary": "Tokens, cost and context pressure, the spending alert, and cost by who spent it",
+      "group": "Models",
+      "report": "open",
+      "actions": [
+        {
+          "id": "open",
+          "label": "See usage and cost",
+          "word": "open",
+          "line": "/usage open [<show>]",
+          "sentence": "Opens the Usage view: context pressure, this session's tokens and cost, turn by turn and per agent.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "It is a terminal screen."
+          },
+          "inputs": [
+            {
+              "id": "tab",
+              "label": "Show",
+              "help": "Which part of the Usage view",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "overview",
+                  "label": "Overview",
+                  "help": "Context pressure, tokens and cost"
+                },
+                {
+                  "value": "turns",
+                  "label": "Turn by turn"
+                },
+                {
+                  "value": "agents",
+                  "label": "Per agent"
+                }
+              ],
+              "required": {
+                "default": "overview",
+                "defaultMeans": "the overview"
+              },
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "alert",
+          "label": "Set a spending alert",
+          "word": "alert",
+          "line": "/usage alert <dollars>",
+          "sentence": "You will be warned when this session's cost passes ${usd} (0 turns the warning off), until you change it.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "operator": {
+            "method": "config.set",
+            "fields": {
+              "value": "usd"
+            }
+          },
+          "inputs": [
+            {
+              "id": "usd",
+              "label": "Dollars",
+              "help": "Warn when this session's cost passes it; 0 turns the alert off",
+              "kind": "money",
+              "freeTextReason": "an amount in dollars",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "attribution",
+          "label": "See cost by who spent it",
+          "word": "by-source",
+          "line": "/usage by-source [<over>] [--as <as>]",
+          "sentence": "Shows what the daemon spent, split by agent, model, provider and the other ways it records cost.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "method": "cost.attribution.get",
+            "fields": {
+              "window": "window"
+            }
+          },
+          "inputs": [
+            {
+              "id": "window",
+              "label": "Over",
+              "help": "How far back",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "24h",
+                  "label": "The last 24 hours"
+                },
+                {
+                  "value": "7d",
+                  "label": "The last 7 days"
+                }
+              ],
+              "required": {
+                "default": "24h",
+                "defaultMeans": "the last 24 hours"
+              },
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "as",
+              "label": "As",
+              "help": "Text, or JSON for programs",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "text",
+                  "label": "Text"
+                },
+                {
+                  "value": "json",
+                  "label": "JSON"
+                }
+              ],
+              "required": {
+                "default": "text",
+                "defaultMeans": "text"
+              },
+              "typed": {
+                "flag": "--as"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "verbosity",
       "title": "How much the app prints",
       "summary": "Set how much the app prints: quiet, balanced or operator",
@@ -36451,6 +37342,319 @@
               "required": true,
               "typed": {
                 "position": 2
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "voice",
+      "title": "Voice",
+      "summary": "Hear answers spoken, set up the local voice runtime and the wake word, and keep the voice settings as a file",
+      "group": "Experience",
+      "report": "review",
+      "actions": [
+        {
+          "id": "review",
+          "label": "See your voice settings",
+          "word": "review",
+          "line": "/voice review",
+          "sentence": "Shows whether every answer is spoken aloud and how voice is set up here.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "speak",
+          "label": "Ask and hear the answer spoken",
+          "word": "speak",
+          "line": "/voice speak <message...>",
+          "sentence": "{prompt} is sent as a message and the answer is played aloud.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "prompt",
+              "label": "Message",
+              "help": "What to ask",
+              "kind": "long-text",
+              "freeTextReason": "your own words",
+              "required": true,
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        },
+        {
+          "id": "stop",
+          "label": "Stop what is being spoken",
+          "word": "stop",
+          "line": "/voice stop",
+          "sentence": "Whatever is being played aloud now stops.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "on",
+          "label": "Speak every answer aloud",
+          "word": "on",
+          "line": "/voice on",
+          "sentence": "Every answer will be played aloud until you change it.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "undoneBy": "off",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "off",
+          "label": "Stop speaking every answer",
+          "word": "off",
+          "line": "/voice off",
+          "sentence": "Answers will no longer be played aloud, until you change it.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "undoneBy": "on",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "status",
+          "label": "See the local voice runtime",
+          "word": "status",
+          "line": "/voice status",
+          "sentence": "Shows whether speech output and speech-to-text are installed here, and an install in progress.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "setup",
+          "label": "Install the local voice runtime",
+          "word": "setup",
+          "line": "/voice setup",
+          "sentence": "The local speech output and, where this machine has a published bundle, speech-to-text are downloaded and set up; it can be hundreds of megabytes.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "wake-status",
+          "label": "See wake-word detection",
+          "word": "wake-status",
+          "line": "/voice wake-status",
+          "sentence": "Shows whether the wake-word models are here and how listening for the wake word is set.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "wake-setup",
+          "label": "Set up the wake word",
+          "word": "wake-setup",
+          "line": "/voice wake-setup [--with-speech-to-text]",
+          "sentence": "The wake-word models are downloaded and checked, and speech-to-text is installed too when chosen.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "stt",
+              "label": "Speech-to-text",
+              "help": "What makes a wake word useful",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "no",
+                  "label": "Only say whether it is needed"
+                },
+                {
+                  "value": "yes",
+                  "label": "Install it too"
+                }
+              ],
+              "required": {
+                "default": "no",
+                "defaultMeans": "only say whether it is needed"
+              },
+              "typed": {
+                "flag": "--with-speech-to-text",
+                "switchOn": "yes"
+              }
+            }
+          ]
+        },
+        {
+          "id": "export",
+          "label": "Save your voice settings to a file",
+          "word": "export",
+          "line": "/voice export <file>",
+          "sentence": "The voice settings you changed from their defaults are written to {path}.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "path",
+              "label": "File",
+              "help": "Where to write them",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "inspect",
+          "label": "Read a voice settings file",
+          "word": "inspect",
+          "line": "/voice inspect <file>",
+          "sentence": "Shows the settings in {path} without applying them.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "path",
+              "label": "File",
+              "help": "The file to read",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "import",
+          "label": "Apply voice settings from a file",
+          "word": "import",
+          "line": "/voice import <file>",
+          "sentence": "The voice settings in {path} are applied until you change it.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "path",
+              "label": "File",
+              "help": "The file to apply",
+              "kind": "path",
+              "freeTextReason": "a file path",
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "web-search",
+      "title": "Search the web",
+      "summary": "Search the web and list ranked results with where each came from",
+      "group": "Knowledge",
+      "actions": [
+        {
+          "id": "search",
+          "label": "Search the web for words",
+          "word": "",
+          "line": "/web-search [--limit <how many>] <words...>",
+          "sentence": "{query} is sent to the web search provider and the ranked results are listed here.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Web search runs in the terminal app."
+          },
+          "inputs": [
+            {
+              "id": "query",
+              "label": "Words",
+              "help": "What to search for",
+              "kind": "text",
+              "freeTextReason": "your own words",
+              "required": true,
+              "typed": {
+                "tail": true
+              }
+            },
+            {
+              "id": "limit",
+              "label": "How many",
+              "help": "How many results to list",
+              "kind": "number",
+              "freeTextReason": "a whole number",
+              "required": {
+                "default": "",
+                "defaultMeans": "the provider's usual number"
+              },
+              "typed": {
+                "flag": "--limit"
               }
             }
           ]
@@ -37984,7 +39188,7 @@
               "label": "Its id",
               "help": "The session's or task's id",
               "kind": "text",
-              "freeTextReason": "an id from /sessions or /tasks",
+              "freeTextReason": "an id from /session list or /tasks",
               "required": true,
               "typed": {
                 "position": 2
@@ -38031,7 +39235,7 @@
               "label": "Its id",
               "help": "The session's or task's id",
               "kind": "text",
-              "freeTextReason": "an id from /sessions or /tasks",
+              "freeTextReason": "an id from /session list or /tasks",
               "required": true,
               "typed": {
                 "position": 2
@@ -38078,7 +39282,7 @@
               "label": "Its id",
               "help": "The session's or task's id",
               "kind": "text",
-              "freeTextReason": "an id from /sessions or /tasks",
+              "freeTextReason": "an id from /session list or /tasks",
               "required": true,
               "typed": {
                 "position": 2
@@ -38366,6 +39570,12 @@
         "label": "surfaceKind",
         "detail": "model"
       }
+    },
+    "checkpoint.turns": {
+      "terminalOnly": "The turns are the open conversation's, in the terminal app."
+    },
+    "checkpoints": {
+      "terminalOnly": "Checkpoints of this workspace are kept by the terminal app."
     },
     "ci.watches": {
       "method": "ci.watches.list",
@@ -38655,6 +39865,9 @@
         "label": "."
       }
     },
+    "media.providers": {
+      "terminalOnly": "The media providers are the terminal app's own."
+    },
     "memory.copies": {
       "method": "memory.snapshots.list",
       "input": {},
@@ -38709,7 +39922,7 @@
       "terminalOnly": "Agent-local skills are kept on this machine."
     },
     "notes": {
-      "terminalOnly": "Notes are kept in this Agent's home."
+      "terminalOnly": "Notes are kept by the terminal app."
     },
     "notify.failed": {
       "method": "notifications.deadLetters.list",
@@ -38811,6 +40024,9 @@
         "label": "label"
       }
     },
+    "queue.messages": {
+      "terminalOnly": "The queue is the terminal app's composer."
+    },
     "remote.artifacts": {
       "terminalOnly": "Remote runners belong to the terminal app that dispatched them."
     },
@@ -38828,6 +40044,9 @@
     },
     "remote.supervised": {
       "terminalOnly": "Remote runners belong to the terminal app that dispatched them."
+    },
+    "replay.runs": {
+      "terminalOnly": "Recorded runs are kept by the terminal app."
     },
     "routines": {
       "terminalOnly": "Routines are kept in this Agent's home."

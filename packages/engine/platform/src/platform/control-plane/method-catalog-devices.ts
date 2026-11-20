@@ -213,7 +213,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'devices.grants.list',
     title: 'List Device Capability Grants',
-    description: 'The durable "always allow" grants a person gave, per capability and per device, with when each was granted, when it expires, and how often it has been used, plus the recent ledger of grants given, used, revoked, and expired.',
+    description: 'The durable "always allow" grants a person gave, per capability and per device, with when each was granted, when it expires, and how often it has been used, plus the ledger, newest `limit` records (default 100; a larger limit reads further back): every grant given and every one revoked or expired is kept for good, uses for 30 days (the newest 500).',
     category: 'runtime',
     effects: ['remote.read'],
     http: { method: 'GET', path: '/api/devices/grants' },

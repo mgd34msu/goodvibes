@@ -54,6 +54,7 @@ export {
 export {
   TERMINAL_ESCAPES,
   createTerminalLifecycle,
+  ignoreGoneTerminalWrites,
   type TerminalEscapes,
   type TerminalSequenceSet,
   type TerminalLifecycleDeps,

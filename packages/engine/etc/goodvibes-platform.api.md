@@ -5194,6 +5194,7 @@ export interface OperatorMethodInputMap {
     "companion.chat.sessions.list": {
         includeClosed?: boolean;
         limit?: number;
+        cursor?: string;
     };
     // (undocumented)
     "companion.chat.sessions.reopen": {
@@ -5497,6 +5498,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "email.drafts.list": {
         limit?: number;
+        before?: number;
     };
     // (undocumented)
     "email.expectation.cancel": {
@@ -6145,6 +6147,7 @@ export interface OperatorMethodInputMap {
         kinds?: readonly ("approval" | "claim" | "decision" | "purchase" | "question" | "queued-action" | "report")[];
         sessionId?: string;
         limit?: number;
+        cursor?: string;
     };
     // (undocumented)
     "inbox.post": {
@@ -15344,6 +15347,8 @@ export interface OperatorMethodOutputMap {
             active: number;
             closed: number;
         };
+        hasMore?: boolean;
+        nextCursor?: string;
     };
     // (undocumented)
     "companion.chat.sessions.reopen": {
@@ -25142,6 +25147,8 @@ export interface OperatorMethodOutputMap {
             };
         })[];
         revision: number;
+        hasMore?: boolean;
+        nextCursor?: string;
     };
     // (undocumented)
     "inbox.post": {

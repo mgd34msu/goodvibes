@@ -4681,7 +4681,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "approval"
       ],
       "sessionId": "sample",
-      "limit": 0
+      "limit": 0,
+      "cursor": "sample"
     },
     "output": {
       "items": [
@@ -4837,7 +4838,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         }
       ],
-      "revision": 0
+      "revision": 0,
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "inbox.post": {
@@ -10975,7 +10978,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "companion.chat.sessions.list": {
     "input": {
       "includeClosed": false,
-      "limit": 0
+      "limit": 0,
+      "cursor": "sample"
     },
     "output": {
       "sessions": [
@@ -10998,7 +11002,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessions": 0,
         "active": 0,
         "closed": 0
-      }
+      },
+      "hasMore": false,
+      "nextCursor": "sample"
     }
   },
   "companion.chat.sessions.reopen": {
@@ -17109,7 +17115,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "email.drafts.list": {
     "input": {
-      "limit": 0
+      "limit": 0,
+      "before": 0
     },
     "output": {
       "drafts": [

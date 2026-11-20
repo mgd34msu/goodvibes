@@ -9381,7 +9381,7 @@ The asking session reports what became of the answer to a question it posted: `d
 
 #### `inbox.list`
 
-Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. Calls Jev decided for the owner at the permission gate are kind decision: open while the owner can still act on one (undo, never, always, ask, keep), and listed only when `kinds` names decision or the status is closed or all. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number. An approval item carries the approval's own `revision` and its `reading` for the caller (approvals.list describes it), and its `options` are what this caller may answer: an agent reading the inbox is offered none. Every item carries its `presentation`: the question in a sentence, what it will do (`consequence`, tone `cannot-undo` only for what cannot be undone), its `choices` with their keys, whether an answer can be remembered, why the owner is asked and the rest as `details`, worded once by the daemon so every surface shows the same words; an approval item's `title` is its presentation's. A delivered answer was put on a model request the provider accepted; one put on a request by a process that then died is handed to its asker again.
+Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. Calls Jev decided for the owner at the permission gate are kind decision: open while the owner can still act on one (undo, never, always, ask, keep), and listed only when `kinds` names decision or the status is closed or all. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. One page holds `limit` items (default 100, at most 500); while `hasMore` is true, pass `nextCursor` back as `cursor` for the older page, so every item is reachable (a cursor the list did not return is 400 INVALID_CURSOR). An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number. An approval item carries the approval's own `revision` and its `reading` for the caller (approvals.list describes it), and its `options` are what this caller may answer: an agent reading the inbox is offered none. Every item carries its `presentation`: the question in a sentence, what it will do (`consequence`, tone `cannot-undo` only for what cannot be undone), its `choices` with their keys, whether an answer can be remembered, why the owner is asked and the rest as `details`, worded once by the daemon so every surface shows the same words; an approval item's `title` is its presentation's. A delivered answer was put on a model request the provider accepted; one put on a request by a process that then died is handed to its asker again.
 
 - Title: `List Owner Inbox`
 - Source: `builtin`
@@ -9430,6 +9430,9 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
     },
     "limit": {
       "type": "number"
+    },
+    "cursor": {
+      "type": "string"
     }
   },
   "additionalProperties": false
@@ -10159,6 +10162,12 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
     },
     "revision": {
       "type": "number"
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "nextCursor": {
+      "type": "string"
     }
   },
   "required": [
@@ -44094,7 +44103,7 @@ Return a companion-chat session record together with its full message history.
 
 #### `companion.chat.sessions.list`
 
-List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.
+List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts.
 
 - Title: `List Companion Chat Sessions`
 - Source: `builtin`
@@ -44117,6 +44126,9 @@ List active companion-chat sessions. Pass `includeClosed` to include recently cl
     },
     "limit": {
       "type": "number"
+    },
+    "cursor": {
+      "type": "string"
     }
   },
   "additionalProperties": false
@@ -44258,6 +44270,12 @@ List active companion-chat sessions. Pass `includeClosed` to include recently cl
         "closed"
       ],
       "additionalProperties": false
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "nextCursor": {
+      "type": "string"
     }
   },
   "required": [
@@ -83721,7 +83739,7 @@ Replace one saved draft in the IMAP Drafts folder with an edited one, so the fol
 
 #### `email.drafts.list`
 
-Return the newest drafts (default 25, at most 100) in the account's Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer; `uidValidity` is the Drafts folder generation the UIDs belong to, which email.draft.update needs to replace one. Read-only.
+Return the newest drafts (default 25, at most 100) in the account's Drafts folder, newest first, each with its recipient, subject, date, the Message-ID it replies to and up to 64 KB of body text, so a draft can be reopened in a composer; `uidValidity` is the Drafts folder generation the UIDs belong to, which email.draft.update needs to replace one. `before` (a UID) reads the page of drafts older than it: pass the smallest UID of a page to read the one before, until `total` drafts are read. Read-only.
 
 - Title: `List Email Drafts`
 - Source: `builtin`
@@ -83740,6 +83758,9 @@ Return the newest drafts (default 25, at most 100) in the account's Drafts folde
   "type": "object",
   "properties": {
     "limit": {
+      "type": "number"
+    },
+    "before": {
       "type": "number"
     }
   },
@@ -149733,7 +149754,7 @@ Ask one paired device node for one capability, a photo, a screen capture, a loca
 
 #### `devices.grants.list`
 
-The durable "always allow" grants a person gave, per capability and per device, with when each was granted, when it expires, and how often it has been used, plus the recent ledger of grants given, used, revoked, and expired.
+The durable "always allow" grants a person gave, per capability and per device, with when each was granted, when it expires, and how often it has been used, plus the ledger, newest `limit` records (default 100; a larger limit reads further back): every grant given and every one revoked or expired is kept for good, uses for 30 days (the newest 500).
 
 - Title: `List Device Capability Grants`
 - Source: `builtin`

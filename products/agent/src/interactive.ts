@@ -81,7 +81,7 @@ import { getSharedNotificationFeed } from './core/notifications-feed.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
-import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
+import { createTerminalLifecycle, ignoreGoneTerminalWrites, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
 import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
@@ -445,6 +445,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   let externalEditorOpen = false;
   // The window in which this app owns the screen: opened by the enter sequence below, closed by exitApp before the terminal-restore write. render() paints only inside it, see shell/terminal-paint-window.ts for what the early frames did to the boot surface and to the shell's screen.
   let terminalOutputGuard: ReturnType<typeof installFullScreenTerminalOutputGuard> | undefined;
+  // A closed window or hung-up pty ends the session through stdin, not as a crash.
+  ignoreGoneTerminalWrites(stdout);
   const terminalLifecycle = createTerminalLifecycle({
     write: (data) => { stdout.write(data); },
     noAltScreen: cli.flags.noAltScreen,

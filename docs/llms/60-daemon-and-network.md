@@ -768,7 +768,7 @@ Old addresses still work: `?view=sessions` and `?view=hosted-sessions` open Work
 
 ### The settings dialog
 
-The settings dialog opens from the account menu, or with `?settings=<section>` in the address. It has seven pages; each holds one or more sections:
+The settings dialog opens from the account menu, or with `?settings=<section>` in the address. The account menu's "Earlier notices" lists every toast the page has shown, newest first, until the page is closed or another account signs in. It has seven pages; each holds one or more sections:
 
 | Page | Sections (`?settings=` id) | What they hold |
 | --- | --- | --- |
@@ -1546,7 +1546,7 @@ End a session with `goodvibes-daemon sessions kill <id>` or `sessions.hosted.kil
 
 The fleet is every agent and process the daemon is responsible for: spawned agents, Agent Client Protocol agents it hosts, contract units, workflows, triggers, schedules, watchers and background processes. `fleet.maxSize` (default 8) is the ceiling on agents this daemon runs at once; agents launched outside GoodVibes and only observed do not count.
 
-The web UI shows the fleet in Work, grouped by the work board (the reading in `@goodvibes-jev/engine/contracts` `readWorkBoard`, the same one the terminal's "Your agents" panel reads): Waiting for you (every open ask: approvals and the owner inbox's questions, purchase windows, claims, held actions and reports, each in the words of its presentation), Running now (only nodes that serve you in a working state, running tasks and hosted turns), Scheduled (idle or paused schedules, triggers, watchers and CI watches) and Finished (the ten newest). A node's `serves` field decides whether it is yours or the platform's own: a `system` node (heartbeats, pollers, the code index) is counted in the line "Background services: N healthy" and listed only while stalled or failed. The header chip, the sidebar badge and the account menu read the board's counts. An approval for a chat also shows inline in that chat, with its choices. The API methods (all through the invoke route; see the next part) are:
+The web UI shows the fleet in Work, grouped by the work board (the reading in `@goodvibes-jev/engine/contracts` `readWorkBoard`, the same one the terminal's "Your agents" panel reads): Waiting for you (every open ask: approvals and the owner inbox's questions, purchase windows, claims, held actions and reports, each in the words of its presentation), Running now (only nodes that serve you in a working state, running tasks and hosted turns), Scheduled (idle or paused schedules, triggers, watchers and CI watches) and Finished (the ten newest). "Open sessions between turns" lists the newest 50 sessions; "Show older sessions" reads further back with `sessions.search` until every one is listed. A node's `serves` field decides whether it is yours or the platform's own: a `system` node (heartbeats, pollers, the code index) is counted in the line "Background services: N healthy" and listed only while stalled or failed. The header chip, the sidebar badge and the account menu read the board's counts. An approval for a chat also shows inline in that chat, with its choices. The API methods (all through the invoke route; see the next part) are:
 
 | Method | Does |
 | --- | --- |

@@ -115,6 +115,8 @@ export class AgentsModal implements SurfaceModal {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private closed = false;
   private readonly hostedViewport = new HostedTranscriptViewport();
+  /** An opened agent's view: rows scrolled up from its live bottom, for the tab it was set on; ↑↓ PgUp PgDn Home End move it. */
+  private agentScroll = { nodeId: '', rows: 0, max: 0, page: 1 };
   /**
    * The fleet as last read, shared by every helper of a frame. Dropped when the
    * registry reports a change, on the elapsed-time tick and around every key,
@@ -582,6 +584,17 @@ export class AgentsModal implements SurfaceModal {
       }
       if (token.type === 'text' && token.value === 'f') { this.hostedViewport.latest(); return; }
     }
+    if (token.type === 'key' && !token.ctrl && !token.meta && !this.hostedFull) {
+      const name = token.logicalName ?? '';
+      const scroll = this.agentScroll;
+      const to = (rows: number): void => { this.agentScroll = { ...scroll, rows: Math.max(0, Math.min(scroll.max, rows)) }; this.deps.requestRender(); };
+      if (name === 'up') { to(scroll.rows + 1); return; }
+      if (name === 'down') { to(scroll.rows - 1); return; }
+      if (name === 'pageup') { to(scroll.rows + scroll.page); return; }
+      if (name === 'pagedown') { to(scroll.rows - scroll.page); return; }
+      if (name === 'home') { to(scroll.max); return; }
+      if (name === 'end') { to(0); return; }
+    }
     if (token.type === 'key') {
       const name = token.logicalName ?? '';
       if (token.ctrl && name === 'x') {
@@ -670,9 +683,16 @@ export class AgentsModal implements SurfaceModal {
       return renderFleetContractSummary(members, width, live === null || isTerminalProcessState(live.state), contract);
     }
     const isTerminal = live ? isTerminalProcessState(live.state) : true;
+    // Another tab starts at its live bottom.
+    if (this.agentScroll.nodeId !== tab.nodeId) this.agentScroll = { nodeId: tab.nodeId, rows: 0, max: 0, page: 1 };
+    const scrolled = this.agentScroll.rows;
+    const page = Math.max(1, height - 1);
     const snapshot = this.deps.actions.getConversationSnapshot(tab.nodeId);
-    const result = renderFleetAgentTranscript(snapshot, isTerminal, tab.lineCache, width, height, this.deps.configManager ?? null);
-    if (result.mode !== 'unavailable') return result.lines;
+    const result = renderFleetAgentTranscript(snapshot, isTerminal, tab.lineCache, width, height, this.deps.configManager ?? null, scrolled);
+    if (result.mode !== 'unavailable') {
+      this.agentScroll = { nodeId: tab.nodeId, rows: Math.min(scrolled, result.maxScroll ?? 0), max: result.maxScroll ?? 0, page };
+      return result.lines;
+    }
     if (!tab.ledgerLoadStarted) {
       tab.ledgerLoadStarted = true;
       readFile(this.deps.actions.resolveSessionLogPath(tab.nodeId), 'utf-8')
@@ -680,7 +700,9 @@ export class AgentsModal implements SurfaceModal {
         .catch(() => { tab.ledgerEntries = []; })
         .finally(() => this.deps.requestRender());
     }
-    return tab.ledgerEntries !== null ? renderFleetLedgerFallback(tab.ledgerEntries, width, height) : renderFleetTranscriptLoading(width);
+    return tab.ledgerEntries !== null
+      ? renderFleetLedgerFallback(tab.ledgerEntries, width, height, scrolled, (max) => { this.agentScroll = { nodeId: tab.nodeId, rows: Math.min(scrolled, max), max, page }; })
+      : renderFleetTranscriptLoading(width);
   }
 
   /** The headline, and when the service capped its answer, how much of it is shown. */
@@ -704,6 +726,7 @@ export class AgentsModal implements SurfaceModal {
       const hints: KitHint[] = [];
       if (live && node.capabilities.steerable) hints.push(['s', 'steer']);
       if (live && node.capabilities.killable) hints.push(['ctrl+x', 'stop (asks first)']);
+      if (this.agentScroll.max > 0) hints.push(['↑↓ home', this.agentScroll.rows > 0 ? 'scrolled back (end: latest)' : 'scroll back to the first row']);
       hints.push(['[ ]', 'other agents'], ['esc', 'back']);
       return hints;
     }

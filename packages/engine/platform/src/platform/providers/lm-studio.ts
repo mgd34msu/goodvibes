@@ -170,7 +170,7 @@ export class LMStudioProvider implements LLMProvider {
         toolCalling: true,
         parallelTools: true,
         promptCaching: false,
-        notes: ['LM Studio prefers native chat SSE when possible and falls back to the responses or OpenAI-compatible path when needed.'],
+        notes: ['LM Studio native chat SSE carries a single message without tools; every other request, and every request with tools, goes by the responses or OpenAI-compatible path with the whole transcript (native chat takes no client tool definitions).'],
       },
       policy: {
         local: true,

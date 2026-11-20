@@ -10,7 +10,7 @@ import {
   isExternalSurfaceSelectedByDefault,
   type ExternalSurfaceSpec,
 } from './onboarding-wizard-external-surfaces.ts';
-import { buildFeatureUnitSteps, onboardingConfigBaseline } from './onboarding-feature-units.ts';
+import { buildFeatureUnitSteps } from './onboarding-feature-units.ts';
 import { getBlockingFieldLabels } from './onboarding-wizard-state.ts';
 import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type OpenAI from 'openai';
 import { createOpenAIClient } from './optional-openai.js';
@@ -32,7 +31,6 @@ export type NativeChatResult = {
     output_tokens?: number | undefined;
     total_output_tokens?: number | undefined;
   };
-  response_id?: string | undefined;
 };
 
 export type NativeChatContext = {

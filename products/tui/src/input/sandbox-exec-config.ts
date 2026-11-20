@@ -51,6 +51,7 @@ export function readSandboxExecList(configManager: Pick<ConfigManager, 'get'>, k
 
 export const SANDBOX_EGRESS_ALLOWLIST_SYNTHETIC_SETTING: ConfigSetting = {
   key: SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY,
+  label: 'Commands allowed on the network in the sandbox',
   type: 'string',
   default: [],
   description: 'Comma-separated command base names (or "*" for all) whose network access is re-enabled inside the per-command exec sandbox boundary, as a named escalation the approval flow surfaces ("wants network"). Empty = the sandbox disables network for every command. Only takes effect when sandbox.enabled is on, the exec-sandbox setting is on, and bubblewrap is available (Linux only; reports unavailable elsewhere).',
@@ -58,6 +59,7 @@ export const SANDBOX_EGRESS_ALLOWLIST_SYNTHETIC_SETTING: ConfigSetting = {
 
 export const SANDBOX_WORKSPACE_WRITABLE_SYNTHETIC_SETTING: ConfigSetting = {
   key: SANDBOX_WORKSPACE_WRITABLE_CONFIG_KEY,
+  label: 'Extra folders commands may write in the sandbox',
   type: 'string',
   default: [],
   description: 'Comma-separated absolute paths outside the workspace bound writable into the exec sandbox boundary of EVERY sandboxed command. There is no per-command approval for these paths: any command the sandbox auto-allows can write there, so list only paths you are content to open to all of them. Empty = only the workspace (and an isolated /tmp) is writable. Only takes effect when sandbox.enabled is on, the exec-sandbox setting is on, and bubblewrap is available (Linux only; reports unavailable elsewhere).',

@@ -67,6 +67,9 @@ export interface AskCardState {
   readonly awaitingTab?: boolean | undefined;
 }
 
+/** Columns from the question's glyph to its text: the body, buttons and keys line up with the text. */
+const BODY_INDENT = 2;
+
 /** Diff lines drawn for one change before a trailer counts the rest; every change is drawn. */
 const MAX_CHANGE_LINES = 10;
 
@@ -265,8 +268,8 @@ function subjectRows(presentation: AskPresentation, request: PermissionPromptReq
   const t = activeTokens();
   const subject = presentation.subject;
   if (!subject) return [];
-  const indent = '  ';
-  const room = Math.max(8, width - indent.length - 2);
+  const indent = '';
+  const room = Math.max(8, width - 2);
   if (subject.kind === 'command') {
     const [command, ...rest] = subject.lines;
     const rows: CardRow[] = [];
@@ -354,7 +357,7 @@ function keyRows(keys: { hints: KitHint[]; tail?: string | undefined }, width: n
   if (!keys.tail) return { rows, tailOwnRow: false };
   const last = rows[rows.length - 1] ?? [];
   const used = last.reduce((sum, [key, action], i) => sum + (i > 0 ? 3 : 0) + getDisplayWidth(key) + 3 + getDisplayWidth(action), 0);
-  return { rows, tailOwnRow: used + 3 + getDisplayWidth(keys.tail) > width };
+  return { rows, tailOwnRow: used + 2 + getDisplayWidth(keys.tail) > width };
 }
 
 /** A chosen button: the brand gradient with dark bold text; the rest quiet chips. */
@@ -386,17 +389,18 @@ export function renderAskCard(
   const t = activeTokens();
   const width = standardModalWidth(screenWidth);
   const inner = modalInnerWidth(width);
-  const body = bodyRows(presentation, request, state, inner);
+  // Everything under the question lines up with its text, two columns in from the glyph.
+  const body = bodyRows(presentation, request, state, inner - BODY_INDENT);
   const buttons = askCardButtons(presentation, request);
   const keys = cardKeys(presentation, request, state);
-  const keyLayout = keyRows(keys, inner);
+  const keyLayout = keyRows(keys, inner - BODY_INDENT);
   const keyHeight = keyLayout.rows.length + (keyLayout.tailOwnRow ? 1 : 0);
   // Buttons wrap only when a narrow screen cannot hold them on one row.
-  const buttonRows = buttons.length === 0 ? 0 : buttonsWidth(buttons) <= inner ? 1 : buttons.length;
+  const buttonRows = buttons.length === 0 ? 0 : buttonsWidth(buttons) <= inner - BODY_INDENT ? 1 : buttons.length;
   const remember = presentation.remember;
   const tiers = state.submenuOpen && remember.offered ? remember.tiers : [];
   const submenuIndex = Math.max(0, Math.min(state.submenuIndex ?? 0, tiers.length - 1));
-  const tierX0 = MODAL_PAD_X + 2;
+  const tierX0 = MODAL_PAD_X + BODY_INDENT + 2;
   const tierX1 = width - MODAL_PAD_X - 1;
   const tierRows = tiers.map((tier, i): KitRow => ({ label: `${i + 1}  ${tier.label}`, desc: tier.detail, selected: i === submenuIndex }));
   const tierHeight = tierRows.reduce((sum, row) => sum + measureRow(row, tierX0, tierX1), 0);
@@ -437,12 +441,12 @@ export function renderAskCard(
   for (let i = 0; i < capacity && scroll + i < body.length; i++) {
     const row = body[scroll + i]!;
     const y = f.top + i;
-    if (row.inset) f.canvas.fill(f.l - 2, y, f.r - f.l + 5, 1, row.tint ?? t.backgroundElement);
+    if (row.inset) f.canvas.fill(f.l, y, f.r - f.l + 3, 1, row.tint ?? t.backgroundElement);
     if (row.cursor) {
-      drawRow(f.canvas, y, { spans: row.spans.map((s) => ({ ...s, fg: undefined })), selected: true }, f.l, f.r);
+      drawRow(f.canvas, y, { spans: row.spans.map((s) => ({ ...s, fg: undefined })), selected: true }, f.l + BODY_INDENT, f.r);
       continue;
     }
-    let x = f.l;
+    let x = f.l + BODY_INDENT;
     for (const span of row.spans) x = f.canvas.put(x, y, span.text, { fg: span.fg ?? t.text, bold: span.bold });
   }
   const hidden = scrollCountText(scroll, Math.max(0, body.length - scroll - capacity));
@@ -451,9 +455,9 @@ export function renderAskCard(
   if (buttonRows > 0) {
     y++;
     const chosen = askCardChoice(presentation, request, state);
-    let bx = f.l;
+    let bx = f.l + BODY_INDENT;
     buttons.forEach((choice, i) => {
-      if (buttonRows > 1 && i > 0) { y++; bx = f.l; }
+      if (buttonRows > 1 && i > 0) { y++; bx = f.l + BODY_INDENT; }
       bx = drawButton(f.canvas, bx, y, choice.label, i === chosen) + 2;
     });
     // Why nothing is offered to remember, beside the buttons ("always asks · can't be remembered").
@@ -473,15 +477,15 @@ export function renderAskCard(
 
   // The keys, on the last rows, then the dim tail.
   let ky = f.bottom - keyHeight + 1;
-  let lastEnd = f.l;
+  let lastEnd = f.l + BODY_INDENT;
   for (const hintRow of keyLayout.rows) {
     const line = f.canvas.lines[ky];
-    if (line) lastEnd = paintKeycapHints(line, f.l, f.r + 1, hintRow, { fg: t.textMuted });
+    if (line) lastEnd = paintKeycapHints(line, f.l + BODY_INDENT, f.r + 1, hintRow, { fg: t.textMuted });
     ky++;
   }
   if (keys.tail) {
-    if (keyLayout.tailOwnRow) f.canvas.put(f.l, ky, keys.tail, { fg: t.textFaint });
-    else f.canvas.put(lastEnd + 3, ky - 1, keys.tail, { fg: t.textFaint });
+    if (keyLayout.tailOwnRow) f.canvas.put(f.l + BODY_INDENT, ky, keys.tail, { fg: t.textFaint });
+    else f.canvas.put(lastEnd + 2, ky - 1, keys.tail, { fg: t.textFaint });
   }
   if (hidden) f.canvas.right(f.r, f.bottom - keyHeight, hidden, { fg: t.textFaint });
   return finishModal(f);

@@ -71,6 +71,7 @@ export function buildFeatureHeaderEntry(entry: FlagEntry, base: SettingEntry | n
     ?? getConfigSchemaSetting(feature.enablement.key)
     ?? {
       key: feature.enablement.key,
+      label: feature.name,
       type: 'boolean',
       default: feature.defaultEnabled,
       description: feature.description,

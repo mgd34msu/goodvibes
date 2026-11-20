@@ -51,7 +51,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  /knowledge                Use isolated Agent Knowledge',
     '  /notes                    Open Agent-local scratchpad notes',
     '  /vibe                    Inspect or create VIBE.md personality',
-    '  /personas, /skills        Tune Agent-local behavior',
+    '  /personas, /my-skills     Tune Agent-local behavior',
     '  /routines                 Run local routines in the main conversation',
     '  /schedule                 Schedule something to run, see, pause, resume, change or remove schedules',
     '  /delegate                 Explicitly hand build/fix/review work to GoodVibes TUI',
@@ -464,7 +464,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'plugin bundles list',
     ],
     summary:
-      'Browse a governed marketplace index, install a SHA-256-pinned capability bundle, remove one, or list the installed ones. An install is never unpinned: a missing or mismatched --sha256 is refused, not overridable. Without --yes, install prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with --yes it installs that plan and writes the receipt the plugin loader enforces. /plugin trust <name> <tier> sets what an installed plugin may register.',
+      'Browse a governed marketplace index, install a SHA-256-pinned capability bundle, remove one, or list the installed ones. An install is never unpinned: a missing or mismatched --sha256 is refused, not overridable. Without --yes, install prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with --yes it installs that plan and writes the receipt the plugin loader enforces. /plugin-trust trust <plugin> <tier> sets what an installed plugin may register.',
     examples: [
       'plugin bundles browse ./marketplace-index.json',
       'plugin bundles install ./bundle.json --sha256 <64-hex>',

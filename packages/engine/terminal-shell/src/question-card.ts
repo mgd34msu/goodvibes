@@ -33,6 +33,7 @@ import {
   type OwnerItem,
 } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { presentInboxAsk, type AskFacts, type AskPresentation } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { homeOwnerInbox } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './renderer/theme.js';
 import { beginModal, finishModal, layoutHintRows, modalInnerWidth, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from './renderer/surface-kit.js';
@@ -80,6 +81,8 @@ export class OwnerQuestionCard {
   /** The answer just given, shown for one render. */
   #answered: string | null = null;
   #stop: (() => void) | null = null;
+  /** Whether the last frame drew the card: only a card on screen takes keys. */
+  #drawn = false;
 
   constructor(deps: QuestionCardDeps) {
     this.#deps = deps;
@@ -88,6 +91,8 @@ export class OwnerQuestionCard {
   /** Start following the inbox. Returns the function that stops it. */
   start(): () => void {
     this.#stop ??= this.#deps.inbox.subscribe((item) => this.#changed(item));
+    // A question this chat left before this run (a resumed session) is shown too.
+    this.refresh();
     return () => this.stop();
   }
 
@@ -99,6 +104,11 @@ export class OwnerQuestionCard {
   /** Whether a card (or its answered line) is on screen. */
   active(): boolean {
     return this.#state !== null || this.#answered !== null;
+  }
+
+  /** Set by the frame: whether it drew the card. */
+  drawn(value: boolean): void {
+    this.#drawn = value && this.#state !== null;
   }
 
   /** Look again for a question of this chat (a session switch, the first frame). */
@@ -156,7 +166,7 @@ export class OwnerQuestionCard {
    */
   handleInput(data: string): boolean {
     const state = this.#state;
-    if (!state) return false;
+    if (!state || !this.#drawn) return false;
     const choices = state.presentation.choices;
     const set = (next: CardState): boolean => { this.#state = next; this.#deps.render(); return true; };
     if (state.typing !== undefined) {
@@ -207,6 +217,8 @@ export class OwnerQuestionCard {
    */
   layer(screenWidth: number, screenHeight: number, footerRows: number): SurfaceLayer | null {
     const t = activeTokens();
+    // Another chat opened here: its own questions, not the last one's.
+    if (this.#state && !askedHere(this.#state.item, this.#deps.sessionId())) { this.#state = null; this.refresh(); }
     const state = this.#state;
     const width = standardModalWidth(screenWidth);
     const inner = modalInnerWidth(width);
@@ -277,4 +289,29 @@ export class OwnerQuestionCard {
     // Pinned above the composer, not centred: the conversation stays readable above it.
     return { ...layer, y: Math.max(0, screenHeight - footerRows - layer.lines.length) };
   }
+}
+
+/**
+ * The frame's layers with the question card added: only when no dialog dims
+ * the screen and no approval card or full view is up (`hidden`), so it never
+ * covers one. A frame that does not draw it leaves its keys to the composer.
+ */
+export function withOwnerQuestionCard(
+  layers: readonly SurfaceLayer[],
+  card: OwnerQuestionCard,
+  frame: { readonly width: number; readonly height: number; readonly footerRows: number; readonly hidden: boolean },
+): SurfaceLayer[] {
+  const layer = frame.hidden || layers.some((each) => each.dim) ? null : card.layer(frame.width, frame.height, frame.footerRows);
+  card.drawn(layer !== null);
+  return layer ? [...layers, layer] : [...layers];
+}
+
+/** The home's one inbox store as the question card reads and answers it, answers recorded from `surface`. */
+export function ownerQuestionInbox(shellPaths: { resolveUserPath(...segments: string[]): string }, surface: string): QuestionCardInbox {
+  const inbox = homeOwnerInbox(shellPaths);
+  return {
+    subscribe: (listener) => inbox.subscribe(listener),
+    listNow: (filter) => inbox.listNow(filter),
+    answer: async (id, answer) => await inbox.answer(id, answer, { actor: 'owner', surface }),
+  };
 }

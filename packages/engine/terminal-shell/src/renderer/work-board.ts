@@ -287,7 +287,7 @@ function drawBottom(f: ModalFrame, view: WorkBoardPanelView): void {
 type BodyLine =
   | { readonly kind: 'blank' }
   | { readonly kind: 'label'; readonly text: string; readonly right?: string | undefined; readonly tone?: PanelTone | undefined }
-  | { readonly kind: 'note'; readonly text: string; readonly tone?: PanelTone | undefined }
+  | { readonly kind: 'note'; readonly text: string; readonly tone?: PanelTone | undefined; readonly indent?: number | undefined }
   | { readonly kind: 'entry'; readonly entry: WorkBoardEntry; readonly layout: 'agent' | 'scheduled' }
   | { readonly kind: 'service'; readonly label: string; readonly state: string };
 
@@ -368,11 +368,17 @@ function drawEntry(canvas: SurfaceCanvas, y: number, x0: number, x1: number, lin
     if (row.meta.short && metaX <= end) canvas.put(metaX, y, cutText(row.meta.short, end - metaX + 1), { fg: sel ? ink : t.textMuted, bold: sel });
     return;
   }
-  const right = rightBlock(row);
-  const rightW = getDisplayWidth(right);
-  // The right block keeps its place; the title gives way to it.
-  const rightX = right ? end - rightW + 1 : end + 1;
   let x = textX + indent;
+  const titleX = showsWho(row) && plan.whoW > 0 ? textX + plan.whoW
+    : plan.whoW > 0 && row.group !== 'waiting' && row.ref.type === 'agent' ? textX + plan.whoW : x;
+  // The right block keeps its place and the title gives way to it, down to a
+  // readable minimum; past that the right block drops its last parts
+  // ("finished 2 min ago · 2 files read" → "finished 2 min ago").
+  const minTitle = Math.min(getDisplayWidth(row.title), 24);
+  let right = rightBlock(row);
+  while (right.includes(' · ') && end - getDisplayWidth(right) + 1 - 2 - titleX < minTitle) right = right.slice(0, right.lastIndexOf(' · '));
+  const rightW = getDisplayWidth(right);
+  const rightX = right ? end - rightW + 1 : end + 1;
   if (showsWho(row) && plan.whoW > 0) {
     const whoRoom = Math.max(1, plan.whoW - indent - 3);
     canvas.put(x, y, cutText(row.who!, whoRoom), { fg: sel ? ink : t.text, bold: sel });
@@ -405,7 +411,7 @@ function bodyLines(list: WorkBoardListView): { lines: BodyLine[]; selectedAt: nu
       push({ kind: 'note', text: list.filter?.query ? `Nothing matches "${list.filter.query}".` : 'Ask for something and helper agents show up here.', tone: 'muted' });
     } else if (list.agents.length > 0 || list.waiting.length === 0) {
       for (const entry of list.agents) push({ kind: 'entry', entry, layout: 'agent' });
-      if (list.finishedEmpty && list.agents.length > 0) push({ kind: 'note', text: '   no finished agents this session', tone: 'muted' });
+      if (list.finishedEmpty && list.agents.length > 0) push({ kind: 'note', text: 'no finished agents this session', tone: 'muted', indent: 3 });
     }
     if (list.scheduled.length > 0) {
       if (lines.length > 0 && lines[lines.length - 1]!.kind !== 'blank') push({ kind: 'blank' });
@@ -458,7 +464,11 @@ function drawListLevel(f: ModalFrame, view: WorkBoardPanelView): void {
     switch (line.kind) {
       case 'blank': break;
       case 'label': f.canvas.put(x0, y, clipText(line.text, x1 - x0 + 1), { fg: line.tone ? toneColor(line.tone) : t.textMuted }); break;
-      case 'note': drawTextBlock(f.canvas, x0, y, x1 - x0 + 1, [{ text: line.text, style: { fg: line.tone ? toneColor(line.tone) : t.textMuted } }], y); break;
+      case 'note': {
+        const indent = line.indent ?? 0;
+        drawTextBlock(f.canvas, x0 + indent, y, x1 - x0 + 1 - indent, [{ text: line.text, style: { fg: line.tone ? toneColor(line.tone) : t.textMuted } }], y);
+        break;
+      }
       case 'entry': drawEntry(f.canvas, y, x0, x1, line, plan); break;
       case 'service': {
         f.canvas.put(x0 + 3, y, cutText(line.label, Math.max(1, plan.scheduledTitleW - 2)), { fg: t.textMuted });

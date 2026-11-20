@@ -6,11 +6,15 @@
  * may list them but never approves one: the answer is the owner's.
  */
 import { processHeldForOwner, type HeldForOwnerLedger } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { TerminalSlashCommand } from './command-registry.js';
+import type { TerminalCommandRegistry } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { ActionDescription, CommandActionContext } from './command-actions/types.js';
+import { readAction } from './described-command-kit.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 
-export interface HeldCallsCommandContext {
-  readonly print: (text: string) => void;
+export interface HeldCallsCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;
 }
 
@@ -25,64 +29,76 @@ function text(value: string): string {
   return stripDangerousAnsi(value).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, ' ');
 }
 
-export function createHeldCallsCommand<Context extends HeldCallsCommandContext>(
+const HELD_CALLS = defineList<unknown>({
+  name: 'held-calls',
+  async read() {
+    return processHeldForOwner().list().map((call): ListRow => ({ value: call.id, label: `${text(call.toolName)}: ${text(call.summary)}`, detail: text(call.reason) }));
+  },
+  operator: { terminalOnly: 'Held calls belong to the terminal session that held them.' },
+});
+
+/** Register `/held` (one description for both apps). */
+export function registerHeldCallsCommand<Context extends HeldCallsCommandContext>(
+  registry: Pick<TerminalCommandRegistry<Context>, 'register'>,
   policy: HeldCallsCommandPolicy<Context>,
-): TerminalSlashCommand<Context> {
+): void {
   const ledger = policy.ledger ?? processHeldForOwner;
-  const say = (context: Context, message: string) => {
-    context.print(message);
+  const answer = (verb: 'approve' | 'dismiss'): ActionDescription<Context>['run'] => async (values, context) => {
+    // The answer is the owner's: a model running this command never approves or sets aside for him.
+    if (!policy.isOwner(context, 'held')) throw commandRefusal(`Only you can ${verb === 'approve' ? 'approve' : 'set aside'} a held call: type /held ${verb} yourself. Nothing was changed.`);
+    const wanted = (values.calls ?? '').split(/\s+/).map((arg) => arg.trim()).filter(Boolean);
+    const ids = wanted.some((id) => id.toLowerCase() === 'all') ? 'all' as const : wanted;
+    const done = verb === 'approve' ? ledger().approve(ids) : ledger().dismiss(ids);
+    const missing = ids === 'all' ? [] : ids.filter((id) => !done.includes(id));
     context.renderRequest();
+    if (done.length === 0) throw commandRefusal(`No held call ${ids === 'all' ? 'is waiting' : `has the id ${missing.map(text).join(', ')}`}. Nothing was changed.`, '/held lists them.');
+    return [
+      verb === 'approve'
+        ? `Approved ${done.join(', ')} for this session: ask me to carry on and ${done.length === 1 ? 'it runs' : 'they run'} when made again.`
+        : `Set aside ${done.join(', ')}; ${done.length === 1 ? 'it was' : 'they were'} not run.`,
+      ...(missing.length > 0 ? [`Not held (already answered or unknown): ${missing.map(text).join(', ')}.`] : []),
+    ].join('\n');
   };
-  return {
+  const CALLS = {
+    id: 'calls', label: 'Held calls', help: 'The calls held for you; several ids separated by spaces, or all', kind: 'choice' as const,
+    choices: { list: HELD_CALLS, allowOther: { reason: 'several ids separated by spaces, or all' } }, required: true as const, typed: { tail: true } as const,
+  };
+  registry.register(defineCommand<Context>({
     name: 'held',
-    description: 'Calls just-vibes held for you instead of asking: list, approve or set aside',
-    usage: '[list] | approve <id...|all> | dismiss <id...|all>',
-    argsHint: '[list|approve|dismiss]',
-    effect: 'mixed',
-    readVerbs: ['list'],
-    handler(args, context) {
-      // Read before anything else: a model running this command must not approve for the owner.
-      const owner = policy.isOwner(context, 'held');
-      const sub = (args[0] ?? 'list').toLowerCase();
-      if (sub === 'list' || sub === '') {
-        const held = ledger().list();
-        if (held.length === 0) {
-          say(context, '[held] Nothing is held for you.');
-          return;
-        }
-        say(context, [
-          `Held for you (${String(held.length)}, not run):`,
-          ...held.map((call) => `  ${call.id}  ${text(call.toolName)}: ${text(call.summary)} (${text(call.reason)})`),
-          'Approve with /held approve <id> (or all), then ask to carry on; /held dismiss <id> sets one aside.',
-        ].join('\n'));
-        return;
-      }
-      if (sub !== 'approve' && sub !== 'dismiss') {
-        say(context, `[held] Unknown subcommand "${text(sub)}". Usage: /held [list] | approve <id...|all> | dismiss <id...|all>`);
-        return;
-      }
-      if (!owner) {
-        say(context, `[held] Only you can ${sub} a held call: type /held ${sub} yourself. Nothing was changed.`);
-        return;
-      }
-      const wanted = args.slice(1).map((arg) => arg.trim()).filter(Boolean);
-      if (wanted.length === 0) {
-        say(context, `[held] Name the calls to ${sub} (ids from /held), or all. Nothing was changed.`);
-        return;
-      }
-      const ids = wanted.some((id) => id.toLowerCase() === 'all') ? 'all' as const : wanted;
-      const done = sub === 'approve' ? ledger().approve(ids) : ledger().dismiss(ids);
-      const missing = ids === 'all' ? [] : ids.filter((id) => !done.includes(id));
-      if (done.length === 0) {
-        say(context, `[held] No held call ${ids === 'all' ? 'is waiting' : `has the id ${missing.map(text).join(', ')}`}; /held lists them. Nothing was changed.`);
-        return;
-      }
-      say(context, [
-        sub === 'approve'
-          ? `[held] Approved ${done.join(', ')} for this session: ask me to carry on and ${done.length === 1 ? 'it runs' : 'they run'} when made again.`
-          : `[held] Set aside ${done.join(', ')}; ${done.length === 1 ? 'it was' : 'they were'} not run.`,
-        ...(missing.length > 0 ? [`[held] Not held (already answered or unknown): ${missing.map(text).join(', ')}.`] : []),
-      ].join('\n'));
-    },
-  };
+    title: 'Held calls',
+    summary: 'Calls just-vibes held for you instead of asking: approve them or set them aside',
+    group: 'Permissions',
+    report: 'list',
+    actions: [
+      readAction<Context>({
+        id: 'list', label: 'See the calls held for you', word: 'list',
+        sentence: 'Lists the calls just-vibes held instead of asking you, with why each was held.',
+        async run(_values, context) {
+          const held = ledger().list();
+          if (held.length === 0) return 'Nothing is held for you.';
+          return [
+            `Held for you (${String(held.length)}, not run):`,
+            ...held.map((call) => `  ${call.id}  ${text(call.toolName)}: ${text(call.summary)} (${text(call.reason)})`),
+            'Approve with /held approve <id> (or all), then ask to carry on; /held dismiss <id> sets one aside.',
+          ].join('\n');
+        },
+      }),
+      {
+        id: 'approve', label: 'Approve a held call', word: 'approve', inputs: [CALLS],
+        sentence: '{calls} may run for this session only, when the work carries on.', done: '',
+        touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection',
+        ownerOnly: { reason: 'the answer to a held call is the owner\'s', instead: 'Ask the owner to approve it with /held approve.' },
+        operator: { terminalOnly: 'Held calls belong to the terminal session that held them.' }, example: { calls: 'h-1' },
+        run: answer('approve'),
+      },
+      {
+        id: 'dismiss', label: 'Set a held call aside', word: 'dismiss', inputs: [CALLS],
+        sentence: '{calls} is set aside and not run, for this session only; the model may make the call again.', done: '',
+        touches: 'this-machine', lasts: 'session', risk: 'none',
+        ownerOnly: { reason: 'the answer to a held call is the owner\'s', instead: 'Ask the owner to set it aside with /held dismiss.' },
+        operator: { terminalOnly: 'Held calls belong to the terminal session that held them.' }, example: { calls: 'h-1' },
+        run: answer('dismiss'),
+      },
+    ],
+  }));
 }

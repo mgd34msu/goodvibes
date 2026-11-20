@@ -84,6 +84,7 @@ function schemaDescription(configManager: Pick<ConfigManager, 'getSchema'>, key:
 function buildWorktreeSetupSetting(configManager: Pick<ConfigManager, 'getSchema'>, key: ConfigKey, sourceRoot: string): ConfigSetting {
   return {
     key,
+    label: configManager.getSchema().find((setting) => setting.key === key)?.label ?? key,
     type: 'string',
     // The stored default (an empty list, which reads as auto), so a reset writes what the schema holds.
     default: [],

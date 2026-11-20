@@ -250,7 +250,6 @@ export class InputHandler extends TerminalInputHandlerState {
       modals.profilePicker,
       modals.bookmark,
       modals.contextInspector,
-      modals.help,
       modals.shortcuts,
       modals.modelPicker,
       modals.filePicker,

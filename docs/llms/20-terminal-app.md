@@ -1114,13 +1114,13 @@ An invalid value prints `Could not set <key>: <reason>`.
 
 `/profiles` opens the config profile picker; press `s` there to save the current settings as a profile. Without the interface it lists saved profiles or prints `No profiles saved.`
 `/profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]` (alias `/profilesync`) moves config profiles between machines. `import` refuses a file that is not a profile bundle and changes nothing.
-`/settings-sync [panel|report|review|show <key>|staged|conflicts|resolve <key> <local|synced>|failures|rollback-history|export <path>|inspect <path>|pull <path>|push <path>|lock <key> <source> <reason...>|unlock <key>]` (alias `/settingssync`) opens the settings sync view or works with sync bundles; `resolve <key> local` keeps the local value of a conflict.
-`/managed [review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [--stage <id>] [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]` applies a managed settings bundle (settings an administrator sets for a machine). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. Only the stage that was reviewed is applied: `apply <path>` applies the stage it just made, `apply-staged` the one its confirmation showed or the one `--stage <id>` names (the id is on the `stage:` line of `/managed staged`); a different stage put there since by another window or process is refused with `TARGET_CHANGED` and nothing is applied. A locked key cannot be changed from Settings or `/config` until `/managed unlock <key>`.
+`/settings-sync` works with settings sync bundles: `review` (what it alone gives a model or script), `export <file>`, `pull <file>` (changes that touch security are shown and asked about first), `conflicts`, `resolve <setting> local|synced`, `inspect <file>`, `show <setting>`, `failures` and `open` (the settings sync screen). The staged bundle, rollbacks and locks are `/managed`'s.
+`/managed` applies a managed settings bundle (settings an administrator sets for a machine): `review`, `staged`, `history`, `inspect <file>`, `stage <file>`, `export <profile> <file>`, `apply <file> [--key <setting>]...`, `apply-staged [--key <setting>]...`, `rollback <apply>`, `lock <setting> <who> <reason>` and `unlock <setting>` (the owner's only; it asks first). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A bundle that changes a setting that touches security shows those changes and asks first, and what is applied is exactly what was shown: `apply <file>` stages the bundle it read once and applies that stage, `apply-staged` applies the stage it showed; a different stage put there since by another window or process is refused and nothing is applied. A locked key cannot be changed from Settings or `/config` until `/managed unlock <setting>`.
 
 `/setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]` (alias `/startup`) reviews startup readiness.
 `/setup support-bundle ./bundle` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential.
 `/setup transfer export ./setup.json` writes a setup transfer bundle; `/setup transfer import ./setup.json` applies it on another machine and reports `N setting(s) changed, M file(s) replaced`.
-A confirmation applies exactly what it showed. When `/setup transfer import`, `/managed apply <path>`, or `/services trust <name>` finds its target changed between the question and Yes (the file rewritten, the entry edited), nothing is done and the question is asked again with `Changed since you looked:` and each change on top (for `/managed apply`, the keys whose values differ); a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
+A confirmation applies exactly what it showed. When `/setup transfer import` or `/services trust <name>` finds its target changed between the question and Yes (the file rewritten, the entry edited), nothing is done and the question is asked again with `Changed since you looked:` and each change on top ; a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
 `/onboarding` opens the onboarding wizard with current settings loaded.
@@ -2141,14 +2141,19 @@ A tier is given to one copy of the plugin: the copy in the directory it was enab
 
 ### `/plugin`
 
-| Form | Effect |
+`/plugin` alone opens its actions ("See your plugins" first; a model or script running it alone gets the list); a plugin is picked from the plugins found on this machine.
+
+| Line | Effect |
 | --- | --- |
-| `list`, `dirs`, `inspect <name>`, `review` | Plugins, search directories, one plugin's trust, quarantine and capabilities. |
-| `enable <name>`, `disable <name>` | Turn a plugin on (`Plugin '<name>' enabled and activated.`) or off. |
+| `list`, `dirs`, `inspect <plugin>`, `review` | Plugins, search directories, one plugin's trust, quarantine and capabilities. |
+| `enable <plugin>`, `disable <plugin>` | Switch a plugin on (`Plugin '<name>' switched on and started.`) or off. |
 | `reload` | Reload plugins and report each that did not start and why. |
-| `trust <name> <untrusted\|limited\|trusted> [note]`, `trust-key <name> <key.pem>`, `verify <name>`, `capabilities <name>` | Set and check trust. |
-| `quarantine <name> [add\|lift] [reason]` | Stop a plugin and keep it from loading, or lift that. |
-| `installed`, `catalog-review <id>`, `publish-local <id> <path> <summary...>`, `unpublish <id>`, `install <id> [project\|user]`, `update <id> [project\|user]`, `uninstall <id> [project\|user]` | Curated catalog flows (see "The marketplace"). |
+| `trust <plugin> <untrusted\|limited\|trusted> [note]`, `trust-key <plugin> <key.pem>`, `verify <plugin>`, `capabilities <plugin>` | Set and check trust. `trusted` asks first and only the owner can choose it. |
+| `quarantine <plugin> [reason]`, `lift <plugin>` | Stop a plugin and keep it from loading; `lift` (the owner's only) lets it load again. |
+| `publish-local <id> <folder> <summary>`, `unpublish <id>` | Publish a plugin folder into the local curated catalog, or take it out (asks first). |
+| `open` | The plugins screen. |
+
+Installing, updating and uninstalling a catalog plugin is `/marketplace` (`/marketplace install plugin <id>`).
 
 ### Capability bundles
 
@@ -2183,22 +2188,22 @@ Read the git log since the last tag, group the changes by area, and write releas
 Typing `/<skill-name>` (here `/release-notes`), or one of its `triggers`, in the composer sends the skill's body as the prompt.
 The skill directories are read each time a `/<name>` is typed, so a new or edited skill file works at once, without a restart.
 The model also finds skills with the `registry` tool.
-`/skills [open|list|show <name>|origins|browse [query]|installed|catalog-review <id>|publish-local <id> <path> <summary...>|unpublish <id>|install-hint <catalog-id>|install <id> [project|user]|update <id> [project|user]|uninstall <id> [project|user]]` (alias `/skill`) lists and installs skills. `/skills show <name>` of an unknown skill prints `Unknown skill: <name>`.
+`/skills` lists skills: `list` (what `/skills` alone gives a model or script), `show <skill>`, `origins`, `publish-local <id> <folder> <summary>`, `unpublish <id>` and `open` (the skills screen). `/skills show` of an unknown skill is refused: `Unknown skill: <name>`. Installing, updating and uninstalling a catalog skill is `/marketplace` (`/marketplace install skill <id>`).
 
 ## The marketplace
 
 The marketplace is a local-first curated catalog of plugins, skills, hook packs and policy packs, kept in `.goodvibes/ecosystem/*.json` (global under `~/.goodvibes/ecosystem/`, project under `<project>/.goodvibes/ecosystem/`).
-`/marketplace` (alias `/catalog`) forms, where `<kind>` is `plugin`, `skill`, `hook-pack` or `policy-pack`:
+`/marketplace` alone opens its actions ("See the marketplace at a glance" first); `<kind>` is `plugin`, `skill`, `hook-pack` or `policy-pack`, and entries are picked from the catalog or from what is installed:
 
-| Form | Effect |
+| Line | Effect |
 | --- | --- |
-| `open`, `overview`, `recommend`, `browse [query]`, `installed` | Browse. |
-| `review <kind> <id>`, `provenance <kind> <id>`, `install-hint <kind> <id>` | Inspect one entry. |
-| `install <kind> <id> [project\|user]` | Install: `Installed curated <kind> <id> into <path>`. |
-| `update <kind> <id> [project\|user]`, `rollback <kind> <id> [project\|user] [backupId]`, `history <kind> <id> [project\|user]`, `receipt <kind> <id> [project\|user]`, `uninstall <kind> <id> [project\|user]` | Manage an installed entry. |
-| `bundle export <path> [project\|user]`, `bundle inspect <path>`, `bundle import <path> [project\|user]` | Move a set of entries. |
+| `overview`, `recommend`, `browse [words]`, `installed`, `open` | Browse. |
+| `review <kind> <entry>`, `provenance <kind> <entry>`, `install-hint <kind> <entry>` | Inspect one entry. |
+| `install <kind> <entry> [--scope project\|user]` | Install: `Installed curated <kind> <id> into <path>`. |
+| `update`, `history`, `rollback [--backup <id>]`, `receipt`, `uninstall` (each `<kind> <entry> [--scope ...]`) | Manage an installed entry; `uninstall` asks first. |
+| `bundle-export <file> [--scope ...]`, `bundle-inspect <file>`, `bundle-import <file> [--scope ...]` | Move a set of entries. |
 
-The scope defaults to `project`; another word is refused: `Unknown scope "<word>": nothing was changed. The scope is project (the default) or user.`
+"Install for" (`--scope`) is `project` (this project, the default) or `user` (all your projects).
 
 ## Hooks
 
@@ -2414,21 +2419,24 @@ It formats files the owner changed too, not only the model's. The hook runs besi
 
 ### `/hooks`
 
-| Form | Effect |
+`/hooks` alone opens its actions ("See the hook points and your hooks" first; a model or script running it alone gets that list); a hook is picked from the managed hooks and chains.
+
+| Line | Effect |
 | --- | --- |
-| `contracts [filter]` | List hook points. |
+| `contracts [words]` | List hook points. |
 | `reload` | Reload hooks from the file. |
-| `scaffold <name> <match> <command\|prompt\|agent\|http\|ts>` | Add a named hook skeleton to the file. |
+| `scaffold <name> <match> --type command\|prompt\|agent\|http\|ts` | Add a named hook skeleton to the file. |
 | `chain <name> <event1,event2,...>` | Add a chain skeleton. |
-| `enable <name>`, `disable <name>`, `remove <name>` | Change a named hook. |
+| `enable <hook>`, `disable <hook>`, `remove <hook>` | Change a named hook; `remove` asks first. |
 | `simulate <eventPath>` | Show what fires for an event. |
-| `inspect <path>`, `import <path> [merge\|replace]`, `export [path]` | Move hook sets between files. |
+| `inspect <file>`, `import <file> [--strategy merge\|replace]`, `export [file]` | Move hook sets between files; `--strategy replace` asks first. |
+| `open` | The hooks screen. |
 
 Every `/hooks` change (`scaffold`, `chain`, `enable`, `disable`, `remove`, `import`) edits the hooks file itself: the file the setting `tools.hooksFile` names, resolved against the working directory, which is `<project>/hooks.json` by default.
 Before writing, the command reads the file again; a file that is not valid JSON, is writable by other users, or is owned by another user is not changed (`The hooks file <path> was not changed: it was not loaded because <reason>. Fix the file, then retry.`).
 The file is written to a temporary file and renamed over the old one, keeping its permissions, with two-space JSON indentation; the hooks are then loaded again at once.
 
-`/hooks scaffold lint-after-write Post:tool:write command` prints `Scaffolded managed hook lint-after-write at Post:tool:write in /home/me/work/project/hooks.json` and adds this entry under the key `Post:tool:write`:
+`/hooks scaffold lint-after-write Post:tool:write --type command` prints `Made managed hook lint-after-write at Post:tool:write in /home/me/work/project/hooks.json; fill in what it runs there.` and adds this entry under the key `Post:tool:write`:
 
 ```json
 {

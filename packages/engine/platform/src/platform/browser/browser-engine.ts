@@ -497,8 +497,13 @@ export class BrowserEngine {
    * this session (`localReach`) goes through.
    */
   private guardContextRequests(sessionId: string, page: Page): Promise<void> {
+    // A page whose requests cannot be held is refused, launched or attached: nothing runs in it unchecked.
+    const unguardable = (reason: string): Promise<never> => Promise.reject(new BrowserSessionError(
+      `This browser's requests cannot be held to the destination rule (${reason}), so it is not used.`,
+      'Use action:"launch" to open a browser this agent starts, or attach to a Chromium-based browser over its debugging port.'));
     let context: BrowserContext;
-    try { context = page.context(); } catch { return Promise.resolve(); }
+    try { context = page.context(); } catch (error) { return unguardable(error instanceof Error ? error.message : String(error)); }
+    if (typeof (context as { route?: unknown }).route !== 'function') return unguardable('the connection offers no request interception');
     const installing = this.contextGuards.get(context);
     if (installing) return installing;
     const config = this.options.destinationConfig ?? NO_CONFIG;

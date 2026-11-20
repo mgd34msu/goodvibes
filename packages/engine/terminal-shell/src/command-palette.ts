@@ -89,7 +89,7 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['effort', { title: 'Reasoning effort', group: 'Settings', keywords: ['thinking'] }],
   ['shortcuts', { title: 'Keyboard shortcuts', group: 'Settings', keywords: ['keys', 'help'] }],
   ['keybindings', { title: 'Keybindings', group: 'Settings', keywords: ['keys'] }],
-  ['mode', { title: 'Approval mode', group: 'Settings', keywords: ['permissions', 'hitl'] }],
+  ['verbosity', { title: 'How much the app prints', group: 'Settings', keywords: ['quiet', 'notifications', 'print'] }],
   ['profiles', { title: 'Profiles', group: 'Settings' }],
   ['local-auth', { title: 'Local accounts', group: 'Settings', keywords: ['accounts', 'users', 'auth', 'password', 'local-auth'] }],
   ['tts', { title: 'Voice and speech', group: 'Settings', keywords: ['voice'] }],

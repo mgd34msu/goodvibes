@@ -2,7 +2,7 @@ import {
   createContextInspectionCommand,
   createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
-import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
+import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { settingSetSecretPositions } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
@@ -228,25 +228,9 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
   registry.register(errorNavigationCommands.nextError);
   registry.register(errorNavigationCommands.prevError);
 
-  registry.register(interactionModeCommand);
+  registerInteractionModeCommand<CommandContext>(registry);
 }
 
-const interactionModeCommand = createInteractionModeCommand<CommandContext>({
-  description: 'Set how much the app prints: quiet, balanced or operator',
-  usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
-  argsHint: '[level|show|set-domain]',
-  help:
-    'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n' +
-    '  /mode                          show the print level\n' +
-    '  /mode show                     show the print level\n' +
-    '  /mode quiet                    print less: only warnings and errors toast; the rest waits in /notifications\n' +
-    '  /mode balanced                 notices toast, routine notifications wait in /notifications (default)\n' +
-    '  /mode operator                 print everything: every notice and notification toasts\n' +
-    '  /mode set-domain <d> <v>       one domain\'s notification verbosity (minimal|normal|verbose)\n' +
-    'Saved as the behavior.hitlMode setting.',
-  invalidVerbosity: (verbosity) => `Invalid verbosity "${verbosity}". Valid values: minimal, normal, verbose`,
-  domainSet: (domain, verbosity) => `Domain "${domain}" verbosity set to: ${verbosity}`,
-});
 
 const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
   description: "Inspect context window usage (token breakdown per message), or show, set or clear the current model's context window",

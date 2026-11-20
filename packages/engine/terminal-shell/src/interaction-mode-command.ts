@@ -1,105 +1,105 @@
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+/**
+ * `/verbosity`, described once (command-actions/) for both terminal apps: how
+ * much the app prints (quiet, balanced or operator), and one kind of
+ * notification's own level. Saved as the `behavior.hitlMode` setting.
+ */
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellModeManagerService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { commandRefusal, stripYesFlag } from './command-confirmation.js';
-import type { TerminalSlashCommand } from './command-registry.js';
-interface InteractionModeContext {
+import { commandRefusal } from './command-confirmation.js';
+import type { TerminalCommandRegistry } from './command-registry.js';
+import { defineCommand } from './command-actions/define.js';
+import type { CommandActionContext } from './command-actions/types.js';
+import { readAction, textInput } from './described-command-kit.js';
+
+export interface InteractionModeContext extends CommandActionContext {
   readonly ops: { readonly modeManager?: ShellModeManagerService | null | undefined };
   readonly platform: { readonly configManager: Pick<ConfigManager, 'setDynamic'> };
-  print(message: string): void;
-  renderRequest(): void;
+  readonly renderRequest: () => void;
 }
-export function createInteractionModeCommand<Context extends InteractionModeContext>(policy: {
-  readonly description: string;
-  readonly usage: string;
-  readonly argsHint: string;
-  readonly hidden?: boolean | undefined;
-  readonly help: string;
-  readonly invalidVerbosity: (value: string) => string;
-  readonly domainSet: (domain: string, value: string) => string;
-}): TerminalSlashCommand<Context> {
-  return {
-    name: 'mode',
-    effect: 'local-state',
-    aliases: ['hitl'],
-    description: policy.description,
-    usage: policy.usage,
-    argsHint: policy.argsHint,
-    firstScreen: !policy.hidden,
-    handler(args, ctx) {
-      const mgr = ctx.ops.modeManager;
-      if (!mgr) {
-        ctx.print('The print level is not available in this runtime.');
-        return;
-      }
-      const commandArgs = stripYesFlag(args).rest;
-      const sub = commandArgs[0] ?? 'show';
 
-      if (sub === 'quiet' || sub === 'balanced' || sub === 'operator') {
-        const newMode = sub as 'quiet' | 'balanced' | 'operator';
-        mgr.setHITLMode(newMode);
-        let saveFailure: string | null = null;
-        try {
-          ctx.platform.configManager.setDynamic(
-            'behavior.hitlMode' as import('@goodvibes-jev/engine/platform/platform/config').ConfigKey,
-            newMode,
-          );
-        } catch (e) {
-          logger.warn('[/mode] Failed to persist mode', { error: summarizeError(e) });
-          saveFailure = summarizeError(e);
-        }
-        const preset = mgr.getHITLPreset();
-        ctx.print(saveFailure === null
-          ? `Print level set to: ${preset.name}\n${preset.description}`
-          : `Print level set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`);
-        ctx.renderRequest();
-        return;
-      }
+function managerOf(ctx: InteractionModeContext): ShellModeManagerService {
+  const manager = ctx.ops.modeManager;
+  if (!manager) throw commandRefusal('The print level is not available in this runtime.');
+  return manager;
+}
 
-      if (sub === 'show') {
-        const current = mgr.getHITLMode();
-        const preset = mgr.getHITLPreset();
-        const overrides = mgr.getDomainOverrides();
-        const lines: string[] = [
-          `Print level: ${current}`,
-          `  ${preset.description}`,
-          `  Default domain verbosity: ${preset.defaultDomainVerbosity}`,
-          `  Quiet-while-typing: ${preset.quietWhileTyping}`,
-          `  Batch window: ${preset.batchWindowMs}ms`,
-        ];
-        const overrideEntries = Object.entries(overrides);
-        if (overrideEntries.length > 0) {
-          lines.push('  Per-domain overrides:');
-          for (const [domain, verbosity] of overrideEntries) lines.push(`    ${domain}: ${verbosity}`);
-        } else {
-          lines.push('  No per-domain overrides.');
-        }
-        lines.push('');
-        lines.push('Available presets:');
-        for (const p of mgr.listHITLPresets()) {
-          const marker = p.name === current ? '\u25b6' : ' ';
-          lines.push(`  ${marker} ${p.name.padEnd(10)} ${p.description}`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
-
-      if (sub === 'set-domain') {
-        const domain = commandArgs[1];
-        const verbosity = commandArgs[2];
-        if (!domain || !verbosity) {
-          throw commandRefusal('Usage: /mode set-domain <domain> <minimal|normal|verbose>');
-        }
-        if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
-          ctx.print(policy.invalidVerbosity(verbosity));
-          return;
-        }
-        mgr.setDomainVerbosity(domain, verbosity as 'minimal' | 'normal' | 'verbose');
-        ctx.print(policy.domainSet(domain, verbosity));
-        return;
-      }
-
-      ctx.print(policy.help);
-    },
-  };
+/** Register `/verbosity` (one description for both apps). */
+export function registerInteractionModeCommand<Context extends InteractionModeContext>(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
+  registry.register(defineCommand<Context>({
+    name: 'verbosity',
+    title: 'How much the app prints',
+    summary: 'Set how much the app prints: quiet, balanced or operator',
+    group: 'Display',
+    report: 'show',
+    actions: [
+      readAction<Context>({
+        id: 'show', label: 'See how much the app prints', word: 'show',
+        sentence: 'Shows the print level, what it does, and any kind of notification set on its own.',
+        async run(_values, ctx) {
+          const mgr = managerOf(ctx);
+          const current = mgr.getHITLMode();
+          const preset = mgr.getHITLPreset();
+          const overrides = Object.entries(mgr.getDomainOverrides());
+          return [
+            `Print level: ${current}`,
+            `  ${preset.description}`,
+            `  Default domain verbosity: ${preset.defaultDomainVerbosity}`,
+            `  Quiet-while-typing: ${preset.quietWhileTyping}`,
+            `  Batch window: ${preset.batchWindowMs}ms`,
+            ...(overrides.length > 0 ? ['  Per-domain overrides:', ...overrides.map(([domain, verbosity]) => `    ${domain}: ${verbosity}`)] : ['  No per-domain overrides.']),
+            '',
+            'Available presets:',
+            ...mgr.listHITLPresets().map((p) => `  ${p.name === current ? '▶' : ' '} ${p.name.padEnd(10)} ${p.description}`),
+          ].join('\n');
+        },
+      }),
+      {
+        id: 'set', label: 'Set how much the app prints', word: 'set',
+        inputs: [{
+          id: 'level', label: 'Print level', help: 'How much reaches you as it happens', kind: 'choice', required: true, typed: { position: 1 },
+          choices: [
+            { value: 'quiet', label: 'Quiet', help: 'Only warnings and errors pop up; the rest waits in /notifications.' },
+            { value: 'balanced', label: 'Balanced', help: 'Notices pop up; routine notifications wait in /notifications (the usual).' },
+            { value: 'operator', label: 'Operator', help: 'Every notice and notification pops up.' },
+          ],
+        }],
+        sentence: 'The app prints at the {level} level until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none',
+        operator: { terminalOnly: 'It is how this terminal app prints.' }, example: { level: 'quiet' },
+        async run(values, ctx) {
+          const mgr = managerOf(ctx);
+          const level = values.level as 'quiet' | 'balanced' | 'operator';
+          mgr.setHITLMode(level);
+          let saveFailure: string | null = null;
+          try {
+            ctx.platform.configManager.setDynamic('behavior.hitlMode' as ConfigKey, level);
+          } catch (e) {
+            logger.warn('[/verbosity] Failed to persist mode', { error: summarizeError(e) });
+            saveFailure = summarizeError(e);
+          }
+          const preset = mgr.getHITLPreset();
+          ctx.renderRequest();
+          return saveFailure === null
+            ? `Print level set to: ${preset.name}\n${preset.description}`
+            : `Print level set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`;
+        },
+      },
+      {
+        id: 'set-domain', label: 'Set one kind of notification\'s level', word: 'set-domain',
+        inputs: [
+          textInput({ id: 'domain', label: 'Kind of notification', help: 'A notification domain, as /notifications shows it', why: 'a domain name from /notifications', typed: { position: 1 } }),
+          { id: 'verbosity', label: 'How much of it', help: 'How much of this kind reaches you', kind: 'choice', required: true, typed: { position: 2 },
+            choices: [{ value: 'minimal', label: 'Minimal' }, { value: 'normal', label: 'Normal' }, { value: 'verbose', label: 'Verbose' }] },
+        ],
+        sentence: 'Notifications of {domain} are shown at {verbosity} for this session only.', done: '',
+        touches: 'this-machine', lasts: 'session', risk: 'none',
+        operator: { terminalOnly: 'It is how this terminal app prints.' }, example: { domain: 'agents', verbosity: 'minimal' },
+        async run(values, ctx) {
+          managerOf(ctx).setDomainVerbosity(values.domain!, values.verbosity as 'minimal' | 'normal' | 'verbose');
+          return `Domain "${values.domain}" verbosity set to: ${values.verbosity}`;
+        },
+      },
+    ],
+  }));
 }

@@ -1,52 +1,83 @@
 /**
- * ToolActivityGroup, folds a completed turn's tool calls into the assistant
- * message that produced them, instead of letting them evaporate once the turn
- * ends (see useChatStream's toolActivityByMessageId doc comment for where the
- * data comes from and why it is only ever present for a turn this browser tab
- * watched run live).
+ * A turn's tool calls in the reply that made them (ux A4.5): one collapsed line
+ * ("Read 2 files, edited 1 · 4 s", in each tool's own words) that opens to one
+ * line per call, said the way the terminal says it (contracts
+ * tool-call-summary.ts `summarizeToolCall`, the function the terminal's bead
+ * rows read): a status glyph, what the call did ("Reading files"), its key
+ * argument ("src/index.ts"), and on the right its one-line result
+ * ("2 files · 10 lines") and, when this browser timed it, how long it took.
  *
- * Every turn, one call or many, collapses to ONE line ("Edited 2 files,
- * searched the web · 4 s", in each tool's own display words; design doc "Chat":
- * the same rule as the TUI, collapsed output is one compact line) that expands
- * inline to the per-call detail: what the call did, its key argument, and its
- * result. Counts are real; the duration is shown only when this browser timed
- * the calls.
+ * A failed call's line is in --bad with the summary's short failure text. The
+ * raw result (JSON, a schema refusal, command output) is never primary text: it
+ * is behind the call's own "Details". The calls are there after a reload too:
+ * a saved reply keeps its calls and results in its turn history
+ * (message-utils.ts toolActivityFromHistory); only the time is not kept.
  */
+import type { ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { formatBeadTime, summarizeToolCall, type BeadStatus, type ToolCallSummary } from '@goodvibes-jev/engine/contracts';
+import { asRecord } from '../../lib/object';
 import {
   describeToolActivity,
-  toolCallLabel,
-  toolKeyArg,
   toolResultText,
   type CompletedToolCall,
 } from './message-utils';
+import type { ActiveToolCall } from './useChatStream';
 
-/** Results longer than this render a truncated preview with the full text behind expand. */
-const RESULT_PREVIEW_LIMIT = 240;
+/** Status is never colour alone: each line starts with its glyph. */
+const GLYPHS: Readonly<Record<BeadStatus, string>> = {
+  ok: '✓', warn: '!', err: '✕', run: '◐', wait: '●', cancel: '○', bg: '▶', unknown: '?',
+};
 
-function ToolActivityEntry({ call }: { call: CompletedToolCall }) {
-  const label = toolCallLabel(call);
-  const keyArg = toolKeyArg(call.toolInput);
-  const resultText = toolResultText(call.result);
-  const isTruncated = resultText.length > RESULT_PREVIEW_LIMIT;
-  const preview = isTruncated ? `${resultText.slice(0, RESULT_PREVIEW_LIMIT)}…` : resultText;
+const GLYPH_WORDS: Readonly<Record<BeadStatus, string>> = {
+  ok: 'done', warn: 'done, with something to look at', err: 'failed', run: 'running', wait: 'waiting for you', cancel: 'cancelled', bg: 'running in the background', unknown: 'outcome unknown',
+};
 
+/** A finished call's one-line summary. */
+export function completedCallSummary(call: CompletedToolCall): ToolCallSummary {
+  const content = call.result === undefined ? undefined : toolResultText(call.result);
+  return summarizeToolCall(
+    { id: call.toolCallId, name: call.toolName, arguments: asRecord(call.toolInput), ...(call.activity ? { activity: call.activity } : {}) },
+    content,
+    { outcome: content === undefined ? undefined : call.isError ? 'error' : 'ok', ownerActive: false },
+  );
+}
+
+/** A running call's one-line summary. */
+export function runningCallSummary(call: ActiveToolCall): ToolCallSummary {
+  return summarizeToolCall(
+    { id: call.toolCallId, name: call.toolName, arguments: asRecord(call.toolInput), ...(call.activity ? { activity: call.activity } : {}) },
+    undefined,
+    { outcome: call.cancelled ? 'cancelled' : undefined, ownerActive: !call.cancelled },
+  );
+}
+
+/** One call as one line: glyph, name, argument, and the result and time on the right (under the line on a phone). */
+export function ToolCallLine({ summary, durationMs, raw, trailing }: {
+  summary: ToolCallSummary;
+  durationMs?: number;
+  /** The raw result, behind Details. */
+  raw?: string;
+  trailing?: ReactNode;
+}) {
+  const failed = summary.status === 'err';
+  const right = [summary.result?.text, durationMs !== undefined ? formatBeadTime(durationMs) : undefined].filter(Boolean).join(' · ');
   return (
-    <li className={`message-tool-activity__item${call.isError ? ' message-tool-activity__item--error' : ''}`}>
-      <div className="message-tool-activity__header">
-        <span className="message-tool-activity__label">{label}</span>
-        {keyArg && <span className="message-tool-activity__arg" title={keyArg}>{keyArg}</span>}
-        {call.isError && <span className="message-tool-activity__error-badge">error</span>}
+    <li className={`tool-line tool-line--${summary.status}${failed ? ' tool-line--failed' : ''}`}>
+      <div className="tool-line__row">
+        <span className={`tool-line__glyph${summary.status === 'run' ? ' tool-line__glyph--spin' : ''}`} role="img" aria-label={GLYPH_WORDS[summary.status]}>
+          {GLYPHS[summary.status]}
+        </span>
+        <span className="tool-line__name">{summary.name}</span>
+        {summary.argument && <span className="tool-line__arg" title={summary.argument}>{summary.argument}</span>}
+        {right && <span className={`tool-line__result tool-line__result--${summary.result?.tone ?? 'faint'}`}>{right}</span>}
+        {trailing}
       </div>
-      {resultText && (
-        isTruncated ? (
-          <details className="message-tool-activity__result">
-            <summary>{preview}</summary>
-            <pre>{resultText}</pre>
-          </details>
-        ) : (
-          <pre className="message-tool-activity__result-inline">{resultText}</pre>
-        )
+      {raw && (
+        <details className="tool-line__details">
+          <summary>Details</summary>
+          <pre>{raw}</pre>
+        </details>
       )}
     </li>
   );
@@ -61,8 +92,19 @@ export function ToolActivityGroup({ toolActivity }: { toolActivity: readonly Com
         <ChevronRight size={14} aria-hidden="true" className="message-tool-activity__chevron" />
         <span className="message-tool-activity__line">{describeToolActivity(toolActivity)}</span>
       </summary>
-      <ul className="message-tool-activity__list" aria-label="Tool calls">
-        {toolActivity.map((call) => <ToolActivityEntry key={call.toolCallId} call={call} />)}
+      <ul className="tool-lines" aria-label="Tool calls">
+        {toolActivity.map((call) => {
+          const raw = call.result === undefined ? '' : toolResultText(call.result);
+          const duration = call.startedAt !== undefined && call.finishedAt !== undefined ? Math.max(0, call.finishedAt - call.startedAt) : undefined;
+          return (
+            <ToolCallLine
+              key={call.toolCallId}
+              summary={completedCallSummary(call)}
+              {...(duration !== undefined ? { durationMs: duration } : {})}
+              {...(raw ? { raw } : {})}
+            />
+          );
+        })}
       </ul>
     </details>
   );

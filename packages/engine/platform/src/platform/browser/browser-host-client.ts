@@ -117,6 +117,23 @@ export class BrowserHostClient {
     return this.#gone;
   }
 
+  /**
+   * Who decides each request and WebSocket the attached browser makes once the
+   * host's guard is installed (`guard`). With no decider every held request is
+   * aborted: an attached browser never sends one unchecked.
+   */
+  onGuardedRequest(decider: (event: HostGuardEvent) => Promise<HostGuardDecision>): void {
+    this.#guardDecider = decider;
+  }
+
+  #guardDecider: ((event: HostGuardEvent) => Promise<HostGuardDecision>) | null = null;
+
+  private answerGuardEvent(event: HostGuardEvent): void {
+    const decider = this.#guardDecider;
+    const decided = decider ? decider(event).catch((): HostGuardDecision => ({ verdict: 'abort' })) : Promise.resolve<HostGuardDecision>({ verdict: 'abort' });
+    void decided.then((decision) => this.call('decide', { requestId: event.requestId, ...decision })).catch(() => { /* the host aborts an unanswered request itself */ });
+  }
+
   /** Called once, when the helper or its browser goes away. Fires at once if it already has. */
   onGone(listener: () => void): () => void {
     if (this.#gone) {
@@ -318,6 +335,17 @@ export class BrowserHostClient {
     }
     if (message && typeof message === 'object' && (message as { event?: unknown }).event === 'disconnected') {
       this.noteGone();
+      return;
+    }
+    const event = (message as { event?: unknown }).event;
+    if (message && typeof message === 'object' && (event === 'request' || event === 'socket')) {
+      const held = message as unknown as Record<string, unknown>;
+      if (typeof held.requestId !== 'number' || typeof held.url !== 'string') return;
+      this.answerGuardEvent(event === 'socket'
+        ? { kind: 'socket', requestId: held.requestId, url: held.url }
+        : { kind: 'request', requestId: held.requestId, url: held.url, method: typeof held.method === 'string' ? held.method : 'GET',
+          headers: held.headers && typeof held.headers === 'object' ? held.headers as Record<string, string> : {},
+          ...(typeof held.body === 'string' ? { body: held.body } : {}) });
       return;
     }
     if (!message || typeof message !== 'object' || typeof message.id !== 'number') return;
@@ -627,6 +655,16 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
   return remote;
 }
 
+/** One request or WebSocket the attached browser is holding for a decision. */
+export type HostGuardEvent =
+  | { readonly kind: 'request'; readonly requestId: number; readonly url: string; readonly method: string; readonly headers: Readonly<Record<string, string>>; readonly body?: string }
+  | { readonly kind: 'socket'; readonly requestId: number; readonly url: string };
+
+/** What the host does with a held request: let the browser send it, refuse it, or answer it with a response fetched here. */
+export type HostGuardDecision =
+  | { readonly verdict: 'continue' | 'abort' }
+  | { readonly verdict: 'fulfil'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string };
+
 export interface RemoteContextHandle {
   readonly context: BrowserContext;
   readonly refresh: () => Promise<void>;
@@ -634,9 +672,45 @@ export interface RemoteContextHandle {
 
 /** A BrowserContext as the engine uses one, backed by the host. */
 export function remoteContext(client: BrowserHostClient, initialPages: readonly { pageId: string; url: string }[]): BrowserContext {
-  const pages = new Map<string, Page>(initialPages.map((entry): [string, Page] => [entry.pageId, remotePage(client, entry.pageId, entry.url)]));
+  // Every page answers context() with this context, as a native page does, so the request guard finds it.
+  let remote!: BrowserContext;
+  const own = (page: Page): Page => { (page as unknown as Record<string, unknown>).context = () => remote; return page; };
+  const pages = new Map<string, Page>(initialPages.map((entry): [string, Page] => [entry.pageId, own(remotePage(client, entry.pageId, entry.url))]));
   const pageListeners = new Set<(page: Page) => void>();
+  let requestHandler: ((route: unknown) => Promise<void>) | null = null;
+  let socketHandler: ((socket: unknown) => Promise<void>) | null = null;
+  const installGuard = async (): Promise<void> => {
+    client.onGuardedRequest((event) => new Promise<HostGuardDecision>((resolve) => {
+      let settled = false;
+      const decide = (decision: HostGuardDecision): void => { if (!settled) { settled = true; resolve(decision); } };
+      if (event.kind === 'socket') {
+        if (!socketHandler) { decide({ verdict: 'abort' }); return; }
+        void socketHandler({
+          url: () => event.url,
+          connectToServer: () => decide({ verdict: 'continue' }),
+          close: async () => decide({ verdict: 'abort' }),
+        }).then(() => decide({ verdict: 'abort' }), () => decide({ verdict: 'abort' }));
+        return;
+      }
+      if (!requestHandler) { decide({ verdict: 'abort' }); return; }
+      const body = event.body === undefined ? null : Buffer.from(event.body, 'base64');
+      void requestHandler({
+        request: () => ({ url: () => event.url, method: () => event.method, headers: () => ({ ...event.headers }), postDataBuffer: () => body }),
+        continue: async () => decide({ verdict: 'continue' }),
+        abort: async () => decide({ verdict: 'abort' }),
+        fulfill: async (answer: { status?: number; headers?: Record<string, string>; body?: Buffer | string }) => decide({
+          verdict: 'fulfil', status: answer.status ?? 200, headers: answer.headers ?? {},
+          body: Buffer.from(answer.body ?? '').toString('base64'),
+        }),
+      }).then(() => decide({ verdict: 'abort' }), () => decide({ verdict: 'abort' }));
+    }));
+    await client.call('guard');
+  };
   const context: Record<string, unknown> = {
+    // The attached browser's requests are held in the host (Playwright's route
+    // over CDP's Fetch domain) and decided here, the same as a launched browser's.
+    route: async (_pattern: unknown, handler: (route: unknown) => Promise<void>) => { requestHandler = handler; await installGuard(); },
+    routeWebSocket: async (_pattern: unknown, handler: (socket: unknown) => Promise<void>) => { socketHandler = handler; await installGuard(); },
     pages: () => [...pages.values()],
     // The host cannot push page events, but it can say the browser is gone,
     // which is the one a session that must stop being the default needs.
@@ -648,7 +722,7 @@ export function remoteContext(client: BrowserHostClient, initialPages: readonly 
     isClosed: () => client.gone,
     newPage: async () => {
       const created = await client.call<{ pageId: string }>('newPage');
-      const page = remotePage(client, created.pageId, 'about:blank');
+      const page = own(remotePage(client, created.pageId, 'about:blank'));
       pages.set(created.pageId, page);
       return page;
     },
@@ -658,7 +732,7 @@ export function remoteContext(client: BrowserHostClient, initialPages: readonly 
       finally { await client.close(); }
     },
   };
-  const remote = context as unknown as BrowserContext;
+  remote = context as unknown as BrowserContext;
   remoteContextRefreshers.set(remote, async () => {
     const listed = await client.call<{ pages: { pageId: string; url: string }[] }>('pages');
     const live = new Set(listed.pages.map((entry) => entry.pageId));
@@ -669,7 +743,7 @@ export function remoteContext(client: BrowserHostClient, initialPages: readonly 
     }
     for (const entry of listed.pages) {
       if (pages.has(entry.pageId)) continue;
-      const page = remotePage(client, entry.pageId, entry.url);
+      const page = own(remotePage(client, entry.pageId, entry.url));
       pages.set(entry.pageId, page);
       for (const listener of [...pageListeners]) listener(page);
     }

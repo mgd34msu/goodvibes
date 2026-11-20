@@ -8,6 +8,7 @@
  */
 import { describedCommandByName, runGuided } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import type { CommandContext } from './command-registry.ts';
+import { VERBOSITY_WORKSPACE_ACTIONS } from './workspace-actions/verbosity.ts';
 import { MY_SKILLS_WORKSPACE_ACTIONS } from './workspace-actions/my-skills.ts';
 import { TODO_WORKSPACE_ACTIONS } from './workspace-actions/todo.ts';
 import { SECRETS_WORKSPACE_ACTIONS } from './workspace-actions/secrets.ts';
@@ -22,6 +23,7 @@ export interface WorkspaceActionTarget {
 
 // Each converted command spreads its own rows here. /mcp's rows name its actions directly (`command` rows), so it adds none.
 const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({
+  ...VERBOSITY_WORKSPACE_ACTIONS,
   ...MY_SKILLS_WORKSPACE_ACTIONS,
   ...TODO_WORKSPACE_ACTIONS,
   ...SECRETS_WORKSPACE_ACTIONS,

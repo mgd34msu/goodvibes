@@ -35,6 +35,7 @@ export function readExecEnvScrubAllowlist(configManager: Pick<ConfigManager, 'ge
 
 export const EXEC_ENV_SCRUB_ALLOWLIST_SYNTHETIC_SETTING: ConfigSetting = {
   key: EXEC_ENV_SCRUB_ALLOWLIST_CONFIG_KEY,
+  label: 'Variables always passed to commands',
   type: 'string',
   default: [],
   description: 'Comma-separated environment variable NAMES always kept in a spawned exec command\'s environment even when the name looks credential-bearing (case-insensitive). Names only: this never inspects or reports values. The scrub itself stays on; this only widens what it lets through, from the next command. Empty = the built-in credential-name scrub applies with no extra exceptions.',

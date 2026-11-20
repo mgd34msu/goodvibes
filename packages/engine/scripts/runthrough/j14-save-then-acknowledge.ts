@@ -175,7 +175,7 @@ try {
   // F21: a scheduled run's answer owed when the daemon died in its delivery is delivered once after the restart.
   s.model.scriptWrapped('RTJ14AUTO', [{ text: 'RTJ14AUTO the run result.' }]);
   const job = await api(daemon, token, 'POST', '/api/automation/jobs', { name: 'rt owed run', prompt: 'RTJ14AUTO summarise today', every: '24h',
-    delivery: { mode: 'surface', targets: [{ kind: 'surface', surfaceKind: 'mattermost', address: 'ch-auto' }], fallbackTargets: [] } });
+    delivery: { mode: 'surface', targets: [{ kind: 'surface', surfaceKind: 'mattermost', address: 'ch-auto' }], fallbackTargets: [], includeSummary: false, includeLinks: false } });
   const jobId = String((job.body as { job?: { id?: string }; id?: string }).job?.id ?? (job.body as { id?: string }).id ?? '');
   holdChannelOnce.add('ch-auto');
   const runHeld = new Promise<void>((resolve) => { reachedChannelHold = resolve; });

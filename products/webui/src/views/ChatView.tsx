@@ -28,7 +28,7 @@ import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
-import { ChatApprovals } from './chat/ChatApprovals';
+import { ChatAsksChip, InlineAsks } from './chat/InlineAsk';
 import { useChatSend } from './chat/useChatSend';
 import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
 import { useToast } from '../lib/toast';
@@ -821,7 +821,10 @@ export function ChatView({
         headerSlots.titleSlot,
       )}
       {headerSlots?.actionsSlot && createPortal(
-        <ChatFindButton open={showSearch} onToggle={() => setShowSearch((v) => !v)} />,
+        <>
+          {activeSessionId && <ChatAsksChip sessionId={activeSessionId} />}
+          <ChatFindButton open={showSearch} onToggle={() => setShowSearch((v) => !v)} />
+        </>,
         headerSlots.actionsSlot,
       )}
       {showSearch && (
@@ -858,9 +861,9 @@ export function ChatView({
         activeToolCalls={activeToolCalls}
         onCancelToolCall={(callId) => void cancelToolCall(callId)}
         workingLabel={workingLabel}
+        trailing={activeSessionId ? <InlineAsks sessionId={activeSessionId} /> : undefined}
       />
       <div className="chat-dock">
-        {activeSessionId && <ChatApprovals sessionId={activeSessionId} />}
         {activeSessionId && (
           <QueuedMessagesPanel
             sessionId={activeSessionId}

@@ -315,7 +315,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     commands: () => input.commandRegistry?.getAll(),
     categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
     // The keyboard shortcuts, the list's last group, from the live key table.
-    shortcuts: () => paletteShortcuts(commandContext.keybindingsManager),
+    shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
     run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
     fill: (name) => {
       input.prompt = `/${name} `;

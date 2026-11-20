@@ -69,6 +69,8 @@ import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { createPowerNoteSource } from './runtime/power-note-source.ts';
 import { createModeWordsSource, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { terminalAskFacts, type TerminalAskContext } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
+import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes-jev/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes-jev/engine/terminal-shell/status-line';
 import { drawSplashAdditions } from '@goodvibes-jev/engine/terminal-shell/first-run';
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes-jev/engine/terminal-shell/git-status';
@@ -382,6 +384,17 @@ async function main(prepared: PreparedShellCliRuntime) {
   getSharedModeFlash().onChange = () => render();
   // The count repaints after the change that moved it, never inside the paint that posted a notice.
   unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => queueMicrotask(render)));
+  // What an ask is worded from (the approval card and the question card): the folder, the mode in force, this chat.
+  const askContext = (): TerminalAskContext => ({ workingDirectory: workingDir, homeDirectory, modeInForce: modeWords.current(), currentSessionId: runtime.sessionId });
+  // A question this chat's agent left for the owner, pinned above the composer (terminal-shell question-card.ts).
+  const ownerQuestionCard = new OwnerQuestionCard({
+    inbox: ownerQuestionInbox(ctx.services.shellPaths, 'agent'),
+    sessionId: () => runtime.sessionId,
+    facts: () => terminalAskFacts(askContext()),
+    render: () => render(),
+    notify: (message) => { systemMessageRouter.high(message); render(); },
+  });
+  unsubs.push(ownerQuestionCard.start());
   // The status bar's branch: read once, then polled the way the terminal app does (a few file stats
   // every 5 s; git runs only when git's own files moved or the terminal regains focus) and after each turn.
   const gitStatus = new GitStatusProvider(ctx.services.workingDirectory);
@@ -1198,7 +1211,7 @@ async function main(prepared: PreparedShellCliRuntime) {
             }
           : undefined,
       // Modals, the permission dialog and kit modals: stamped over the dimmed screen.
-      layers: buildConversationLayers({
+      layers: withOwnerQuestionCard(buildConversationLayers({
         input,
         conversation,
         commandRegistry,
@@ -1210,9 +1223,13 @@ async function main(prepared: PreparedShellCliRuntime) {
         contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
         providerInputTokens: orchestrator.lastInputTokens,
         permission: pendingPermission
-          ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, { awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0) })
+          ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, {
+            awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0),
+            queueCount: commandUi.waitingCount(),
+            context: askContext(),
+          })
           : null,
-      }),
+      }), ownerQuestionCard, { width, height, footerRows: shellFooterLines.length, hidden: pendingPermission !== null }),
     });
   }
   unsubs.push(announceSettingsIngestionNotices(configManager, (line, level) => {
@@ -1325,6 +1342,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       render();
       return;
     }
+    // The question card's keys (arrows, 1-9, Enter, Esc) while it is on screen and the composer is empty.
+    if (input.prompt.length === 0 && ownerQuestionCard.handleInput(data)) return;
     // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
     if (contractQuestions.handleChord(data)) {
       render();

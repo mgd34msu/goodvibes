@@ -762,7 +762,7 @@ export function evaluateAgentSkillBundleReadiness(
 export function skillStoreUnreadableNotice(storePath: string, error: unknown): string {
   return [
     '## Enabled GoodVibes Agent Skills',
-    `No skills are applied this turn: the skill store at ${storePath} could not be read (${error instanceof Error ? error.message : String(error)}). Repair or remove that file, then run /skills to confirm.`,
+    `No skills are applied this turn: the skill store at ${storePath} could not be read (${error instanceof Error ? error.message : String(error)}). Repair or remove that file, then run /my-skills (the Agent) or /skills (the terminal app) to confirm.`,
   ].join('\n');
 }
 

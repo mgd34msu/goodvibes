@@ -405,7 +405,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           } else if (domain === 'maintenance') {
             lines.push('  domain maintenance');
             lines.push('  /health maintenance');
-            lines.push('  /mode');
+            lines.push('  /verbosity');
             lines.push('  /compact');
             lines.push('  verify /health maintenance');
           } else {

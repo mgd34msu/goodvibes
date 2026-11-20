@@ -1,29 +1,27 @@
 /**
- * Work: everything running for you and everything that needs you, on one
- * page (design doc "Data views" and "Navigation map"). It replaces the
- * Sessions, Hosted, Fleet, Approvals and tasks, Workstream, CI and Checkpoints
- * pages; their old links redirect here (lib/router.ts).
+ * Work: everything working for you and everything waiting for you, grouped by
+ * what you would do about it (ux A3.1): Waiting for you, Running now,
+ * Scheduled, Finished, then one line for the platform's own background
+ * services, which become rows only while one is unhealthy. The groups, their
+ * rows, their words and every count are the work board's (work-items.ts over
+ * contracts/src/work-board.ts); this view draws them and opens a row's detail.
  *
- * Layout: the data-view template. Header "Work" with the one-line count and
- * "New" as the one primary action; a filter row with the kind Segmented (All,
- * Sessions, Agents, Processes), a search field and a Show select (active,
- * with finished, the fleet archive); then a list and detail split. The list
- * is "Needs you" first (approvals, input asks, pick-a-winner, merge
- * conflicts), then Running, then Finished when shown. On desktop the first
- * item that needs you opens in the detail by itself; the detail folds the
- * sidebar to its rail while it is open.
+ * Header: "Work" and, while anything waits, the chip "2 waiting for you", then
+ * "New". A search narrows the rows; Show switches to the fleet archive. On
+ * desktop the first row waiting for you opens in the detail by itself; on a
+ * phone the detail is a full-screen pane with Back. An ask opens its card
+ * (ApprovalDetail, ux A2.5).
  *
  * Deep links: a push notification's `#approval-action=…` opens that approval
  * for review (Allow) or denies it (Deny) on mount (useApprovalActions);
- * `#fleet-node=…` opens that process.
- * `?tab=checkpoints` (the old Checkpoints page) opens the first session on its
- * Checkpoints tab, or the workspace checkpoints when there is no session.
- * `?tab=plan` opens the project work plan (WorkPlanPanel), also reachable from
- * the list footer.
+ * `#fleet-node=…` opens that process. `?tab=checkpoints` (the old Checkpoints
+ * page) opens the first session on its Checkpoints tab, or the workspace
+ * checkpoints when there is no session; `?tab=plan` opens the project work plan.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-react';
+import type { BoardRow } from '@goodvibes-jev/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
 import { firstArray, firstString } from '../../lib/object';
 import { queryKeys } from '../../lib/queries';
@@ -32,24 +30,23 @@ import { WORK } from '../../components/shell/nav';
 import { parseFleetFocusFromHash, stripFleetFocusFragment } from '../../lib/push/fleet-focus-link';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
-import { riskTone } from '../../lib/approvals';
+import { approvalAsk } from '../../lib/asks';
 import { isClosedStatus } from '../../lib/sessions-union';
+import { useOpenAsks } from '../../hooks/useOpenAsks';
 import {
   DataPage,
   DetailPane,
   Disclosure,
   EmptyState,
   ListDetail,
-  RowGroup,
   SkeletonRows,
 } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
+import { Chip } from '../../components/ui/Chip';
 import { IconButton } from '../../components/ui/IconButton';
 import { Input } from '../../components/ui/Field';
-import { Row } from '../../components/ui/Row';
-import { Segmented } from '../../components/ui/Segmented';
+import { Row, RowList } from '../../components/ui/Row';
 import { Select } from '../../components/ui/Select';
-import { StatusDot } from '../../components/ui/StatusDot';
 import { PHONE_QUERY, useMediaQuery } from '../../components/ui/overlay';
 import { ApprovalDetail } from './ApprovalDetail';
 import { AttemptGroupDetail } from './AttemptGroupDetail';
@@ -67,8 +64,9 @@ import { SessionDetail, type SessionTab } from './SessionDetail';
 import { TaskDetail } from './TaskDetail';
 import { WorkPlanPanel } from './WorkPlanPanel';
 import { useApprovalActions } from './useApprovalActions';
+import { useAskActions } from './useAskActions';
 import { useWorkData } from './useWorkData';
-import { buildWorkItems, groupWorkItems, workSummary, type WorkItem, type WorkKind } from './work-items';
+import { archivedRows, fleetStatePhrase, matchesQuery, readWork, workKeyOf } from './work-items';
 import '../../styles/components/work.css';
 import { nonEmpty } from '../../lib/non-empty';
 
@@ -77,7 +75,7 @@ const WORKSPACE_CHECKPOINTS_KEY = 'workspace:checkpoints';
 /** The project work plan detail. */
 const WORK_PLAN_KEY = 'workspace:work-plan';
 
-type ShowScope = 'active' | 'finished' | 'archived';
+type ShowScope = 'active' | 'archived';
 
 export interface WorkViewProps {
   tab?: string;
@@ -97,33 +95,54 @@ function workKey(key: string): string {
   return key.startsWith('hosted:') ? `session:${key.slice('hosted:'.length)}` : key;
 }
 
-function kindFromTab(tab: string | undefined): WorkKind | 'all' {
-  if (tab === 'sessions' || tab === 'checkpoints') return 'sessions';
-  if (tab === 'agents' || tab === 'processes') return tab;
-  return 'all';
+/**
+ * The clock the rows' words read ("started 15 s ago", "goes ahead in 9 min"):
+ * re-read every 10 s while something runs or counts down, every minute
+ * otherwise. Rendering only; no request.
+ */
+function useNow(fast: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), fast ? 10_000 : 60_000);
+    return () => window.clearInterval(timer);
+  }, [fast]);
+  return now;
 }
 
-function ItemRow({ item, selected, onSelect }: { item: WorkItem; selected: boolean; onSelect: () => void }) {
+function BoardRowItem({ row, selected, child, onSelect }: { row: BoardRow; selected: boolean; child: boolean; onSelect: () => void }) {
   return (
     <Row
-      className={item.depth > 0 ? 'work-row work-row--child' : 'work-row'}
+      className={child ? 'work-row work-row--board work-row--child' : 'work-row work-row--board'}
       selected={selected}
       onSelect={onSelect}
-      leading={(
-        <span className="work-row__lead" style={item.depth > 0 ? { marginLeft: `${Math.min(item.depth, 4) * 16}px` } : undefined}>
-          <StatusDot tone={item.tone} />
-        </span>
-      )}
-      title={item.title}
-      meta={(
-        <>
-          <span className="work-row__status" data-attention-reason={item.attentionReason}>{item.status}</span>
-          {item.meta ? ` · ${item.meta}` : ''}
-        </>
-      )}
-      trailing={item.value ? <span className="dv-value">{item.value}</span> : undefined}
-      aria-label={`${item.title}, ${item.status}`}
+      title={row.title}
+      meta={row.meta.full || undefined}
+      aria-label={[row.title, row.meta.full].filter(Boolean).join(', ')}
     />
+  );
+}
+
+function BoardGroup({ label, rows, selectedKey, onOpen }: { label: string; rows: readonly BoardRow[]; selectedKey: string; onOpen: (key: string) => void }) {
+  if (rows.length === 0) return null;
+  const ids = new Set(rows.map((row) => row.ref.id));
+  return (
+    <section className="work-board__group" aria-label={`${label}, ${rows.length}`}>
+      <h3 className="work-board__label">{label} · {rows.length}</h3>
+      <RowList aria-label={label}>
+        {rows.map((row) => {
+          const key = workKeyOf(row);
+          return (
+            <BoardRowItem
+              key={key}
+              row={row}
+              child={row.parentId !== undefined && ids.has(row.parentId)}
+              selected={key === selectedKey}
+              onSelect={() => onOpen(key)}
+            />
+          );
+        })}
+      </RowList>
+    </section>
   );
 }
 
@@ -134,14 +153,14 @@ export function WorkView(props: WorkViewProps) {
   return <WorkViewContent key={contractScope.revision} {...props} contractScope={contractScope} />;
 }
 
-function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive = true, sessionSubscriptionActive = false, streamPaused = false, onOpenSession }: WorkViewProps & { contractScope: ClientLifetime }) {
+function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessionSubscriptionActive = false, streamPaused = false, onOpenSession }: WorkViewProps & { contractScope: ClientLifetime }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const phone = useMediaQuery(PHONE_QUERY);
-  const kind = kindFromTab(tab);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<ShowScope>('active');
   const [archiving, setArchiving] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
 
   // A needs-input push opens the app at #fleet-node=<id>: read it once, then scrub it.
   const [initialFocus] = useState(() => (typeof window !== 'undefined' ? parseFleetFocusFromHash(window.location.hash) : null));
@@ -150,17 +169,20 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   }, [initialFocus]);
 
   const [selectedKey, setSelectedKey] = useState<string>(() => (initialFocus ? `fleet:${initialFocus.nodeId}` : tab === 'plan' ? WORK_PLAN_KEY : ''));
-  // After the person closes a detail, the first needs-you item does not reopen by itself.
+  // After the person closes a detail, the first waiting row does not reopen by itself.
   const dismissedRef = useRef(Boolean(initialFocus) || tab === 'plan');
   const [sessionTab, setSessionTab] = useState<SessionTab>(tab === 'checkpoints' ? 'checkpoints' : 'transcript');
 
+  const archived = scope === 'archived';
   const data = useWorkData({
     contractScope,
     subscriptionActive,
-    archived: scope === 'archived',
-    includeFinished: scope !== 'active',
+    archived,
+    // Finished work is a group of the board (the newest ten), so finished hosted sessions are read too.
+    includeFinished: !archived,
     hostedStreamConnected: sessionSubscriptionActive,
   });
+  const { asks } = useOpenAsks(!archived);
   const closeDetail = useCallback(() => {
     dismissedRef.current = true;
     setSelectedKey('');
@@ -204,6 +226,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
       setSelectedKey(`approval:${id}`);
     },
   });
+  const askActions = useAskActions(approvalActions);
 
   // The chat list the sidebar already reads (same key and request), for each chat's current title.
   const chatList = useQuery({
@@ -220,20 +243,35 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     return titles;
   }, [chatList.data]);
 
-  const items = useMemo(() => buildWorkItems({
-    contracts: data.contractRecords,
-    approvals: scope === 'archived' ? [] : data.approvalRecords,
+  const running = data.nodes.some((node) => node.state !== 'idle' && node.state !== 'paused') || asks.some((ask) => ask.presentation.countdown !== undefined);
+  const now = useNow(running);
+  const work = useMemo(() => readWork({
+    asks,
     nodes: data.nodes,
-    attemptGroups: scope === 'archived' ? [] : data.attemptGroups,
-    sessions: scope === 'archived' ? [] : data.sessionRecords,
+    attemptGroups: data.attemptGroups,
+    sessions: data.sessionRecords,
     chatTitles,
-    hosted: scope === 'archived' ? [] : data.hostedRecords,
-    tasks: scope === 'archived' ? [] : data.taskRecords,
-    ciWatches: scope === 'archived' ? [] : data.watchRecords,
-    archived: scope === 'archived',
-  }), [scope, data.contractRecords, data.approvalRecords, data.nodes, data.attemptGroups, data.sessionRecords, chatTitles, data.hostedRecords, data.taskRecords, data.watchRecords]);
-  const groups = useMemo(() => groupWorkItems(items, kind, query), [items, kind, query]);
-  const selectedItem = useMemo(() => items.find((item) => item.key === selectedKey) ?? null, [items, selectedKey]);
+    hosted: data.hostedRecords,
+    tasks: data.taskRecords,
+    ciWatches: data.watchRecords,
+    contracts: data.contractRecords,
+  }, now), [asks, data.nodes, data.attemptGroups, data.sessionRecords, chatTitles, data.hostedRecords, data.taskRecords, data.watchRecords, data.contractRecords, now]);
+  const board = work.board;
+  const archive = useMemo(() => (archived ? archivedRows(data.nodes, now) : []), [archived, data.nodes, now]);
+  const filter = (rows: readonly BoardRow[]) => rows.filter((row) => matchesQuery(row, query));
+  const groups = {
+    waiting: filter(board.groups.waiting),
+    running: filter(board.groups.running),
+    scheduled: filter(board.groups.scheduled),
+    finished: filter(board.groups.finished),
+    unhealthy: filter(board.services.unhealthy),
+    archive: filter(archive),
+  };
+  const systemNodes = useMemo(
+    () => data.liveNodes.filter((node) => (node as { serves?: unknown }).serves === 'system'),
+    [data.liveNodes],
+  );
+  const openSessions = work.openSessions.filter((session) => !query.trim() || session.title.toLowerCase().includes(query.trim().toLowerCase()));
 
   const openItem = useCallback((raw: string) => {
     const key = workKey(raw);
@@ -241,22 +279,28 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     if (key.startsWith('session:')) setSessionTab((current) => (tab === 'checkpoints' ? 'checkpoints' : current));
   }, [tab]);
 
-  // Desktop: the first item that needs you opens by itself, until the person closes a detail.
+  // Desktop: the first row waiting for you opens by itself, until the person closes a detail.
+  const firstWaiting = archived ? undefined : groups.waiting[0];
   useEffect(() => {
-    if (phone || selectedKey || dismissedRef.current) return;
-    const first = groups.needs[0];
-    if (first) setSelectedKey(first.key);
-  }, [phone, selectedKey, groups.needs]);
+    if (phone || selectedKey || dismissedRef.current || !firstWaiting) return;
+    setSelectedKey(workKeyOf(firstWaiting));
+  }, [phone, selectedKey, firstWaiting]);
 
   // The old Checkpoints page: a session's Checkpoints tab, or the workspace checkpoints.
   const checkpointsHandled = useRef(false);
   useEffect(() => {
     if (tab !== 'checkpoints' || checkpointsHandled.current || !data.sessions.isFetched) return;
     checkpointsHandled.current = true;
-    const firstSession = items.find((item) => item.type === 'session');
+    const firstSession = data.sessionRecords[0];
     setSessionTab('checkpoints');
-    setSelectedKey(firstSession ? firstSession.key : WORKSPACE_CHECKPOINTS_KEY);
-  }, [tab, items, data.sessions.isFetched]);
+    setSelectedKey(firstSession ? `session:${firstSession.id}` : WORKSPACE_CHECKPOINTS_KEY);
+  }, [tab, data.sessionRecords, data.sessions.isFetched]);
+
+  const restart = useMutation({
+    mutationFn: (id: string) => platformClient.operator.fleet.resume(id),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.fleet }); },
+    onError: (error) => toast({ title: 'Could not restart it', description: formatError(error), tone: 'danger' }),
+  });
 
   const archiveFinished = async () => {
     setArchiving(true);
@@ -280,13 +324,14 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.contracts }),
       queryClient.invalidateQueries({ queryKey: queryKeys.workPlan }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.ownerInbox }),
       data.snapshot.refetch(),
       data.approvals.refetch(),
       data.sessions.refetch(),
       data.hosted.refetch(),
       data.tasks.refetch(),
       data.ciWatches.refetch(),
-      ...(scope === 'archived' ? [data.archivedList.refetch()] : []),
+      ...(archived ? [data.archivedList.refetch()] : []),
     ]);
   };
 
@@ -315,7 +360,12 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
             ? () => openItem(`fleet:contract:${id}`) : undefined} />;
       case 'approval': {
         const record = data.approvalRecords.find((a) => a.id === id);
-        return record ? <ApprovalDetail key={record.id} record={record} actions={approvalActions} onClose={closeDetail} /> : null;
+        const ask = asks.find((entry) => entry.key === selectedKey) ?? (record ? approvalAsk(record) : undefined);
+        return ask ? <ApprovalDetail key={ask.key} ask={ask} approvalActions={approvalActions} askActions={askActions} now={now} onClose={closeDetail} /> : null;
+      }
+      case 'inbox': {
+        const ask = asks.find((entry) => entry.key === selectedKey);
+        return ask ? <ApprovalDetail key={ask.key} ask={ask} approvalActions={approvalActions} askActions={askActions} now={now} onClose={closeDetail} /> : null;
       }
       case 'fleet': {
         const node = data.nodes.find((n) => n.id === id) ?? data.liveNodes.find((n) => n.id === id);
@@ -323,7 +373,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
           <ProcessDetail
             key={node.id}
             node={node}
-            archived={scope === 'archived'}
+            archived={archived}
             approvals={data.approvalRecords}
             onOpenItem={openItem}
             onClose={closeDetail}
@@ -381,14 +431,13 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     }
   })();
 
-  const pendingApprovals = data.approvalRecords.filter((a) => a.status === 'pending' || a.status === 'claimed');
-  const showFinished = scope !== 'active';
-  const showHostedNotice = (kind === 'sessions' || kind === 'all') && data.hostedUnreadable;
-  const nothingAtAll = !data.firstLoad && (scope === 'archived' || !data.contracts.isFetching) && data.failures.length === 0 && !showHostedNotice && groups.needs.length === 0 && groups.running.length === 0
-    && (!showFinished || groups.finished.length === 0);
+  const anyRows = archived
+    ? groups.archive.length > 0
+    : groups.waiting.length + groups.running.length + groups.scheduled.length + groups.finished.length + groups.unhealthy.length > 0;
+  const nothingAtAll = !data.firstLoad && data.failures.length === 0 && !anyRows && (archived || openSessions.length === 0);
 
   const list = (
-    <>
+    <div className="work-board">
       {data.failures.map(({ label, query: failed }) => (
         <p key={label} className="dv-notice dv-notice--bad work-notice" role="alert">
           Could not load {label}: {formatError(failed.error)}
@@ -396,7 +445,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
           <Button size="sm" variant="ghost" onClick={() => void failed.refetch()}>Retry</Button>
         </p>
       ))}
-      {showHostedNotice && (
+      {data.hostedUnreadable && (
         <p className="dv-notice work-notice" role="note">
           The daemon answered the hosted session list in a shape this client does not understand, so hosted sessions are not shown.
         </p>
@@ -407,33 +456,78 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
         </p>
       )}
 
-      {!data.firstLoad && scope !== 'archived' && data.contracts.isPending && data.contracts.isFetching && <SkeletonRows count={2} label="Loading contracts" />}
       {data.firstLoad && <SkeletonRows count={6} label="Loading work" />}
 
-      {!data.firstLoad && <OwnerQuestions enabled={scope !== 'archived'} />}
+      {!data.firstLoad && !archived && (
+        <>
+          <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} />
+          <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} />
+          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} />
+          <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} />
 
-      {!data.firstLoad && groups.needs.length > 0 && (
-        <RowGroup label="Needs you" count={groups.needs.length}>
-          {groups.needs.map((item) => (
-            <ItemRow key={item.key} item={item} selected={item.key === selectedKey} onSelect={() => openItem(item.key)} />
-          ))}
-        </RowGroup>
+          <div className="work-services">
+            <button
+              type="button"
+              className="work-services__link"
+              aria-expanded={servicesOpen}
+              onClick={() => setServicesOpen((open) => !open)}
+            >
+              Background services: {board.services.healthy} healthy ›
+            </button>
+            {servicesOpen && systemNodes.length > 0 && (
+              <ul className="work-services__list" aria-label="Background services">
+                {systemNodes.map((node) => (
+                  <li key={node.id} className="work-services__item">
+                    <span>{node.label || node.id}</span>
+                    <span className="work-services__state">{fleetStatePhrase(node.state)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {groups.unhealthy.length > 0 && (
+            <section className="work-board__group" aria-label="Needs attention">
+              <h3 className="work-board__label">Needs attention</h3>
+              <RowList aria-label="Needs attention">
+                {groups.unhealthy.map((row) => (
+                  <Row
+                    key={row.ref.id}
+                    className="work-row work-row--board"
+                    title={row.title}
+                    meta={row.meta.full || undefined}
+                    selected={workKeyOf(row) === selectedKey}
+                    onSelect={() => openItem(workKeyOf(row))}
+                    trailing={row.actions.includes('resume') ? (
+                      <Button size="sm" variant="secondary" disabled={restart.isPending} onClick={() => restart.mutate(row.ref.id)}>Restart</Button>
+                    ) : undefined}
+                  />
+                ))}
+              </RowList>
+            </section>
+          )}
+
+          {openSessions.length > 0 && (
+            <Disclosure summary={`Open sessions between turns: ${openSessions.length}`}>
+              <RowList aria-label="Open sessions">
+                {openSessions.map((session) => (
+                  <Row
+                    key={session.id}
+                    className="work-row work-row--board"
+                    title={session.title}
+                    selected={`session:${session.id}` === selectedKey}
+                    onSelect={() => openItem(`session:${session.id}`)}
+                  />
+                ))}
+              </RowList>
+            </Disclosure>
+          )}
+
+          <OwnerQuestions enabled />
+        </>
       )}
 
-      {!data.firstLoad && groups.running.length > 0 && (
-        <RowGroup label={groups.running.every((item) => item.active) ? 'Running' : 'Running and idle'} count={groups.running.length}>
-          {groups.running.map((item) => (
-            <ItemRow key={item.key} item={item} selected={item.key === selectedKey} onSelect={() => openItem(item.key)} />
-          ))}
-        </RowGroup>
-      )}
-
-      {!data.firstLoad && showFinished && groups.finished.length > 0 && (
-        <RowGroup label={scope === 'archived' ? 'Archived' : 'Finished'} count={groups.finished.length}>
-          {groups.finished.map((item) => (
-            <ItemRow key={item.key} item={item} selected={item.key === selectedKey} onSelect={() => openItem(item.key)} />
-          ))}
-        </RowGroup>
+      {!data.firstLoad && archived && (
+        <BoardGroup label="Archive" rows={groups.archive} selectedKey={selectedKey} onOpen={openItem} />
       )}
 
       {nothingAtAll && (
@@ -441,13 +535,13 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
           <EmptyState icon={<Search />} action={<Button onClick={() => setQuery('')}>Clear search</Button>}>
             Nothing here matches “{query.trim()}”.
           </EmptyState>
-        ) : scope === 'archived' ? (
+        ) : archived ? (
           <EmptyState icon={<Archive />} action={<Button onClick={() => setScope('active')}>Show active work</Button>}>
             Finished processes you archive stay browsable here.
           </EmptyState>
         ) : (
-          <EmptyState icon={<Inbox />} action={<Button onClick={() => setScope('finished')}>Show finished work</Button>}>
-            Sessions, agents and processes appear here while they run, and anything waiting on you shows first.
+          <EmptyState icon={<Inbox />}>
+            Nothing is running and nothing is waiting for you.
           </EmptyState>
         )
       )}
@@ -462,45 +556,39 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
           >
             Work plan
           </Button>
-          {kind !== 'agents' && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<History aria-hidden="true" />}
-              onClick={() => { dismissedRef.current = true; setSessionTab('checkpoints'); setSelectedKey(WORKSPACE_CHECKPOINTS_KEY); }}
-            >
-              Workspace checkpoints
-            </Button>
-          )}
-          {scope !== 'archived' && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<History aria-hidden="true" />}
+            onClick={() => { dismissedRef.current = true; setSessionTab('checkpoints'); setSelectedKey(WORKSPACE_CHECKPOINTS_KEY); }}
+          >
+            Workspace checkpoints
+          </Button>
+          {!archived && (
             <Button size="sm" variant="ghost" icon={<Archive aria-hidden="true" />} disabled={archiving} onClick={() => void archiveFinished()}>
               {archiving ? 'Archiving…' : 'Archive finished processes'}
             </Button>
           )}
         </div>
       )}
-
-      {!data.firstLoad && pendingApprovals.length > 1 && (
-        <Disclosure summary="Approvals by category and risk">
-          <ApprovalBreakdown records={pendingApprovals} />
-        </Disclosure>
-      )}
-    </>
+    </div>
   );
+
+  const waitingCount = board.counts.waiting;
 
   return (
     <DataPage
       title={WORK.label}
-      description={data.firstLoad ? WORK.description : workSummary(scope === 'archived' ? items : items.filter((i) => i.group !== 'finished'), scope === 'archived')}
-      action={<NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} />}
+      action={(
+        <span className="work-header__actions">
+          {!archived && waitingCount > 0 && (
+            <Chip tone="warn" className="work-header__chip">{waitingCount} waiting for you</Chip>
+          )}
+          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} />
+        </span>
+      )}
       filters={(
         <>
-          <Segmented<WorkTab>
-            label="Kind of work"
-            value={kind === 'all' ? 'all' : kind}
-            options={WORK.tabs.map((t) => ({ value: t.tab as WorkTab, label: t.label }))}
-            onChange={(next) => onTabChange(next)}
-          />
           <div className="dv-filters__search">
             <Input
               type="search"
@@ -519,7 +607,6 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
               placement="bottom-end"
               options={[
                 { value: 'active', label: 'Active' },
-                { value: 'finished', label: 'Active and finished' },
                 { value: 'archived', label: 'Archive' },
               ]}
             />
@@ -533,49 +620,10 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
         detail={detail}
         detailOpen={Boolean(detail)}
         onCloseDetail={closeDetail}
-        listLabel="Work items"
-        detailLabel={selectedItem ? selectedItem.title : 'Detail'}
+        listLabel="Work"
+        detailLabel="Detail"
         backLabel="All work"
       />
     </DataPage>
-  );
-}
-
-/** Category by risk counts for the pending approvals (the old approval-class matrix). */
-function ApprovalBreakdown({ records }: { records: readonly import('../../lib/goodvibes').ApprovalRecord[] }) {
-  const rows = useMemo(() => {
-    const byCategory = new Map<string, Map<string, number>>();
-    for (const record of records) {
-      const category = record.request.category || 'uncategorized';
-      const risk = record.request.analysis.riskLevel || 'unknown';
-      const byRisk = byCategory.get(category) ?? new Map<string, number>();
-      byRisk.set(risk, (byRisk.get(risk) ?? 0) + 1);
-      byCategory.set(category, byRisk);
-    }
-    return [...byCategory.entries()].map(([category, byRisk]) => ({
-      category,
-      total: [...byRisk.values()].reduce((sum, n) => sum + n, 0),
-      byRisk: [...byRisk.entries()].sort((a, b) => b[1] - a[1]),
-    })).sort((a, b) => b.total - a.total);
-  }, [records]);
-  return (
-    <table className="work-breakdown" aria-label="Approvals by category and risk">
-      <tbody>
-        {rows.map(({ category, total, byRisk }) => (
-          <tr key={category}>
-            <th scope="row">{category}</th>
-            <td>
-              {byRisk.map(([risk, count]) => (
-                <span key={risk} className="work-breakdown__risk">
-                  <StatusDot tone={riskTone(risk) === 'bad' ? 'bad' : riskTone(risk) === 'warning' ? 'warn' : 'idle'} />
-                  {risk} {count}
-                </span>
-              ))}
-            </td>
-            <td className="dv-value">{total}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

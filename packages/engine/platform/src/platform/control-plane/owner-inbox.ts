@@ -52,6 +52,8 @@ import {
   type StoredOwnerItemKind,
 } from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
+import type { AskPresentation } from '../permissions/ask-presentation.js';
+import type { PermissionPromptRequest } from '../permissions/prompt.js';
 import { logger } from '../utils/logger.js';
 import { askerLivenessPath, isTakerGone, processTaker, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
@@ -114,7 +116,16 @@ export interface OwnerItem {
   readonly revision?: number | undefined;
   /** For an approval: its reading for the viewer that listed it (approval-lifecycle.ts). */
   readonly reading?: ApprovalReading | undefined;
+  /**
+   * What the ask says (permissions/ask-presentation.ts): its question,
+   * consequence, choices and why, the same words on every surface. Present
+   * where the inbox was given the facts to word it (the daemon's).
+   */
+  readonly presentation?: AskPresentation | undefined;
 }
+
+/** Words an item: the ask's request for an approval item, the item alone otherwise. */
+export type OwnerItemPresenter = (item: OwnerItem, request?: PermissionPromptRequest) => AskPresentation;
 
 /** What a producer posts. Approvals are raised through the approval broker, not posted. */
 export interface NewOwnerItem {
@@ -648,6 +659,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   #approvalRevision = 0;
   /** While anyone listens: the store's change feed, so a change made by another process is heard too. */
   #stopStoreChanges: (() => void) | null = null;
+  /** Words for each item; set by the composition with the facts (usePresentation). */
+  #presenter: OwnerItemPresenter | null = null;
   /** Rows this inbox already announced itself, by id: the store's feed repeats them and is skipped once. */
   readonly #announced = new Map<string, string>();
 
@@ -751,11 +764,34 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       ?? { kind: 'owner-route', scopes: ['*'], node: 'local', mayAnswer: true, mayAdminister: true };
   }
 
+  /**
+   * Word every item this inbox lists, answers or announces with `presenter`:
+   * the composition that holds the facts (the mode in force, the session
+   * titles, the purchase windows) sets it. One pure call per item listed.
+   */
+  usePresentation(presenter: OwnerItemPresenter | null): void {
+    this.#presenter = presenter;
+  }
+
+  /** The item with its words, and an approval's title from them; unchanged without a presenter. */
+  #present(item: OwnerItem): OwnerItem {
+    const presenter = this.#presenter;
+    if (presenter === null) return item;
+    try {
+      const request = item.kind === 'approval' ? this.#approvals?.getApproval(item.id)?.request : undefined;
+      const presentation = presenter(item, request);
+      return { ...item, presentation, ...(item.kind === 'approval' ? { title: presentation.title } : {}) };
+    } catch (error) {
+      logger.debug('[owner-inbox] an item could not be worded; it is listed without its words', { itemId: item.id, error: error instanceof Error ? error.message : String(error) });
+      return item;
+    }
+  }
+
   get(id: string, viewer?: ApprovalViewer): OwnerItem | undefined {
     const entry = this.#questions.get(id);
-    if (entry) return this.#project(entry, this.#now());
+    if (entry) return this.#present(this.#project(entry, this.#now()));
     const row = this.#approvalActions?.get(id, this.#viewer(viewer));
-    return row ? projectApproval(row.record, row.reading, this.#approvalActions?.homeNode) : undefined;
+    return row ? this.#present(projectApproval(row.record, row.reading, this.#approvalActions?.homeNode)) : undefined;
   }
 
   async find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined> {
@@ -783,7 +819,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       if (matchesFilter(item, filter, kinds)) items.push(item);
     }
     items.sort(newestFirst);
-    return items.length > limit ? items.slice(0, limit) : items;
+    return (items.length > limit ? items.slice(0, limit) : items).map((item) => this.#present(item));
   }
 
   /**
@@ -1197,7 +1233,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return { applied: true, item: projected };
   }
 
-  #emit(item: OwnerItem): void {
+  #emit(projected: OwnerItem): void {
+    const item = this.#present(projected);
     // Surfaces outside the daemon (a terminal waiting on its question, the web UI)
     // learn of the change from the stream; an approval is already on approval-update.
     if (item.kind !== 'approval') {

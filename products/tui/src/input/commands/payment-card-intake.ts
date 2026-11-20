@@ -74,7 +74,7 @@ async function renderCardStatus(ctx: CommandContext): Promise<string[]> {
     lines = ['Payment cards on the selected daemon could not be read:', `  ${describeCardFailure(error)}`];
   }
   for (const kind of ['billing', 'shipping'] as const) {
-    const set = (['name', 'line1', 'city', 'postalCode', 'country'] as const).map((field) => ctx.platform.configManager.get(paymentsAddressConfigKey(kind, field) as never)).filter((value) => typeof value === 'string' && value.length > 0);
+    const set = (['name', 'line1', 'city', 'postalCode', 'country'] as const).map((field): unknown => ctx.platform.configManager.get(paymentsAddressConfigKey(kind, field) as never)).filter((value): value is string => typeof value === 'string' && value.length > 0);
     lines.push(`${kind === 'billing' ? 'Billing' : 'Shipping'} address: ${set.length > 0 ? set.join(', ') : 'not set (/payments address)'}`);
   }
   lines.push('/payments pending shows the purchases waiting for your answer; budgets and windows are in Settings > Payments.');

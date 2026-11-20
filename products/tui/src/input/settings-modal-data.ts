@@ -220,7 +220,7 @@ export function buildSettingGroups(
   // get, setDynamic and validation take a registered host key.
   const hostValueEntries = hostSchema.flatMap((setting): BuiltinSettingEntry[] => {
     if (setting.type === 'boolean') return [];
-    const row: ConfigSetting = { key: setting.key as ConfigKey, type: setting.type, default: setting.default, description: setting.description };
+    const row: ConfigSetting = { key: setting.key as ConfigKey, label: setting.label, type: setting.type, default: setting.default, description: setting.description };
     const currentValue = configManager.get(row.key);
     return [{
       setting: row, currentValue, isDefault: deepEqual(currentValue, row.default),
@@ -435,6 +435,7 @@ export const NOTIFY_AFTER_SECONDS_DEFAULT_SETTING = 60;
  */
 export const NOTIFY_AFTER_SECONDS_SYNTHETIC_SETTING: ConfigSetting = {
   key: 'behavior.notifyAfterSeconds' as ConfigKey,
+  label: 'Notify when an answer takes longer than (seconds)',
   type: 'number',
   default: NOTIFY_AFTER_SECONDS_DEFAULT_SETTING,
   description: 'Seconds a turn must run before a push notification fires (0 = off). Delivers to desktop (notify-send/osascript) and configured ntfy/webhook URLs.',
@@ -477,6 +478,7 @@ export function buildNotifyAfterSecondsSyntheticEntry(configManager: Pick<Config
  */
 export const BUDGET_ALERT_USD_SYNTHETIC_SETTING: ConfigSetting = {
   key: BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey,
+  label: 'Session budget for alerts (USD)',
   type: 'number',
   default: BUDGET_ALERT_USD_DEFAULT,
   description: 'Session cost-budget alert threshold in USD (0 = no budget configured). Set via the Usage modal\'s "b" key or /cost budget <usd>; this entry only displays the current effective value.',
@@ -509,25 +511,30 @@ export function buildBudgetAlertUsdSyntheticEntry(configManager: Pick<ConfigMana
  * (budget-breach-notifier.ts, approval-alert.ts, turn-event-wiring.ts,
  * long-task-notifier.ts), this is only the settings-modal-visible surface.
  */
-const NOTIFY_ALERT_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly description: string }> = [
+const NOTIFY_ALERT_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly label: string; readonly description: string }> = [
   {
     key: 'behavior.notifyOnBudgetBreach',
+    label: 'Alert when the session goes over budget',
     description: 'Alert when session cost crosses the configured budget (set via the Usage modal\'s "b" key).',
   },
   {
     key: 'behavior.notifyOnAgentFailure',
+    label: 'Alert when a helper agent fails',
     description: 'Alert when a delegated or background agent fails.',
   },
   {
     key: 'behavior.notifyOnChainFailure',
+    label: 'Alert when a review chain fails',
     description: 'Alert when a WRFC review chain fails.',
   },
   {
     key: 'behavior.notifyOnApprovalPending',
+    label: 'Alert when something waits for your approval',
     description: 'Alert when a tool call is waiting on your approval.',
   },
   {
     key: 'behavior.notifyOnlyWhenUnfocused',
+    label: 'Alert only when the terminal is in the background',
     description: 'Master gate for the four alerts above: fire only when the terminal window is unfocused, or when focus state was never observed (terminal does not report focus). Turn off to always fire regardless of focus.',
   },
 ];
@@ -535,13 +542,14 @@ const NOTIFY_ALERT_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; rea
 function buildBooleanSyntheticEntry(
   configManager: Pick<ConfigManager, 'get'>,
   key: string,
+  label: string,
   description: string,
   defaultValue: boolean,
 ): SettingEntry {
   const raw = configManager.get(key as ConfigKey);
   const currentValue = typeof raw === 'boolean' ? raw : defaultValue;
   return {
-    setting: { key: key as ConfigKey, type: 'boolean', default: defaultValue, description },
+    setting: { key: key as ConfigKey, label, type: 'boolean', default: defaultValue, description },
     currentValue,
     isDefault: currentValue === defaultValue,
   };
@@ -549,7 +557,7 @@ function buildBooleanSyntheticEntry(
 
 /** Build the five synthetic SettingEntry rows for the behavior category. */
 export function buildNotifyAlertSyntheticEntries(configManager: Pick<ConfigManager, 'get'>): SettingEntry[] {
-  return NOTIFY_ALERT_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.description, true));
+  return NOTIFY_ALERT_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.label, spec.description, true));
 }
 
 // ---------------------------------------------------------------------------
@@ -566,24 +574,28 @@ export function buildNotifyAlertSyntheticEntries(configManager: Pick<ConfigManag
  * `notifyOnlyWhenUnfocused` gate, an in-terminal notification is always
  * focus-gated on its own (only fires for an unfocused/unknown terminal).
  */
-const TERMINAL_NOTIFY_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly description: string; readonly defaultOn: boolean }> = [
+const TERMINAL_NOTIFY_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly label: string; readonly description: string; readonly defaultOn: boolean }> = [
   {
     key: 'behavior.terminalNotifyApprovalWait',
+    label: 'Notify from the terminal when something waits for approval',
     description: 'Send an in-terminal (OSC 9) desktop notification when a tool call is waiting on your approval. Fires only when the terminal window is unfocused. Works over SSH/tmux where OS notifications do not.',
     defaultOn: true,
   },
   {
     key: 'behavior.terminalNotifyTurnEnd',
+    label: 'Notify from the terminal when an answer finishes',
     description: 'Send an in-terminal (OSC 9) desktop notification when a turn finishes. Off by default. Fires only when the terminal window is unfocused.',
     defaultOn: false,
   },
   {
     key: 'behavior.terminalNotifyAgentBlocked',
+    label: 'Notify from the terminal when a helper agent needs you',
     description: 'Send an in-terminal (OSC 9) desktop notification when a delegated agent blocks waiting for your input. Off by default. Fires only when the terminal window is unfocused.',
     defaultOn: false,
   },
   {
     key: 'behavior.terminalBell',
+    label: 'Ring the terminal bell with notifications',
     description: 'Also ring the terminal bell alongside in-terminal notifications. Off by default.',
     defaultOn: false,
   },
@@ -591,7 +603,7 @@ const TERMINAL_NOTIFY_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; 
 
 /** Build the OSC 9 in-terminal notification SettingEntry rows for the behavior category. */
 export function buildTerminalNotifySyntheticEntries(configManager: Pick<ConfigManager, 'get'>): SettingEntry[] {
-  return TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.description, spec.defaultOn));
+  return TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.label, spec.description, spec.defaultOn));
 }
 
 // ---------------------------------------------------------------------------
@@ -610,6 +622,7 @@ export function buildCodeIndexEnabledSyntheticEntry(configManager: Pick<ConfigMa
   return buildBooleanSyntheticEntry(
     configManager,
     CODE_INDEX_ENABLED_CONFIG_KEY,
+    'Keep the code index up to date',
     'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; see /codebase status. Off by default: /codebase build indexes once, on demand, and the index is NOT kept current after edits.',
     false,
   );
@@ -716,7 +729,7 @@ function rebuildTuiLocalSyntheticEntry(entry: BuiltinSettingEntry, configManager
     || TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.some((spec) => spec.key === key)
     || key === CODE_INDEX_ENABLED_CONFIG_KEY;
   if (isLocalBoolean && typeof entry.setting.default === 'boolean') {
-    return buildBooleanSyntheticEntry(configManager, key, entry.setting.description, entry.setting.default);
+    return buildBooleanSyntheticEntry(configManager, key, entry.setting.label, entry.setting.description, entry.setting.default);
   }
   return null;
 }

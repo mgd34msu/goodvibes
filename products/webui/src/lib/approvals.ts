@@ -72,41 +72,6 @@ export function partialApprovalLabel(record: ApprovalRecord): string | null {
   return `partial (${modifiedEdits.length}/${originalHunks.length} hunks)`;
 }
 
-export function riskTone(riskLevel: string): string {
-  switch (riskLevel) {
-    case 'critical':
-      return 'bad';
-    case 'high':
-      return 'warning';
-    case 'medium':
-      return 'neutral';
-    default:
-      return 'ok';
-  }
-}
-
-export function statusTone(status: ApprovalStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'warning';
-    case 'claimed':
-      return 'neutral';
-    case 'approved':
-      return 'ok';
-    case 'denied':
-    case 'expired':
-      return 'bad';
-    case 'cancelled':
-      return 'neutral';
-    default:
-      return 'neutral';
-  }
-}
-
-export function statusLabel(status: string): string {
-  return status.trim() || 'unknown';
-}
-
 export function sortApprovalsNewestFirst(approvals: readonly ApprovalRecord[]): ApprovalRecord[] {
   return [...approvals].sort((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -277,7 +242,7 @@ export function judgmentVerdict(record: ApprovalRecord): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-/** Badge tone for a model-judgment verdict, mirrors riskTone's ok/warning/neutral vocabulary. */
+/** Badge tone for a model-judgment verdict: ok, warning or neutral. */
 export function judgmentTone(verdict: string): string {
   switch (verdict) {
     case 'looks-safe':

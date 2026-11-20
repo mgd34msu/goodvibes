@@ -6,7 +6,7 @@
  * picker renderer, so both apps show the same form.
  */
 import type { SelectionItem } from '../selection-modal.js';
-import { askInput, pickFrom } from './guided.js';
+import { askInput, pickFrom } from './ask-input.js';
 import { fixedChoices } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, InputDescription } from './types.js';
 

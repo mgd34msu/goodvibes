@@ -117,7 +117,7 @@ $ goodvibes-agent web
 Unsupported command: web. GoodVibes Agent does not start web servers or expose browser routes.
 ```
 
-`goodvibes-agent` has no `acp`, `open`, `hooks validate`, `host pair` (it uses `setup pair`), `support-bundle` (it uses `bundle`), `plugin init`, `plugin validate`, or `plugin trust` on the command line (trust is set with `/plugin trust` inside the Agent).
+`goodvibes-agent` has no `acp`, `open`, `hooks validate`, `host pair` (it uses `setup pair`), `support-bundle` (it uses `bundle`), `plugin init`, `plugin validate`, or `plugin trust` on the command line (trust is set with `/plugin-trust trust` inside the Agent).
 `goodvibes-agent tasks submit` is refused with exit code `2`:
 
 ```text
@@ -255,11 +255,11 @@ Besides `exec`, the Agent runs commands through `terminal` (`args.command`), `pr
 ### Plugins in the Agent
 
 The Agent loads plugins from the same two directories as the terminal app (`<project>/.goodvibes/plugins/` and `~/.goodvibes/plugins/`), with the same manifest, entry file and trust tiers (see "Plugins" in the terminal-app part). The trust tier is shared by both programs (`~/.goodvibes/plugin-trust.json`); the enabled list is not: the Agent starts only the plugins enabled in its own `~/.goodvibes/agent/plugins.json`.
-The Agent's `/plugin` takes `list`, `enable <name>`, `disable <name>`, `reload`, `quarantine <name> [add|lift] [reason]`, `trust`, `trust-key`, `verify` and `capabilities`, with the same lines and answers as the terminal app's. `goodvibes-agent plugin` on the command line has only `bundles`. To run a plugin in the Agent:
+The Agent's `/plugin-trust` takes `list`, `enable <plugin>`, `disable <plugin>`, `reload`, `quarantine <plugin> [reason]`, `lift <plugin>`, `trust`, `trust-key`, `verify` and `capabilities`, the same actions and answers as the terminal app's `/plugin`. `goodvibes-agent plugin` on the command line has only `bundles`. To run a plugin in the Agent:
 
-1. Set its tier if it needs one: `/plugin trust word-count limited` (or `goodvibes plugin trust word-count limited`).
-2. `/plugin enable word-count` loads and starts it at once and records the choice, with the directory it was enabled from, in `~/.goodvibes/agent/plugins.json`: `Plugin 'word-count' enabled and activated.`, or the reason it did not start.
-3. `/plugin list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent. `/plugin disable word-count` stops it.
+1. Set its tier if it needs one: `/plugin-trust trust word-count limited` (or `goodvibes plugin trust word-count limited`).
+2. `/plugin-trust enable word-count` loads and starts it at once and records the choice, with the directory it was enabled from, in `~/.goodvibes/agent/plugins.json`: `Plugin 'word-count' switched on and started.`, or the reason it did not start.
+3. `/plugin-trust list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent. `/plugin-trust disable word-count` stops it.
 
 ### Instructions and personality
 
@@ -284,8 +284,8 @@ On top of the files under "Project instructions", the Agent applies:
 | `/settings` | `/settings [category|key|list|get <key>|set <key> <value>|reset <key>]` reads and writes settings directly; `/config` is hidden. |
 | `/memory` | The same command as the terminal app's `/memory` (see "Memory and knowledge" in the terminal app's part): bare, it opens the list of actions, "See your memory" first; `open` opens the workspace's Memory page; `injections` refuses, because the Agent records no per-turn memory. |
 | `/session` | `link-task`, `handoff` and `cancel` are refused: `[session] Local cross-session task graph mutation is blocked in GoodVibes Agent.` with pointers to `/session graph` (read only) and `/delegate`. `/session export <id\|.> [markdown\|text]` prints the redacted transcript into the conversation and writes no file; it has no `--out` or `--print`. To get a file, use `/export [markdown\|text] [path]` or `goodvibes-agent sessions export <id> <path>` (JSON). |
-| `/skills` | Agent-local skills (see "`goodvibes-agent skills` (aliases `skill`, `agent-skills`)" below), not the skill files of the terminal app. |
-| `/plugin` | `list`, `enable <name>`, `disable <name>`, `reload`, `quarantine <name> [add|lift] [reason]`, `trust <name> <untrusted|limited|trusted> [note]`, `trust-key <name> <key.pem>`, `verify <name>`, `capabilities <name>`. No `dirs`, `inspect`, `review` or catalog subcommands. |
+| `/my-skills` | The Agent's own skills (see "`goodvibes-agent skills` (aliases `skill`, `agent-skills`)" below); the terminal app's `/skills` lists skill files instead. |
+| `/plugin-trust` | The terminal app's plugin actions without `dirs`, `inspect`, `review`, publishing or the plugins screen: `list`, `enable`, `disable`, `reload`, `quarantine`, `lift`, `trust <plugin> <untrusted|limited|trusted> [note]`, `trust-key`, `verify`, `capabilities`. |
 | `/notify` | Every change needs `--yes`: `add <url> --yes`, `remove <n|url> --yes`, `list [--show --yes]`, `clear --yes`, `test --yes`; `send <message> --yes` sends a notification. |
 | `/schedule` | `list`, `edit <id> --cron <expr> --yes`, `remind --at <iso> --message <text> --yes`, `receipts`, `reconcile`, `receipt <id>`, `promote-routine <routine-id> --cron <expr> --yes` (see "Automation and host actions" below). |
 | `/calendar` | Agent-local events, calendar subscriptions and connected calendar accounts (see "Personal operations" below). |
@@ -309,7 +309,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `/quit` | Aliases `/:q` and `/:wq` only. |
 | `/help` | Shows commands and keyboard shortcuts. |
 
-Some shared commands are not on the Agent's first screen (the bare `/` list and `/help`'s list leave them out; they are found as soon as their name is typed, run when typed, and `/commands` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/skills`, `/routines`, `/channels`, `/delegate`, `/media`.
+Some shared commands are not on the Agent's first screen (the bare `/` list and `/help`'s list leave them out; they are found as soon as their name is typed, run when typed, and `/commands` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
 
 Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels` and `/onboarding` for `/setup`, is not listed): `/agents`, `/branch`, `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/resume`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/share`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
 
@@ -399,7 +399,7 @@ An Agent skill is a stored procedure the Agent can follow, with optional require
 | `skills discover`, `skills import-discovered <name> [--enabled] --yes` | Import skills found on this machine. |
 | `skills bundle [list|enabled|attention|show|create|update|enable|disable|review|stale|delete]` | Skill bundles, for example `skills bundle create --name "Ops Pack" --description "Daily operations bundle" --skills daily-brief --enabled`. |
 
-Inside the Agent, `/skills import-standard <path/to/SKILL.md>` imports a standard skill file and `/skills export-standard <id> <dest-directory> [--overwrite]` writes one.
+Inside the Agent, `/my-skills import-standard <path/to/SKILL.md>` imports a standard skill file and `/my-skills export-standard <skill> <folder> [--overwrite]` writes one (replacing an existing SKILL.md asks first).
 
 ```text
 $ goodvibes-agent skills create --name "Daily Brief" --description "Summarize operator state" --procedure "Review Agent Knowledge, work plans, approvals, and routines" --requires-env GOODVIBES_AGENT_TOKEN --requires-command gh --enabled
@@ -673,7 +673,7 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 
 ### Personas, skills, routines, memory and personality
 
-`/personas`, `/skills` and `/routines` take the same verbs as the matching `goodvibes-agent` commands above, plus `/routines start <id>`, `/skills import-standard` and `/skills export-standard`. `/memory` is the same command as the terminal app's `/memory`.
+`/personas`, `/my-skills` and `/routines` take the same verbs as the matching `goodvibes-agent` commands above, plus `/routines start <id>`, `/my-skills import-standard` and `/my-skills export-standard`; `/my-skills` names the bundle verbs `bundle-create`, `bundle-show` and so on, and its options are named (`create --name ... --description ... <steps>`). `/memory` is the same command as the terminal app's `/memory`.
 `/vibe status` lists the VIBE.md candidates and which loaded; `/vibe init` creates one (asks first); `/vibe show` prints the applied text; `/vibe import-persona` imports it as a persona.
 
 ### Personal operations

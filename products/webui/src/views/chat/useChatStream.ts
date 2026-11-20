@@ -82,6 +82,8 @@ export interface ActiveToolCall {
   readonly toolName: string;
   /** The words the tool's definition gives this call, as `turn.tool_call` carried them. */
   readonly activity?: ToolActivityWords;
+  /** The call's arguments, as `turn.tool_call` carried them: the line shows its key argument. */
+  readonly toolInput?: unknown;
   readonly cancelled: boolean;
 }
 
@@ -422,7 +424,7 @@ export function useChatStream({
             setActiveToolCalls((current) => (
               current.some((c) => c.toolCallId === toolCallId)
                 ? current
-                : [...current, { turnId, toolCallId, toolName, ...(activity ? { activity } : {}), cancelled: false }]
+                : [...current, { turnId, toolCallId, toolName, ...(activity ? { activity } : {}), toolInput: asRecord(payload).toolInput, cancelled: false }]
             ));
             // Captured so the matching turn.tool_result (which does not repeat the
             // input back) can still build a full CompletedToolCall for the fold.

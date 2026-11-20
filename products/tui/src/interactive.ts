@@ -126,6 +126,8 @@ function turnRanTools(conversation: { getMessageCount(): number; getMessageAt(in
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
 import { createModeWordsSource, getSharedModeFlash } from '@goodvibes-jev/engine/terminal-shell/session-permission-mode';
+import { terminalAskFacts, type TerminalAskContext } from '@goodvibes-jev/engine/terminal-shell/permission-prompt-facts';
+import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes-jev/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes-jev/engine/terminal-shell/status-line';
 import { drawSplashAdditions } from '@goodvibes-jev/engine/terminal-shell/first-run';
 import { getSharedNotificationFeed } from './views/notifications-feed.ts';
@@ -458,6 +460,17 @@ async function main(prepared: PreparedShellCliRuntime) {
   const modeWords = createModeWordsSource(configManager, () => render(), getSharedModeFlash());
   getSharedModeFlash().onChange = () => render();
   unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => render()));
+  // What an ask is worded from (the approval card and the question card): the folder, the mode in force, this chat.
+  const askContext = (): TerminalAskContext => ({ workingDirectory: workingDir, homeDirectory, modeInForce: modeWords.current(), currentSessionId: runtime.sessionId });
+  // A question this chat's agent left for the owner, pinned above the composer (terminal-shell question-card.ts).
+  const ownerQuestionCard = new OwnerQuestionCard({
+    inbox: ownerQuestionInbox(ctx.services.shellPaths, 'tui'),
+    sessionId: () => runtime.sessionId,
+    facts: () => terminalAskFacts(askContext()),
+    render,
+    notify: (message) => { systemMessageRouter.high(message); render(); },
+  });
+  unsubs.push(ownerQuestionCard.start());
   // Turning wake detection on from anywhere (settings, /config, a model's settings
   // call) runs the same voice setup as /voice wake setup and shows its plan.
   unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
@@ -1186,7 +1199,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     const overlayContext = { input, conversation, commandRegistry, keybindingsManager: ctx.services.keybindingsManager, contextWindow };
     viewport = applyConversationOverlays(viewport, { ...overlayContext, conversationWidth, viewportHeight: vHeight });
 
-    const layers = buildConversationLayers({
+    const layers = withOwnerQuestionCard(buildConversationLayers({
       ...overlayContext,
       providerInputTokens: orchestrator.lastInputTokens,
       screenWidth: width,
@@ -1194,9 +1207,9 @@ async function main(prepared: PreparedShellCliRuntime) {
       headerRows: shellHeaderLines.length,
       footerRows: shellFooterLines.length,
       permission: pendingPermission
-        ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker, input.prompt.length === 0)
+        ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker, input.prompt.length === 0, askContext())
         : null,
-    });
+    }), ownerQuestionCard, { width, height, footerRows: shellFooterLines.length, hidden: pendingPermission !== null || Boolean(viewFrame) || onboardingOwnsScreen });
     input.surfacePointer.layers = layers;
     compositor.composite({
       width,
@@ -1548,6 +1561,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (blocking.handled) {
       return;
     }
+    // The question card's keys (arrows, 1-9, Enter, Esc) while it is on screen and the composer is empty.
+    if (input.prompt.length === 0 && ownerQuestionCard.handleInput(data)) return;
     // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
     if (contractQuestions.handleChord(data)) {
       render();

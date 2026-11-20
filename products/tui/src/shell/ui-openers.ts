@@ -403,7 +403,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       categories: getCommandCategoryMap,
       extraKeywords: PALETTE_VIEW_KEYWORDS,
       // The keyboard shortcuts, the list's last group, from the live key table.
-      shortcuts: () => paletteShortcuts(commandContext.keybindingsManager),
+      shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
       // A command gone since the palette opened, or one that refuses, says so like a typed one.
       run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),

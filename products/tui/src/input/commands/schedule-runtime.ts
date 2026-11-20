@@ -56,7 +56,7 @@ function localView(job: AutomationJob): RoutineView {
 }
 
 function listedJobs(output: JobsListOutput): readonly DaemonJob[] {
-  return ('jobs' in output ? output.jobs : output.items) as readonly DaemonJob[];
+  return output.items as readonly DaemonJob[];
 }
 
 /** Where the routines are kept and how each verb reaches them. */

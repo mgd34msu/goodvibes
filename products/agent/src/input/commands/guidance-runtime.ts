@@ -23,7 +23,7 @@ const welcomeCommand = createWelcomeCommand<CommandContext>({
     '  /knowledge          - inspect isolated Agent Knowledge status, ask/search, libraries, map, connectors, and ingest paths',
     '  /memory             - manage Agent-local memory',
     '  /personas           - manage Agent-local personas',
-    '  /skills             - manage reusable Agent-local skills',
+    '  /my-skills          - manage reusable Agent-local skills',
     '  /routines           - manage Agent-local routines',
     '  /delegate           - explicitly hand build/fix/review work to GoodVibes TUI',
   ],

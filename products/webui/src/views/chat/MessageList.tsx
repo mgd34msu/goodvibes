@@ -4,6 +4,7 @@ import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { Spark } from '../../components/shell/Spark';
 import { useReducedMotion } from '../../components/motion/useReducedMotion';
 import { MessageItem } from './MessageItem';
+import { runningCallSummary, ToolCallLine } from './ToolActivityGroup';
 import { lineageNodeKey, type LineageNode } from './lineage';
 import { bestId, canResendUserMessage, messageTone } from './message-utils';
 import type { LiveReplyStore } from './live-reply-store';
@@ -48,6 +49,8 @@ interface MessageListProps {
   workingLabel?: string;
   /** Rendered before the first message (the new-chat greeting). */
   lead?: ReactNode;
+  /** Rendered below the last message and the live reply (the asks this chat waits on). */
+  trailing?: ReactNode;
 }
 
 /** The streamed reply's text: re-renders on its own, at most once per frame, as the text grows. */
@@ -89,6 +92,7 @@ export function MessageList({
   onCancelToolCall,
   workingLabel = '',
   lead,
+  trailing,
 }: MessageListProps) {
   const reducedMotion = useReducedMotion();
   // Stop must be reachable for the WHOLE active turn, including the
@@ -156,27 +160,26 @@ export function MessageList({
                       )}
                     </div>
                   )}
-                  {/* Running tool calls. Cancel ONE call without ending the turn. The
-                      cancelled result renders honestly (a "Cancelled" label replaces the
-                      button) until the daemon's own turn.tool_result actually clears it. */}
+                  {/* Running tool calls, one line each as the terminal draws them. Cancel ONE
+                      call without ending the turn; a cancelled call reads "cancelled" until the
+                      daemon's own turn.tool_result clears it. */}
                   {activeToolCalls.length > 0 && (
-                    <ul className="active-tool-calls" aria-label="Running tool calls">
+                    <ul className="tool-lines active-tool-calls" aria-label="Running tool calls">
                       {activeToolCalls.map((call) => (
-                        <li key={call.toolCallId} className="active-tool-call">
-                          <span className="active-tool-call__name">
-                            {call.cancelled ? 'Cancelled: ' : 'Running: '}{call.toolName || call.toolCallId}
-                          </span>
-                          {!call.cancelled && onCancelToolCall && (
+                        <ToolCallLine
+                          key={call.toolCallId}
+                          summary={runningCallSummary(call)}
+                          trailing={!call.cancelled && onCancelToolCall ? (
                             <button
                               type="button"
                               className="active-tool-call__cancel"
                               onClick={() => onCancelToolCall(call.toolCallId)}
-                              aria-label={`Cancel tool call ${call.toolName || call.toolCallId}`}
+                              aria-label={`Cancel ${runningCallSummary(call).name}`}
                             >
                               <X size={12} aria-hidden="true" /> Cancel
                             </button>
-                          )}
-                        </li>
+                          ) : undefined}
+                        />
                       ))}
                     </ul>
                   )}
@@ -184,6 +187,7 @@ export function MessageList({
               </article>
             </div>
           )}
+          {trailing}
         </div>
       </div>
       {showJumpToBottom && (

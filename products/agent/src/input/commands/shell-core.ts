@@ -31,7 +31,7 @@ function commandCategory(commandName: string): string {
     return 'Knowledge & Local Context';
   if (['channels', 'notify', 'qrcode', 'pair'].includes(commandName)) return 'Channels';
   if (
-    ['model', 'provider', 'providers', 'effort', 'pin', 'unpin', 'refresh-models', 'mode', 'tts', 'voice', 'media', 'image'].includes(
+    ['model', 'provider', 'providers', 'effort', 'pin', 'unpin', 'refresh-models', 'verbosity', 'tts', 'voice', 'media', 'image'].includes(
       commandName,
     )
   )

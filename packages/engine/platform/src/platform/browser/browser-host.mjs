@@ -28,6 +28,7 @@ const require = createRequire(import.meta.url);
 const state = {
   browser: null,
   context: null,
+  guarded: false,
   pages: new Map(),
   pageCounter: 0,
 };
@@ -106,7 +107,63 @@ function deadline(args) {
   throw new Error('The browser host was sent no deadline for this action.');
 }
 
+/**
+ * The request guard for an attached browser. Every request and WebSocket the
+ * attached context makes is held here (Playwright's route, the CDP Fetch
+ * domain underneath) and put to the parent as an event; the parent answers
+ * with `decide`. A request the parent does not answer within the limit is
+ * aborted: nothing leaves unchecked.
+ */
+const DECISION_LIMIT_MS = 30_000;
+const pendingDecisions = new Map();
+let decisionCounter = 0;
+function askParent(event) {
+  decisionCounter += 1;
+  const requestId = decisionCounter;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { pendingDecisions.delete(requestId); resolve({ verdict: 'abort' }); }, DECISION_LIMIT_MS);
+    pendingDecisions.set(requestId, (decision) => { clearTimeout(timer); resolve(decision); });
+    send({ event: event.kind, requestId, ...event.fields });
+  });
+}
+
 const handlers = {
+  /** Hold every request of the attached context to the parent's decision. Installed once. */
+  async guard() {
+    if (!state.context) throw new Error('not attached');
+    if (state.guarded) return { guarded: true };
+    await state.context.route('**/*', async (route) => {
+      const request = route.request();
+      const body = request.postDataBuffer();
+      let decision;
+      try {
+        decision = await askParent({ kind: 'request', fields: { url: request.url(), method: request.method(), headers: request.headers(), ...(body ? { body: body.toString('base64') } : {}) } });
+      } catch { decision = { verdict: 'abort' }; }
+      try {
+        if (decision.verdict === 'continue') await route.continue();
+        else if (decision.verdict === 'fulfil') await route.fulfill({ status: decision.status, headers: decision.headers, body: Buffer.from(decision.body ?? '', 'base64') });
+        else await route.abort('blockedbyclient');
+      } catch { /* the page went away while the request was held */ }
+    });
+    await state.context.routeWebSocket(/.*/, async (socket) => {
+      const decision = await askParent({ kind: 'socket', fields: { url: socket.url() } }).catch(() => ({ verdict: 'abort' }));
+      try {
+        if (decision.verdict === 'continue') socket.connectToServer();
+        else await socket.close({ code: 1008, reason: 'blocked by the browser destination rule' });
+      } catch { /* the page went away while the connection was held */ }
+    });
+    state.guarded = true;
+    return { guarded: true };
+  },
+
+  /** The parent's answer to one held request or WebSocket. */
+  async decide({ requestId, ...decision }) {
+    const resolve = pendingDecisions.get(requestId);
+    pendingDecisions.delete(requestId);
+    resolve?.(decision);
+    return { decided: resolve !== undefined };
+  },
+
   async attach({ endpoint, original, driverDirectory, driverVersion }) {
     const { chromium } = loadDriver(driverDirectory, driverVersion);
     state.browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 });

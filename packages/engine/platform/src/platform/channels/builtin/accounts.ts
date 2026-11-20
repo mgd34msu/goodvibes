@@ -14,6 +14,7 @@ import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { readSurfaceSecret } from './surface-secrets.js';
 import { asProviderRuntimeSurface, resolveBuiltinConfigSecret } from './surfaces.js';
 import { displaySettingValue } from '../../config/config-key-facts.js';
+import type { ConfigKey } from '../../config/schema-types.js';
 
 /**
  * A setting as an account record shows it. The record reaches operator
@@ -21,7 +22,7 @@ import { displaySettingValue } from '../../config/config-key-facts.js';
  * credential-bearing setting (a webhook URL, an ntfy topic name) goes through
  * the one display projection: its reference, or `(secret)`.
  */
-function shownSetting(deps: BuiltinChannelRuntimeDeps, key: string): unknown {
+function shownSetting(deps: BuiltinChannelRuntimeDeps, key: ConfigKey): unknown {
   return displaySettingValue(key, deps.configManager.get(key));
 }
 

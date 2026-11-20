@@ -39,6 +39,7 @@ import { looksLikeSecretRef } from './secret-ref-refusal.js';
 import type { OAuthProviderConfig } from './subscriptions.js';
 import { SubscriptionManager, captureSubscriptionReadSource } from './subscriptions.js';
 import { logger } from '../utils/logger.js';
+import { contentDigest, targetRef, type TargetRef } from '../utils/target-ref.js';
 import { summarizeError } from '../utils/error-display.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 
@@ -173,7 +174,7 @@ function projectEntryRefusal(entry: unknown): string | null {
  * confirmation; a change of path under the same origin does not.
  */
 function projectEntryFingerprint(entry: ServiceConfig): string {
-  return JSON.stringify({
+  return contentDigest({
     authType: entry.authType,
     origin: originOf(entry.baseUrl),
     providerId: entry.providerId ?? null,
@@ -199,6 +200,12 @@ export interface PendingProjectService {
   readonly keys: readonly string[];
   /** The provider whose signed-in token it would send, when it names one. */
   readonly providerId?: string | undefined;
+  /**
+   * The digest of what confirming agrees to (auth type, origin, provider,
+   * header, key names): a confirmation shown for this digest approves this
+   * entry only, never one the repository changed since.
+   */
+  readonly digest: string;
 }
 
 /** One line saying what a waiting project service would send where. */
@@ -206,6 +213,15 @@ export function describePendingProjectService(service: PendingProjectService): s
   const keys = service.keys.length ? service.keys.join(', ') : 'no stored key';
   const sends = service.providerId ? `${service.providerId} sign-in token or ${keys}` : keys;
   return `${service.name}: sends ${sends} (${service.authType}) to ${service.origin ?? '(no baseUrl)'}`;
+}
+
+/**
+ * A waiting project service as a confirmation shows it: what it sends where,
+ * by the digest of its entry. The confirmed handler builds the same reference
+ * from the file as it is then; a changed entry is shown again, never approved.
+ */
+export function projectServiceRef(service: PendingProjectService): TargetRef<'project-service'> {
+  return targetRef('project-service', service.name, { entry: service.digest }, { entry: describePendingProjectService(service) }, service.path);
 }
 
 /** The lines naming project services that wait for confirmation, empty when none do. */
@@ -346,7 +362,7 @@ export class ServiceRegistry {
    * there is no such waiting entry, or when this registry has no user services
    * file to keep the record beside. Throws when the record cannot be written.
    */
-  confirmProjectService(name: string): ProjectServiceConfirmation {
+  confirmProjectService(name: string, shownDigest?: string): ProjectServiceConfirmation {
     const pending = this.readServices().pending.get(name);
     if (!pending || !this.projectServicesFilePath) {
       return { ok: false, reason: this.get(name)
@@ -356,7 +372,12 @@ export class ServiceRegistry {
     if (!this.projectApprovals) return { ok: false, reason: 'this app has no services file of your own to keep the confirmation beside' };
     const entry = readServicesFile(this.projectServicesFilePath).services[name];
     if (!entry) return { ok: false, reason: `${name} is no longer in ${this.projectServicesFilePath}` };
-    this.projectApprovals.approve(this.projectServicesFilePath, name, projectEntryFingerprint(entry));
+    const fingerprint = projectEntryFingerprint(entry);
+    // The confirmation approves the entry that was shown, and only that one.
+    if (shownDigest !== undefined && shownDigest !== fingerprint) {
+      return { ok: false, reason: `${name} in ${this.projectServicesFilePath} changed since it was shown (now ${describePendingProjectService(pending)}); confirm it again to use it` };
+    }
+    this.projectApprovals.approve(this.projectServicesFilePath, name, fingerprint);
     return { ok: true, service: pending };
   }
 
@@ -384,6 +405,7 @@ export class ServiceRegistry {
         pending.set(name, {
           name, path: projectPath, authType: entry.authType, origin: originOf(entry.baseUrl), keys: projectEntryKeys(entry),
           ...(typeof entry.providerId === 'string' && entry.providerId ? { providerId: entry.providerId } : {}),
+          digest: projectEntryFingerprint(entry),
         });
         continue;
       }

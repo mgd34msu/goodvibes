@@ -38,9 +38,9 @@ export function buildMcpHelp(modal: McpTrustModal, entry: McpTrustEntry | null):
     text(''),
     { kind: 'heading', text: 'Tool rules:' },
     ...(rules.length > 0
-      ? rules.map((rule): HelpLine => ({ kind: 'text', text: `${rule.rule} ${rule.toolName}: ${rule.source === 'session' ? 'this session (/mcp block)' : 'kept in the MCP config'}${rule.inEffect ? '' : '; overridden by a deny'}` }))
+      ? rules.map((rule): HelpLine => ({ kind: 'text', text: `${rule.rule === 'deny' ? 'blocked' : 'past its limits'} ${rule.toolName}: ${rule.source === 'session' ? 'for this session only' : 'kept in the MCP config'}${rule.inEffect ? '' : '; a block wins'}` }))
       : [text('None. Every tool is decided by the trust mode and scope.')]),
-    text('Enter, then type deny <tool>, allow <tool> or clear <tool> to keep a rule in the server\'s MCP config. A deny refuses every call to the tool; an allow lets it past the path and host scope (kept only in your global config); clear drops the kept rule.'),
+    text('Enter, then type block <tool>, unblock <tool>, exempt <tool> or unexempt <tool>: the /mcp action of that word, kept in the server\'s MCP config until you change it. Block refuses every call to the tool; exempt lets it past the folder and site limits (kept only in your global config); unblock and unexempt drop one of them.'),
     text(''),
     { kind: 'heading', text: 'Trust meanings:' },
     text('constrained: keep MCP activity inside declared paths/hosts and prompt on risk.'),

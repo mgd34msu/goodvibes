@@ -11,42 +11,55 @@ For operation evidence or merge: return {"facts":[{"text":"source-backed fact, i
 For operation findings: return {"findings":[{"check":"supplied failing check ID","issue":"precise observed problem or unresolved question","repair":"specific authorized action that resolves it","resolvedWhen":"observable acceptance condition","preserve":["specific already-completed work, findings or artifacts supported by the evidence"],"remaining":["specific missing work or one precise evidence question to settle"],"passage":{"reference":"source/node ID or exact requirement","quote":"exact relevant source words"}}],"noIssues":[{"check":"supplied held check ID with no supported defect or actionable evidence gap","reason":"why the existing primary observations resolve this concern","passage":{"reference":"source/node ID","quote":"exact supporting source words"}}]}. Account for each supplied check exactly once in findings OR noIssues. Either array may be empty. Never manufacture a repair for a check whose concern is already disproven or resolved; use noIssues and the host will independently recheck it. A noIssues proposal is not permission to complete. Findings must follow the supplied readings and original requirements; do not invent failure from uncertainty. Give concrete paths/behaviors when known. A wording repair is sufficient only for an inaccurate claim; actually unfinished work requires performing that work. Explicitly account for known completed work in preserve and identify only the remaining delta in remaining. A broad original requirement is not a repair plan. If the missing paths are not yet known, ask for one bounded comparison of existing inspection receipts with the requested scope; do not instruct a fresh full review. Reuse existing findings and amend the same artifact. Do not ask for another unchanged report, hashes or repeated logs. The repair feedback, when present, describes defects in your previous PROPOSAL; repair the proposal using the same original evidence.`;
 
 /** Uses the already authorized active provider. No stream callback or tool path
- * exists here, and the proposal itself never goes into user-visible events. */
+ * exists here, and the proposal itself never goes into user-visible events.
+ * A provider failure goes to the turn's own failover (`failOver`), the same
+ * rule and the same tried models as the turn's requests: when it moves the
+ * turn to another model, the proposal is asked of that model; otherwise the
+ * failure stands. The first request is the only one when it answers. */
 export function createVerificationWriter(options: {
   readonly route: () => { readonly provider: LLMProvider; readonly model: string; readonly reasoning?: Pick<ChatRequest, 'reasoningEffort' | 'reasoningEffortSpec'> };
   readonly beforeAttempt: () => void | Promise<void>;
   readonly onUsage: (response: ChatResponse, durationMs: number) => void;
+  /** The turn's failover (providers/failover.ts): true when it moved the turn to another model. */
+  readonly failOver?: ((error: unknown) => boolean) | undefined;
 }): VerificationWriter {
   return async request => {
     request.assertCurrent();
     const content = JSON.stringify(snapshotJudgmentEvidence({ operation: request.operation, context: request.context, repair: request.repair ?? null }));
-    const route = options.route(), started = Date.now();
-    const beforeAttempt = async () => {
-      request.signal?.throwIfAborted(); request.assertCurrent();
-      await options.beforeAttempt();
-      request.assertCurrent();
-      const current = options.route();
-      if (current.provider !== route.provider || current.model !== route.model) throw new Error('Verification provider changed');
-    };
-    // The provider runs `beforeAttempt` before retry admission and again right before dispatch, so the
-    // fence is not run a third time here.
-    request.signal?.throwIfAborted();
-    const work = route.provider.chat({ model: route.model, messages: [{ role: 'user', content }],
-      // Provider defaults keep the selected reasoning budget compatible with
-      // its output limit. Proposal size is enforced by the bounded JSON schema.
-      systemPrompt: instructions, ...route.reasoning, signal: request.signal, beforeAttempt });
-    let abort = () => {};
-    const cancelled = new Promise<never>((_, reject) => {
-      abort = () => reject(request.signal?.reason ?? new Error('Verification cancelled'));
-      request.signal?.addEventListener('abort', abort, { once: true });
-      if (request.signal?.aborted) abort();
-    });
-    try {
-      const response = await Promise.race([work, cancelled]);
+    for (;;) {
+      const route = options.route(), started = Date.now();
+      const beforeAttempt = async () => {
+        request.signal?.throwIfAborted(); request.assertCurrent();
+        await options.beforeAttempt();
+        request.assertCurrent();
+        const current = options.route();
+        if (current.provider !== route.provider || current.model !== route.model) throw new Error('Verification provider changed');
+      };
+      // The provider runs `beforeAttempt` before retry admission and again right before dispatch, so the
+      // fence is not run a third time here.
+      request.signal?.throwIfAborted();
+      const work = route.provider.chat({ model: route.model, messages: [{ role: 'user', content }],
+        // Provider defaults keep the selected reasoning budget compatible with
+        // its output limit. Proposal size is enforced by the bounded JSON schema.
+        systemPrompt: instructions, ...route.reasoning, signal: request.signal, beforeAttempt });
+      let abort = () => {};
+      const cancelled = new Promise<never>((_, reject) => {
+        abort = () => reject(request.signal?.reason ?? new Error('Verification cancelled'));
+        request.signal?.addEventListener('abort', abort, { once: true });
+        if (request.signal?.aborted) abort();
+      });
+      let response: ChatResponse;
+      try {
+        response = await Promise.race([work, cancelled]);
+      } catch (error) {
+        work.catch(() => undefined);
+        if (request.signal?.aborted || !options.failOver?.(error)) throw error;
+        continue;
+      } finally { request.signal?.removeEventListener('abort', abort); }
       request.assertCurrent(); options.onUsage(response, Date.now() - started);
       if (response.toolCalls.length) throw new Error('Verification proposals cannot invoke tools');
       return response.content;
-    } finally { request.signal?.removeEventListener('abort', abort); }
+    }
   };
 }
 

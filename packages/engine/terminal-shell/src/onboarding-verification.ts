@@ -1,3 +1,4 @@
+import { revealOrNull, type Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import { isGoodVibesSecretReferenceValue, type SecretScope } from '@goodvibes-jev/engine/platform/platform/config';
 import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import type { OnboardingAcknowledgementTarget, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
@@ -31,7 +32,7 @@ export interface OnboardingVerificationDependencies<Key extends string> {
   readonly config: { get(key: Key): unknown };
   /** `getFromScope` reads the scope the write went to. */
   readonly secrets?:
-    | { get(key: string): Promise<string | null>; getFromScope(key: string, scope: SecretScope): Promise<string | null> }
+    | { get(key: string): Promise<Secret | null>; getFromScope(key: string, scope: SecretScope): Promise<Secret | null> }
     | undefined;
   readonly auth?: Pick<UserAuthManager, 'inspect'> | undefined;
   readonly shellPaths: OnboardingShellPaths;
@@ -138,11 +139,12 @@ export function createOnboardingVerifier<
     // The write targeted one scope; the check reads that scope, not whichever
     // copy (an exported variable, another store) wins when the key is used.
     const scope = operation.scope ?? 'project';
-    const stored = await deps.secrets.getFromScope(operation.key, scope);
+    // A read-back of a write compares the stored bytes with what was written.
+    const stored = revealOrNull(await deps.secrets.getFromScope(operation.key, scope), 'store-write');
     if (stored !== operation.value) {
       return { id, status: 'fail', message: `${operation.key} was not found in the ${scope} secret store after it was written.`, target: operation.key };
     }
-    const effective = await deps.secrets.get(operation.key);
+    const effective = revealOrNull(await deps.secrets.get(operation.key), 'store-write');
     if (effective !== operation.value) {
       const overriddenBy = Object.hasOwn(process.env, operation.key)
         ? `the environment variable ${operation.key}`

@@ -4,7 +4,7 @@ import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-c
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
 
-import { openCommandView, requireBookmarkManager, requireProviderApi, requireSecretsManager } from './runtime-services.ts';
+import { openCommandView, requireBookmarkManager, requireProviderApi } from './runtime-services.ts';
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   hidden: false,
@@ -19,17 +19,11 @@ const localActions = createLocalCommandActions<CommandContext>(requireProviderAp
   noteTouch: (conversation, key) => conversation.searchExpansion.noteUserTouch(key),
 });
 
-const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManager, {
-  description:
-    'Persistent secret storage: hierarchy-aware, external secret refs, providers (a quick one-off masked value instead: /secret)',
-  hidden: false,
-  concealedEntry: true,
+// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); a credential is kept where it is asked.
+const secretsCommand = createSecretsCommand<CommandContext>({
   writeScope: (_key, requested) => requested,
   deleteScope: (_key, requested) => requested,
   relocationNote: () => '',
-  resolved: (ref, status) => '[secrets] ' + ref + ': ' + status,
-  failed: (ref, error) => '[secrets] ' + ref + ' failed: ' + error,
-  deleted: (key) => '[secrets] Deleted: ' + key,
 });
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {

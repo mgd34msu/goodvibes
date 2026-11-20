@@ -4,7 +4,7 @@
  * register this one description, so their guided path, typed line, help,
  * completion, confirmation and the model's catalogue entry are the same.
  */
-import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult } from '@goodvibes-jev/engine/platform/platform/mcp';
+import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult, McpToolRule } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
@@ -101,7 +101,8 @@ const MCP_SERVERS = defineList<McpCommandContext>({
     const known = new Set(running.map((row) => row.value));
     return [...running, ...configured.filter((name) => !known.has(name)).map((name): ListRow => ({ value: name, label: name, state: 'not started yet' }))];
   },
-  operator: { method: 'mcp.servers.list', input: {}, rows: { from: 'servers', value: 'name', label: 'name' } },
+  // Every configured server, started or not, from the daemon's effective config.
+  operator: { method: 'mcp.config.get', input: {}, rows: { from: 'servers', value: 'name', label: 'name', detail: 'source.path' } },
 });
 
 const MCP_QUARANTINED_SERVERS = defineList<McpCommandContext>({
@@ -114,7 +115,7 @@ const MCP_QUARANTINED_SERVERS = defineList<McpCommandContext>({
       state: 'tools held back',
     }));
   },
-  operator: { terminalOnly: 'Accepting a server\'s changed tools is done in a terminal app, where its tools run.' },
+  operator: { method: 'mcp.servers.list', input: {}, rows: { from: 'security', where: { field: 'schemaFreshness', equals: 'quarantined' }, value: 'name', label: 'name', detail: 'quarantineReason' } },
 });
 
 const MCP_TOOLS = defineList<McpCommandContext>({
@@ -188,9 +189,9 @@ function where(result: McpStoredToolRuleResult): string {
   return `${result.scope} MCP config ${result.path}`;
 }
 
-async function keepToolRule(ctx: McpCommandContext, server: string, tool: string, rule: 'allow' | 'deny' | 'clear'): Promise<McpStoredToolRuleResult> {
+async function keepToolRule(ctx: McpCommandContext, server: string, tool: string, rule: McpToolRule): Promise<McpStoredToolRuleResult> {
   const api = mcpApiOf(ctx);
-  if (!api.storeServerToolRule) refuse(`MCP tool ${tool} not changed: this runtime cannot keep a per-tool rule.`, rule === 'deny' ? `Block it for this session only: /mcp block ${server} ${tool}.` : undefined);
+  if (!api.storeServerToolRule) refuse(`MCP tool ${tool} not changed: this runtime cannot keep a per-tool rule.`, rule === 'block' ? `Block it for this session only: /mcp block ${server} ${tool}.` : undefined);
   try {
     const result = await api.storeServerToolRule(server, tool, rule, shellPathsOf(ctx));
     ctx.renderRequest();
@@ -402,14 +403,14 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       sentence: 'Every call to {tool} on {server} will be refused {lasts}.',
       done: 'Blocked {tool} on {server} {lasts}.',
       touches: 'this-machine', lasts: { byInput: 'lasts' }, risk: 'none', undoneBy: 'unblock-tool',
-      operator: { method: 'mcp.servers.tools.deny', fields: { serverName: 'server', toolName: 'tool' } },
+      operator: { method: 'mcp.servers.tools.block', fields: { serverName: 'server', toolName: 'tool' } },
       example: { server: 'github', tool: 'create_issue', lasts: 'kept' },
       async run(values, ctx) {
         const api = mcpApiOf(ctx);
         const server = values.server!, tool = values.tool!;
         knownServer(api, server, `tool ${tool}`);
         if (values.lasts === 'kept') {
-          const result = await keepToolRule(ctx, server, tool, 'deny');
+          const result = await keepToolRule(ctx, server, tool, 'block');
           return result.changed ? `Kept in ${where(result)}.` : `It was already kept in ${where(result)}.`;
         }
         if (!api.denyServerTool) refuse(`MCP tool ${tool} not changed: this runtime cannot block a single tool.`, `Refuse the whole server instead: /mcp trust ${server} blocked.`);
@@ -425,7 +426,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       done: 'Stopped blocking {tool} on {server}.',
       touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'block-tool',
       ownerOnly: { reason: 'it loosens what an MCP server may do', instead: 'Ask the owner to unblock it from /mcp or Settings.' },
-      operator: { method: 'mcp.servers.tools.clear', fields: { serverName: 'server', toolName: 'tool' } },
+      operator: { method: 'mcp.servers.tools.unblock', fields: { serverName: 'server', toolName: 'tool' } },
       example: { server: 'github', tool: 'create_issue' },
       async run(values, ctx) {
         const api = mcpApiOf(ctx);
@@ -435,7 +436,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
         if (rules.length === 0) refuse(`${tool} on ${server.name} is not blocked; nothing changed.`, `/mcp servers shows ${server.name}'s tool rules.`);
         const removed: string[] = [];
         if (rules.some((rule) => rule.source === 'stored')) {
-          const result = await keepToolRule(ctx, server.name, tool, 'clear');
+          const result = await keepToolRule(ctx, server.name, tool, 'unblock');
           if (result.changed) removed.push(`the block kept in ${where(result)}`);
         }
         if (rules.some((rule) => rule.source === 'session')) {
@@ -453,11 +454,11 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       done: '{tool} on {server} now goes past {server}\'s limits, until you change it.',
       touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'unexempt-tool',
       ownerOnly: { reason: 'it loosens what an MCP server may do', instead: 'Ask the owner; it is kept in the global MCP config.' },
-      operator: { method: 'mcp.servers.tools.allow', fields: { serverName: 'server', toolName: 'tool' } },
+      operator: { method: 'mcp.servers.tools.exempt', fields: { serverName: 'server', toolName: 'tool' } },
       example: { server: 'github', tool: 'get_file_contents' },
       async run(values, ctx) {
         knownServer(mcpApiOf(ctx), values.server!, `tool ${values.tool!}`);
-        const result = await keepToolRule(ctx, values.server!, values.tool!, 'allow');
+        const result = await keepToolRule(ctx, values.server!, values.tool!, 'exempt');
         return result.changed ? `Kept in ${where(result)}.` : `It was already kept in ${where(result)}.`;
       },
     },
@@ -467,14 +468,14 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       sentence: 'Calls to {tool} on {server} will be held to {server}\'s folder and site limits again, until you change it.',
       done: '{tool} on {server} follows {server}\'s limits again.',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'exempt-tool',
-      operator: { method: 'mcp.servers.tools.clear', fields: { serverName: 'server', toolName: 'tool' } },
+      operator: { method: 'mcp.servers.tools.unexempt', fields: { serverName: 'server', toolName: 'tool' } },
       example: { server: 'github', tool: 'get_file_contents' },
       async run(values, ctx) {
         const api = mcpApiOf(ctx);
         const server = knownServer(api, values.server!, `tool ${values.tool!}`);
         const kept = server.toolRules?.find((rule) => rule.source === 'stored' && rule.toolName === values.tool);
         if (kept?.rule !== 'allow') refuse(`${values.tool} on ${server.name} does not go past its limits; nothing changed.`);
-        const result = await keepToolRule(ctx, server.name, values.tool!, 'clear');
+        const result = await keepToolRule(ctx, server.name, values.tool!, 'unexempt');
         return `Removed from ${where(result)}.`;
       },
     },
@@ -502,7 +503,15 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       sentence: '{name} will be added to the {scope} MCP config and started now, until you change it.',
       done: 'Added {name}.',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-server',
-      operator: { terminalOnly: 'Adding a server from the web UI comes with its MCP servers screen; add it here.' },
+      // The command line splits into the program and its arguments; NAME=VALUE lines become the environment or headers.
+      operator: {
+        method: 'mcp.servers.upsert',
+        fields: {
+          scope: 'scope', 'server.name': 'name', 'server.command': 'command:first', 'server.args': 'command:rest', 'server.url': 'address',
+          'server.trustMode': 'trust', 'server.role': 'role', 'server.allowedPaths': 'path:lines', 'server.allowedHosts': 'host:lines',
+          'server.env': 'env:pairs', 'server.headers': 'header:pairs',
+        },
+      },
       example: { name: 'weather', command: 'npx\n-y\n@acme/weather-mcp' },
       async run(values, ctx) {
         const api = mcpApiOf(ctx);
@@ -544,7 +553,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       id: 'reload', label: 'Reconnect every server from its config', word: 'reload', inputs: [],
       sentence: 'Every MCP server is read again from its config file and reconnected.', done: '',
       touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'mcp.config.reload', fields: {} }, example: {},
+      operator: { method: 'mcp.servers.reload', fields: {} }, example: {},
       async run(_values, ctx) {
         const api = mcpApiOf(ctx);
         try {
@@ -563,7 +572,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       sentence: '{server} will be set to "{mode}" until you change it.',
       done: '{server} is set to "{mode}".',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore-trust',
-      operator: { terminalOnly: 'The daemon has no method to set a server\'s trust level yet; set it here or in Settings → MCP.' },
+      operator: { method: 'mcp.servers.trust.set', fields: { serverName: 'server', trustMode: 'mode' } },
       example: { server: 'github', mode: 'constrained' },
       async run(values, ctx) {
         knownServer(mcpApiOf(ctx), values.server!, 'trust level');
@@ -589,7 +598,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       sentence: '{server} will be treated as a {role} server until you change it.',
       done: '{server} is a {role} server.',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore-role',
-      operator: { terminalOnly: 'The daemon has no method to set a server\'s role yet; set it here.' },
+      operator: { method: 'mcp.servers.role.set', fields: { serverName: 'server', role: 'role' } },
       example: { server: 'github', role: 'git' },
       async run(values, ctx) {
         knownServer(mcpApiOf(ctx), values.server!, 'role');
@@ -631,7 +640,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       done: 'Accepted {server}\'s tools.',
       touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', undoneBy: 'hold-back',
       ownerOnly: { reason: 'it offers tools that changed since they were last accepted', instead: 'Ask the owner to accept them from /mcp.' },
-      operator: { terminalOnly: 'Accepting a server\'s changed tools is done in a terminal app, where its tools run.' },
+      operator: { method: 'mcp.servers.quarantine.accept', fields: { serverName: 'server' } },
       example: { server: 'github' },
       async run(values, ctx) {
         const api = mcpApiOf(ctx);

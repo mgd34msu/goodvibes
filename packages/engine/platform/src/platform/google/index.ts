@@ -331,6 +331,7 @@ export {
   type GoogleRemovalResult,
   type GoogleRemovalRequest,
   type GoogleRemovalDeps,
+  type GoogleRemovalReview,
 } from './credential-removal.js';
 
 export {

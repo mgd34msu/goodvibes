@@ -36,11 +36,14 @@ export interface ServiceSettingsSyncOptions {
   readonly mkdir?: typeof mkdirSync;
 }
 
-/** The two keys whose values say whether an OS service should exist, as they were before the change. */
-interface ServiceKeys {
-  readonly autostart: unknown;
-  readonly enabled: unknown;
+/** One setting this change wrote: what it wrote and what it held before. */
+interface WrittenKey {
+  readonly key: ConfigKey;
+  readonly wrote: boolean;
+  readonly before: boolean;
 }
+/** The settings a change wrote, put back when its OS action fails. */
+type ServiceKeys = readonly WrittenKey[];
 
 const SERVICE_DEFINITION_KEYS = new Set<ConfigKey>([
   'service.restartOnFailure',
@@ -49,9 +52,13 @@ const SERVICE_DEFINITION_KEYS = new Set<ConfigKey>([
   'service.logPath',
 ] as ConfigKey[]);
 
+/**
+ * Put back what this change wrote, but only a key that still holds what it
+ * wrote: a later change (a second toggle while this one's OS action ran) is the
+ * owner's newer intent and is kept.
+ */
 function restoreKeys(runtime: CliServiceRuntime, keys: ServiceKeys): void {
-  runtime.configManager.setDynamic('service.autostart', keys.autostart === true);
-  runtime.configManager.setDynamic('service.enabled', keys.enabled === true);
+  for (const { key, wrote, before } of keys) runtime.configManager.setIfUnchanged(key, wrote, before as never);
 }
 
 function withLingerNote(message: string, status: ManagedServiceStatus): string {
@@ -196,15 +203,19 @@ export function syncServiceSettingToPlatform(
 
   try {
     if (change.key === 'service.enabled') {
-      const keysBefore = { autostart: config.get('service.autostart'), enabled: change.previousValue };
+      const wroteEnabled: WrittenKey = { key: 'service.enabled' as ConfigKey, wrote: change.value === true, before: change.previousValue === true };
       if (change.value === false) {
-        keysToRestore = keysBefore;
-        if (config.get('service.autostart') === true) config.setDynamic('service.autostart', false);
-        return disableSystemService(runtime, manager, keysBefore);
+        const written: WrittenKey[] = [wroteEnabled];
+        if (config.get('service.autostart') === true) {
+          config.setDynamic('service.autostart', false);
+          written.push({ key: 'service.autostart' as ConfigKey, wrote: false, before: true });
+        }
+        keysToRestore = written;
+        return disableSystemService(runtime, manager, written);
       }
       if (config.get('service.autostart') === true) {
-        keysToRestore = keysBefore;
-        return enableSystemService(runtime, manager, options, keysBefore);
+        keysToRestore = [wroteEnabled];
+        return enableSystemService(runtime, manager, options, keysToRestore);
       }
       return {
         handled: true,

@@ -2,10 +2,10 @@
  * MCP tool rules, in Settings > Permissions: for each configured MCP server,
  * its tools and the allow or denial each one carries, with where it came from
  * (kept in the server's MCP config, or blocked for this session with /mcp block
- * in a terminal app). The owner keeps a denial (mcp.servers.tools.deny), an
- * allow past the server's path and host scope (mcp.servers.tools.allow, asked
+ * in a terminal app). The owner keeps a block (mcp.servers.tools.block), an
+ * exemption past the server's path and host scope (mcp.servers.tools.exempt, asked
  * once here, and only in his global MCP config), or clears the kept rule
- * (mcp.servers.tools.clear). Allow and clear are the owner's own acts: the
+ * (mcp.servers.tools.unblock or .unexempt). Exempt and unblock are the owner's own acts: the
  * daemon refuses them for the Agent's model on every route.
  */
 import { useMemo } from 'react';
@@ -95,9 +95,11 @@ export function McpToolRules() {
 
   const change = useMutation({
     mutationFn: ({ action, serverName, toolName }: { action: ToolRuleAction; serverName: string; toolName: string }) => {
-      if (action === 'deny') return invokeMethod('mcp.servers.tools.deny', { serverName, toolName });
-      if (action === 'allow') return invokeMethod('mcp.servers.tools.allow', { serverName, toolName });
-      return invokeMethod('mcp.servers.tools.clear', { serverName, toolName });
+      if (action === 'deny') return invokeMethod('mcp.servers.tools.block', { serverName, toolName });
+      if (action === 'allow') return invokeMethod('mcp.servers.tools.exempt', { serverName, toolName });
+      // Clear drops the rule the tool has: a block (kept or this daemon's session) or an exemption.
+      const blocked = views.find((view) => view.name === serverName)?.rules.some((rule) => rule.toolName === toolName && rule.rule === 'deny') ?? false;
+      return invokeMethod(blocked ? 'mcp.servers.tools.unblock' : 'mcp.servers.tools.unexempt', { serverName, toolName });
     },
     onSuccess: async (result, { action, serverName, toolName }) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.mcp });

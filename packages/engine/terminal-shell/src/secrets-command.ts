@@ -1,3 +1,10 @@
+/**
+ * `/secrets`, described once (command-actions/): store, point at, check, test,
+ * use and delete secrets, see how they are stored, and use one for this
+ * session only. Both terminal apps register this one description; what differs
+ * between them (which tier a credential is filed in) is the app's policy, read
+ * by the actions' `run`, never by the words.
+ */
 import {
   isGoodVibesSecretReferenceValue as isGoodVibesSecretRefInput,
   isMalformedGoodVibesSecretReferenceValue as isMalformedGoodVibesSecretRefInput,
@@ -9,271 +16,302 @@ import {
   resolveSecretRef,
   type SecretsManager,
   type SecretScope,
+  type SecretStorageMedium,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { ConcealedInputRequest } from './concealed-input.js';
-import { secretArg, type TerminalSlashCommand } from './command-registry.js';
-import { commandRefusal, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
-import type { CommandSubcommandHints } from './command-args-hint.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 
-interface SecretsCommandContext {
-  readonly print: (message: string) => void;
-  readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
-}
-const SET_OPTIONS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--yes']);
+type SecretsStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed' | 'inspect'> & Partial<Pick<SecretsManager, 'confirmProjectSecret'>>;
 
-/**
- * The one reading of a `/secrets set|link` line, used both for the input
- * history's mask (`secretArgs.select`) and by the handler, so what is masked
- * and what is stored as the secret cannot differ. The subcommand is the first
- * word that is not `--yes`; after it, options come first and a bare `--` ends
- * them, so a value may itself start with `--`. Positions index the arguments
- * as typed.
- */
-function readSecretsMutationLine(args: readonly string[]): {
-  readonly subcommand: string | undefined;
-  readonly flags: ReadonlySet<string>;
-  readonly positional: readonly { readonly token: string; readonly index: number }[];
-} {
-  const subIndex = args.findIndex((token) => token !== '--yes');
-  const subcommand = subIndex === -1 ? undefined : args[subIndex];
-  const flags = new Set<string>();
-  const positional: { readonly token: string; readonly index: number }[] = [];
-  let optionsEnded = false;
-  for (let index = subIndex + 1; subIndex !== -1 && index < args.length; index++) {
-    const token = args[index]!;
-    if (!optionsEnded && token === '--') optionsEnded = true;
-    else if (!optionsEnded && token.startsWith('--')) flags.add(token);
-    else positional.push({ token, index });
-  }
-  return { subcommand, flags, positional };
+export interface SecretsCommandContext extends CommandActionContext {
+  readonly platform: { readonly secretsManager?: SecretsStore | null | undefined };
 }
 
-/** Where `/secrets set <KEY> <value>` holds the value: every word after the key. */
-function secretsSetValuePositions(args: readonly string[]): number[] {
-  const line = readSecretsMutationLine(args);
-  return line.subcommand === 'set' ? line.positional.slice(1).map((entry) => entry.index) : [];
+/** What differs between the two apps: where a credential is filed and what is said about it. */
+export interface SecretsCommandPolicy {
+  /** The scope a write lands in for this key (the Agent files daemon-read credentials in the daemon tier). */
+  readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
+  readonly deleteScope: (key: string, requested: SecretScope | undefined) => SecretScope | undefined;
+  /** One more line when the write landed somewhere other than where it was asked. */
+  readonly relocationNote: (key: string, requested: SecretScope) => string;
 }
-/** Values stay redacted; each product supplies its credential ownership and confirmation policy. */
-export function createSecretsCommand<Context extends SecretsCommandContext>(
-  manager: (context: Context) => Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed'> & Partial<Pick<SecretsManager, 'confirmProjectSecret'>>,
-  policy: {
-    readonly hidden: boolean;
-    readonly description: string;
-    readonly concealedEntry: boolean;
-    readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
-    readonly deleteScope: (key: string, requested: SecretScope | undefined) => SecretScope | undefined;
-    readonly relocationNote: (key: string, requested: SecretScope) => string;
-    readonly resolved: (reference: string, status: string) => string;
-    readonly failed: (reference: string, error: string) => string;
-    readonly deleted: (key: string) => string;
+
+function storeOf(ctx: SecretsCommandContext): SecretsStore {
+  const store = ctx.platform.secretsManager;
+  if (!store) throw commandRefusal('Secrets are not available in this session.', 'Restart the app; the secret store loads with it.');
+  return store;
+}
+
+const REFERENCE_EXAMPLES = [
+  'OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY',
+  'SLACK_BOT_TOKEN goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password',
+  'SLACK_BOT_TOKEN goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test',
+  'STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value',
+  'OPENAI_API_KEY goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key',
+];
+
+const TERMINAL_ONLY = { terminalOnly: 'Secrets are kept by the app that reads them; manage them in a terminal app.' } as const;
+
+// ---------------------------------------------------------------------------
+// Live lists, read only when a guided step or a completion asks
+// ---------------------------------------------------------------------------
+
+function whereKept(record: { readonly source: string; readonly refSource?: string | undefined; readonly overriddenByEnv: boolean; readonly unconfirmed?: true | undefined }): string {
+  return [
+    record.source,
+    ...(record.refSource ? [`points at ${record.refSource}`] : []),
+    ...(record.overriddenByEnv ? ['an environment variable overrides it'] : []),
+    ...(record.unconfirmed ? ['not used until you confirm it'] : []),
+  ].join(', ');
+}
+
+const STORED_SECRETS = defineList<SecretsCommandContext>({
+  name: 'secrets.stored',
+  async read(ctx) {
+    const records = (await storeOf(ctx).listDetailed()).filter((record) => record.source !== 'env');
+    const byKey = new Map<string, ListRow>();
+    for (const record of records) {
+      const known = byKey.get(record.key);
+      byKey.set(record.key, { value: record.key, label: record.key, state: known?.state ? `${known.state}; ${whereKept(record)}` : whereKept(record) });
+    }
+    return [...byKey.values()];
   },
-): TerminalSlashCommand<Context> & CommandSubcommandHints & Pick<ConfirmableCommand<Context>, 'confirm'> {
-  const storageFlags = '[--user|--project] [--secure|--plaintext]';
-  const mutationUsage = (operation: string) =>
-    `/secrets ${operation} <KEY> <${operation === 'link' ? 'secret-ref' : 'value'}> ${storageFlags}`;
-  const deletionUsage = `/secrets delete <KEY> ${storageFlags}`;
-  const trustUsage = `/secrets trust <KEY>`;
-  const usage = `set <KEY> <value> ${storageFlags} | link <KEY> <secret-ref> ${storageFlags} | get <KEY> | test <secret-ref> | providers | list | trust <KEY> | delete <KEY> ${storageFlags}`;
-  const referenceExamples = [
-    'OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY',
-    'SLACK_BOT_TOKEN goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password',
-    'SLACK_BOT_TOKEN goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test',
-    'STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value',
-    'OPENAI_API_KEY goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key',
-  ];
+  operator: TERMINAL_ONLY,
+});
+
+const UNCONFIRMED_SECRETS = defineList<SecretsCommandContext>({
+  name: 'secrets.unconfirmed',
+  async read(ctx) {
+    return (await storeOf(ctx).listDetailed()).filter((record) => record.unconfirmed).map((record): ListRow => ({
+      value: record.key, label: record.key, ...(record.path ? { detail: record.path } : {}), state: 'not used until you confirm it',
+    }));
+  },
+  operator: TERMINAL_ONLY,
+});
+
+const SCOPES: readonly FixedChoice[] = [
+  { value: 'project', label: 'This project', help: 'Kept in this project\'s secret store, read only here.' },
+  { value: 'user', label: 'All your projects', help: 'Kept in your own secret store, read in every project.' },
+];
+const MEDIA: readonly FixedChoice[] = [
+  { value: 'secure', label: 'Encrypted', help: 'Kept encrypted on this machine.' },
+  { value: 'plaintext', label: 'Plain text', help: 'Kept readable by anything that can read the file.', risk: 'loosens-a-protection' },
+];
+
+const KEY_STORED: InputDescription = {
+  id: 'key', label: 'Secret', help: 'The secrets you have stored', kind: 'choice',
+  choices: { list: STORED_SECRETS }, required: true, typed: { position: 1 },
+};
+const KEY_NEW: InputDescription = {
+  id: 'key', label: 'Name', help: 'The name programs read it by, such as OPENAI_API_KEY', kind: 'choice',
+  choices: { list: STORED_SECRETS, allowOther: { reason: 'a new name, such as OPENAI_API_KEY' } }, required: true, typed: { position: 1 },
+};
+const SCOPE: InputDescription = {
+  id: 'scope', label: 'Where to keep it', help: 'This project only, or every project', kind: 'choice', choices: SCOPES,
+  required: { default: 'project', defaultMeans: 'this project only' }, typed: { flag: '--scope' },
+};
+const MEDIUM: InputDescription = {
+  id: 'storage', label: 'How to keep it', help: 'Encrypted, or as plain text', kind: 'choice', choices: MEDIA,
+  required: { default: 'secure', defaultMeans: 'encrypted' }, typed: { flag: '--storage' },
+};
+const REFERENCE: InputDescription = {
+  id: 'reference', label: 'Reference', help: 'A goodvibes://secrets/... address of a password manager entry or variable', kind: 'text',
+  freeTextReason: 'the address of an entry in your password manager (see "See where secrets can come from")', required: true, typed: { position: 2 },
+};
+
+// ---------------------------------------------------------------------------
+// The description
+// ---------------------------------------------------------------------------
+
+function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy): CommandDescription<Ctx> {
+  async function write(values: Readonly<Record<string, string>>, ctx: Ctx, value: string): Promise<string> {
+    const key = values.key!;
+    const requested = (values.scope || 'project') as SecretScope;
+    const scope = policy.writeScope(key, requested);
+    const medium = (values.storage || 'secure') as SecretStorageMedium;
+    try {
+      await storeOf(ctx).set(key, value, { scope, medium });
+    } catch (error) {
+      throw commandRefusal(`${key} was not stored: ${summarizeError(error)}`);
+    }
+    return policy.relocationNote(key, requested).trim();
+  }
   return {
     name: 'secrets',
-    effect: 'mixed',
-    description: policy.description,
-    firstScreen: !policy.hidden,
-    usage,
-    argsHint: '<set|link|get|test|providers|list|trust|delete> [KEY]',
-    secretArgs: { select: secretsSetValuePositions },
-    subcommands: {
-      set: `<KEY> <value> ${storageFlags}`,
-      link: `<KEY> <secret-ref> ${storageFlags}`,
-      get: '<KEY>',
-      test: '<secret-ref>',
-      providers: '',
-      list: '',
-      trust: `<KEY>`,
-      delete: `<KEY> ${storageFlags}`,
-    },
-    // The registry asks once for a line that cannot be undone.
-    confirm: (args) => {
-      const key = args[0] === 'delete' || args[0] === 'trust' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
-      if (!key) return undefined;
-      return args[0] === 'trust'
-        ? { title: `Use ${key} from this project's secret store?`, detail: `A project's secret store is part of the checkout, so whoever wrote the repository may have put ${key} there. Once confirmed, ${key} from this project's store is used whenever you have not set it yourself.`, confirmLabel: 'Use it' }
-        : { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' };
-    },
-    async handler(args, context) {
-      const store = manager(context);
-      const parsed = { rest: stripYesFlag(args).rest };
-      const [subcommand, ...rest] = parsed.rest;
-      const invalidReference = (): never => { throw commandRefusal('[secrets] Invalid secret reference.', 'Use /secrets providers for examples.'); };
-      if (!subcommand || subcommand === 'list') {
-        const records = (await store.listDetailed()).filter((record) => record.source !== 'env');
-        context.print(
-          !records.length
-            ? `[secrets] No secrets stored. Use: /secrets set <KEY> <value>`
-            : [
-                '[secrets] Stored keys:',
-                ...records.map(
-                  (record) =>
-                    `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''}${record.unconfirmed ? `, not used until confirmed: /secrets trust ${record.key}` : ''})`,
-                ),
-              ].join('\n'),
-        );
-        return;
-      }
-      if (subcommand === 'providers') {
-        context.print(
-          [
-            '[secrets] Built-in secret providers:',
+    title: 'Secrets',
+    summary: 'Keep passwords and keys where programs can read them, without showing them',
+    group: 'Setup',
+    report: 'see-secrets',
+    actions: [
+      {
+        id: 'see-secrets', label: 'See your secrets', word: 'list', inputs: [],
+        async rowValue(ctx) {
+          const keys = new Set((await storeOf(ctx).listDetailed()).filter((record) => record.source !== 'env').map((record) => record.key));
+          return keys.size === 0 ? 'none stored yet' : `${keys.size} stored`;
+        },
+        sentence: 'Shows every stored secret by name, where it is kept and whether something overrides it; no value is shown.', done: '',
+        touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: {},
+        async run(_values, ctx) {
+          const records = (await storeOf(ctx).listDetailed()).filter((record) => record.source !== 'env');
+          if (records.length === 0) return 'No secrets stored yet. Store one with /secrets, "Store a secret".';
+          return ['Stored secrets:', ...records.map((record) => `  ${record.key}  ${whereKept(record)}`)].join('\n');
+        },
+      },
+      {
+        id: 'set-secret', label: 'Store a secret', word: 'set',
+        inputs: [
+          KEY_NEW,
+          { id: 'value', label: 'Value', help: 'The password or key itself; hidden as you type', kind: 'secret', required: true, typed: { position: 2 } },
+          SCOPE,
+          MEDIUM,
+        ],
+        sentence: '{key} will be kept in the {scope} secret store ({storage}) until you change it.',
+        done: 'Stored {key} in the {scope} secret store ({storage}).',
+        touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
+        operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY', value: 'example-value', scope: 'user' },
+        async run(values, ctx) {
+          if (!values.value) throw commandRefusal(`Nothing was stored: no value was given for ${values.key}.`);
+          if (isMalformedGoodVibesSecretRefInput(values.value)) throw commandRefusal('Nothing was stored: the value starts like a secret reference but is not one.', '"See where secrets can come from" shows the reference forms.');
+          return write(values, ctx, values.value);
+        },
+      },
+      {
+        id: 'link-secret', label: 'Point a secret at a password manager', word: 'link',
+        inputs: [KEY_NEW, REFERENCE, SCOPE, MEDIUM],
+        sentence: '{key} will be read from {reference}, kept in the {scope} secret store ({storage}), until you change it.',
+        done: '{key} now reads from {reference}.',
+        touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
+        operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY', reference: 'goodvibes://secrets/env/OPENAI_API_KEY' },
+        async run(values, ctx) {
+          if (!isGoodVibesSecretRefInput(values.reference!)) throw commandRefusal(`${values.reference} is not a secret reference; nothing was stored.`, '"See where secrets can come from" shows the reference forms.');
+          return write(values, ctx, values.reference!);
+        },
+      },
+      {
+        id: 'check-secret', label: 'Check a secret is stored', word: 'get', inputs: [KEY_STORED],
+        sentence: 'Says whether {key} is stored and can be read; its value is not shown.', done: '',
+        touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY' },
+        async run(values, ctx) {
+          const value = await storeOf(ctx).get(values.key!);
+          if (value === null) throw commandRefusal(`${values.key} is not stored.`, '/secrets list shows what is stored.');
+          return `${values.key} is stored and can be read (value not shown).`;
+        },
+      },
+      {
+        id: 'test-reference', label: 'Test a secret reference', word: 'test',
+        inputs: [{ ...REFERENCE, typed: { position: 1 } }],
+        sentence: 'Reads {reference} once and says whether it gives a value; the value is not shown.', done: '',
+        touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: { reference: 'goodvibes://secrets/env/OPENAI_API_KEY' },
+        async run(values, ctx) {
+          const reference = values.reference!;
+          if (!isGoodVibesSecretRefInput(reference)) throw commandRefusal(`${reference} is not a secret reference.`, '"See where secrets can come from" shows the reference forms.');
+          try {
+            const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => storeOf(ctx).get(key) });
+            return `${describeSecretRef(reference)}: ${result.value ? 'gives a value (not shown)' : 'gives nothing'}.`;
+          } catch (error) {
+            throw commandRefusal(`${describeSecretRef(reference)} could not be read: ${summarizeError(error)}`);
+          }
+        },
+      },
+      {
+        id: 'see-sources', label: 'See where secrets can come from', word: 'providers', inputs: [],
+        sentence: 'Lists the password managers and other places a secret can be read from, with a line for each.', done: '',
+        touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: {},
+        async run() {
+          return [
+            'A secret can be read from:',
             ...BUILTIN_SECRET_PROVIDER_SOURCES.map((source) => `  ${source}`),
             '',
-            'Examples:',
-            ...referenceExamples.map((example) => `  /secrets link ${example}`),
-          ].join('\n'),
-        );
-        return;
-      }
-      if (subcommand === 'test') {
-        const reference = rest.join(' ').trim();
-        if (!reference) {
-          throw commandRefusal('[secrets] Usage: /secrets test <secret-ref>');
-        }
-        if (!isGoodVibesSecretRefInput(reference)) {
-          invalidReference();
-        }
-        try {
-          const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => store.get(key) });
-          context.print(policy.resolved(describeSecretRef(reference), result.value ? 'resolved <redacted>' : 'missing'));
-        } catch (error) {
-          throw commandRefusal(policy.failed(describeSecretRef(reference), summarizeError(error)));
-        }
-        return;
-      }
-      if (subcommand === 'set' || subcommand === 'link') {
-        // Options come first; a bare `--` ends them so a value may itself start
-        // with `--` (even `--yes`). The token is never echoed: it may be the
-        // secret. Read from the arguments as typed, the same words the input
-        // history masked (`secretArgs`), so `set`'s value is taken with
-        // `secretArg` at the position the mask covered.
-        const { flags, positional } = readSecretsMutationLine(args);
-        const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
-        if (unknownFlags.length) {
-          throw commandRefusal(
-            `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). To store a value that starts with --, put it after a bare --.\nUsage: ${mutationUsage(subcommand)}`,
-          );
-        }
-        const key = positional[0]?.token;
-        const parts = positional.slice(1);
-        if (!key) {
-          throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
-        }
-        const requestedScope = flags.has('--user') ? 'user' : 'project';
-        const scope = policy.writeScope(key, requestedScope);
-        const medium = flags.has('--plaintext') ? 'plaintext' : 'secure';
-        if (policy.concealedEntry && subcommand === 'set' && parts.length === 0) {
-          if (!context.beginConcealedInput) {
-            throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
+            'For example:',
+            ...REFERENCE_EXAMPLES.map((example) => `  /secrets link ${example}`),
+          ].join('\n');
+        },
+      },
+      {
+        id: 'see-storage', label: 'See how secrets are kept', word: 'storage', inputs: [],
+        sentence: 'Shows the storage rule, how many secrets are encrypted or plain text, and where each store is.', done: '',
+        touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: {},
+        async run(_values, ctx) {
+          const review = await storeOf(ctx).inspect();
+          const overridden = new Set((review.records ?? []).filter((record) => record.source !== 'env' && record.overriddenByEnv).map((record) => record.key)).size;
+          return [
+            'How secrets are kept',
+            `  rule: ${review.policy.replace(/_/g, ' ')}`,
+            `  stored: ${review.storedKeys} (${review.secureKeys} encrypted, ${review.plaintextKeys} plain text)`,
+            `  overridden by an environment variable: ${overridden}`,
+            ...review.locations.map((location) => `  ${location.source}: ${location.exists ? 'present' : 'absent'} (${location.path})`),
+            ...review.warnings.map((warning) => `  warning: ${warning}`),
+          ].join('\n');
+        },
+      },
+      {
+        id: 'trust-secret', label: 'Use a secret from this project\'s store', word: 'trust',
+        inputs: [{ ...KEY_STORED, help: 'Secrets in this project\'s store that wait for you', choices: { list: UNCONFIRMED_SECRETS } }],
+        sentence: '{key} from this project\'s secret store will be used whenever you have not set it yourself, until you change it (a changed value asks again).',
+        done: '{key} from this project\'s secret store is used from now on.',
+        touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection',
+        ownerOnly: { reason: 'a project\'s secret store is part of the checkout, so whoever wrote the repository may have put it there', instead: 'Ask the owner to choose "Use a secret from this project\'s store" in /secrets.' },
+        operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY' },
+        async run(values, ctx) {
+          const store = storeOf(ctx);
+          const key = values.key!;
+          if (!store.confirmProjectSecret) throw commandRefusal(`Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} --scope user.`);
+          const confirmed = store.confirmProjectSecret(key);
+          if (confirmed.length === 0) throw commandRefusal(`Nothing was confirmed: ${key} is not in this project's secret store.`, '/secrets list shows what is stored.');
+          return confirmed.map((entry) => entry.pointsAt
+            ? `  ${entry.path}: a pointer to ${describeSecretRef(entry.pointsAt)} inside this project's store`
+            : `  ${entry.path}`).join('\n');
+        },
+      },
+      {
+        id: 'delete-secret', label: 'Delete a secret', word: 'delete',
+        inputs: [
+          KEY_STORED,
+          { ...SCOPE, label: 'From', help: 'Which store to delete it from', required: { default: '', defaultMeans: 'every store that holds it' } },
+          { ...MEDIUM, label: 'Kept as', help: 'Only the encrypted or only the plain-text copy', choices: MEDIA.map(({ risk: _risk, ...choice }) => choice), required: { default: '', defaultMeans: 'both' } },
+        ],
+        sentence: 'The stored value of {key} will be deleted; anything that reads it stops working until it is set again.',
+        done: 'Deleted {key}.',
+        touches: 'credential', lasts: 'kept', risk: 'cannot-be-undone',
+        operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY' },
+        async run(values, ctx) {
+          const requested = values.scope ? values.scope as SecretScope : undefined;
+          try {
+            await storeOf(ctx).delete(values.key!, {
+              scope: policy.deleteScope(values.key!, requested),
+              medium: values.storage ? values.storage as SecretStorageMedium : undefined,
+            });
+          } catch (error) {
+            throw commandRefusal(`${values.key} was not deleted: ${summarizeError(error)}`);
           }
-          context.print(`[secrets] Enter value for ${key} (input is masked; press Enter to store, Esc to cancel).`);
-          context.beginConcealedInput({
-            label: key,
-            onSubmit(value) {
-              if (!value.length) {
-                context.print(`[secrets] ${key} not set (empty value).`);
-                return;
-              }
-              void store.set(key, value, { scope, medium }).then(
-                () => context.print(`[secrets] Stored: ${key} (${scope}, ${medium})${policy.relocationNote(key, requestedScope)}`),
-                (error) => context.print(`[secrets] Could not store ${key}: ${summarizeError(error)}`),
-              );
-            },
-            onCancel: () => context.print(`[secrets] ${key} cancelled.`),
-          });
-          return;
-        }
-        // A value is one word, stored exactly as typed (a backslash outside
-        // quotes is an ordinary character). Several words would have to be
-        // re-joined with guessed spacing, so they are refused instead.
-        if (parts.length > 1) {
-          throw commandRefusal(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
-        }
-        const typed = parts[0];
-        if (!typed || !typed.token.length) {
-          throw commandRefusal(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
-        }
-        // A link's value is a reference, not a secret; a set's value is read
-        // only through the declared secret position.
-        const value = subcommand === 'set' ? secretArg(typed.index).reveal('store-write') : typed.token;
-        if (
-          (subcommand === 'link' && !isGoodVibesSecretRefInput(value)) ||
-          (subcommand === 'set' && isMalformedGoodVibesSecretRefInput(value))
-        ) {
-          invalidReference();
-        }
-        await store.set(key, value, { scope, medium });
-        context.print(
-          (subcommand === 'link'
-            ? `[secrets] Linked: ${key} -> ${describeSecretRef(value)} (${scope}, ${medium})`
-            : `[secrets] Stored: ${key} (${scope}, ${medium})`) + policy.relocationNote(key, requestedScope),
-        );
-        return;
-      }
-      if (subcommand === 'trust') {
-        const key = rest.find((value) => !value.startsWith('--'));
-        if (!key) {
-          throw commandRefusal(`[secrets] Usage: ${trustUsage}`);
-        }
-        if (!store.confirmProjectSecret) {
-          throw commandRefusal(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user.`);
-        }
-        const confirmed = store.confirmProjectSecret(key);
-        if (!confirmed.length) throw commandRefusal(`[secrets] Nothing was confirmed: ${key} is not in this project's secret store.`, '/secrets list shows what is stored.');
-        // Say what was confirmed: a pointer is resolved only inside this project's store, and any later change to the value needs confirming again.
-        const described = confirmed.map((entry) => entry.pointsAt
-          ? `${entry.path}, a pointer to ${describeSecretRef(entry.pointsAt)} inside this project's store`
-          : entry.path);
-        context.print(`[secrets] ${key} from this project's secret store is used from now on, until its value changes (${described.join('; ')}).`);
-        return;
-      }
-      if (subcommand === 'get') {
-        const key = rest[0];
-        if (!key) {
-          context.print('[secrets] Usage: /secrets get <KEY>');
-          return;
-        }
-        const value = await store.get(key);
-        if (value === null) throw commandRefusal(`[secrets] Not found: ${key}`, 'Use /secrets list to see all keys.');
-        context.print(`[secrets] ${key} = <stored> (use /secrets list to see all keys)`);
-        return;
-      }
-      if (subcommand === 'delete') {
-        const flags = new Set(rest.filter((value) => value.startsWith('--')));
-        const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
-        if (unknownFlags.length) {
-          // Deleting at a default scope the person did not ask for is not recoverable.
-          throw commandRefusal(
-            `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). Nothing was deleted.\nUsage: ${deletionUsage}`,
-          );
-        }
-        const key = rest.find((value) => !value.startsWith('--'));
-        if (!key) {
-          throw commandRefusal(`[secrets] Usage: ${deletionUsage}`);
-        }
-        await store.delete(key, {
-          scope: policy.deleteScope(key, flags.has('--user') ? 'user' : flags.has('--project') ? 'project' : undefined),
-          medium: flags.has('--plaintext') ? 'plaintext' : flags.has('--secure') ? 'secure' : undefined,
-        });
-        context.print(policy.deleted(key));
-        return;
-      }
-      throw commandRefusal(`[secrets] Usage: /secrets ${usage}`);
-    },
+        },
+      },
+      {
+        id: 'use-for-session', label: 'Use a secret for this session only', word: 'use',
+        inputs: [
+          { id: 'name', label: 'Name', help: 'The variable name programs read it by, such as GITHUB_TOKEN', kind: 'text', freeTextReason: 'a variable name you choose', required: true, typed: { position: 1 } },
+          { id: 'value', label: 'Value', help: 'The password or key itself; hidden as you type', kind: 'secret', required: true, typed: { position: 2 } },
+        ],
+        sentence: 'Programs this app runs will read the value as ${name}, for this session only; it is not stored.',
+        done: '${name} is set for this session only.',
+        touches: 'credential', lasts: 'session', risk: 'none',
+        operator: { terminalOnly: 'It is set in the terminal app\'s own session.' }, example: { name: 'GITHUB_TOKEN', value: 'example-value' },
+        async run(values) {
+          const name = values.name!.trim().replace(/[^A-Za-z0-9_]/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
+          if (!name) throw commandRefusal('A variable name holds letters, digits and underscores, such as GITHUB_TOKEN.');
+          if (!values.value) throw commandRefusal(`${name} was not set: no value was given.`);
+          process.env[name] = values.value;
+          return `(${values.value.length} character${values.value.length === 1 ? '' : 's'}, value not shown${name !== values.name ? `; set as ${name}` : ''}.)`;
+        },
+      },
+    ],
   };
+}
+
+/** `/secrets` for one app: the one description, with the app's filing rule for credentials. */
+export function createSecretsCommand<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy): DescribedCommand<Ctx> {
+  return defineCommand(describeSecrets<Ctx>(policy));
 }

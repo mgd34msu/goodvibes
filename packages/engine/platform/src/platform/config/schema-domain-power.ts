@@ -32,18 +32,21 @@ export const powerConfigDefaults: { power: PowerConfig } = {
 export const powerConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'power.keepAwake',
+    label: 'Keep this computer awake',
     type: 'boolean',
     description:
       'The owner keep-awake toggle: the daemon holds a sleep inhibitor INDEPENDENT of work state, so the host stays reachable after work finishes and after surfaces close. Covers idle + sleep + lid-switch inhibitor classes where the OS grants them; the served state names any refused class honestly. Every attached surface shows an always-visible "sleep disabled" chip while this is on, the chip, not a timer, is the safety mechanism.',
   },
   {
     key: 'power.inhibitWhileWorking',
+    label: 'Keep this computer awake while work runs',
     type: 'boolean',
     description:
       'Hold an idle/sleep inhibitor automatically while real work runs (a running turn, an active agent, a schedule about to fire), released when work drains. On by default so the host cannot sleep mid-work.',
   },
   {
     key: 'power.workInhibitMaxMinutes',
+    label: 'Longest work may keep this computer awake (minutes)',
     type: 'number',
     description:
       'Hard cap in minutes on the automatic WORK inhibitor (never the keep-awake toggle): a wedged hold releases at the cap and the state reports the expiry honestly.',

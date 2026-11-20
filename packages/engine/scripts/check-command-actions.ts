@@ -81,7 +81,9 @@ export function checkDescription(description: CommandDescription<never>, problem
     // 4
     if (!action.sentence.trim()) at(action, 'it has no sentence');
     for (const input of action.inputs) {
-      if (input.required === true && !input.showWhen && !action.sentence.includes(`{${input.id}}`)) at(action, `its sentence leaves out the required blank "${input.label}" ({${input.id}})`);
+      // A secret is never written into a sentence: it would be shown on screen and kept in the transcript.
+      if (input.kind === 'secret' && action.sentence.includes(`{${input.id}}`)) at(action, `its sentence shows the secret blank "${input.label}"; a secret is never shown`);
+      if (input.required === true && input.kind !== 'secret' && !input.showWhen && !action.sentence.includes(`{${input.id}}`)) at(action, `its sentence leaves out the required blank "${input.label}" ({${input.id}})`);
     }
     // 5
     if (action.lasts !== 'not-a-change' && action.risk !== 'cannot-be-undone' && !action.sentence.includes('{lasts}') && !/for this session only|until you change it/.test(action.sentence)) {

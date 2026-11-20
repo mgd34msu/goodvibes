@@ -20,6 +20,7 @@
  * (`computeKeyAcceptance`), so no machine holds a copy of the answer that can
  * disagree with the group's record.
  */
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -350,7 +351,7 @@ export interface ClusterSecretStore {
 
 /** What {@link clusterSecretStoreFrom} needs of the secrets store; `SecretsManager` satisfies it. */
 export interface ClusterSecretsSource {
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<Secret | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
   /** The daemon tier's own entry; throws when that store exists but cannot be read. */
@@ -370,8 +371,9 @@ export interface ClusterSecretsSource {
 export function clusterSecretStoreFrom(source: ClusterSecretsSource): ClusterSecretStore {
   const onDidChange = source.onDidChange;
   return {
+    // The cluster layer reads its own material (the group key, replicated settings) as text.
     get: async (key) => {
-      const value = await source.get(key);
+      const value = revealOrNull(await source.get(key), 'dispatch');
       if (value === null) await source.getWriteScopeEntry(key, 'daemon');
       return value;
     },

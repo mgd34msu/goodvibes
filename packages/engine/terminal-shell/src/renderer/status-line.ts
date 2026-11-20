@@ -220,8 +220,9 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
     const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
     if (asks.inForce) {
         runs.push(paint(' · ', t.textFaint), paint(asks.inForce, t.warning, true));
+        // A reason with no short form stays whole until the reason goes.
         const because = asks.because
-            ? form.because === 'full' ? asks.because : form.because === 'short' ? shortBecause(asks.because) : null
+            ? form.because === 'full' ? asks.because : form.because === 'short' ? (shortBecause(asks.because) ?? asks.because) : null
             : null;
         if (because)
             runs.push(paint(' · ', t.textFaint), paint(because, t.textFaint));

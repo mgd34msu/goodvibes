@@ -374,6 +374,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     verificationWriter: createVerificationWriter({
       route: () => ({ provider, model: model.id, reasoning: turnReasoning() }),
       beforeAttempt: () => assertVerificationProvider(),
+      // A failed proposal request moves the turn like any of its requests.
+      failOver: (error) => turnFailover(error),
       onUsage: (response, durationMs) => {
         context.usage.input += response.usage.inputTokens; context.usage.output += response.usage.outputTokens;
         context.usage.cacheRead += response.usage.cacheReadTokens ?? 0; context.usage.cacheWrite += response.usage.cacheWriteTokens ?? 0;

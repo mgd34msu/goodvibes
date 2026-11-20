@@ -8,6 +8,7 @@ import {
 import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { getClientLifetime, invalidateClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY, type ClientLifetime } from './client-lifetime';
+import { clearHeldInputs } from './held-input';
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
@@ -2305,6 +2306,8 @@ async function endDaemonSignIn(token: string): Promise<SignOutOutcome> {
 export async function signOut(): Promise<SignOutOutcome> {
   // A new identity generation even when nothing was stored: a sign-in still in flight is older and is dropped.
   invalidateClientLifetime();
+  // What was typed and not yet accepted belongs to this sign-in: it does not outlive it.
+  clearHeldInputs();
   const token = await tokenStore.getToken();
   await client.auth.clearToken();
   const outcome = token ? await endDaemonSignIn(token) : { endedOnDaemon: true };

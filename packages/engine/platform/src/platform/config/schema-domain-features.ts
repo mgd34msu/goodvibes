@@ -148,6 +148,8 @@ export const featureConfigDefaults: {
 export const featureConfigSettings: ConfigSettingRow[] = [
   {
     key: 'fetch.sanitizeMode',
+    label: 'Clean up fetched pages',
+    appliesWhen: 'now',
     type: 'enum',
     description:
       'Default response sanitization mode applied by the fetch tool when the per-call sanitize_mode is omitted: none (no content sanitization), safe-text (strip active/script content, default), or strict (aggressive text-only reduction). A per-call sanitize_mode always overrides this default. Private-IP and cloud-metadata host blocking applies regardless of mode.',
@@ -155,36 +157,43 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'fetch.allowLocalhost',
+    label: 'Let fetch reach servers on this computer',
     type: 'boolean',
     description:
       'Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP blocking is governed by fetch.allowedPrivateHosts; cloud-metadata blocking is absolute.',
   },
   {
     key: 'fetch.allowedPrivateHosts',
+    label: 'Machines on your network fetch may reach',
     type: 'string',
     description:
       'Comma-separated private-network hosts the fetch tool and the browser may reach: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. For the fetch tool it applies only to the host a call writes, never to a redirect target; the browser holds every request a page makes (navigation, redirect, frame, subresource, WebSocket) to it, and asks the owner before opening any other private or loopback address for a page. Cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it.',
   },
   {
     key: 'fetch.trustedHosts',
+    label: 'Websites fetch trusts',
     type: 'string',
     description:
       'Comma-separated trusted hosts for fetch sanitization/trust-tier classification (e.g. docs.example.com, *.internal.example.com). Trusted hosts relax sanitization. This list is the only source of trust: a fetch call cannot add to it. Empty means no host is trusted. In a pattern * matches one name label and ** matches across dots; an entry that is only * or ** matches every host. Hosts are compared lower-case, without a trailing dot, in their ASCII (punycode) form.',
   },
   {
     key: 'fetch.blockedHosts',
+    label: 'Websites fetch refuses',
     type: 'string',
     description:
       'Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode.',
   },
   {
     key: 'security.tokenAudit.enabled',
+    label: 'Check access tokens for broad access and age',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Audit API tokens for minimum-scope violations and overdue rotation, surfacing age, scope, and rotation warnings in diagnostics with typed security events. Default on in advisory mode: tokens are reported, never blocked, unless security.tokenAudit.managed is also true.',
   },
   {
     key: 'security.tokenAudit.rotationCadenceDays',
+    label: 'Replace access tokens every (days)',
     type: 'number',
     description:
       'Default rotation cadence (days) for the token audit: a token older than this is reported overdue. Per-policy rotationCadenceMs overrides this default. Only enforced (blocking) when security.tokenAudit.managed is also true.',
@@ -192,6 +201,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'security.tokenAudit.rotationWarningDays',
+    label: 'Warn this many days before a token is due',
     type: 'number',
     description:
       'Default lead time (days) before the rotation-cadence due date at which a token is reported as a rotation warning. Per-policy rotationWarningThresholdMs overrides this default.',
@@ -199,24 +209,30 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'security.tokenAudit.managed',
+    label: 'Block tokens that fail the check',
     type: 'boolean',
     description:
       'When true (and security.tokenAudit.enabled is on), tokens with excess scopes or overdue rotation are BLOCKED from use rather than only reported. Default false = advisory reporting only.',
   },
   {
     key: 'integrations.routeBinding',
+    label: 'Remember where to reply in each chat app',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Durably bind and resolve external conversation routes, thread contexts, and reply targets across channel surfaces. Default on; it is inert until a channel surface is configured.',
   },
   {
     key: 'integrations.deliveryTracking',
+    label: 'Track deliveries to chat apps',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Track integration deliveries first-class: retries, dead letters, and per-surface delivery outcomes. Default on; it is inert until a channel surface is configured.',
   },
   {
     key: 'integrations.delivery.maxRetries',
+    label: 'Retries for a failed delivery',
     type: 'number',
     description:
       'Maximum retry attempts for a retryable integration delivery (Slack/Discord/webhook) before it moves to the dead-letter queue. A per-queue maxRetries option overrides this default.',
@@ -224,6 +240,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'integrations.delivery.initialDelayMs',
+    label: 'First wait before retrying a delivery (ms)',
     type: 'number',
     description:
       'Initial exponential-backoff delay (ms) between integration delivery retries. Delay grows as initialDelayMs * 2^(attempt-1) with jitter, capped at integrations.delivery.maxDelayMs.',
@@ -231,12 +248,14 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'integrations.delivery.maxDelayMs',
+    label: 'Longest wait between delivery retries (ms)',
     type: 'number',
     description: 'Upper cap (ms) on the exponential-backoff delay between integration delivery retries.',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {
     key: 'integrations.delivery.maxDlqSize',
+    label: 'Failed deliveries kept',
     type: 'number',
     description:
       'Maximum entries retained in the integration delivery dead-letter queue; oldest entries are evicted first past this size.',
@@ -244,24 +263,31 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'integrations.delivery.sloEnforced',
+    label: 'Hold chat-app deliveries to their delivery targets',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default.',
   },
   {
     key: 'policy.registryEnabled',
+    label: 'Load versioned policy bundles',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Enable the versioned policy bundle registry with promote/rollback semantics and the /policy load, simulate, diff, promote, and rollback commands. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists.',
   },
   {
     key: 'policy.requireSignedBundles',
+    label: 'Accept only signed policy bundles',
+    appliesWhen: 'restart',
     type: 'boolean',
     description:
       'Require a valid HMAC-SHA256 signature on every policy bundle: a bundle that is unsigned, altered or signed with another key is refused, and so is every bundle when no signing key is set. The key is read from the GOODVIBES_POLICY_SIGNING_KEY environment variable (hex, at least 16 bytes). Restart to apply. Default off until divergence evidence clears the governance gate.',
   },
   {
     key: 'policy.bundleSource',
+    label: 'Where the starting policy bundle comes from',
     type: 'enum',
     description:
       'Where the policy bundle registry loads its initial bundle from at startup: none (no bundle loaded; bundles supplied programmatically or via commands), or file (load policy.bundlePath). Only consulted when policy.registryEnabled is true.',
@@ -269,24 +295,30 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'policy.bundlePath',
+    label: 'Policy bundle file',
     type: 'string',
     description:
       'Filesystem path to the policy bundle JSON loaded at startup when policy.bundleSource is "file" and policy.registryEnabled is true. Empty disables file loading. The loaded bundle enters the registry as a candidate (subject to the divergence gate before promotion); once promoted, the same unchanged bundle is enforced again at every start.',
   },
   {
     key: 'agents.passiveInjection.knowledge',
+    label: 'Bring in relevant project knowledge each turn',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Re-retrieve project-memory knowledge each turn against the evolving conversation (steers, new sub-topics), under the hard token budget with a visible per-turn injection record on the agent record and session transcript. Default on: the block is hard-budgeted and every turn is honestly recorded. Turn off to revert to spawn-time-only injection.',
   },
   {
     key: 'agents.passiveInjection.code',
+    label: 'Bring in relevant code each turn',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Additionally inject similarity-ranked chunks from the repo source-code index each turn as untrusted reference pointers, sharing the knowledge-injection budget and relevance floor, each with an honest match label on the turn record. Default off: code chunks carry no review provenance, so this is deliberately opt-in. Also respects storage.codeIndexEnabled.',
   },
   {
     key: 'agents.passiveInjection.budgetTokens',
+    label: 'Most tokens brought in each turn',
     type: 'number',
     description:
       'Default hard token budget for per-turn passive knowledge/code injection. The effective budget is min(this value, 3% of the model context window). Set 0 to disable injection. A per-run passiveKnowledgeInjectionBudgetTokens override still wins.',
@@ -294,6 +326,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'agents.passiveInjection.relevanceFloor',
+    label: 'How relevant brought-in material must be',
     type: 'number',
     description:
       'Minimum relevance score (higher = stricter) a knowledge/code candidate must clear to be eligible for per-turn passive injection. Filters filler before the token budget is applied. A per-run passiveKnowledgeInjectionRelevanceFloor override still wins.',
@@ -301,6 +334,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'agents.passiveInjection.codeLimit',
+    label: 'Most code pieces brought in each turn',
     type: 'number',
     description:
       'Maximum number of source-code chunks injected per turn by passive code injection (chunks share the passive-injection token budget and relevance floor).',
@@ -308,12 +342,15 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'agents.contextWindowGuard',
+    label: "Shorten a helper agent's conversation before it overflows",
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Before each sub-agent provider call, estimate total token count (system prompt + messages + tool definitions) and compact the conversation past agents.contextCompactThreshold, with layered system-prompt assembly for small windows and a single compaction retry on context-size errors. Turn off to revert to unchecked provider calls.',
   },
   {
     key: 'agents.contextCompactThreshold',
+    label: "Shorten a helper agent's conversation when this full (0 to 1)",
     type: 'number',
     description:
       'Fraction of the model context window at which the agent context-window guard triggers sub-agent conversation compaction (estimated system + messages + tool tokens above this fraction compacts). Distinct from behavior.autoCompactThreshold, which governs main-session conversation compaction.',
@@ -321,6 +358,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'agents.maxTurns',
+    label: 'Turns an agent may take (0 for no limit)',
     type: 'number',
     description:
       'Per-agent turn budget. Zero (default) continues until completion, cancellation, or a call that keeps returning the same result (8 identical calls with identical results end the run as repeated_call). A positive value stops the run with a max-turns outcome. A positive agents.maxTurnsCap remains an owner-controlled ceiling.',
@@ -328,6 +366,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'agents.maxTurnsCap',
+    label: 'Most turns any agent may be given (0 for no limit)',
     type: 'number',
     description:
       'Owner-controlled ceiling on per-spawn turn budgets. Zero (default) disables this ceiling; a positive value cannot be raised by a spawn override.',

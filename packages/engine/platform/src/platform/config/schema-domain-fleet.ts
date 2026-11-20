@@ -23,6 +23,7 @@ export const fleetConfigDefaults: { fleet: FleetConfig } = {
 export const fleetConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'fleet.maxSize',
+    label: 'Most agents at once',
     type: 'number',
     description:
       'Maximum fleet size, the one ceiling on agents this daemon is responsible for: native spawned agents, ACP-hosted agents, and elastic fix-task agents all count against it. Externally-launched agents merely observed on the host never count. Renamed from orchestration.maxActiveAgents.',

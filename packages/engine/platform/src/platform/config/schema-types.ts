@@ -257,8 +257,24 @@ export interface PricingConfig {
   modelPrices: Record<string, ManualModelPriceConfig>;
 }
 
+/**
+ * When a change to a setting takes effect, stated only where the code that
+ * reads it was checked: `now` (the next screen or event reads it), `next-answer`
+ * (read when a turn starts), `next-session` (read when a session starts),
+ * `restart` (read once when the program starts).
+ */
+export type SettingAppliesWhen = 'now' | 'next-answer' | 'next-session' | 'restart';
+
 export interface ConfigSetting {
   key: ConfigKey;
+  /**
+   * The setting's name in the words a person would use ("Show the model's
+   * thinking"): the primary text of every settings row. The key is shown only
+   * as small secondary text.
+   */
+  label: string;
+  /** When a change takes effect; absent where that was not verified in the reader. */
+  appliesWhen?: SettingAppliesWhen | undefined;
   type: 'boolean' | 'number' | 'string' | 'enum' | 'object';
   default: unknown;
   description: string;

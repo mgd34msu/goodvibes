@@ -25,6 +25,7 @@ import {
   type EmailServiceDeps,
   type SurfaceEmailConfigProblem,
 } from '@goodvibes-jev/engine/platform/platform/email';
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import { currentUntrustedContentScope, getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 
@@ -38,7 +39,7 @@ interface MailCompositionInput {
     onDidInvalidate?(listener: () => void): () => void;
   };
   readonly secretsManager: {
-    get(key: string): Promise<string | null>;
+    get(key: string): Promise<Secret | null>;
     onDidChange?(listener: (key: string) => void): () => void;
   };
   /** Required to issue source snapshots, optional for existing narrow embedders. */

@@ -1,5 +1,5 @@
 import { isAcceptableReasoningEffortSetting } from './reasoning-effort-setting.js';
-import type { ConfigKey } from './schema-types.js';
+import type { ConfigKey, SettingAppliesWhen } from './schema-types.js';
 import type { ConfigValue } from './schema-types-values.js';
 
 /**
@@ -16,6 +16,10 @@ export type ConfigSettingDefault<K extends ConfigKey> = ConfigValue<K>;
 
 /** What a settings row says besides its key and default. */
 export interface ConfigSettingFields {
+  /** The setting's name in plain words, the primary text of its row (schema-types.ts `ConfigSetting.label`). */
+  label: string;
+  /** When a change takes effect, declared only where the reader was verified. */
+  appliesWhen?: SettingAppliesWhen | undefined;
   type: 'boolean' | 'number' | 'string' | 'enum';
   description: string;
   /** Retained for saved-config compatibility, excluded from current settings controls. */

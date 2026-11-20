@@ -14,7 +14,7 @@ import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { OwnedScope } from '../utils/owned-work.js';
-import { INBOX_SWEEP_INTERVAL_MS, isInboxRetentionPolicy, type InboxRetentionPolicy } from './cursor-store.js';
+import { INBOX_ITEM_COLUMNS, INBOX_SWEEP_INTERVAL_MS, isInboxRetentionPolicy, type InboxRetentionPolicy } from './cursor-store.js';
 import { isActiveInboxStore } from './active-stores.js';
 
 export interface InactiveInboxSweep {
@@ -68,6 +68,19 @@ function sweepDatabase(file: SqliteFile): SqlDatabase {
 function scalar(db: SqlDatabase, sql: string, params?: (string | number)[]): number {
   const value = db.exec(sql, params)[0]?.values[0]?.[0]; if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw unavailable(); return value;
 }
+/** A stored triage revision that is not `ir-` and 32 hex digits. */
+const MALFORMED_REVISION = "typeof(triage_revision) != 'text' OR length(triage_revision) != 35 OR length(CAST(triage_revision AS BLOB)) != 35 OR substr(triage_revision, 1, 3) != 'ir-' OR substr(triage_revision, 4) GLOB '*[^0-9a-f]*'";
+
+function assertSourceRevisionPolicy(db: SqlDatabase): void {
+  const policyInfo = db.exec('PRAGMA table_info(inbox_source_revision_policy)')[0]?.values;
+  const policyColumns = policyInfo?.map(row => row[1]);
+  const policy = db.exec('SELECT singleton, version FROM inbox_source_revision_policy')[0]?.values;
+  if (!policyColumns || policyColumns.length !== 2 || policyColumns[0] !== 'singleton' || policyColumns[1] !== 'version'
+    || policyInfo?.[0]?.[2] !== 'INTEGER' || policyInfo[0]?.[5] !== 1
+    || policyInfo[1]?.[2] !== 'INTEGER' || policyInfo[1]?.[3] !== 1 || policyInfo[1]?.[5] !== 0
+    || !policy || policy.length !== 1 || policy[0]?.[0] !== 1 || policy[0]?.[1] !== 1) throw unavailable();
+}
+
 function knownSchema(db: SqlDatabase): void {
   const tables = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(row => row[0]);
   // A mirror from before the mailbox reader fed it kept `imap_checkpoints`; a current one keeps `mail_generations`.
@@ -80,7 +93,14 @@ function knownSchema(db: SqlDatabase): void {
   const expected = ['id', 'provider', 'kind', 'fromDigest', 'subjectPreview', 'bodyPreview', 'routeId', 'receivedAt', 'unread'];
   if (!columns || expected.some((name, index) => columns[index] !== name)) throw unavailable();
   const sourcePolicy = tables.includes('inbox_source_revision_policy');
-  if (columns.length === expected.length) {
+  // A mirror the current store wrote: its columns are the store's own list.
+  const current = columns.length === INBOX_ITEM_COLUMNS.length && INBOX_ITEM_COLUMNS.every((name, index) => columns[index] === name);
+  if (current) {
+    if (!sourcePolicy) throw unavailable();
+    assertSourceRevisionPolicy(db);
+    // The current store leaves a row's revision empty until it is triaged; one it holds is well formed.
+    if (scalar(db, `SELECT COUNT(*) FROM items WHERE triage_revision IS NOT NULL AND (${MALFORMED_REVISION})`) !== 0) throw unavailable();
+  } else if (columns.length === expected.length) {
     // Original nine-column mirrors predate mutation-issued source revisions.
     if (sourcePolicy) throw unavailable();
   } else {
@@ -89,14 +109,8 @@ function knownSchema(db: SqlDatabase): void {
     if ((columns.length !== expected.length + 1 && !sequenced) || columns[expected.length] !== 'triage_revision' || !sourcePolicy) throw unavailable();
     const revisionColumn = itemColumns?.[expected.length];
     if (revisionColumn?.[2] !== 'TEXT' || revisionColumn[3] !== 0 || revisionColumn[4] !== null || revisionColumn[5] !== 0) throw unavailable();
-    const policyInfo = db.exec('PRAGMA table_info(inbox_source_revision_policy)')[0]?.values;
-    const policyColumns = policyInfo?.map(row => row[1]);
-    const policy = db.exec('SELECT singleton, version FROM inbox_source_revision_policy')[0]?.values;
-    if (!policyColumns || policyColumns.length !== 2 || policyColumns[0] !== 'singleton' || policyColumns[1] !== 'version'
-      || policyInfo?.[0]?.[2] !== 'INTEGER' || policyInfo[0]?.[5] !== 1
-      || policyInfo[1]?.[2] !== 'INTEGER' || policyInfo[1]?.[3] !== 1 || policyInfo[1]?.[5] !== 0
-      || !policy || policy.length !== 1 || policy[0]?.[0] !== 1 || policy[0]?.[1] !== 1) throw unavailable();
-    if (scalar(db, "SELECT COUNT(*) FROM items WHERE triage_revision IS NULL OR typeof(triage_revision) != 'text' OR length(triage_revision) != 35 OR length(CAST(triage_revision AS BLOB)) != 35 OR substr(triage_revision, 1, 3) != 'ir-' OR substr(triage_revision, 4) GLOB '*[^0-9a-f]*'") !== 0) throw unavailable();
+    assertSourceRevisionPolicy(db);
+    if (scalar(db, `SELECT COUNT(*) FROM items WHERE triage_revision IS NULL OR ${MALFORMED_REVISION}`) !== 0) throw unavailable();
   }
   if (scalar(db, "SELECT COUNT(*) FROM items WHERE typeof(id) != 'text' OR typeof(provider) != 'text' OR typeof(receivedAt) != 'integer'") !== 0) throw unavailable();
 }

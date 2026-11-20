@@ -325,9 +325,9 @@ export function buildMcpWorkspaceFormFields(form: McpWorkspaceFormBase): readonl
     },
     {
       id: 'deniedTools',
-      label: 'Denied tools',
+      label: 'Blocked tools',
       value: form.deniedTools,
-      help: 'Comma-separated tool names refused on every call, kept in this config past a restart. /mcp block <server> <tool> blocks one for this session only; letting a tool past its server\'s limits is set in Settings MCP or with /mcp exempt.',
+      help: 'Tools refused on every call, separated by commas, kept in this config until you change it. /mcp block and /mcp unblock do the same one tool at a time; /mcp exempt lets a tool past its server\'s limits.',
       editable: true,
     },
   ];

@@ -39,7 +39,7 @@ function actionData(command: CommandDescription<never>, action: ActionDescriptio
     id: action.id,
     label: action.label,
     word: action.word,
-    line: `/${command.name} ${linePattern(action)}`,
+    line: [`/${command.name}`, linePattern(action)].filter(Boolean).join(' '),
     sentence: action.sentence,
     done: action.done,
     touches: action.touches,

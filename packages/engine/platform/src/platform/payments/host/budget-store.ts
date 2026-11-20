@@ -283,7 +283,11 @@ export class DurableBudgetLedger extends BudgetLedger {
     // owner checkpoint has already bound this exact immutable receipt.
     assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentBudgetUnavailableError());
     owner?.assertCurrent();
+    // The base computes the next ledger, writes it through persistSettlement, and publishes only once it landed.
     super.settleReconciliation(receipt, owner);
+  }
+
+  protected override persistSettlement(owner?: CheckoutBudgetSettlementOwner): void {
     this.writeToDisk(owner ? () => owner.assertCurrent() : undefined);
   }
 

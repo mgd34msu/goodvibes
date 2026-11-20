@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { describeCardTransportRefusal, isLivePaymentOperation, canReconcilePaymentOperation, mayCrossWithCardDetails, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient } from '../../lib/goodvibes';
-import { formatError } from '../../lib/errors';
+import { errorCode, formatError } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
 import { Button } from '../ui/Button';
@@ -131,10 +131,13 @@ export function PaymentWindows({ currency = 'USD' }: { readonly currency?: strin
       setAdvance({ merchantDomain: '', item: '', amount: '' });
     } catch (error) {
       if (controller.signal.aborted) return;
-      setMessage(`Nothing was approved: ${formatError(error)}`);
+      // An answer that could not be confirmed is not a refusal: the approval may exist.
+      setMessage(errorCode(error) === 'OUTCOME_UNKNOWN'
+        ? `It may have been approved: ${formatError(error)}`
+        : `Nothing was approved: ${formatError(error)}`);
     } finally {
       if (active.current === controller) active.current = null;
-      if (!controller.signal.aborted) setPending(null);
+      if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: QUERY_KEY }); }
     }
   };
 

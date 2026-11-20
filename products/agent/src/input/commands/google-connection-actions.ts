@@ -55,6 +55,7 @@ import {
   type GoogleConfigPort,
   type GoogleConnectionPlan,
   type GoogleCredentialItem,
+  type GoogleRemovalReview,
   type GoogleProgressPort,
   type GoogleSecretPort,
   type GoogleSetupActionDeps,
@@ -548,6 +549,9 @@ export async function reauthorizeGoogle(
 
 export const GOOGLE_CALENDAR_SUBSCRIPTION_NAME = 'Google calendar';
 
+/** The last `/google forget` question shown: which items, and the digests of the values it named. */
+let lastRemovalQuestion: { readonly key: string; readonly reviewed: GoogleRemovalReview } | null = null;
+
 /**
  * `/google forget`, remove stored credentials, only ever with an explicit yes.
  *
@@ -560,10 +564,14 @@ export async function forgetGoogleCredentials(
   items: readonly GoogleCredentialItem[],
   confirmed: boolean,
 ): Promise<string> {
+  // A yes answering the question shown removes only the values that question named.
+  const key = [...items].sort().join(',');
+  const shown = confirmed && lastRemovalQuestion?.key === key ? lastRemovalQuestion.reviewed : undefined;
   const result = await removeGoogleCredentials(
     { secrets: googleSecretPort(ctx), config: googleConfigPort(ctx) },
-    { items, confirmed },
+    { items, confirmed, ...(shown ? { reviewed: shown } : {}) },
   );
+  lastRemovalQuestion = !result.confirmed && 'reviewed' in result ? { key, reviewed: result.reviewed } : null;
 
   if (result.confirmed) {
     // The private calendar address also lives as the 'Google calendar' feed

@@ -17,6 +17,7 @@
  *
  * Cost: memory and one sessionStorage write per change; no request.
  */
+import { RELAY_PAIRING_STORAGE_KEY, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 
 export interface HeldAttachment {
   readonly name: string;
@@ -94,8 +95,19 @@ function readStored(storage: Storage | null, key: string): Map<string, HeldInput
   return entries;
 }
 
+/**
+ * A send id of 32 hex digits from getRandomValues: `crypto.randomUUID` exists
+ * only on a secure origin, and a daemon reached at a LAN address is not one.
+ * It fits the daemon's one rule for client keys (letters, digits, `.`, `_`, `:`, `-`).
+ */
+export function newClientMessageId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** A held-input store over `storage` (null keeps it in memory only). */
-export function createHeldInputs(scope: HeldInputScope, storage: Storage | null = sessionStore(), mintId: () => string = () => crypto.randomUUID()): HeldInputs {
+export function createHeldInputs(scope: HeldInputScope, storage: Storage | null = sessionStore(), mintId: () => string = newClientMessageId): HeldInputs {
   const key = storageKey(scope);
   const entries = readStored(storage, key);
   const listeners = new Set<() => void>();
@@ -177,4 +189,36 @@ export function clearHeldInputs(scope?: HeldInputScope): void {
   } else if (scope) {
     try { storage?.removeItem(storageKey(scope)); } catch { /* nothing to clear */ }
   }
+}
+
+/** FNV-1a, 64 bits as hex: tells two sign-ins apart without keeping the credential itself as a storage key. */
+function fingerprint(text: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= BigInt(text.charCodeAt(index));
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16);
+}
+
+/**
+ * This page's daemon and account: the origin it talks to and a fingerprint of
+ * the sign-in it holds (the stored token and relay pairing named by
+ * `identityKeys`), so a reload keeps held input for the same account and
+ * another account never sees it.
+ */
+export function currentHeldInputScope(identityKeys: readonly string[]): HeldInputScope {
+  let identity = '';
+  try {
+    const storage = globalThis.localStorage;
+    identity = identityKeys.map((key) => storage?.getItem(key) ?? '').join('\n');
+  } catch { identity = ''; }
+  let daemon = '';
+  try { daemon = globalThis.location?.origin ?? ''; } catch { daemon = ''; }
+  return { daemon, account: fingerprint(identity) };
+}
+
+/** The held-input store of the daemon and account this page is signed in to now. */
+export function heldInputsForThisPage(): HeldInputs {
+  return heldInputsFor(currentHeldInputScope([WEBUI_TOKEN_STORE_KEY, RELAY_PAIRING_STORAGE_KEY]));
 }

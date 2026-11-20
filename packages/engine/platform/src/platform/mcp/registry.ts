@@ -143,9 +143,9 @@ function sameToolRules(a: McpServerConfig, b: McpServerConfig): boolean {
 
 /** The reason a refused call names for each kind of per-tool rule. */
 const TOOL_RULE_NOTES = {
-  storedAllow: 'allowed in your MCP config, past the server\'s path and host scope',
-  storedDeny: 'denied in the server\'s MCP config; lift it in /mcp or Settings',
-  sessionDeny: 'denied by the owner for this session; /mcp clear <server> <tool> lifts it',
+  storedAllow: 'goes past the server\'s folder and site limits, kept in your MCP config (/mcp unexempt ends it)',
+  storedDeny: 'blocked in the server\'s MCP config; /mcp unblock <server> <tool> lifts it',
+  sessionDeny: 'blocked by the owner for this session only; /mcp unblock <server> <tool> lifts it',
 } as const;
 
 /** Servers connected at once while applying a configuration. */

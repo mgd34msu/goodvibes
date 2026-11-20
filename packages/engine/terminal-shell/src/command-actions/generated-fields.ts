@@ -53,39 +53,38 @@ function secretInput(input: InputDescription): boolean {
   return input.kind === 'secret';
 }
 
+/**
+ * Which typed words hold a secret, read with the one parser the command runs
+ * on (`parseTypedLine`), so the input history masks exactly what the action
+ * takes as the secret, wherever options, `--yes` or a `--` put it: a secret
+ * input's words, as a whole word or as the value of `--flag=value`. A line
+ * the parser cannot read (an unknown option, words after a `--` the action
+ * does not take) has every word after its action word masked: any of them may
+ * be the secret, and the line is refused anyway.
+ */
+function typedSecretIndexes(description: CommandDescription<never>, args: readonly string[]): number[] {
+  const parsed = parseTypedLine(description, args);
+  if (!('action' in parsed)) return [];
+  const secrets = parsed.action.inputs.filter(secretInput);
+  if (secrets.length === 0) return [];
+  const actionIndex = singleAction(description) ? -1 : args.findIndex((word) => word !== '--yes');
+  const after = args.map((word, index) => ({ word, index })).filter((entry) => entry.index > actionIndex && entry.word !== '--yes');
+  if (parsed.problem !== undefined) return after.map((entry) => entry.index);
+  const words = new Set<string>();
+  for (const input of secrets) {
+    if (!parsed.given.includes(input.id)) continue;
+    const value = parsed.values[input.id] ?? '';
+    if (value) words.add(value);
+    for (const part of value.split(/[\n ]/)) if (part) words.add(part);
+  }
+  if (words.size === 0) return [];
+  return after.filter(({ word }) => words.has(word)
+    || (word.startsWith('--') && word.includes('=') && words.has(word.slice(word.indexOf('=') + 1)))).map((entry) => entry.index);
+}
+
 export function generatedSecretArgs(description: CommandDescription<never>): CommandSecretArgs {
-  const single = singleAction(description);
-  if (single) {
-    // No action word: positions count from the first word after the name.
-    const positions = single.inputs.filter(secretInput).flatMap((input) => 'position' in input.typed ? [input.typed.position - 1] : []);
-    const flags = single.inputs.filter(secretInput).flatMap((input) => 'flag' in input.typed ? [input.typed.flag] : []);
-    const tailFrom = single.inputs.some((input) => secretInput(input) && 'tail' in input.typed) ? single.inputs.filter((other) => 'position' in other.typed).length : undefined;
-    return {
-      ...(positions.length > 0 ? { positions } : {}),
-      ...(flags.length > 0 ? { flags } : {}),
-      ...(tailFrom !== undefined ? { select: (args: readonly string[]) => args.map((_arg, index) => index).filter((index) => index >= tailFrom) } : {}),
-    };
-  }
-  const subcommands: Record<string, number[] | { from: number }> = {};
-  const flags = new Set<string>();
-  for (const action of description.actions) {
-    for (const input of action.inputs.filter(secretInput)) {
-      if ('position' in input.typed) {
-        const list = subcommands[action.word];
-        const positions = Array.isArray(list) ? list : [];
-        positions.push(input.typed.position);
-        subcommands[action.word] = positions;
-      } else if ('flag' in input.typed) {
-        flags.add(input.typed.flag);
-      } else {
-        subcommands[action.word] = { from: 1 + action.inputs.filter((other) => 'position' in other.typed).length };
-      }
-    }
-  }
-  return {
-    ...(Object.keys(subcommands).length > 0 ? { subcommands } : {}),
-    ...(flags.size > 0 ? { flags: [...flags] } : {}),
-  };
+  const hasSecret = description.actions.some((action) => action.inputs.some(secretInput));
+  return hasSecret ? { select: (args) => typedSecretIndexes(description, args) } : {};
 }
 
 /** The refusal an owner-only action gets when a model runs it. */

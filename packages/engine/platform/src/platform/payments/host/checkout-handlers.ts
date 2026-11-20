@@ -702,10 +702,14 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
     } catch (error) {
       // A full store is a plain refusal that names its cap; nothing was recorded.
       if (error instanceof PaymentApprovalStoreError && error.kind === 'full') throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
-      // A write error may follow rename. Report uncertainty without claiming
-      // that no approval exists or echoing raw filesystem diagnostics.
+      // A write error may follow rename: the approval may have been recorded.
+      // Answered as unknown (never as "nothing was approved"), without echoing
+      // raw filesystem diagnostics; approving the same purchase again returns
+      // the recorded approval if there is one, so a retry never makes two.
       void error;
-      throw new HandlerError('Recording the approval could not be confirmed. Inspect the original purchase and approval evidence before trying again.', 'INTERNAL_ERROR', 500);
+      throw new HandlerError('The approval may have been recorded: recording it could not be confirmed, so whether it exists is not known. '
+        + 'Restart the daemon so the approvals file is read again, then approve the same merchant, item and amount again: '
+        + 'an approval already recorded is returned, not made twice.', 'OUTCOME_UNKNOWN', 503);
     }
     // Named fields, never a spread, the same containment rule as every other
     // response in this family.

@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import { dirname, resolve } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
@@ -71,11 +72,7 @@ function plannedManagedChanges(args: readonly string[], ctx: CommandContext): (r
     } catch {
       return undefined;
     }
-    if (!bundle || typeof bundle !== 'object' || !bundle.settings || typeof bundle.settings !== 'object') return undefined;
-    return Object.entries(bundle.settings)
-      .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey) && (requestedKeys.length === 0 || requestedKeys.includes(key as ConfigKey)))
-      .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
-      .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
+    return bundleChanges(bundle, requestedKeys, config);
   }
   if (args[0] === 'apply-staged') {
     const { stageId, rest } = splitStageArgument(args.slice(1));
@@ -88,6 +85,31 @@ function plannedManagedChanges(args: readonly string[], ctx: CommandContext): (r
       .map((change) => ({ key: change.key, previous: change.previousValue, next: change.nextValue })), { stageId: staged.id });
   }
   return undefined;
+}
+
+/** The setting changes `bundle` makes (only `requestedKeys` when any are named); undefined when it is not a bundle. */
+function bundleChanges(bundle: ManagedSettingsBundle, requestedKeys: readonly ConfigKey[], config: CommandContext['platform']['configManager']): PlannedChange[] | undefined {
+  if (!bundle || typeof bundle !== 'object' || !bundle.settings || typeof bundle.settings !== 'object') return undefined;
+  return Object.entries(bundle.settings)
+    .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey) && (requestedKeys.length === 0 || requestedKeys.includes(key as ConfigKey)))
+    .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
+    .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
+}
+
+/**
+ * The changes an `apply <path>` line showed, as a reference: one fact per key
+ * (the value it gets), shown as the confirmation listed it. The handler builds
+ * the same reference from the file as it is at Yes; a rewritten file is refused
+ * naming the keys that differ.
+ */
+function managedApplyRef(path: string, changes: readonly PlannedChange[]): TargetRef<'managed-bundle'> {
+  const facts: Record<string, unknown> = {};
+  const shown: Record<string, string> = {};
+  for (const change of changes) {
+    facts[change.key] = change.next;
+    shown[change.key] = describeSetupTransferChanges([change])[0] ?? change.key;
+  }
+  return targetRef('managed-bundle', path, facts, shown);
 }
 
 function readBundleFile(sourcePath: string): unknown {
@@ -125,7 +147,8 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         title: 'Apply managed settings that change security?',
         detail: [...describeSetupTransferChanges(changes), 'Each applied key is locked as managed; /managed rollback <token> puts the previous values back.'].join('\n'),
         confirmLabel: 'Apply',
-        ...(changes.stageId !== undefined ? { reviewed: changes.stageId } : {}),
+        // apply-staged: the stage id shown; apply <path>: the exact changes shown.
+        reviewed: changes.stageId !== undefined ? changes.stageId : managedApplyRef(args[1] ?? '', changes),
       };
     },
     async handler(args, ctx, reviewed?: unknown) {
@@ -287,6 +310,13 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
           ctx.print(await inspectManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath));
           return;
         }
+        // Confirmed: the file must still hold the changes that were shown.
+        if (sub === 'apply' && reviewed !== undefined && typeof reviewed !== 'string') {
+          const shown = reviewed as TargetRef<'managed-bundle'>;
+          // Built from the bundle read here, the one that is staged and applied below.
+          const now = bundleChanges(bundle, keyArguments.requestedKeys, ctx.platform.configManager);
+          assertTarget(shown, now ? managedApplyRef(pathArg, now) : null, `/managed ${args.join(' ')}`);
+        }
 
         const stage = await stageManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath);
         const ignoredNote = stage.ignoredKeys && stage.ignoredKeys.length > 0
@@ -301,6 +331,8 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys, stage.id);
         ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, risk=${stage.risk}, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).${ignoredNote}`);
       } catch (error) {
+        // A rewritten bundle goes back to the confirmation, which shows the changed keys and asks again.
+        if (error instanceof TargetChangedError) throw error;
         recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
         ctx.print(`/managed ${sub} failed: ${summarizeError(error)}`);
       }

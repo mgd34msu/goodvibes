@@ -121,7 +121,7 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
         throw commandRefusal(`/${description.name} has no action "${parsed.unknownWord}". The actions are: ${names}.`, `/help ${description.name} shows each one with its line.`, 'USAGE');
       }
       const action = description.actions.find((candidate) => candidate.id === parsed.action.id)!;
-      if (parsed.problem) throw commandRefusal(parsed.problem, `Usage: /${description.name} ${linePattern(parsed.action)}`, 'USAGE');
+      if (parsed.problem) throw commandRefusal(parsed.problem, usageLine(description.name, parsed.action), 'USAGE');
       if (parsed.missing.length > 0) {
         if (dialog) {
           const given = Object.fromEntries(parsed.given.map((id) => [id, parsed.values[id]!]));
@@ -132,13 +132,17 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
         const choices = await choicesForRefusal(blank, parsed.values, ctx);
         throw commandRefusal(
           `/${description.name} ${action.word} (${action.label}) needs ${blank.label}: ${blank.help}.${choices}`,
-          `Usage: /${description.name} ${linePattern(parsed.action)}`,
+          usageLine(description.name, parsed.action),
           'USAGE',
         );
       }
       await runComplete(description, action, parsed.values, ctx);
     },
   };
+}
+
+function usageLine(name: string, action: ActionDescription<never>): string {
+  return `Usage: ${[`/${name}`, linePattern(action)].filter(Boolean).join(' ')}`;
 }
 
 function defaultsOf(action: ActionDescription<never>): ActionValues {

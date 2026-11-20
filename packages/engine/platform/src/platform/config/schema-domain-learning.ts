@@ -62,54 +62,63 @@ export const learningConfigDefaults: { learning: LearningConfig } = {
 export const learningConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'learning.consolidation.enabled',
+    label: 'Tidy memory while idle',
     type: 'boolean',
     description:
       'Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off.',
   },
   {
     key: 'learning.consolidation.intervalMs',
+    label: 'How often memory is tidied (ms)',
     type: 'number',
     description: 'Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours).',
     ...intRange(1, 30 * 24 * 60 * 60 * 1000),
   },
   {
     key: 'learning.consolidation.minIdleMs',
+    label: 'Idle time needed before tidying memory (ms)',
     type: 'number',
     description: 'Minimum continuous idle time required before a consolidation run may start, in milliseconds (default: 0 = no idle requirement).',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {
     key: 'learning.consolidation.maxMergesPerRun',
+    label: 'Most duplicates merged per tidy',
     type: 'number',
     description: 'Maximum duplicate groups merged in a single consolidation run.',
     ...intRange(1, 10_000),
   },
   {
     key: 'learning.consolidation.maxDecaysPerRun',
+    label: 'Most memories faded per tidy',
     type: 'number',
     description: 'Maximum records decayed or archived in a single consolidation run.',
     ...intRange(1, 10_000),
   },
   {
     key: 'learning.consolidation.maxProposalsPerRun',
+    label: 'Most suggestions offered per tidy',
     type: 'number',
     description: 'Maximum review proposals emitted in a single consolidation run.',
     ...intRange(1, 10_000),
   },
   {
     key: 'learning.consolidation.decayAgeDays',
+    label: 'Fade memories unused for (days)',
     type: 'number',
     description: 'Active records older than this (by updatedAt) become decay candidates, in days.',
     ...intRange(1, 3_650),
   },
   {
     key: 'learning.consolidation.decayConfidenceStep',
+    label: 'Confidence lost each time an unused memory fades',
     type: 'number',
     description: 'Confidence points removed from a never-referenced decaying record per run.',
     ...intRange(1, 100),
   },
   {
     key: 'learning.consolidation.archiveConfidenceFloor',
+    label: 'Archive a fading memory at this confidence',
     type: 'number',
     description: 'A decaying record whose confidence would fall to or below this is archived (marked stale).',
     ...intRange(0, 100),

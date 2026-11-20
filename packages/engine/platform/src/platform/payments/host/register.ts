@@ -53,7 +53,7 @@ import { paymentHostStopSentence, paymentHostStopView } from '../payment-host-he
 import { purchaseReconciliationHandler } from './reconciliation-handler.js';
 import { standingCreateHandler, standingListHandler, standingDeleteHandler } from './standing-handlers.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
-import { CardStoreUnreadableError } from './card-store.js';
+import { CardCreateIncompleteError, CardStoreUnreadableError } from './card-store.js';
 import type { DaemonCardStore } from './card-store.js';
 import { MAX_PURCHASE_LIST_LIMIT, PaymentPurchaseLedgerError } from './purchase-ledger.js';
 import type { DaemonPurchaseLedger, StoredPurchase } from './purchase-ledger.js';
@@ -323,6 +323,8 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
         if (error instanceof CardStoreUnreadableError) {
           throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
         }
+        // Part of the card stayed saved: said, with the id that removes it.
+        if (error instanceof CardCreateIncompleteError) throw new HandlerError(error.message, 'INTERNAL_ERROR', 500);
         void error;
         throw new HandlerError('Storing the card failed. Nothing was saved.', 'INTERNAL_ERROR', 500);
       }

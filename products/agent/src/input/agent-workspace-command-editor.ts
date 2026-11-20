@@ -21,7 +21,6 @@ type AgentWorkspaceCommandEditorKind = AgentWorkspaceBasicCommandEditorKind | Ex
   | 'knowledge-reindex'
   | 'knowledge-search'
   | 'knowledge-ask'
-  | 'mcp-server'
   | 'notify-webhook'
   | 'notify-webhook-remove'
   | 'notify-webhook-clear'

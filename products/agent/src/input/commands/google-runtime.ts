@@ -225,6 +225,13 @@ function describePending(entry: PendingOutwardAction): string[] {
  * exactly the route it exists to defend against: content steers the model,
  * the model runs the command, the approval appears.
  */
+/**
+ * The waiting sends the last `/google approve` listing showed, by id with
+ * their description. `/google approve --yes` without a number approves the
+ * one that listing showed, never a different send that is alone now.
+ */
+let lastListedSends: ReadonlyMap<number, string> | null = null;
+
 async function approveRefusedOutwardAction(rest: readonly string[], ctx: CommandContext): Promise<void> {
   const waiting = listRefusedOutwardActions();
   if (waiting.length === 0) {
@@ -232,13 +239,24 @@ async function approveRefusedOutwardAction(rest: readonly string[], ctx: Command
     return;
   }
   const numbers = rest.filter((arg) => /^\d+$/.test(arg)).map(Number);
-  const chosen = numbers.length > 0 ? waiting.find((entry) => entry.id === numbers[0]) : waiting.length === 1 ? waiting[0] : undefined;
+  let chosen = numbers.length > 0 ? waiting.find((entry) => entry.id === numbers[0]) : waiting.length === 1 ? waiting[0] : undefined;
+  // Without a number, the send approved is the one the last listing showed alone.
+  if (numbers.length === 0 && chosen && saidYes(rest) && !rest.includes('--drop')) {
+    const shown = lastListedSends && lastListedSends.size === 1 ? [...lastListedSends][0]! : null;
+    if (shown === null) {
+      chosen = undefined; // Nothing was shown yet: show it, and the owner approves what he saw.
+    } else if (shown[0] !== chosen.id) {
+      throw commandRefusal(`Nothing was sent: the waiting send changed since it was shown (was ${shown[0]}: ${shown[1]}; now ${chosen.id}: ${chosen.description}).`,
+        'Run /google approve to see what is waiting, then approve it by its number.', 'TARGET_CHANGED');
+    }
+  }
   if (rest.includes('--drop')) {
     const dropped = chosen && takeRefusedOutwardAction(chosen.id);
     ctx.print(dropped ? `Dropped ${dropped.id}: ${dropped.description}. Nothing was sent.` : 'Name the one to drop: /google approve <n> --drop');
     return;
   }
   if (!chosen || !saidYes(rest)) {
+    lastListedSends = new Map(waiting.map((entry) => [entry.id, entry.description] as const));
     ctx.print([
       'Refused by the content check, waiting for your approval:',
       ...waiting.flatMap(describePending),

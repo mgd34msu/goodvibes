@@ -391,15 +391,18 @@ async function main(prepared: PreparedShellCliRuntime) {
   let postedPowerNote: string | null = null;
   const currentPowerChip = (): string | undefined => {
     const note = powerNote.get();
-    if (note && note.detail !== postedPowerNote) publishToSharedFeed(note.detail, { restored: false, notice: { level: 'warning' } });
+    const previous = postedPowerNote;
+    // Recorded before posting: posting repaints, and that paint must find this note already posted.
     postedPowerNote = note?.detail ?? null;
+    if (note && note.detail !== previous) publishToSharedFeed(note.detail, { restored: false, notice: { level: 'warning' } });
     return note?.chip ?? undefined;
   };
   // The status bar's mode words, recomputed only when the mode in force can change (session-permission-mode.ts);
   // its flash after Shift+Tab, and the unread notices count, each repaint when they change.
   const modeWords = createModeWordsSource(configManager, () => render(), getSharedModeFlash());
   getSharedModeFlash().onChange = () => render();
-  unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => render()));
+  // The count repaints after the change that moved it, never inside the paint that posted a notice.
+  unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => queueMicrotask(render)));
   // The status bar's branch: read once, then polled the way the terminal app does (a few file stats
   // every 5 s; git runs only when git's own files moved or the terminal regains focus) and after each turn.
   const gitStatus = new GitStatusProvider(ctx.services.workingDirectory);

@@ -21,6 +21,10 @@
 
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from './setup-plan.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
+import { contentDigest } from '../utils/target-ref.js';
+
+/** Per item shown in a removal question, the digest of the stored value it named (never the value). */
+export type GoogleRemovalReview = Readonly<Partial<Record<GoogleCredentialItem, string>>>;
 
 /**
  * Secret storage that can also remove. Deliberately separate from
@@ -57,6 +61,8 @@ export interface GoogleRemovalPlan {
   readonly wouldRemove: readonly string[];
   /** One sentence, ending in a question. Show this and wait for a yes. */
   readonly prompt: string;
+  /** What the question named, to pass back as `reviewed` with the yes: only those exact values are removed. */
+  readonly reviewed: GoogleRemovalReview;
 }
 
 /** Something was actually removed, and this says exactly what. */
@@ -99,6 +105,12 @@ export interface GoogleRemovalRequest {
   readonly confirmed?: boolean;
   /** Why the removal was proposed, quoted back in the prompt. */
   readonly reason?: string;
+  /**
+   * The plan's `reviewed`, when the yes answers a question that was shown:
+   * an item whose stored value was replaced since (a new setup) is kept, not
+   * removed, and the result says so.
+   */
+  readonly reviewed?: GoogleRemovalReview | undefined;
 }
 
 export interface GoogleRemovalDeps {
@@ -110,10 +122,10 @@ function isRemovable(secrets: GoogleSecretPort): secrets is GoogleRemovableSecre
   return typeof (secrets as Partial<GoogleRemovableSecretPort>).delete === 'function';
 }
 
-/** True when a secret exists and is non-empty; throws when the store cannot be read. Never returns the value. */
-async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
+/** The digest of a stored, non-empty secret, or null when there is none; throws when the store cannot be read. Never returns the value. */
+async function secretDigest(secrets: GoogleSecretPort, key: string): Promise<string | null> {
   const value = await secrets.get(key);
-  return typeof value === 'string' && value.trim().length > 0;
+  return typeof value === 'string' && value.trim().length > 0 ? contentDigest(value) : null;
 }
 
 function buildPrompt(labels: readonly string[], reason: string | undefined): string {
@@ -140,9 +152,11 @@ export async function removeGoogleCredentials(
   request: GoogleRemovalRequest,
 ): Promise<GoogleRemovalResult> {
   const present: GoogleCredentialItem[] = [];
+  const digests: Partial<Record<GoogleCredentialItem, string>> = {};
   for (const item of request.items) {
     try {
-      if (await secretPresent(deps.secrets, ITEM_SECRET_KEYS[item])) present.push(item);
+      const digest = await secretDigest(deps.secrets, ITEM_SECRET_KEYS[item]);
+      if (digest !== null) { present.push(item); digests[item] = digest; }
     } catch {
       // An unreadable store is not an empty one: saying "nothing is stored"
       // would send the owner to set up again over credentials that are there.
@@ -173,7 +187,19 @@ export async function removeGoogleCredentials(
       removed: [],
       wouldRemove: labels,
       prompt: buildPrompt(labels, request.reason),
+      reviewed: Object.freeze({ ...digests }),
     };
+  }
+
+  // Answering a question that was shown: only the values it named are removed.
+  const reviewed = request.reviewed;
+  const replaced = reviewed ? present.filter((item) => reviewed[item] !== digests[item]) : [];
+  const removable = present.filter((item) => !replaced.includes(item));
+  const keptNote = replaced.length > 0
+    ? ` Kept ${replaced.map((item) => ITEM_LABELS[item]).join(', ')}: ${replaced.length === 1 ? 'it was' : 'they were'} stored or replaced after you were asked, so ${replaced.length === 1 ? 'it is' : 'they are'} not what you agreed to remove; ask again to remove ${replaced.length === 1 ? 'it' : 'them'}.`
+    : '';
+  if (removable.length === 0) {
+    return { confirmed: true, removed: [], wouldRemove: [], detail: `Nothing was removed.${keptNote}` };
   }
 
   if (!isRemovable(deps.secrets)) {
@@ -188,14 +214,15 @@ export async function removeGoogleCredentials(
 
   const secrets = deps.secrets;
   const removed: string[] = [];
-  for (const item of present) {
+  const unclearedRefs: string[] = [];
+  for (const item of removable) {
     try {
       await secrets.delete(ITEM_SECRET_KEYS[item]);
     } catch {
       return {
         confirmed: true,
         removed,
-        wouldRemove: present.filter((rest) => !removed.includes(ITEM_LABELS[rest])).map((rest) => ITEM_LABELS[rest]),
+        wouldRemove: removable.filter((rest) => !removed.includes(ITEM_LABELS[rest])).map((rest) => ITEM_LABELS[rest]),
         partial: true,
         detail:
           `Removal stopped at ${ITEM_LABELS[item]}, which the store would not delete. `
@@ -205,15 +232,19 @@ export async function removeGoogleCredentials(
     removed.push(ITEM_LABELS[item]);
     // The config reference is cleared alongside the value it points at, or the
     // machine is left claiming a credential that is no longer there.
-    if (item === 'client-secret') deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, '');
-    if (item === 'app-password') deps.config.set(GOOGLE_CONFIG_KEYS.emailPassword, '');
-    if (item === 'calendar-address') deps.config.set(GOOGLE_CONFIG_KEYS.calendarIcsUrl, '');
+    // A failed clear is reported with what was removed, never thrown past the receipt.
+    const ref = item === 'client-secret' ? GOOGLE_CONFIG_KEYS.oauthClientSecretRef
+      : item === 'app-password' ? GOOGLE_CONFIG_KEYS.emailPassword
+      : item === 'calendar-address' ? GOOGLE_CONFIG_KEYS.calendarIcsUrl : null;
+    if (ref !== null) {
+      try { deps.config.set(ref, ''); } catch { unclearedRefs.push(ref); }
+    }
   }
 
   return {
     confirmed: true,
     removed,
     wouldRemove: [],
-    detail: `Removed ${removed.join(', ')} from the encrypted store. Nothing else was touched.`,
+    detail: `Removed ${removed.join(', ')} from the encrypted store. Nothing else was touched.${unclearedRefs.length > 0 ? ` The setting${unclearedRefs.length === 1 ? '' : 's'} ${unclearedRefs.join(', ')} still point${unclearedRefs.length === 1 ? 's' : ''} at the removed value and could not be cleared; clear ${unclearedRefs.length === 1 ? 'it' : 'them'} with /config.` : ''}${keptNote}`,
   };
 }

@@ -8,7 +8,6 @@
  */
 import { describedCommandByName, runGuided } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import type { CommandContext } from './command-registry.ts';
-import { MCP_WORKSPACE_ACTIONS } from './workspace-actions/mcp.ts';
 
 export interface WorkspaceActionTarget {
   /** The described command's name. */
@@ -17,9 +16,8 @@ export interface WorkspaceActionTarget {
   readonly action: string;
 }
 
-const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({
-  ...MCP_WORKSPACE_ACTIONS,
-}));
+// Each converted command spreads its own rows here. /mcp's rows name its actions directly (`command` rows), so it adds none.
+const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({}));
 
 /** The action a workspace row's form kind now opens, or undefined while the row still opens its form. */
 export function workspaceActionFor(editorKind: string): WorkspaceActionTarget | undefined {

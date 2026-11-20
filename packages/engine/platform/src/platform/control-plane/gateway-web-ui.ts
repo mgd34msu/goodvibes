@@ -202,7 +202,7 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
 
     <section class="panel">
       <h2>Live bus</h2>
-      <div id="events" class="live"></div>
+      <div id="events" class="live" role="log" aria-live="polite"></div>
     </section>
   </div>
 
@@ -385,8 +385,19 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       try {
         do {
           snapshotQueued = false;
+          // The rows are rebuilt from the daemon's lists: the button that had the
+          // keyboard focus gets it back by what it acts on, so a live refresh
+          // does not throw a keyboard user back to the top of the page.
+          const focused = document.activeElement;
+          const focusKey = focused && focused.tagName === 'BUTTON' && focused.closest('.item')
+            ? Array.from(focused.attributes).filter((attr) => attr.name.startsWith('data-')).map((attr) => [attr.name, attr.value])
+            : null;
           try {
             await loadSnapshotOnce();
+            if (focusKey && focusKey.length > 0 && document.activeElement !== focused) {
+              const match = Array.from(document.querySelectorAll('.item button')).find((button) => focusKey.every(([name, value]) => button.getAttribute(name) === value));
+              if (match) match.focus();
+            }
           } catch (error) {
             els.authStatus.textContent = 'Could not refresh: ' + (error && error.message ? error.message : 'network error');
             els.authStatus.className = 'warn';
@@ -647,14 +658,21 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       const task = els.taskText.value.trim();
       if (!task) return;
       const sessionId = els.taskSession.value.trim();
-      const res = await fetch('/task', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ task, ...(sessionId ? { sessionId, surfaceKind: 'web', surfaceId: 'surface:web' } : {}) }),
-      });
+      // The text stays in the box until the daemon took it: a refusal or a lost answer keeps it, with why.
+      let res;
+      try {
+        res = await fetch('/task', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ task, ...(sessionId ? { sessionId, surfaceKind: 'web', surfaceId: 'surface:web' } : {}) }),
+        });
+      } catch (error) {
+        appendEvent('task not confirmed (' + (error && error.message ? error.message : 'network error') + '); the text is kept: check the task list before sending it again', 'warn');
+        return;
+      }
       const body = await res.json().catch(() => ({}));
-      appendEvent('task ' + JSON.stringify(body), res.ok ? 'ok' : 'warn');
-      els.taskText.value = '';
+      appendEvent((res.ok ? 'task ' : 'task refused, the text is kept: ') + JSON.stringify(body), res.ok ? 'ok' : 'warn');
+      if (res.ok) els.taskText.value = '';
       await loadSnapshot();
     });
 
@@ -663,14 +681,29 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       const sessionId = els.sessionId.value.trim();
       const message = els.sessionText.value.trim();
       if (!sessionId || !message) return;
-      const res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ body: message, surfaceKind: 'web', surfaceId: 'surface:web' }),
-      });
+      // One id per message, kept with the text: a resend after a lost answer is recorded once.
+      if (els.sessionText.dataset.messageFor !== message) {
+        els.sessionText.dataset.messageFor = message;
+        els.sessionText.dataset.messageId = 'web-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      }
+      let res;
+      try {
+        res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ body: message, messageId: els.sessionText.dataset.messageId, surfaceKind: 'web', surfaceId: 'surface:web' }),
+        });
+      } catch (error) {
+        appendEvent('message not confirmed (' + (error && error.message ? error.message : 'network error') + '); the text is kept and sending it again is recorded once', 'warn');
+        return;
+      }
       const body = await res.json().catch(() => ({}));
-      appendEvent('session ' + JSON.stringify(body), res.ok ? 'ok' : 'warn');
-      els.sessionText.value = '';
+      appendEvent((res.ok ? 'session ' : 'message refused, the text is kept: ') + JSON.stringify(body), res.ok ? 'ok' : 'warn');
+      if (res.ok) {
+        els.sessionText.value = '';
+        delete els.sessionText.dataset.messageFor;
+        delete els.sessionText.dataset.messageId;
+      }
       await loadSnapshot();
     });
 

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandRegistry } from '../command-registry.ts';
-import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
+import { requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 
 interface DeepLinkBundle {
@@ -19,53 +19,6 @@ function inspectDeepLinkBundle(bundle: DeepLinkBundle): string {
 }
 
 export function registerPlatformServicesRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'storage',
-    description: 'Review secure storage posture, list stored keys and delete one (the support bundle carries the key names)',
-    usage: '[review|list|delete <key> (runs /secrets delete)]',
-    subcommands: { review: '', list: '', delete: '<key> (same as /secrets delete)' },
-    async handler(args, ctx) {
-      const sub = args[0] ?? 'review';
-      // One delete with one rule: /secrets delete asks once, takes the same scope flags and says whether the key existed.
-      if (sub === 'delete') {
-        if (!ctx.executeCommand) {
-          ctx.print('Use /secrets delete <key>: it is the one way to delete a stored secret.');
-          return;
-        }
-        await ctx.executeCommand('secrets', args);
-        return;
-      }
-      const manager = requireSecretsManager(ctx);
-      const detailedKeys = await manager.listDetailed();
-      const storedRecords = detailedKeys.filter((record) => record.source !== 'env');
-      const storedKeys = [...new Set(storedRecords.map((record) => record.key))];
-      // A stored secret whose value an environment variable supplies; the environment's other variables are not secrets.
-      const envBackedKeys = [...new Set(storedRecords.filter((record) => record.overriddenByEnv).map((record) => record.key))];
-
-      if (sub === 'review') {
-        const review = await manager.inspect();
-        ctx.print([
-          'Secure Storage Review',
-          `  policy: ${review.policy}`,
-          `  stored keys: ${storedKeys.length}`,
-          `  stored keys an environment variable overrides: ${envBackedKeys.length}`,
-          `  secure keys: ${review.secureKeys}`,
-          `  plaintext keys: ${review.plaintextKeys}`,
-          ...review.locations.map((location) => `  ${location.source}: ${location.exists ? 'present' : 'absent'} (${location.path})`),
-          ...(review.warnings.length > 0 ? review.warnings.map((warning) => `  warning: ${warning}`) : []),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'list') {
-        ctx.print(storedRecords.length > 0
-          ? ['Secure Storage Keys', ...storedRecords.map((record) => `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''})`)].join('\n')
-          : 'Secure Storage Keys\n  No stored secrets yet.');
-        return;
-      }
-      ctx.print('Usage: /storage [review|list|delete <key>]\n  Stored key names for a support thread are in /setup support-bundle <dir> (platform-review.json).');
-    },
-  });
-
   registry.register({
     name: 'helpers',
     aliases: ['integration-api'],

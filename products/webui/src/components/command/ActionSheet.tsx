@@ -14,6 +14,7 @@ import {
   actionSentence,
   effectiveRisk,
   listOperatorInput,
+  operatorInputFromValues,
   renderTypedLine,
   riskWords,
   rowsFromOutput,
@@ -61,16 +62,6 @@ function initialValues(action: ActionData, prefill: Readonly<Record<string, stri
     } else values[input.id] = usual;
   }
   return values;
-}
-
-function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
-  const parts = path.split('.');
-  let node = target;
-  for (const part of parts.slice(0, -1)) {
-    const next = node[part];
-    node = (next && typeof next === 'object' ? next : (node[part] = {})) as Record<string, unknown>;
-  }
-  node[parts.at(-1)!] = value;
 }
 
 function ListBlank({ input, values, onChange }: { readonly input: InputData; readonly values: Readonly<Record<string, string>>; readonly onChange: (value: string) => void }) {
@@ -169,9 +160,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
   const run = useMutation({
     mutationFn: async () => {
       if (!found || !('method' in found.action.operator)) throw new Error('This action is done from a terminal app.');
-      const input: Record<string, unknown> = {};
-      for (const [field, inputId] of Object.entries(found.action.operator.fields)) setPath(input, field, values[inputId]);
-      return invokeNamed(found.action.operator.method, input);
+      return invokeNamed(found.action.operator.method, operatorInputFromValues(found.action.operator.fields, values));
     },
     onSuccess: () => {
       if (!found) return;

@@ -9,8 +9,6 @@ import type { AgentWorkspaceKnowledgeCommandEditorKind } from './agent-workspace
 import { createAgentWorkspaceKnowledgeCommandEditor, isAgentWorkspaceKnowledgeCommandEditorKind } from './agent-workspace-knowledge-command-editors.ts';
 import type { AgentWorkspaceLibraryCommandEditorKind } from './agent-workspace-library-command-editors.ts';
 import { createAgentWorkspaceLibraryCommandEditor, isAgentWorkspaceLibraryCommandEditorKind } from './agent-workspace-library-command-editors.ts';
-import type { AgentWorkspaceMcpCommandEditorKind } from './agent-workspace-mcp-command-editors.ts';
-import { createAgentWorkspaceMcpCommandEditor, isAgentWorkspaceMcpCommandEditorKind } from './agent-workspace-mcp-command-editors.ts';
 import type { AgentWorkspaceMemoryCommandEditorKind } from './agent-workspace-memory-command-editors.ts';
 import { createAgentWorkspaceMemoryCommandEditor, isAgentWorkspaceMemoryCommandEditorKind } from './agent-workspace-memory-command-editors.ts';
 import type { AgentWorkspaceMediaCommandEditorKind } from './agent-workspace-media-command-editors.ts';
@@ -49,14 +47,13 @@ type AgentWorkspaceBasicOwnCommandEditorKind = Extract<
   | 'secret-set' | 'secret-link' | 'secret-test' | 'secret-delete'
 >;
 
-export type AgentWorkspaceBasicCommandEditorKind = AgentWorkspaceAccessCommandEditorKind | AgentWorkspaceChannelCommandEditorKind | AgentWorkspaceKnowledgeCommandEditorKind | AgentWorkspaceLibraryCommandEditorKind | AgentWorkspaceMcpCommandEditorKind | AgentWorkspaceMemoryCommandEditorKind | AgentWorkspaceMediaCommandEditorKind | AgentWorkspaceOperationsCommandEditorKind | AgentWorkspaceOwnerProfileEditorKind | AgentWorkspaceProviderCommandEditorKind | AgentWorkspaceSessionCommandEditorKind | AgentWorkspaceSkillBundleCommandEditorKind | AgentWorkspaceTaskCommandEditorKind | AgentWorkspaceProfileEditorKind | AgentWorkspaceBasicOwnCommandEditorKind;
+export type AgentWorkspaceBasicCommandEditorKind = AgentWorkspaceAccessCommandEditorKind | AgentWorkspaceChannelCommandEditorKind | AgentWorkspaceKnowledgeCommandEditorKind | AgentWorkspaceLibraryCommandEditorKind | AgentWorkspaceMemoryCommandEditorKind | AgentWorkspaceMediaCommandEditorKind | AgentWorkspaceOperationsCommandEditorKind | AgentWorkspaceOwnerProfileEditorKind | AgentWorkspaceProviderCommandEditorKind | AgentWorkspaceSessionCommandEditorKind | AgentWorkspaceSkillBundleCommandEditorKind | AgentWorkspaceTaskCommandEditorKind | AgentWorkspaceProfileEditorKind | AgentWorkspaceBasicOwnCommandEditorKind;
 
 export function isAgentWorkspaceBasicCommandEditorKind(kind: AgentWorkspaceEditorKind): kind is AgentWorkspaceBasicCommandEditorKind {
   return isAgentWorkspaceAccessCommandEditorKind(kind)
     || isAgentWorkspaceChannelCommandEditorKind(kind)
     || isAgentWorkspaceKnowledgeCommandEditorKind(kind)
     || isAgentWorkspaceLibraryCommandEditorKind(kind)
-    || isAgentWorkspaceMcpCommandEditorKind(kind)
     || isAgentWorkspaceMemoryCommandEditorKind(kind)
     || isAgentWorkspaceMediaCommandEditorKind(kind)
     || isAgentWorkspaceOperationsCommandEditorKind(kind)
@@ -526,9 +523,6 @@ export function createAgentWorkspaceBasicCommandEditor(kind: AgentWorkspaceBasic
   }
   if (isAgentWorkspaceLibraryCommandEditorKind(kind)) {
     return createAgentWorkspaceLibraryCommandEditor(kind);
-  }
-  if (isAgentWorkspaceMcpCommandEditorKind(kind)) {
-    return createAgentWorkspaceMcpCommandEditor(kind);
   }
   if (isAgentWorkspaceMemoryCommandEditorKind(kind)) {
     return createAgentWorkspaceMemoryCommandEditor(kind);

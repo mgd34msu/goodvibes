@@ -8,8 +8,9 @@ import type { CommandRegistry, CommandContext, SlashCommand } from '../command-r
 
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { requireBookmarkManager, requireProviderApi, requireSecretsManager, requireServiceRegistry } from './runtime-services.ts';
-import { describePendingProjectService, pendingProjectServiceLines } from '@goodvibes-jev/engine/platform/platform/config';
+import { requireBookmarkManager, requireProviderApi, requireServiceRegistry } from './runtime-services.ts';
+import { describePendingProjectService, pendingProjectServiceLines, projectServiceRef } from '@goodvibes-jev/engine/platform/platform/config';
+import { assertTarget, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import {
   credentialWriteScopeWasRelocated,
   resolveCredentialDeleteScope,
@@ -101,21 +102,14 @@ const localActions = createLocalCommandActions<CommandContext>(requireProviderAp
   noteTouch: (conversation, key) => conversation.noteUserTouch(key),
 });
 
-const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManager, {
-  description: 'Manage hierarchy-aware secrets, external secret refs, and secure/plaintext storage policy controls',
-  hidden: true,
-  concealedEntry: true,
+// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); a credential the daemon reads is filed in its tier.
+const secretsCommand = createSecretsCommand<CommandContext>({
   writeScope: resolveCredentialWriteScope,
   deleteScope: resolveCredentialDeleteScope,
   relocationNote: (key, requested) =>
     credentialWriteScopeWasRelocated(key, requested)
-      ? '\n  filed in the daemon tier instead of ' +
-        requested +
-        ', the daemon is what reads this credential, and it reads only its own tier'
+      ? 'Filed in the daemon tier instead of ' + requested + ': the daemon is what reads this credential, and it reads only its own tier.'
       : '',
-  resolved: (ref, status) => '[secrets] ' + ref + '\n  status ' + status,
-  failed: (ref, error) => '[secrets] ' + ref + ' failed ' + error,
-  deleted: (key) => '[secrets] Deleted\n  key ' + key,
 });
 
 /**
@@ -132,14 +126,19 @@ const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pic
   usage: '[list|trust <name> --yes]',
   argsHint: '[list|trust] [name]',
   subcommands: { list: '', trust: '<name> --yes' },
-  confirm: (args) => args[0] === 'trust' && args[1]
-    ? {
-        title: `Use the service ${args[1]} from this project's services file?`,
-        detail: `A project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as it stands now; if the repository changes its keys, header or host it waits for confirmation again.`,
-        confirmLabel: 'Use it',
-      }
-    : undefined,
-  handler(args, ctx) {
+  confirm: (args, ctx) => {
+    if (args[0] !== 'trust' || !args[1]) return undefined;
+    // The question names what the entry sends and where; the yes approves that entry only.
+    const pending = requireServiceRegistry(ctx).pendingProjectServices().find((service) => service.name === args[1]);
+    if (!pending) return undefined; // The handler says why there is nothing to confirm.
+    return {
+      title: `Use the service ${args[1]} from this project's services file?`,
+      detail: `${describePendingProjectService(pending)}.\nA project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as shown here; if the repository changes its keys, header or host it waits for confirmation again.`,
+      confirmLabel: 'Use it',
+      reviewed: projectServiceRef(pending),
+    };
+  },
+  handler(args, ctx, reviewed?: unknown) {
     const services = requireServiceRegistry(ctx);
     const pendingLines = () => pendingProjectServiceLines(services.pendingProjectServices());
     if (args[0] === 'trust') {
@@ -149,7 +148,11 @@ const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pic
         return;
       }
       try {
-        const result = services.confirmProjectService(name);
+        // Confirmed: the entry must still be the one shown, and that one is approved.
+        const shown = reviewed as TargetRef<'project-service'> | undefined;
+        const now = services.pendingProjectServices().find((service) => service.name === name);
+        if (shown) assertTarget(shown, now ? projectServiceRef(now) : null, `/services trust ${name}`);
+        const result = services.confirmProjectService(name, shown ? now?.digest : undefined);
         ctx.print(result.ok
           ? '[services] ' + name + ' from this project is used from now on\n  ' + describePendingProjectService(result.service)
           : '[services] Nothing was confirmed: ' + result.reason + '.');

@@ -144,6 +144,13 @@ export class DaemonApprovalStore {
       const granted = grantOwnerApproval({ action: captured.action, content: captured.content, surface: 'owner-direct', now: () => at });
       if (granted === null) throw new PaymentApprovalStoreError('invalid-request');
       const approvals = snapshot.approvals.filter(row => Date.parse(row.expiresAt) > nowMs);
+      // The same approval asked again (a retry after an answer that never came,
+      // or after a write whose outcome was not known) is the first one: its key
+      // is the action and the exact fields, so a repeat never mints a second
+      // single-use approval that would let the purchase happen twice.
+      const existing = approvals.find(row => row.action === granted.action && row.contentFingerprint !== null
+        && row.contentFingerprint === granted.contentFingerprint);
+      if (existing) return { approvals, result: view(existing), changed: approvals.length !== snapshot.approvals.length };
       // Never evict: dropping the oldest would destroy an approval the owner was
       // told was granted. Refuse instead, outside the mutation so a full store
       // is a normal answer and not a reason to stop using the file.

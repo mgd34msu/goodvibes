@@ -380,6 +380,10 @@ export class BudgetLedger {
     if (!samePaymentEvidence(held, receipt.reservation) || !samePaymentEvidence(spent, receipt.spend)) throw new Error('The original payment accounting changed.');
     // A purchase recorded as bought with no hold and no spend would leave the budget uncharged.
     if (receipt.outcome === 'purchased' && !held && !spent) throw new Error('The original payment hold and spend are both missing, so this purchase cannot be settled as bought without charging the budget.');
+    // Save, then publish: the next ledger is computed here, written by
+    // persistSettlement, and only then told to the owner; a failed write puts
+    // the ledger back as it was and throws, so memory never runs ahead of disk.
+    const before = { reservations: this.reservations, spend: [...this.spend], reconciliations: [...this.reconciliations] };
     let finalSpend = spent;
     if (held) {
       if (spent || held.retainUntilSettled !== true || held.id !== receipt.purchaseId) throw new Error('The original payment hold is unavailable.');
@@ -393,9 +397,20 @@ export class BudgetLedger {
     const stored = Object.freeze({ ...receipt, reservation: held === null ? null : Object.freeze({ ...held }),
       spend: spent === null ? null : Object.freeze({ ...spent }) });
     this.reconciliations.push(stored);
+    try {
+      this.persistSettlement(owner);
+    } catch (error) {
+      this.reservations = before.reservations;
+      this.spend = before.spend;
+      this.reconciliations = before.reconciliations;
+      throw error;
+    }
     owner?.settled(null, finalSpend, stored);
     owner?.assertCurrent();
   }
+
+  /** Writes a settlement before it is published. Memory ledgers have no durable sink; the daemon's writes its file here and throws when it could not. */
+  protected persistSettlement(_owner?: CheckoutBudgetSettlementOwner): void {}
 
   /** Ensure preceding settlement is durable before removing its crash journal.
    * Memory ledgers have no durable sink; the daemon overrides this boundary. */

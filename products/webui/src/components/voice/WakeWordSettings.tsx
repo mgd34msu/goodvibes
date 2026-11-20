@@ -38,6 +38,10 @@ import {
   useWakeTranscriptionAvailable,
 } from '../../lib/voice/useWake';
 import { WAKE_SURFACE_KEY } from '../../lib/voice/wake-config';
+import { CONFIG_SCHEMA_ENTRIES } from '../../lib/generated/config-schema';
+
+/** What the web UI row does, said by the setting's own description (one text for the setting, the docs and this box). */
+const WAKE_SURFACE_HINT = CONFIG_SCHEMA_ENTRIES.find((entry) => entry.key === WAKE_SURFACE_KEY)?.description ?? '';
 import { STT_UNAVAILABLE_MESSAGE } from '../../lib/voice/voice-config';
 import { wakeIndicatorCopy } from './wake-indicator';
 
@@ -160,10 +164,10 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
         disabled={setKey.isPending}
         onChange={(checked) => setKey.mutate({ key: WAKE_SURFACE_KEY, value: checked })}
       >
-        Listen for the wake word in this browser
+        Listen for the wake word in this daemon’s web UI
       </Checkbox>
       <p className="voice-settings-hint">
-        Opted into per browser, not inherited from the terminal: the microphone permission is this origin’s own.
+        {WAKE_SURFACE_HINT}
         {settings.enabled
           ? ''
           : ' Wake detection is switched off for every device, so this alone will not start it.'}
@@ -179,7 +183,7 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
             else setKey.mutate({ key: 'voice.wake.enabled', value: false });
           }}
         >
-          Enable wake-word detection (all surfaces)
+          Turn on wake-word detection and listen in this daemon’s web UI
         </Checkbox>
       )}
 

@@ -149,9 +149,6 @@ interface OnboardingActionColumns {
 
 function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
   switch (editorKind) {
-    case 'mcp-server': return 'Edit MCP server';
-    case 'mcp-tools-server': return 'Edit MCP tools server';
-    case 'mcp-repair': return 'Repair MCP connection';
     case 'secret-link': return 'Link secret reference';
     case 'secret-set': return 'Store secret';
     case 'secret-test': return 'Test secret reference';

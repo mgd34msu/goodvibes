@@ -15,8 +15,11 @@ import {
   isSessionClosedError,
   isAuthExpiredError,
   formatError,
+  isDefiniteRefusal,
   isMethodUnavailableError,
 } from '../../lib/errors';
+import { heldInputsForThisPage, type HeldInputs } from '../../lib/held-input';
+import { readPath } from '../../lib/object';
 import { fileToBase64, uploadedArtifactId, type TurnState } from './message-utils';
 import type { ChatMessage } from './types';
 
@@ -45,6 +48,12 @@ interface UseChatSendOptions {
    */
   onSendAbandoned?: (input: { body: string; files: File[] }) => void;
   /**
+   * The daemon refused or never got the first step of a send that has no
+   * bubble yet (a new chat's creation): its text and files, so the caller puts
+   * them back in the composer, with why.
+   */
+  onSendRefused?: (input: { body: string; files: File[]; reason: string }) => void;
+  /**
    * Same auth-expiry handoff useChatStream uses: on a 401 mid-send, re-probe
    * auth.current so a genuinely dead token flips the app to the signed-out gate,
    * rather than collapsing to a generic 'send failed'.
@@ -72,6 +81,14 @@ export class SendAbandonedError extends Error {
   constructor() {
     super('The message was not sent: the chat or sign-in changed before it was sent.');
     this.name = 'SendAbandonedError';
+  }
+}
+
+/** A new chat for the send could not be created: nothing was posted, and the text and files are back in the composer. */
+class ChatNotCreatedError extends Error {
+  constructor(readonly reason: string, options?: { cause?: unknown }) {
+    super(`The chat could not be created (${reason}). Your message was not sent; it is back in the composer.`, options);
+    this.name = 'ChatNotCreatedError';
   }
 }
 
@@ -119,7 +136,7 @@ export interface UseChatSendReturn {
   isLineagePending: boolean;
   /** The last regenerate/edit error, if any. */
   lineageError: Error | null;
-  /** True when the files of a failed send are still held, so Resend can send them again. */
+  /** True when a failed send can be sent again with its files: the files are still held, or each was already uploaded. */
   hasHeldFiles: (messageId: string) => boolean;
   /** Hand over (and stop holding) the files of a failed send, or [] when none are held. */
   takeHeldFiles: (messageId: string) => File[];
@@ -142,6 +159,28 @@ function isServerMessageId(id: string): boolean {
 }
 
 const CLOSED_CHAT_MESSAGE = 'This chat is closed and could not be reopened; start a new chat to keep going.';
+
+/** The local bubble id of a held send: the same id is the `clientMessageId` every attempt carries. */
+const LOCAL_PREFIX = 'local-';
+function heldIdOf(localMessageId: string | undefined): string | undefined {
+  return localMessageId?.startsWith(LOCAL_PREFIX) ? localMessageId.slice(LOCAL_PREFIX.length) : undefined;
+}
+/** A held attachment's name: its place in the send and its file name, so two files with one name stay two. */
+function heldAttachmentName(index: number, filename: string): string {
+  return `${index}:${filename}`;
+}
+
+/** The attachments of the message as the daemon answered with it (a repeat answers with the first send's). */
+function answeredAttachments(result: unknown): { artifactId: string; label?: string }[] | undefined {
+  const list = readPath(result, ['message', 'attachments']) ?? readPath(result, ['attachments']);
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  const read = list.flatMap((entry: unknown) => {
+    const artifactId = readPath(entry, ['artifactId']);
+    const label = readPath(entry, ['label']);
+    return typeof artifactId === 'string' && artifactId ? [{ artifactId, ...(typeof label === 'string' ? { label } : {}) }] : [];
+  });
+  return read.length === list.length ? read : undefined;
+}
 
 /**
  * Run a chat verb; when the daemon answers that the chat is closed, reopen it
@@ -182,6 +221,7 @@ export function useChatSend({
   invalidateChatState,
   onAuthExpired,
   onSendAbandoned,
+  onSendRefused,
 }: UseChatSendOptions): UseChatSendReturn {
   const mounted = useRef(true);
   useEffect(() => {
@@ -195,7 +235,12 @@ export function useChatSend({
   const holdFiles = (messageId: string, files: File[]) => {
     if (files.length) heldFilesRef.current.set(messageId, files);
   };
-  const hasHeldFiles = useCallback((messageId: string) => heldFilesRef.current.has(messageId), []);
+  const hasHeldFiles = useCallback((messageId: string) => {
+    if (heldFilesRef.current.has(messageId)) return true;
+    const heldId = heldIdOf(messageId);
+    const entry = heldId ? heldInputsForThisPage().get(heldId) : undefined;
+    return entry !== undefined && entry.attachments.length > 0 && entry.attachments.every((attachment) => Boolean(attachment.artifactId));
+  }, []);
   const takeHeldFiles = useCallback((messageId: string) => {
     const files = heldFilesRef.current.get(messageId) ?? [];
     heldFilesRef.current.delete(messageId);
@@ -217,6 +262,8 @@ export function useChatSend({
   // being current, or the view unmounts. One controller per send; every await
   // before the daemon accepts the message ends with it.
   const inFlightRef = useRef<{ lease: SelectionLease; controller: AbortController } | null>(null);
+  /** The held entry of each send, by its controller, so a send given up early drops the entry its text left with. */
+  const heldIdsRef = useRef(new WeakMap<AbortController, string>());
   const abandonIfStale = () => {
     const inFlight = inFlightRef.current;
     if (inFlight && !inFlight.controller.signal.aborted && !isCurrent(inFlight.lease)) {
@@ -238,10 +285,25 @@ export function useChatSend({
   // Core send mutation (unchanged API, still used by Composer)
   // -------------------------------------------------------------------------
   const ownedSendMutation = useMutation<undefined, Error, OwnedSendInput>({
-    mutationFn: async ({ body, files, steer, localMessageId: retriedMessageId, lease, controller }) => {
-      if (!body && !files.length) throw new Error('There is nothing to send: write a message or attach a file.');
+    mutationFn: async ({ body, files, steer: steerAsked, localMessageId: retriedMessageId, lease, controller }) => {
+      if (!body && !files.length && !heldIdOf(retriedMessageId)) throw new Error('There is nothing to send: write a message or attach a file.');
       const { signal } = controller;
       inFlightRef.current = { lease, controller };
+      // Held before anything is sent, a new chat's creation included: until the
+      // daemon answers for it, the held entry (text, files' upload ids, steer) is
+      // what a resend sends, under the same id.
+      const held: HeldInputs = heldInputsForThisPage();
+      const retriedHeldId = heldIdOf(retriedMessageId);
+      const entry = (retriedHeldId ? held.resending(retriedHeldId) : undefined) ?? held.hold({
+        sessionId: lease.sessionId || 'new-chat',
+        text: body,
+        attachments: files.map((file, index) => ({ name: heldAttachmentName(index, file.name) })),
+        flags: steerAsked ? { steer: true } : {},
+      });
+      const heldId = entry.clientMessageId;
+      heldIdsRef.current.set(controller, heldId);
+      // A resend of a failed steer is still a steer.
+      const steer = steerAsked === true || entry.flags.steer === true;
       // Checked after every await before the message is posted: the effect above
       // aborts on the next render, this catches a change within the same tick.
       const ensureCurrent = () => {
@@ -256,9 +318,19 @@ export function useChatSend({
       if (!sessionId) {
         const createdAt = Date.now();
         const title = body.slice(0, 72) || files[0]?.name?.slice(0, 72) || 'Attachment chat';
-        const created = await untilAborted(platformClient.chat.sessions.create({ title }, signal), signal);
+        let created: unknown;
+        try {
+          created = await untilAborted(platformClient.chat.sessions.create({ title }, signal), signal);
+        } catch (error) {
+          if (signal.aborted) throw error;
+          // No chat, so no bubble: the text and files go back to the composer.
+          held.accepted(heldId);
+          if (mounted.current) onSendRefused?.({ body, files, reason: formatError(error) });
+          throw new ChatNotCreatedError(formatError(error), { cause: error });
+        }
         ensureCurrent();
         sessionId = extractSessionId(created);
+        held.moveToSession(heldId, sessionId);
         const createdSession = companionSessionFromDetail(created);
         onLocalSessionCreated(bestId(createdSession) ? createdSession : {
           id: sessionId,
@@ -284,14 +356,22 @@ export function useChatSend({
         onDraftSessionRequestedChange(false);
       }
 
-      const localMessageId = retriedMessageId ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const localAttachments = files.map((file, index) => ({
-        artifactId: `local-${localMessageId}-${index}`,
-        label: file.name,
-        filename: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        sizeBytes: file.size,
-      }));
+      const localMessageId = `${LOCAL_PREFIX}${heldId}`;
+      // The held entry names every attachment of the send; a file uploaded on an earlier attempt keeps its id.
+      const heldAttachments = held.get(heldId)?.attachments ?? entry.attachments;
+      const fileFor = (name: string): File | undefined => files.find((file, index) => heldAttachmentName(index, file.name) === name)
+        ?? files[Number.parseInt(name, 10)];
+      const localAttachments = heldAttachments.map((attachment, index) => {
+        const file = fileFor(attachment.name);
+        const filename = file?.name ?? attachment.name.slice(attachment.name.indexOf(':') + 1);
+        return {
+          artifactId: attachment.artifactId ?? `local-${localMessageId}-${index}`,
+          label: filename,
+          filename,
+          mimeType: file?.type || 'application/octet-stream',
+          sizeBytes: file?.size ?? 0,
+        };
+      });
       const localMessage = {
         id: localMessageId,
         sessionId,
@@ -309,7 +389,7 @@ export function useChatSend({
       setLiveText('');
       setTurnState('submitted');
       const markFailed = () => {
-        holdFiles(localMessageId, files);
+        if (files.length) holdFiles(localMessageId, files);
         setLocalMessages((current) => current.map((message) => (
           message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
         )));
@@ -318,7 +398,12 @@ export function useChatSend({
 
       let attachments: typeof localAttachments;
       try {
-        attachments = await Promise.all(files.map(async (file) => {
+        attachments = await Promise.all(heldAttachments.map(async (attachment, index) => {
+          const local = localAttachments[index]!;
+          // Uploaded on an earlier attempt: only the missing files are uploaded again.
+          if (attachment.artifactId) return { ...local, artifactId: attachment.artifactId };
+          const file = fileFor(attachment.name);
+          if (!file) throw new Error(`The file ${local.filename} of this message is no longer available. Attach it again and send a new message.`);
           const dataBase64 = await untilAborted(fileToBase64(file), signal);
           const uploaded = await untilAborted(platformClient.artifacts.create({
             filename: file.name,
@@ -328,18 +413,13 @@ export function useChatSend({
           }), signal);
           const artifactId = uploadedArtifactId(uploaded);
           if (!artifactId) throw new Error(`Artifact upload for ${file.name} did not return an artifact id.`);
-          return {
-            artifactId,
-            label: file.name,
-            filename: file.name,
-            mimeType: file.type || 'application/octet-stream',
-            sizeBytes: file.size,
-          };
+          held.attachmentUploaded(heldId, attachment.name, artifactId);
+          return { ...local, artifactId };
         }));
         ensureCurrent();
       } catch (error) {
         if (signal.aborted) dropLocal();
-        else markFailed();
+        else { markFailed(); held.refused(heldId, formatError(error)); }
         throw error;
       }
 
@@ -376,29 +456,50 @@ export function useChatSend({
         }
       } catch (error) {
         markFailed();
+        // Refused: the daemon read it and said no. Anything else (no answer, an
+        // unreadable one) may have been recorded: kept as such, resent only under its id.
+        if (isDefiniteRefusal(error)) held.refused(heldId, formatError(error));
+        else held.unknown(heldId, formatError(error));
         throw error;
       } finally {
         if (inFlightRef.current?.controller === controller) inFlightRef.current = null;
       }
-      // Accepted. When the chat changed meanwhile, its own list shows the message.
+      // Accepted: the daemon has it under this id, so the held entry is done.
+      held.accepted(heldId);
+      heldFilesRef.current.delete(localMessageId);
+      // When the chat changed meanwhile, its own list shows the message.
       if (!isCurrent(lease)) return;
       const messageId = extractMessageId(result);
+      // A repeat of a send the daemon already had is answered with the first message: its attachments are the ones shown.
+      const shownAttachments = answeredAttachments(result)?.map((answered, index) => ({ ...attachments[index], ...answered })) ?? attachments;
       setLocalMessages((current) => current.map((message) => (
         message.id === localMessageId
           ? {
             ...message,
             id: messageId || localMessageId,
             deliveryState: 'sent' as const,
-            attachments,
+            attachments: shownAttachments,
           }
           : message
       )));
       setPendingUserMessageId(messageId || localMessageId);
       await invalidateChatState(sessionId);
     },
-    onError: (error, { lease, body, files, controller }) => {
+    onError: (error, { lease, body, files, controller, localMessageId: retried }) => {
       if (inFlightRef.current?.controller === controller) inFlightRef.current = null;
+      if (error instanceof ChatNotCreatedError) {
+        if (mounted.current && lease.owner.isCurrent(lease.selection)) {
+          setTurnState('send failed');
+          setTurnError(error.message);
+        }
+        return;
+      }
       if (error instanceof SendAbandonedError) {
+        // Nothing was posted and the text goes back to the composer: the held entry is not kept beside it.
+        const abandonedId = heldIdsRef.current.get(controller);
+        // A first send leaves with its text; a resend of a held one stays held as it was (it may have been sent before).
+        if (abandonedId && heldIdOf(retried)) heldInputsForThisPage().unknown(abandonedId, 'not sent again: the chat or sign-in changed');
+        else if (abandonedId) heldInputsForThisPage().accepted(abandonedId);
         if (mounted.current) onSendAbandoned?.({ body, files });
         // Still on the same chat (only the sign-in changed): say what happened.
         if (mounted.current && lease.owner.isCurrent(lease.selection)) {
@@ -430,9 +531,41 @@ export function useChatSend({
         return;
       }
       setTurnState('send failed');
-      setTurnError(formatError(error));
+      setTurnError(isDefiniteRefusal(error)
+        ? formatError(error)
+        : `${formatError(error)}. It may have been sent: Resend sends it again under the same id, so the daemon records it at most once.`);
     },
   });
+
+  // A send held from before (this tab reloaded, or the view was left and came
+  // back) shows again as a failed bubble with Resend, so nothing typed is lost.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const held = heldInputsForThisPage();
+    const restore = () => {
+      const entries = held.list(activeSessionId).filter((entry) => entry.state !== 'sending');
+      if (entries.length === 0) return;
+      setLocalMessages((current) => {
+        const present = new Set(current.map((message) => message.id));
+        const missing = entries.filter((entry) => !present.has(`${LOCAL_PREFIX}${entry.clientMessageId}`));
+        if (missing.length === 0) return current;
+        return [...current, ...missing.map((entry) => ({
+          id: `${LOCAL_PREFIX}${entry.clientMessageId}`,
+          sessionId: activeSessionId,
+          role: 'user' as const,
+          content: entry.text,
+          createdAt: Date.now(),
+          deliveryState: 'failed' as const,
+          attachments: entry.attachments.map((attachment, index) => {
+            const filename = attachment.name.slice(attachment.name.indexOf(':') + 1);
+            return { artifactId: attachment.artifactId ?? `local-${entry.clientMessageId}-${index}`, label: filename, filename };
+          }),
+        }))];
+      });
+    };
+    restore();
+    return held.subscribe(restore);
+  }, [activeSessionId, setLocalMessages]);
 
   const callbackOptions = (
     input: SendInput,

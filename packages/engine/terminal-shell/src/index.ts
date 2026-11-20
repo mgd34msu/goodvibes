@@ -342,13 +342,12 @@ export {
   writeTreeStatusMarker,
 } from './conversation-tree.js';
 export {
-  WORKSTREAM_SHARED_USAGE,
-  workstreamRawRest,
   renderContractStatus,
   renderWorkstreamDraft,
   resolveWorkstreamContract,
-  runWorkstreamCommand,
-  type WorkstreamCommandDeps,
+  registerWorkstreamCommand,
+  type StartWorkstream,
+  type WorkstreamCommandContext,
 } from './workstream-command.js';
 export {
   LANGUAGE_SERVER_INSTALL_USAGE,

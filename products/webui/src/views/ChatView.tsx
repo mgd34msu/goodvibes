@@ -383,17 +383,30 @@ export function ChatView({
     [cancelToolCallRaw, setTurnError],
   );
 
-  // A send that was abandoned before the daemon accepted it (the chat or the
-  // sign-in changed under it) gives its text and files back to the composer.
-  const restoreAbandonedSend = useCallback(({ body, files }: { body: string; files: File[] }) => {
-    setDraft((current) => (current.trim() ? current : body));
-    if (files.length) setAttachedFiles((current) => (current.length ? current : files));
+  // A send that was abandoned or refused before the daemon had it (the chat or
+  // the sign-in changed under it, or a new chat could not be created) gives its
+  // text and files back to the composer. Something typed since is kept: the
+  // returned text goes after it, and its files join the attached ones.
+  const putBackInComposer = useCallback(({ body, files }: { body: string; files: File[] }) => {
+    if (body) setDraft((current) => (current.trim() && current.trim() !== body ? `${current.trimEnd()}\n\n${body}` : body));
+    if (files.length) setAttachedFiles((current) => [...current, ...files.filter((file) => !current.includes(file))]);
+  }, []);
+  const restoreAbandonedSend = useCallback((input: { body: string; files: File[] }) => {
+    putBackInComposer(input);
     toast({
       title: 'Message not sent',
       description: 'The chat or sign-in changed before it was sent. It is back in the composer.',
       tone: 'warning',
     });
-  }, [toast]);
+  }, [putBackInComposer, toast]);
+  const restoreRefusedSend = useCallback((input: { body: string; files: File[]; reason: string }) => {
+    putBackInComposer(input);
+    toast({
+      title: 'Message not sent',
+      description: `The chat could not be created (${input.reason}). It is back in the composer.`,
+      tone: 'warning',
+    });
+  }, [putBackInComposer, toast]);
 
   const send = useChatSend({
     activeSessionId,
@@ -410,6 +423,7 @@ export function ChatView({
     invalidateChatState,
     onAuthExpired: onChatAuthExpired,
     onSendAbandoned: restoreAbandonedSend,
+    onSendRefused: restoreRefusedSend,
   });
   const { editAndResend, regenerateFrom: sendRegenerateFrom } = send;
 
@@ -571,9 +585,10 @@ export function ChatView({
     wakeHandlerRef.current = (text: string, autoSubmit: boolean) => {
       if (!text) return;
       // A send already in flight would drop the dictated text, so it goes to the
-      // draft for review instead.
+      // draft for review instead. Sent on its own: whatever is typed or attached
+      // in the composer is not part of it and stays there.
       if (autoSubmit && !send.isPending) {
-        sendText(text);
+        send.mutate({ body: text.trim(), files: [] });
         return;
       }
       setDraft(draft.trim() ? `${draft.trimEnd()} ${text}` : text);
@@ -654,22 +669,25 @@ export function ChatView({
     // Only a send that failed keeps its id, so the daemon can recognise a repeat of one it
     // already accepted; resending any other message is a new message.
     const failedId = bestId(message);
-    const retryOptions = (message as { deliveryState?: unknown } | null)?.deliveryState === 'failed' && failedId.startsWith('local-')
-      ? { localMessageId: failedId }
-      : {};
-    if (messageAttachments(message).length === 0) {
-      sendText(text, [], retryOptions);
-      return;
-    }
-    // A message with files is resent only with those files: sending the text alone
-    // would read as a normal send while the attachments were dropped.
+    const retryId = (message as { deliveryState?: unknown } | null)?.deliveryState === 'failed' && failedId.startsWith('local-')
+      ? failedId
+      : undefined;
     if (send.isPending) return;
-    const id = bestId(message);
-    if (!send.hasHeldFiles(id)) {
+    const hasFiles = messageAttachments(message).length > 0;
+    // A message with files is resent only with those files: sending the text alone
+    // would read as a normal send while the attachments were dropped. Files already
+    // uploaded on the failed attempt are not needed again.
+    if (hasFiles && !send.hasHeldFiles(failedId)) {
       setTurnError('The files of that message are no longer available. Attach them again and send a new message.');
       return;
     }
-    sendText(text, send.takeHeldFiles(id), retryOptions);
+    // Resent under its own id (with its steer flag and uploads, which the send keeps), and
+    // without touching what is being typed in the composer.
+    if (retryId) {
+      send.mutate({ body: text.trim(), files: hasFiles ? send.takeHeldFiles(failedId) : [], localMessageId: retryId });
+      return;
+    }
+    sendText(text, hasFiles ? send.takeHeldFiles(failedId) : []);
   }
 
   function addAttachedFiles(files: File[]) {

@@ -6,7 +6,7 @@
  */
 import { tokenizeSlashCommand } from '../slash-command-parser.js';
 import type { ListRow } from './lists.js';
-import { fillSentence, fixedChoices, switchValue } from './typed-line.js';
+import { fillSentence, fixedChoices, singleAction, switchValue } from './typed-line.js';
 import type { CommandDescription, InputDescription, ListName } from './types.js';
 
 export interface ArgumentCompletionItem {
@@ -47,6 +47,8 @@ export function completeArguments<Ctx>(
   const endsWithSpace = /\s$/.test(afterName);
   const words = [...tokenizeSlashCommand(`/x ${afterName}`)].slice(1);
   const partial = endsWithSpace ? '' : (words.pop() ?? '');
+  // A single-action command has no action word: its words are the action's blanks from the first.
+  if (singleAction(description)) words.unshift('');
   if (words.length === 0) {
     const items = description.actions
       .filter((action) => matches(partial, action.word, action.label))

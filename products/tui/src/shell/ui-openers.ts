@@ -320,7 +320,11 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           // so they run after the "applying" frame is painted rather than inside
           // this key handler; the result then replaces that message.
           setTimeout(() => {
-            const result = syncServiceSettingToPlatform(serviceRuntime, serviceChange);
+            // A later change of the same setting, made before this one ran, owns
+            // the outcome: its own deferred run applies it, and this one does nothing.
+            const result = JSON.stringify(configManager.get(serviceChange.key)) === JSON.stringify(serviceChange.value)
+              ? syncServiceSettingToPlatform(serviceRuntime, serviceChange)
+              : { handled: true, message: 'A later change to this setting replaced this one before it ran' };
             const modal = input.settingsModal;
             if (modal.active) {
               modal.lastSettingEffectMessage = result.message ?? null;

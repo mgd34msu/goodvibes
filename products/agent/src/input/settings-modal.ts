@@ -22,7 +22,7 @@ import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/plat
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
-import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
@@ -581,7 +581,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         return this._applyTrustMode(entry, 'allow-all');
       }
 
-      // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config (clear also lifts this session's denial). This screen is the owner's own.
+      // `block <tool>`, `unblock <tool>`, `exempt <tool>` or `unexempt <tool>`: the /mcp action of that word, kept in the server's MCP config. This screen is the owner's own.
       const toolEdit = parseMcpToolRuleEdit(this.editBuffer);
       if (toolEdit) {
         const registry = this.mcpRegistry;
@@ -599,7 +599,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
       const nextMode = this.editBuffer.trim() as McpEntry['trustMode'];
       if (!MCP_TRUST_MODES.includes(nextMode)) {
-        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode (${MCP_TRUST_MODES.join(', ')}) or a tool rule (deny <tool>, allow <tool>, clear <tool>).`);
+        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode (${MCP_TRUST_MODES.join(', ')}) or a tool rule (${MCP_TOOL_RULE_EDIT_WORDS}).`);
       }
       return this._requestTrustMode(entry, nextMode);
     }

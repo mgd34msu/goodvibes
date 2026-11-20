@@ -5,6 +5,7 @@ import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime }
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { formatError, isDefiniteRefusal, isSessionClosedError, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
+import { heldInputsForThisPage } from '../lib/held-input';
 import { queryKeys } from '../lib/queries';
 
 type InputReceipt = OperatorMethodOutput<'sessions.inputs.list'>['inputs'][number];
@@ -27,11 +28,11 @@ const terminal = new Set<LocalDispatch['state']>(['completed', 'failed', 'cancel
 const ATTEMPT_DEADLINE_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 3_000] as const;
 
-/** 1-128 of [A-Za-z0-9._:-], from getRandomValues (randomUUID needs a secure origin, a LAN address is not one). */
-function newMessageId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return `web-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+/** Settled dispatches kept on screen; one not yet answered (sending or unsent) is never cut. */
+const SHOWN_SETTLED = 20;
+function keepShown(list: LocalDispatch[]): LocalDispatch[] {
+  let settled = 0;
+  return list.filter((entry) => entry.state === 'sending' || entry.state === 'unsent' || ++settled <= SHOWN_SETTLED);
 }
 
 const states = new Set<InputReceipt['state']>(['queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected']);
@@ -58,7 +59,19 @@ function adopt(dispatch: LocalDispatch, input: InputReceipt): LocalDispatch {
 /** One local receipt per send; list/event refreshes match only the returned input ID. */
 export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string, streamPaused: boolean) {
   const client = useQueryClient();
-  const [dispatches, setDispatches] = useState<LocalDispatch[]>([]);
+  // What was sent and not yet answered lives in the held store above this pane
+  // (one per daemon and account, kept for the tab): leaving the session and
+  // coming back, or reloading, shows it again as unsent with Retry, under the
+  // same messageId. It leaves the store once the daemon answered for it.
+  const held = heldInputsForThisPage();
+  const [dispatches, setDispatches] = useState<LocalDispatch[]>(() => held.list(sessionId).map((entry, index) => ({
+    id: -(index + 1),
+    mode: entry.flags.steer ? 'steer' as const : 'followUp' as const,
+    text: entry.text,
+    messageId: entry.clientMessageId,
+    state: 'unsent' as const,
+    error: entry.reason ?? 'Its answer was not seen before this view was left. Retry sends it again; the daemon records it at most once.',
+  })));
   const sequence = useRef(0);
   const owner = useRef(false);
   const flights = useRef(new Set<AbortController>());
@@ -125,12 +138,17 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
     });
   }, [inputs.data, dispatches, lifetime]);
 
-  // Keep dispatch text/receipts local to this mounted identity, rather than
-  // retaining them in QueryClient's cross-account mutation cache after navigation.
-  // Every attempt carries the send's messageId, so a resend after a lost
+  // Receipts stay local to this mounted identity, rather than in QueryClient's
+  // cross-account mutation cache; unanswered text is in the held store, which is
+  // scoped to this daemon and account and cleared on sign-out. Every attempt carries the send's messageId, so a resend after a lost
   // response is answered with the receipt of the input already recorded.
   async function dispatch(id: number, body: string, mode: DispatchMode, messageId: string, abort: AbortController) {
     const settle = (change: Partial<LocalDispatch> | ((entry: LocalDispatch) => LocalDispatch)) => {
+      // The held entry follows the answer whether or not this pane is still mounted: a receipt
+      // or a refusal ends it; no answer keeps it (unsent, retried under the same id).
+      const state = typeof change === 'function' ? undefined : change.state;
+      if (state === 'unsent') held.unknown(messageId, typeof change === 'function' ? 'no answer' : change.error ?? 'no answer');
+      else held.accepted(messageId);
       if (!owned()) return;
       setDispatches((previous) => previous.map((entry) => entry.id !== id ? entry
         : typeof change === 'function' ? change(entry) : { ...entry, ...change }));
@@ -207,8 +225,8 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
   function send(body: string, mode: DispatchMode): boolean {
     if (!owned()) return false;
     const id = ++sequence.current;
-    const messageId = newMessageId();
-    setDispatches((previous) => [{ id, mode, text: body, messageId, state: 'sending' as const }, ...previous].slice(0, 20));
+    const messageId = held.hold({ sessionId, text: body, attachments: [], flags: mode === 'steer' ? { steer: true } : {} }).clientMessageId;
+    setDispatches((previous) => keepShown([{ id, mode, text: body, messageId, state: 'sending' as const }, ...previous]));
     start(id, body, mode, messageId);
     return true;
   }
@@ -220,6 +238,8 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
     if (!entry || entry.state !== 'unsent') return false;
     setDispatches((previous) => previous.map((candidate) => candidate.id !== id ? candidate
       : { ...candidate, state: 'sending', error: undefined }));
+    // Its held entry (kept while unsent) is sending again, under the same id.
+    held.resending(entry.messageId);
     start(id, entry.text, entry.mode, entry.messageId);
     return true;
   }

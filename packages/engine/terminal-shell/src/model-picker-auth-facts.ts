@@ -1,3 +1,4 @@
+import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
 import { customProviderKeyName } from './local-provider-commands.js';
@@ -37,7 +38,7 @@ export async function resolveSecretProviderIds(
   getConfiguredProviderIds: () => readonly string[],
   secretsManager?:
     | {
-        readonly get: (key: string) => Promise<string | null>;
+        readonly get: (key: string) => Promise<Secret | null>;
       }
     | undefined,
   /** Extra secret names a provider's key may be stored under, beyond the two derived from its id. Defaults to the provider's declared environment names. */
@@ -52,7 +53,7 @@ export async function resolveSecretProviderIds(
       const names = new Set([providerId, customProviderKeyName(providerId), ...extraKeyNames(providerId)]);
       for (const name of names) {
         const val = await secretsManager.get(name).catch(() => null);
-        if (typeof val === 'string' && val !== '') return providerId;
+        if (val !== null && !val.empty) return providerId;
       }
       return null;
     }),

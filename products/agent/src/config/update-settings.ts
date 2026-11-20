@@ -21,8 +21,7 @@
  * directive that clients update on start, and `update.autoUpdateAtLaunch:
  * false` is the explicit, persisted off switch.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import type { ConfigManager } from './index.ts';
+import type { ConfigKey, ConfigManager } from './index.ts';
 
 type RawRecord = Record<string, unknown>;
 
@@ -97,8 +96,8 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
 }
 
 /**
- * Which of the self-update switches (`update.auto`, `update.autoUpdateAtLaunch`)
- * the person actually WROTE, as opposed to inherited.
+ * Whether the person stated a self-update switch (`update.auto`,
+ * `update.autoUpdateAtLaunch`), as opposed to inheriting its default.
  *
  * `readUpdateSettings` reads the resolved config, and the platform ships real
  * defaults for both, so a resolved `auto: true` says nothing about whether
@@ -107,32 +106,14 @@ export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>)
  * while-running updater, or whether the person has separately asked to keep it
  * (see runtime/periodic-update.ts).
  *
- * Both switches are daemon settings (config-ownership.ts): one choice for the
- * machine's installation, kept in the daemon's settings file and read by every
- * program. So that file is the one read here. The Agent's own file and a
- * project's file cannot state them (a daemon key there is left out at load),
- * which is what keeps a project's settings file from turning the while-running
- * update back on.
- *
- * Unreadable or malformed files yield "nothing was stated", which degrades to
- * the documented switch governing both updaters, the safe direction.
+ * The settings loader is the one owner of that fact (ConfigManager.sourceOf):
+ * a value it accepted from a file has that file's tier; a malformed value it
+ * refused, or a key in a file that may not state it (a project file), leaves
+ * the default, so a refused value can never count as a choice. No file is read here.
  */
-export function readExplicitUpdateKeys(
-  configManager: {
-    readonly getDaemonTierPath?: () => string | null | undefined;
-  },
-): ReadonlySet<string> {
-  const explicit = new Set<string>();
-  const path = configManager.getDaemonTierPath?.();
-  if (!path || !existsSync(path)) return explicit;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    const block = parsed && typeof parsed === 'object' ? (parsed as RawRecord)['update'] : undefined;
-    if (block && typeof block === 'object' && !Array.isArray(block)) {
-      for (const key of Object.keys(block as RawRecord)) explicit.add(key);
-    }
-  } catch {
-    // A file that cannot be read stated nothing.
-  }
-  return explicit;
+export function updateKeyStated(
+  configManager: Pick<ConfigManager, 'sourceOf'>,
+  key: 'auto' | 'autoUpdateAtLaunch',
+): boolean {
+  return configManager.sourceOf(`update.${key}` as ConfigKey) !== 'default';
 }

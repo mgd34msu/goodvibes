@@ -22,6 +22,8 @@ import {
   fixedChoices,
   renderTypedLine,
   riskWords,
+  singleAction,
+  withoutSecrets,
 } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, CommandReport, InputDescription } from './types.js';
 
@@ -131,6 +133,15 @@ export async function runGuided(
   start: { readonly action?: ActionDescription<never> | undefined; readonly values?: ActionValues | undefined },
   ctx: CommandActionContext,
 ): Promise<void> {
+  // A single-action command has no list to choose from: it starts at its action.
+  const single = start.action ? undefined : singleAction(command);
+  if (single) {
+    start = { ...start, action: single };
+    if (single.inputs.length === 0) {
+      if (await askSentence(single, {}, ctx)) await runAndSay(command, single, {}, ctx);
+      return;
+    }
+  }
   // Where the surface can push a kit modal, the panel holds the first screen and the forms.
   if (ctx.pushSurfaceModal) { await runInPanel(command, start, ctx); return; }
   let action = start.action;
@@ -231,7 +242,7 @@ export async function runAndSay(command: CommandDescription<never>, action: Acti
     const lines = [
       ...(doneLine ? [doneLine] : []),
       ...(isCommandReport(detail) ? [renderCommandReport(detail)] : typeof detail === 'string' && detail ? [detail] : []),
-      ...(action.lasts === 'not-a-change' && action.inputs.length === 0 ? [] : [`${undo ? `Undo: ${undo.label}    ` : ''}The command for this is: ${renderTypedLine(command, action.id, values)}`]),
+      ...(action.lasts === 'not-a-change' && action.inputs.length === 0 ? [] : [`${undo ? `Undo: ${undo.label}    ` : ''}The command for this is: ${renderTypedLine(command, action.id, withoutSecrets(action, values))}`]),
     ];
     if (lines.length > 0) ctx.print(lines.join('\n'));
   } catch (error) {

@@ -96,13 +96,15 @@ export function renderCommandReferenceMarkdown(entries: readonly CategorizedComm
       if (!described) continue;
       lines.push(`### /${cmd.name}: ${escapeCell(described.title)}`);
       lines.push('');
-      lines.push(`\`/${cmd.name}\` alone opens these actions to choose from; each asks for what it needs.`);
+      lines.push(described.actions.length === 1 && described.actions[0]!.word === ''
+        ? `\`/${cmd.name}\` runs its one action; it asks for what it needs.`
+        : `\`/${cmd.name}\` alone opens these actions to choose from; each asks for what it needs.`);
       lines.push('');
       lines.push('| Action | Line | What happens | Risk |');
       lines.push('| --- | --- | --- | --- |');
       for (const action of described.actions) {
         const blanks = Object.fromEntries(action.inputs.map((input) => [input.id, `<${input.label.toLowerCase()}>`]));
-        lines.push(`| ${escapeCell(action.label)} | \`/${cmd.name} ${escapeCell(linePattern(action))}\` | ${escapeCell(actionSentence(action, blanks))} | ${action.risk === 'none' ? 'None' : escapeCell(riskWords(action.risk))} |`);
+        lines.push(`| ${escapeCell(action.label)} | \`${escapeCell([`/${cmd.name}`, linePattern(action)].filter(Boolean).join(' '))}\` | ${escapeCell(actionSentence(action, blanks))} | ${action.risk === 'none' ? 'None' : escapeCell(riskWords(action.risk))} |`);
       }
       lines.push('');
     }

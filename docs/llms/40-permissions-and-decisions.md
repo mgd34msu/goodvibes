@@ -658,7 +658,7 @@ A managed policy is a versioned bundle of rules the gate reads before the owner'
 /policy diff                   rule diff, current against candidate
 /policy lint                   lint the active and candidate bundles
 /policy preflight              review proactive policy and MCP risk state
-/policy promote --yes          enforce the candidate
+/policy promote --yes          enforce the candidate /policy simulate showed (a candidate loaded or changed since is refused: simulate it first)
 /policy rollback               restore the previous active bundle
 /policy status
 ```

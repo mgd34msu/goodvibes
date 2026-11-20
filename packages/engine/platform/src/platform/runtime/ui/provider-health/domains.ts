@@ -128,7 +128,7 @@ export function buildProviderHealthDomainSummaries(
           .slice(0, 3)
           .map((server) => `${server.name}: trust=${server.trustMode} schema=${server.schemaFreshness}${server.quarantineReason ? ` quarantine=${server.quarantineReason}` : ''}`),
     nextSteps: degradedServers.length > 0
-      ? ['/mcp review', '/mcp auth-review', '/mcp repair']
+      ? ['/mcp review', '/mcp repair']
       : ['/mcp review'],
   });
 

@@ -1,3 +1,4 @@
+import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Root-held credential and permission owners for explicit provider tag handles. */
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -47,7 +48,8 @@ export function createDaemonTriageTaggingFactory(input: {
     const keys = provider === 'email'
       ? [daemonSecretKeyFor('surfaces.email.password'), daemonSecretKeyFor('surfaces.email.imap.password')]
       : [daemonSecretKeyFor(credentialKey)];
-    const resolve = () => provider === 'email' ? mail.get(keys[0]!) : get(keys[0]!);
+    // Revealed for the provider the tagger signs in to.
+    const resolve = async () => revealOrNull(await (provider === 'email' ? mail.get(keys[0]!) : get(keys[0]!)), 'dispatch');
     const tagger = makeTagger({ provider, accountScopeId: scope, signal: host.signal, assertCurrent: current, port: host.port,
       credentialKey, credentials: { resolveRef: async () => null, resolveConfigSecret: async key => key === credentialKey ? resolve() : null },
       ...(request.imap ? { imap: request.imap } : {}),

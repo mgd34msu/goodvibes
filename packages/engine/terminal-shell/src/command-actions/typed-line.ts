@@ -165,6 +165,17 @@ export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: 
   return done();
 }
 
+/**
+ * The values with every secret left out, for a line shown on screen or kept in
+ * the transcript ("The command for this is", "This will run"): typed without
+ * the secret, the line asks for it on a hidden line instead.
+ */
+export function withoutSecrets(action: Pick<ActionShape, 'inputs'>, values: ActionValues): ActionValues {
+  const secret = new Set(action.inputs.filter((input) => input.kind === 'secret').map((input) => input.id));
+  if (secret.size === 0) return values;
+  return Object.fromEntries(Object.entries(values).filter(([id]) => !secret.has(id)));
+}
+
 /** The line that runs `actionId` with `values`; defaults are left out, so the line is the shortest that means the same. */
 export function renderTypedLine(description: CommandShape, actionId: string, given: ActionValues): string {
   const action = description.actions.find((candidate) => candidate.id === actionId);
@@ -270,4 +281,40 @@ export function actionButton(action: ActionShape): string {
   const stop = words.findIndex((word, index) => index > 0 && /^(a|an|the|one|its|this|all|every|to|from|for|beyond|on|it)$/i.test(word));
   const kept = stop > 0 ? words.slice(0, stop) : words;
   return kept.join(' ');
+}
+
+/**
+ * What an action sends to its operator method: each field (a dot path) takes
+ * the value of the input it names. `input:first` and `input:rest` take the
+ * first line and the lines after it as a list (a command and its arguments),
+ * `input:lines` all lines as a list, and `input:pairs` NAME=VALUE lines as an
+ * object. A blank value is left out, so the method sees only what was given.
+ */
+export function operatorInputFromValues(fields: Readonly<Record<string, string>>, values: ActionValues): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  for (const [field, spec] of Object.entries(fields)) {
+    const [id, shape] = spec.split(':') as [string, string | undefined];
+    const raw = values[id];
+    if (raw === undefined || raw === '') continue;
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+    let value: unknown = raw;
+    if (shape === 'first') value = lines[0];
+    else if (shape === 'rest') value = lines.slice(1);
+    else if (shape === 'lines') value = lines;
+    else if (shape === 'pairs') {
+      value = Object.fromEntries(lines.flatMap((line) => {
+        const eq = line.indexOf('=');
+        return eq > 0 ? [[line.slice(0, eq).trim(), line.slice(eq + 1)]] : [];
+      }));
+    }
+    if (value === undefined || (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0)) continue;
+    let node = input;
+    const parts = field.split('.');
+    for (const part of parts.slice(0, -1)) {
+      const next = node[part];
+      node = (next && typeof next === 'object' ? next : (node[part] = {})) as Record<string, unknown>;
+    }
+    node[parts.at(-1)!] = value;
+  }
+  return input;
 }

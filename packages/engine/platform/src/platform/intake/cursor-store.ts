@@ -114,6 +114,28 @@ export function isInboxRetentionPolicy(value: unknown): value is InboxRetentionP
   return typeof row['itemTtlMs'] === 'number' && Number.isSafeInteger(row['itemTtlMs']) && row['itemTtlMs'] >= 0
     && typeof row['itemCap'] === 'number' && Number.isSafeInteger(row['itemCap']) && row['itemCap'] >= 0;
 }
+/**
+ * The items table's columns, in order: the store creates the table from this
+ * list, and the retention of an inactive mirror (inactive-retention.ts) knows a
+ * current mirror by it, so the two cannot drift apart.
+ */
+const INBOX_ITEM_COLUMN_DEFINITIONS = [
+  ['id', 'TEXT PRIMARY KEY'],
+  ['provider', 'TEXT NOT NULL'],
+  ['kind', 'TEXT NOT NULL'],
+  ['fromDigest', 'TEXT NOT NULL'],
+  ['subjectPreview', 'TEXT NOT NULL'],
+  ['bodyPreview', 'TEXT NOT NULL'],
+  ['routeId', 'TEXT'],
+  ['receivedAt', 'INTEGER NOT NULL'],
+  ['unread', 'INTEGER NOT NULL'],
+  ['triage_revision', 'TEXT'],
+  ['seq', 'INTEGER'],
+  ['screening', 'TEXT'],
+  ['screeningReason', 'TEXT'],
+] as const;
+export const INBOX_ITEM_COLUMNS: readonly string[] = INBOX_ITEM_COLUMN_DEFINITIONS.map(([name]) => name);
+
 const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS inbox_source_revision_policy (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL
@@ -125,19 +147,7 @@ const SCHEMA: string[] = [
      provider TEXT PRIMARY KEY, uidValidity INTEGER
    )`,
   `CREATE TABLE IF NOT EXISTS items (
-     id TEXT PRIMARY KEY,
-     provider TEXT NOT NULL,
-     kind TEXT NOT NULL,
-     fromDigest TEXT NOT NULL,
-     subjectPreview TEXT NOT NULL,
-     bodyPreview TEXT NOT NULL,
-     routeId TEXT,
-     receivedAt INTEGER NOT NULL,
-     unread INTEGER NOT NULL,
-     triage_revision TEXT,
-     seq INTEGER,
-     screening TEXT,
-     screeningReason TEXT
+     ${INBOX_ITEM_COLUMN_DEFINITIONS.map(([name, type]) => `${name} ${type}`).join(',\n     ')}
    )`,
   `CREATE INDEX IF NOT EXISTS idx_items_provider_received
      ON items(provider, receivedAt)`,

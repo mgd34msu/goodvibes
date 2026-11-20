@@ -20,6 +20,12 @@ import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-rev
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
+
+/** The bundle file a setup import shows, by the digest of what it holds: the import applies only that content. */
+function setupImportRef(pathArg: string, parsed: unknown): TargetRef<'setup-import'> {
+  return targetRef('setup-import', pathArg, { bundle: parsed }, { bundle: `the bundle in ${pathArg} as shown` });
+}
 
 type SetupSnapshot = Awaited<ReturnType<typeof buildSetupReviewSnapshot>>;
 
@@ -51,8 +57,10 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
       const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
       if (!pathArg) return undefined;
       let plan: ReturnType<typeof planSetupTransferImport>;
+      let parsed: unknown;
       try {
-        plan = planSetupTransferImport(ctx.platform.configManager, JSON.parse(readFileSync(requireShellPaths(ctx).resolveWorkspacePath(pathArg), 'utf-8')));
+        parsed = JSON.parse(readFileSync(requireShellPaths(ctx).resolveWorkspacePath(pathArg), 'utf-8'));
+        plan = planSetupTransferImport(ctx.platform.configManager, parsed);
       } catch {
         return undefined; // The handler reports an unreadable bundle; nothing would change.
       }
@@ -69,9 +77,11 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           'The replaced files are not kept.',
         ].join('\n'),
         confirmLabel: 'Import',
+        // The import applies exactly this content; a file rewritten before Yes is refused and asked again.
+        reviewed: setupImportRef(pathArg, parsed),
       };
     },
-    async handler(args, ctx) {
+    async handler(args, ctx, reviewed?: unknown) {
       const sub = args[0] ?? 'review';
       let shellPaths: ReturnType<typeof requireShellPaths> | null = null;
       let snapshotPromise: Promise<SetupSnapshot> | null = null;
@@ -263,7 +273,10 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         }
         if (mode === 'import') {
           try {
-            const plan = planSetupTransferImport(ctx.platform.configManager, JSON.parse(readFileSync(targetPath, 'utf-8')));
+            const parsed: unknown = JSON.parse(readFileSync(targetPath, 'utf-8'));
+            const shown = reviewed as TargetRef<'setup-import'> | undefined;
+            if (shown) assertTarget(shown, setupImportRef(shown.id, parsed), `/setup transfer import ${shown.id}`);
+            const plan = planSetupTransferImport(ctx.platform.configManager, parsed);
             if (!plan.ok) {
               ctx.print(`Setup transfer bundle not imported: ${plan.reason}`);
               return;
@@ -310,6 +323,8 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
             }
             ctx.print(`Imported setup transfer bundle from ${targetPath}: ${changes.length} setting(s) changed, ${replacedFiles.length} file(s) replaced${skippedParts.length > 0 ? `, ${skippedParts.join(' and ')} kept as they are here (the bundle masked credentials in them; move those credentials into the secret store with /secrets link on the exporting machine and export again)` : ''}${ignoredKeys.length > 0 ? `, ${ignoredKeys.length} unknown setting(s) skipped (${ignoredKeys.join(', ')})` : ''}.`);
           } catch (error) {
+            // A rewritten bundle goes back to the confirmation, which shows it again.
+            if (error instanceof TargetChangedError) throw error;
             ctx.print(`Failed to import setup transfer bundle (settings written before the failure were restored): ${summarizeError(error)}`);
           }
           return;

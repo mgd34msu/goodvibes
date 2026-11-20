@@ -121,7 +121,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       settingAction({ id: 'permissions-exec', label: 'Shell commands', detail: 'deny refuses shell commands; prompt leaves each command to the execution mode; allow also runs commands without asking when no decision model works.', key: 'permissions.tools.exec' }),
       settingAction({ id: 'permissions-fetch', label: 'Network fetches', detail: 'deny refuses network fetches; prompt leaves each fetch to the execution mode; allow also runs fetches without asking when no decision model works.', key: 'permissions.tools.fetch' }),
       // MCP servers + secrets (forms that open inside the modal)
-      { id: 'onboarding-mcp-server', label: 'Add an MCP server', detail: 'Add or update one MCP server with command, args, role, trust, env refs, paths, and hosts.', editorKind: 'mcp-server', kind: 'editor', safety: 'safe' },
+      { id: 'onboarding-mcp-server', label: 'Add an MCP server', detail: 'Opens /mcp "Add a server": how it starts, its name, then what it may do.', command: '/mcp add', kind: 'command', safety: 'safe' },
       { id: 'onboarding-secret-link', label: 'Link a secret reference', detail: 'Link one config key to a goodvibes secret reference.', editorKind: 'secret-link', kind: 'editor', safety: 'safe' },
       { id: 'onboarding-secret-test', label: 'Test a secret reference', detail: 'Check one stored secret reference without printing the value.', editorKind: 'secret-test', kind: 'editor', safety: 'safe' },
       // Advanced, tool runtime limits and debugging
@@ -299,9 +299,9 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     summary: 'MCP server setup, trust review, and tool inventory.',
     detail: 'Configure and inspect task tools from the Agent TUI. Adding or changing tools requires typed confirmation; normal chat still chooses tools serially in the main conversation.',
     actions: [
-      { id: 'mcp-tools-server', label: 'Server tool inventory', detail: 'Open a server-name form for read-only MCP tool inventory from one server.', editorKind: 'mcp-tools-server', kind: 'editor', safety: 'read-only' },
-      { id: 'mcp-add-server', label: 'Add MCP server', detail: 'Open a confirmed form that adds or updates one MCP server config with scope, role, trust, env refs, paths, and hosts.', editorKind: 'mcp-server', kind: 'editor', safety: 'safe' },
-      { id: 'mcp-repair', label: 'Repair guidance', detail: 'Open a server-name form for read-only MCP repair guidance and next steps.', editorKind: 'mcp-repair', kind: 'editor', safety: 'read-only' },
+      { id: 'mcp-tools-server', label: 'See a server\'s tools', detail: 'Lists the tools each MCP server offers right now (/mcp tools <server> for one).', command: '/mcp tools', kind: 'command', safety: 'read-only' },
+      { id: 'mcp-add-server', label: 'Add a server', detail: 'Opens /mcp "Add a server": how it starts, its name, then what it may do.', command: '/mcp add', kind: 'command', safety: 'safe' },
+      { id: 'mcp-repair', label: 'See how to fix a server', detail: 'Opens /mcp "See how to fix a server": the server\'s state and the steps that fix it.', command: '/mcp repair', kind: 'command', safety: 'read-only' },
       { id: 'secret-set', label: 'Store secret value', detail: 'Open a masked, confirmed form that stores one secret value through the Agent secret manager.', editorKind: 'secret-set', kind: 'editor', safety: 'safe' },
       { id: 'secret-link', label: 'Link secret ref', detail: 'Open a confirmed form that links one key to a goodvibes://secrets/... external reference.', editorKind: 'secret-link', kind: 'editor', safety: 'safe' },
       { id: 'secret-test', label: 'Test secret ref', detail: 'Open a confirmed form that tests one secret reference while printing only redacted status.', editorKind: 'secret-test', kind: 'editor', safety: 'safe' },

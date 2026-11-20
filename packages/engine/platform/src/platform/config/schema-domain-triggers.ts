@@ -88,12 +88,15 @@ export const triggersConfigDefaults: { triggers: TriggersConfig } = {
 export const triggersConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'watchers.triggers.enabled',
+    label: 'Run triggers that watch commands and conditions',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Enable the trigger family: stream watchers over long-lived commands, model-free condition checks, and one-shot on-exit process triggers. Off by default because a trigger launches and supervises real processes on your machine without a person watching, turning it on is a deliberate choice, not a fallback. With it on and no triggers defined, the supervisor idles and consumes nothing.',
   },
   {
     key: 'watchers.triggers.backoffLadderMs',
+    label: 'Waits between retries of a failing trigger (ms)',
     type: 'string',
     description:
       'Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens. Read once when the daemon starts; restart to apply a change.',
@@ -107,6 +110,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.breakerStrikes',
+    label: 'Failures before a trigger is paused',
     type: 'number',
     description:
       'Consecutive check failures that open the trigger\'s breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast. Read once when the daemon starts; restart to apply a change.',
@@ -114,6 +118,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.defaultCheckIntervalMs',
+    label: 'How often a trigger checks its condition (ms)',
     type: 'number',
     description:
       'Cadence used by a condition trigger that does not declare its own interval. This is the steady-state polling rate; the backoff ladder overrides it while a trigger is failing.',
@@ -121,6 +126,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.probeTimeoutMs',
+    label: 'Give up on one trigger check after (ms)',
     type: 'number',
     description:
       'Ceiling on one probe execution (http request, file read, command run, or platform-tool call) before it is abandoned and counted as a failed check. Keeps a hung endpoint from stalling the whole check queue.',
@@ -128,6 +134,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.maxConcurrentChecks',
+    label: 'Trigger checks that run at once',
     type: 'number',
     description:
       'How many condition checks may execute at the same moment. Checks beyond this wait their turn, so a large trigger set cannot saturate the machine or a rate-limited API.',
@@ -135,6 +142,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.observationRingSize',
+    label: 'Readings kept per trigger',
     type: 'number',
     description:
       'Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring. Read once when the daemon starts; restart to apply a change.',
@@ -142,6 +150,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.runHistoryLimit',
+    label: 'Runs kept per trigger',
     type: 'number',
     description:
       'Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name. Read once when the daemon starts; restart to apply a change.',
@@ -149,6 +158,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.runHistoryTtlHours',
+    label: 'Keep trigger runs for (hours)',
     type: 'number',
     description:
       'Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.',
@@ -156,6 +166,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.eventLogLimit',
+    label: 'Events kept for linking triggers',
     type: 'number',
     description:
       'Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit. Read once when the daemon starts; restart to apply a change.',
@@ -163,6 +174,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.eventLogTtlHours',
+    label: 'Keep events for linking triggers for (hours)',
     type: 'number',
     description:
       'Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window. Read once when the daemon starts; restart to apply a change.',
@@ -170,6 +182,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.sweepIntervalMs',
+    label: 'How often old trigger records are cleared (ms)',
     type: 'number',
     description:
       'Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.',
@@ -177,6 +190,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.supervisionTickMs',
+    label: 'How often watched processes are checked (ms)',
     type: 'number',
     description:
       'How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds. Read once when the daemon starts; restart to apply a change.',
@@ -184,6 +198,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.streamQueueLimit',
+    label: 'Matched lines a log watcher may hold',
     type: 'number',
     description:
       'Matched lines a stream watcher may hold before the oldest are dropped. The queue is bounded so a chatty log cannot exhaust memory; every drop is counted and reported on the trigger record rather than being silent.',
@@ -191,6 +206,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.streamBatchLines',
+    label: 'Matched lines sent to an agent at once',
     type: 'number',
     description:
       'Matched lines gathered into one payload before an agent is invoked. Batching is what keeps a stream watcher from starting one agent turn per log line.',
@@ -198,6 +214,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.streamBatchIntervalMs',
+    label: 'Send a partial batch of matched lines after (ms)',
     type: 'number',
     description:
       'How long a partially filled stream batch waits before it is flushed anyway, so a slow trickle of matches still reaches an agent promptly instead of waiting for the batch to fill.',
@@ -205,6 +222,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.onExitMaxDurationMs',
+    label: 'Longest a watched process may run (ms)',
     type: 'number',
     description:
       'Hard ceiling on a supervised on-exit child. When it is reached the child is terminated and the trigger fires with an explicit timed-out termination state, so a process waiting on a prompt that will never come cannot hang forever. The six-hour default is sized for a long build.',
@@ -212,6 +230,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.onExitStdin',
+    label: 'Input given to a watched process',
     type: 'enum',
     enumValues: ['none', 'empty'],
     description:
@@ -219,6 +238,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'watchers.triggers.outputTailBytes',
+    label: 'Output kept from a watched process (bytes)',
     type: 'number',
     description:
       'Bytes of trailing child output carried in an on-exit termination payload. Exit is not success, so the payload always includes this tail for the agent prompt to inspect alongside the exit code and signal.',

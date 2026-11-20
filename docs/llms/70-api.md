@@ -497,7 +497,7 @@ The writes a client needs most:
 | Create a shared session: `sessions.create` | `unsafe`: look first with `GET /api/sessions` and create again only if it is not there. |
 | Send a message or turn: `sessions.followUp`, `sessions.steer`, `sessions.messages.create` | Keyed with the same `messageId` (above). |
 | Run or retry a task: `POST /task` (`tasks.create`), `POST /api/tasks/{taskId}/retry` | Keyed (`Idempotency-Key`): the same key returns the first answer and starts no second agent. |
-| Decide an approval: `POST /api/approvals/{id}/approve` or `/deny`, `inbox.answer` | `safe`: the first decision wins. A repeat, or a different decision afterwards, answers `200` with `"applied":false` and a `refusal` naming who decided; nothing changes. |
+| Decide an approval: `POST /api/approvals/{id}/approve` or `/deny`, `inbox.answer` | `safe`: the first decision wins. A repeat, or a different decision afterwards, answers `200` with `"applied":false`, a `refusal` (`APPROVAL_SETTLED`) and the current `reading`; nothing changes. |
 | Write a setting: `POST /config` (`config.set`), `config.setMany`, `config.reset` | Keyed (`Idempotency-Key`): writing the same value again leaves the same state, but a paired device's change that loosens a setting is put to the owner as an approval, and each unkeyed repeat asks him again. |
 
 ## Sessions: shared and hosted
@@ -710,22 +710,24 @@ After that, sending to it answers `409` `{"error":"Session is closed","code":"SE
 
 When the permission mode needs the owner to decide a tool call, the gate raises an approval and the turn waits.
 
-1. Watch for it. Every approval change arrives as event `approval-update` on domain `gate`, with the whole `approval` record. A stream opened without `?domains=` carries it; a stream that names its domains carries it only when the list includes `gate` (see "What a stream without `domains` carries"). A non-admin credential cannot receive `gate` (`403` `EVENT_ACCESS_DENIED`).
+1. Watch for it. Every approval change arrives as event `approval-update` on domain `gate`, with the whole `approval` record and its `reading` (below). Every record carries `revision` (1 when raised, one more on every change): apply a frame only when its revision is higher than the one you hold, so a late or repeated frame never brings back an ask that was decided. Frames are not replayed: after a gap or a reconnect, read `GET /api/approvals` once. A stream opened without `?domains=` carries it; a stream that names its domains carries it only when the list includes `gate` (see "What a stream without `domains` carries"). A non-admin credential cannot receive `gate` (`403` `EVENT_ACCESS_DENIED`).
 2. Or poll `GET /api/approvals` (scope `read:approvals`): it returns `awaitingDecision`, `mode` (the daemon's `permissions.mode` setting, not any one session's mode), counts and the newest 50 `approvals`. Add `?approvalId=<id>` to read one; an id that matches no approval is not an error: the answer is `200` with `"approvals":[]` (and the counts), so check that the list is not empty. A pending approval does not expire by itself unless the code that raised it set a time limit; then the record carries `expiresAt` and becomes `expired` when it passes.
 
    ```json
    {"awaitingDecision":false,"mode":"jev-decides","approvalCount":0,"denialCount":0,"promptCount":0,"totalChecks":0,"approvals":[]}
    ```
 
-   An approval record has `id`, `callId`, `sessionId`, `status` (`pending`, `claimed`, `approved`, `denied`, `cancelled`, `expired`) and `request` (`tool`, `args`, `category` `read`/`write`/`execute`/`delegate`, and `analysis` with `classification`, `riskLevel` `low`/`medium`/`high`/`critical`, `summary`, `reasons`, `target`, `blastRadius`).
+   An approval record has `id`, `callId`, `sessionId`, `status` (`pending`, `claimed`, `approved`, `denied`, `cancelled`, `expired`), `revision`, `homeNode` (the daemon's cluster node), `requester` (`in-process`, or `wire` with the `holds` of the surfaces that raised it over `approvals.raise`), `cause` when it was cancelled or expired (`requester-left`, `requester-restarted`, `cancelled-by-actor`, `owner-decision-stale`, `deadline`, `deadline-while-down`), and `request` (`tool`, `args`, `category` `read`/`write`/`execute`/`delegate`, and `analysis` with `classification`, `riskLevel` `low`/`medium`/`high`/`critical`, `summary`, `reasons`, `target`, `blastRadius`).
+
+   Each listed record also carries `reading`, computed for the credential that asked: `phase` (`waiting`, `decided`, `ended`), a stable `reason` (`waiting-for-approver`, `waiting-for-owner`, `claimed-by-you`, `claimed-by-other`, `approved`, `denied`, `amended`, `remembered-approved`, `remembered-denied`, `cancelled-requester-left`, `cancelled-requester-restarted`, `cancelled-by-actor`, `cancelled-owner-decision-stale`, `expired`, `expired-while-down`), `waitingOn`, `deadline` (`expiresAt`, `remainingMs`), `allowedActions` (what this credential may do now; the Agent's never include approve or deny), `refusedActions` with why, `decision` (who decided, from which surface and node, when), `receipt` (`delivered`: the asker has it; `waiting`: a surface that raised it has not yet confirmed it; `requester-reads-record`; `not-applicable`), `work` (`not-reported`: whether the approved work ran is not reported by the approval) and `next` (the lawful next moves). A surface words it its own way; the state, the deadline and the actions come from the reading.
 3. Decide it (admin, owner-only, scope `write:approvals`):
 
    ```sh
    curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
-     http://127.0.0.1:3421/api/approvals/<approvalId>/approve -d '{"note":"ok"}'
+     http://127.0.0.1:3421/api/approvals/<approvalId>/approve -d '{"expectedRevision":2,"note":"ok"}'
 
    curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
-     http://127.0.0.1:3421/api/approvals/<approvalId>/deny -d '{"reason":"use the staging database instead"}'
+     http://127.0.0.1:3421/api/approvals/<approvalId>/deny -d '{"expectedRevision":2,"reason":"use the staging database instead"}'
    ```
 
    | Field | Method | Meaning |
@@ -734,22 +736,26 @@ When the permission mode needs the owner to decide a tool call, the gate raises 
    | `reason` | approve, deny | Free text. On a denial the model receives it, so it can adapt. |
    | `selectedHunks` | approve | For an edit: approve only these hunk indices. |
    | `modifiedArgs` | approve | Approve with changed arguments, for example the answer to a command's prompt. |
+   | `expectedRevision` | all (required) | The `revision` of the approval you showed or read. Missing: `400` `INVALID_ARGUMENT`. Stale: not applied (below). A release (`cancel` with `release: true`) needs none. |
    | `note` | all | A note on the record. |
    | `disposition` | approve, deny | Optional and redundant with the URL: `approved` for approve; `denied` or `amended` (the owner changed the request) for deny. Any other value is `400`. |
    | `remember` | approve, deny | A boolean recorded on the decision, asking that it be remembered; `rememberTier` is what makes a standing rule and names its reach. `amended` cannot be combined with `remember: true` or `rememberTier` (`400` `An amendment cannot create a remembered approval rule.`). |
 
-   The body may be empty or omitted; every field is optional. A successful decision answers `200`:
+   Every field but `expectedRevision` is optional. A successful decision answers `200`:
 
    ```json
-   {"approval":{"id":"<approvalId>","status":"approved","request":{"tool":"...","args":{},"category":"execute","analysis":{...}},"decision":{...},...},"applied":true,"recorded":{"approved":true,"rememberTier":null,"reasonStored":false,"modifiedArgsDelivered":false}}
+   {"applied":true,"approval":{"id":"<approvalId>","status":"approved","revision":3,"request":{"tool":"...","args":{},"category":"execute","analysis":{...}},"decision":{...},...},"reading":{"phase":"decided","reason":"approved","receipt":{"state":"delivered"},...},"recorded":{"approved":true,"rememberTier":null,"reasonStored":false,"modifiedArgsDelivered":false}}
    ```
 
    `recorded` is read back from the record the daemon stored: whether it was approved, the tier saved (or `null`), whether a reason was stored, and whether modified arguments reached the waiting call.
 
    | Status | Body | Cause |
    | --- | --- | --- |
-   | `200` | `"applied":false` and `"refusal":"Approval is denied by <who>, which is final; it cannot become approved. Nothing changed."` | The approval had already ended (approved, denied, cancelled or expired). Not an error: the first decision wins. |
-   | `200` | `"applied":false` and `"refusal":"Approval is still pending; this approve was not recorded. Read the approval again and retry."` | The decision did not land; read it and retry. |
+   | `200` | `"applied":false`, `"refusal":{"code":"APPROVAL_SETTLED",...}`, the record and its `reading` | The approval had already ended (approved, denied, cancelled or expired). Not an error: the first decision wins. |
+   | `200` | `"applied":false`, `"refusal":{"code":"APPROVAL_CHANGED",...}`, the record and its `reading` | It changed since the revision you sent (claimed, noted, another surface joined it). Show the returned reading and act on its `revision`. |
+   | `200` | `"applied":false`, `"refusal":{"code":"APPROVAL_EXPIRED",...}` | Its deadline passed before the decision reached it; it is now `expired` and nothing was approved. |
+   | `200` | `"applied":false`, `"refusal":{"code":"OWNER_DECISION_REQUIRED",...}` | Only the paired-owner decision on the device that raised it can approve it; deny and cancel are allowed. |
+   | `400` | `expectedRevision must be the revision of the approval you showed or read ...` | `expectedRevision` missing or not a positive integer. |
    | `400` | `disposition must match the approval action.` | `disposition` was sent and is not `approved` (approve) or `denied`/`amended` (deny). |
    | `400` | `rememberTier must be one of: session, exact, command-class, path, tool.` | Bad `rememberTier`. |
    | `400` | `reason must be a string.` | Bad `reason`. |
@@ -762,13 +768,14 @@ When the permission mode needs the owner to decide a tool call, the gate raises 
    | `404` | `{"error":"Unknown approval","status":404}` | No approval has that id. |
 
    The contract marks approve and deny as owner-only but does not name the `OWNER_ONLY` code or the `400` validation messages; the table above is what the daemon returns. The `OWNER_ONLY` check runs before the approval is looked up, so it answers the same for an id that does not exist. The approval id is taken from the path; an `approvalId` in the body is not used.
-4. `POST /api/approvals/<approvalId>/claim` marks that you are handling it (advisory). `POST /api/approvals/<approvalId>/cancel` withdraws it.
+4. `POST /api/approvals/<approvalId>/claim` marks that you are handling it (advisory). `POST /api/approvals/<approvalId>/cancel` withdraws it. Both take `expectedRevision`.
+5. A surface that raised an ask with `approvals.raise` holds it (`holdId`). It gives the hold up with `cancel` `{"release":true,"holdId":"..."}`: while the ask waits that means it left (the last hold to go cancels it, `cancelled-requester-left`), and once it is decided that means it received the decision, which is what the reading shows as `receipt: delivered`. A raiser that was away (its stream dropped, the daemon restarted) reads the record again and releases then.
 
 Remember tiers and permission modes are explained in "Permissions, decisions and safety".
 
 ### The owner inbox
 
-Approvals are one kind of item in the owner inbox, which also holds questions agents left, channel claims, purchase windows, queued actions, decisions the decision model made, and reports (kind `report`: the answer of a scheduled run or trigger turn that named no surface or whose send failed, answered `read`). `inbox.list` (invoke, `read:approvals`) lists them (`status` `open`, `closed` or `all`; `kinds`; `sessionId`; `limit`; `itemId`). `inbox.answer` (invoke, admin, owner-only) answers one with one of its `options`, or with `text`: `{"body":{"itemId":"...","option":"approve"}}`. Changes arrive as event `owner-inbox-update` on domain `gate`. The first answer wins; a later one returns `applied: false` with who answered.
+Approvals are one kind of item in the owner inbox, which also holds questions agents left, channel claims, purchase windows, queued actions, decisions the decision model made, and reports (kind `report`: the answer of a scheduled run or trigger turn that named no surface or whose send failed, answered `read`). `inbox.list` (invoke, `read:approvals`) lists them (`status` `open`, `closed` or `all`; `kinds`; `sessionId`; `limit`; `itemId`). `inbox.answer` (invoke, admin, owner-only) answers one with one of its `options`, or with `text`: `{"body":{"itemId":"...","option":"approve","expectedRevision":2}}`. An approval item carries the approval's `revision` and `reading`; answering it needs `expectedRevision`. Changes arrive as event `owner-inbox-update` on domain `gate`. The first answer wins; a later one returns `applied: false` with who answered, and an answer after an item's deadline changes nothing. A decision item's choice is claimed before it is carried out: a second choice or a withdrawal meanwhile returns `DECISION_IN_PROGRESS`. An answer to a question an agent or session asked is recorded `delivered` only once a model request carrying it was accepted; if the process that took it stops first, the answer is handed to the asker again.
 
 ## Settings through the API
 

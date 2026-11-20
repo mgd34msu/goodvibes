@@ -1,6 +1,7 @@
-import { existsSync } from 'node:fs';
-import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
-import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
+import { revealOrNull } from '@goodvibes-jev/engine/platform/platform/security';
+import { createAuthCommand } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
+import type { ServiceSignIn, ServiceSignOut } from '@goodvibes-jev/engine/terminal-shell/provider-account-commands';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes-jev/engine/platform/platform/runtime/client/daemon-credentials';
@@ -9,29 +10,13 @@ import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/confi
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { handleLocalAuthCommand } from './local-auth-runtime.ts';
 import { registerUpdateCommand } from './update-runtime.ts';
 import '@/runtime/index.ts';
 import {
   requireProfileManager,
   requireSecretsManager,
-  requireServiceRegistry,
   requireShellPaths,
-  requireSubscriptionManager,
 } from './runtime-services.ts';
-
-/**
- * `/auth bundle export <path>` over an existing file replaces what it holds,
- * for the owner and for a model-run command alike, so the registry asks once
- * first; a new file is written at once.
- */
-function authBundleExportConfirmation(args: readonly string[], resolvePath: (path: string) => string) {
-  const words = args.filter((word) => word !== '--yes');
-  if (words[0] !== 'bundle' || words[1] !== 'export' || !words[2]) return undefined;
-  const target = resolvePath(words[2]);
-  if (!existsSync(target)) return undefined;
-  return { title: `Replace ${target}?`, detail: `${target} already exists; the auth review bundle replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
-}
 
 interface AuthReviewBundle {
   readonly version: 1;
@@ -92,21 +77,18 @@ function decodeListenerSession(value: string): StoredListenerSession | null {
  * plain http carries them readable by anyone on the path, so it is accepted
  * only for this machine.
  */
-function serviceBaseUrl(ctx: CommandContext, raw: string, action: string): URL | null {
+function serviceBaseUrl(raw: string, action: string): URL {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    ctx.print(`${action}: "${raw}" is not a URL. Give the service's base URL, for example https://host.example:3421. Nothing was sent.`);
-    return null;
+    throw commandRefusal(`${action}: "${raw}" is not a web address. Give the service's address, for example https://host.example:3421. Nothing was sent.`);
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    ctx.print(`${action}: ${url.protocol} is not a web address. Use https:// (or http:// for this machine). Nothing was sent.`);
-    return null;
+    throw commandRefusal(`${action}: ${url.protocol} is not a web address. Use https:// (or http:// for this machine). Nothing was sent.`);
   }
   if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
-    ctx.print(`${action}: ${url.host} is another machine and http:// would send the credential unencrypted. Use https://${url.host}${url.pathname === '/' ? '' : url.pathname}. Nothing was sent.`);
-    return null;
+    throw commandRefusal(`${action}: ${url.host} is another machine and http:// would send the credential unencrypted. Use https://${url.host}${url.pathname === '/' ? '' : url.pathname}. Nothing was sent.`);
   }
   return url;
 }
@@ -129,18 +111,15 @@ async function exchangeServiceLogin(
       const location = response.headers.get('location');
       let where = 'another address';
       try { if (location) where = new URL(location, url).origin; } catch { /* an unreadable Location names nothing */ }
-      ctx.print(`Auth login refused: ${input.baseUrl.origin} answered with a redirect to ${where}, and the password is sent only to the address you typed. Sign in at that address directly if it is the ${input.target}. Nothing was stored.`);
-      return;
+      throw commandRefusal(`Not signed in: ${input.baseUrl.origin} answered with a redirect to ${where}, and the password is sent only to the address you typed. Sign in at that address directly if it is the ${input.target}. Nothing was stored.`);
     }
     if (!response.ok) {
       // The body is not echoed: a login endpoint may reflect the submitted credentials.
-      ctx.print(`Auth login failed (HTTP ${response.status}). Check the base URL, username and password, then retry.`);
-      return;
+      throw commandRefusal(`Not signed in: the ${input.target} answered HTTP ${response.status}. Check the address, user name and password, then try again. Nothing was stored.`);
     }
     const body = (await response.json()) as { token?: unknown };
     if (typeof body.token !== 'string') {
-      ctx.print('Auth login response did not include a session token.');
-      return;
+      throw commandRefusal(`Not signed in: the ${input.target}'s answer held no session. Nothing was stored.`);
     }
     if (input.target === 'daemon') {
       // The session is what this terminal presents to that daemon from now on
@@ -159,7 +138,7 @@ async function exchangeServiceLogin(
         notInUse
           ? `Signed in to the daemon at ${signedIn} as ${input.username}; the session is stored but not in use: ${notInUse}.`
           : `Signed in to the daemon at ${signedIn} as ${input.username}; this terminal now calls that daemon with the session.`,
-        `  It stays ${notInUse ? 'stored' : 'in use'} until it expires (calls are then refused until you sign in again or sign out) or you run /auth logout daemon ${signedIn}.`,
+        `  It stays ${notInUse ? 'stored' : 'in use'} until it expires (calls are then refused until you sign in again or sign out) or you run /accounts sign-out daemon ${signedIn}.`,
         ...(input.secretKey === sessionTokenKey(input.target, undefined) ? [] : [`  A daemon session is kept per daemon address, so the key name ${input.secretKey} is not used.`]),
       ].join('\n'));
       return;
@@ -168,14 +147,15 @@ async function exchangeServiceLogin(
     await requireSecretsManager(ctx).set(input.secretKey, encodeListenerSession(input.baseUrl.origin, body.token));
     ctx.print([
       `Signed in to the ${input.target} at ${input.baseUrl.origin} as ${input.username}; the session token is in secure storage as ${input.secretKey}.`,
-      `  The session stays valid on the ${input.target} until it expires or you run /auth logout ${input.target} ${input.baseUrl.origin}${input.secretKey === sessionTokenKey(input.target, undefined) ? '' : ` ${input.secretKey}`}.`,
+      `  The session stays valid on the ${input.target} until it expires or you run /accounts sign-out ${input.target} ${input.baseUrl.origin}${input.secretKey === sessionTokenKey(input.target, undefined) ? '' : ` --key ${input.secretKey}`}.`,
     ].join('\n'));
   } catch (error) {
+    if (readRefusal(error)) throw error;
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-    ctx.print(
+    throw commandRefusal(
       timedOut
-        ? `Auth login timed out after ${AUTH_LOGIN_TIMEOUT_MS / 1000}s waiting for ${input.baseUrl.origin}. Nothing was stored.`
-        : `Auth login failed: ${error instanceof Error ? error.message : String(error)}. Nothing was stored.`,
+        ? `Not signed in: no answer from ${input.baseUrl.origin} after ${AUTH_LOGIN_TIMEOUT_MS / 1000}s. Nothing was stored.`
+        : `Not signed in: ${error instanceof Error ? error.message : String(error)}. Nothing was stored.`,
     );
   }
 }
@@ -195,10 +175,9 @@ async function endServiceSession(
   const secrets = requireSecretsManager(ctx);
   const homeDirectory = requireShellPaths(ctx).homeDirectory;
   // A daemon session is held per address; a listener session names the origin that issued it.
-  const stored = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : await secrets.get(input.secretKey);
+  const stored = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : revealOrNull(await secrets.get(input.secretKey), 'dispatch');
   if (!stored) {
-    ctx.print(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
-    return;
+    throw commandRefusal(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of.`, `/accounts sign-in ${input.target} ${input.baseUrl.origin} signs in.`);
   }
   let token = stored;
   if (input.target === 'listener') {
@@ -210,8 +189,7 @@ async function endServiceSession(
       return;
     }
     if (session.origin !== input.baseUrl.origin) {
-      ctx.print(`The listener session stored as ${input.secretKey} was issued by ${session.origin}; it is never sent to ${input.baseUrl.origin}. Nothing was sent or removed. /auth logout listener ${session.origin}${input.secretKey === sessionTokenKey('listener', undefined) ? '' : ` ${input.secretKey}`} signs out there.`);
-      return;
+      throw commandRefusal(`The listener session stored as ${input.secretKey} was issued by ${session.origin}; it is never sent to ${input.baseUrl.origin}. Nothing was sent or removed.`, `/accounts sign-out listener ${session.origin}${input.secretKey === sessionTokenKey('listener', undefined) ? '' : ` --key ${input.secretKey}`} signs out there.`);
     }
     token = session.token;
   }
@@ -230,8 +208,8 @@ async function endServiceSession(
       : response.status === 401
         ? `The ${input.target} no longer knows the session (it expired or was revoked already).`
         : response.status === 404 || response.status === 405
-          ? `The ${input.target} is an older build without a sign-out route, so the session lapses at its expiry${input.target === 'daemon' ? ', or an admin revokes it with /local-auth revoke-session' : ''}.`
-          : `The ${input.target} did not end the session (HTTP ${response.status}); it lapses at its expiry${input.target === 'daemon' ? ', or an admin revokes it with /local-auth revoke-session' : ''}.`;
+          ? `The ${input.target} is an older build without a sign-out route, so the session lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it with /local-auth sign-out' : ''}.`
+          : `The ${input.target} did not end the session (HTTP ${response.status}); it lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it with /local-auth sign-out' : ''}.`;
   } catch (error) {
     revoked = `The ${input.target} could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
   }

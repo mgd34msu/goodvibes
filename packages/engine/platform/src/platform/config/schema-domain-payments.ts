@@ -68,24 +68,28 @@ export const paymentsConfigDefaults = {
 export const paymentsConfigSettings: ConfigSettingRow[] = [
   {
     key: 'payments.enabled',
+    label: 'Let GoodVibes make purchases',
     type: 'boolean',
     description:
       'Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount.',
   },
   {
     key: 'payments.confirmEveryPurchase',
+    label: 'Ask before every purchase',
     type: 'boolean',
     description:
       'When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named.',
   },
   {
     key: 'payments.defaultCardId',
+    label: 'Card used when a purchase names none',
     type: 'string',
     description:
       'A card id from payments.cards.list. A purchase that names no card is paid with this one; with this empty, every purchase must name its card. Deleting that card does not clear this setting, and a purchase that would use a deleted card is refused saying so. The card NUMBER, expiry and CVV live in the daemon secret store and never in config.',
   },
   {
     key: 'payments.currency',
+    label: 'Currency of your budgets',
     type: 'string',
     description:
       'ISO-4217 code your budgets are denominated in. A checkout priced in any other currency is REFUSED rather than converted, the issuer converts at its own rate on its own date, so any number shown to you before the charge would not be the number you are charged.',
@@ -94,6 +98,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.cvvHandling',
+    label: 'Card security code at checkout',
     type: 'enum',
     enumValues: ['stored', 'prompt'],
     description:
@@ -103,6 +108,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   // ── Budgets ────────────────────────────────────────────────────────────
   {
     key: 'payments.budget.dailyItem',
+    label: 'Most spent on items each day',
     type: 'number',
     description:
       "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it. While payments.budget.dailyOverage is also 0, a purchase with any tax, fee or paid delivery is refused, not asked about.",
@@ -110,6 +116,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.budget.dailyOverage',
+    label: 'Daily allowance for tax, fees and delivery',
     type: 'number',
     description:
       'Daily allowance for charges that CANNOT BE AVOIDED on a purchase you already approved: sales tax, mandatory handling or booking fees, and the delivery option actually used. Written the way you would say it, 25 is twenty-five, 7.50 is seven fifty. Discretionary add-ons, expedited shipping beyond what the ladder picks, insurance, gift wrap, extended warranties, are purchase decisions, not delivery costs, and never draw on this. Default 0.',
@@ -117,12 +124,14 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.budget.perPurchaseCeilingEnabled',
+    label: 'Ask before any single large purchase',
     type: 'boolean',
     description:
       'When true (DEFAULT), no single purchase may come to more than payments.budget.perPurchaseCeiling in total (items, tax, fees and delivery) without your explicit approval, no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once.',
   },
   {
     key: 'payments.budget.perPurchaseCeiling',
+    label: 'Most a single purchase may cost',
     type: 'number',
     description:
       'The most any single purchase may come to in total, items plus tax, fees and delivery, applied when perPurchaseCeilingEnabled is true. A purchase over it asks you first and names the ceiling and by how much. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number.',
@@ -130,12 +139,14 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.budget.overageToleranceEnabled',
+    label: 'Allow a little extra when fees run over',
     type: 'boolean',
     description:
       'When true, a purchase whose unavoidable charges cannot fit the overage budget even at the CHEAPEST delivery option may draw the shortfall from the tolerance allowance below instead of being refused. Default FALSE. Enabling it alone changes nothing, the allowance also starts at 0.',
   },
   {
     key: 'payments.budget.overageToleranceDailyAllowance',
+    label: 'Daily extra allowed when fees run over',
     type: 'number',
     description:
       'Daily tolerance allowance, used only when overageToleranceEnabled is true. Written the way you would say it, 5 is five, 2.50 is two fifty. This is a third pool, drawn on only after the shipping ladder has stepped delivery all the way down and the unavoidable charges still do not fit. Every use is recorded in the purchase audit record.',
@@ -145,6 +156,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   // ── Shipping ───────────────────────────────────────────────────────────
   {
     key: 'payments.shipping.preferredTier',
+    label: 'Preferred delivery speed',
     type: 'enum',
     enumValues: ['normal', 'fast', 'fastest'],
     description:
@@ -154,84 +166,98 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   // ── Addresses ──────────────────────────────────────────────────────────
   {
     key: 'payments.billingAddress.name',
+    label: 'Billing name',
     type: 'string',
     description:
       'Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.line1',
+    label: 'Billing street address',
     type: 'string',
     description:
       'Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.line2',
+    label: 'Billing address, second line',
     type: 'string',
     description:
       'Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.city',
+    label: 'Billing city',
     type: 'string',
     description:
       'City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.region',
+    label: 'Billing state or region',
     type: 'string',
     description:
       'State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.postalCode',
+    label: 'Billing postal code',
     type: 'string',
     description:
       'Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.country',
+    label: 'Billing country',
     type: 'string',
     description:
       'Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.name',
+    label: 'Delivery name',
     type: 'string',
     description:
       'Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.line1',
+    label: 'Delivery street address',
     type: 'string',
     description:
       'Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.line2',
+    label: 'Delivery address, second line',
     type: 'string',
     description:
       'Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.city',
+    label: 'Delivery city',
     type: 'string',
     description:
       'City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.region',
+    label: 'Delivery state or region',
     type: 'string',
     description:
       'State, province or region; leave empty where the country has none (it is required only for countries whose addresses use one, such as US, CA, AU, IN). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.postalCode',
+    label: 'Delivery postal code',
     type: 'string',
     description:
       'Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.country',
+    label: 'Delivery country',
     type: 'string',
     description:
       'Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
@@ -240,6 +266,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   // ── The two windows ────────────────────────────────────────────────────
   {
     key: 'payments.windows.vetoMinutes',
+    label: 'Time to stop a purchase within budget (minutes)',
     type: 'number',
     description:
       'How long you get to STOP an in-budget purchase, in minutes, starting once the final total is known and before payment. The notice is always in your owner inbox, and on the channels in payments.notifyChannels. This is a VETO, not an approval: if you say nothing, the purchase GOES AHEAD. One word (stop) cancels it. The window always runs its full length wherever you are, no presence, focus or activity signal shortens it, and an explicit acknowledgement buys immediately.',
@@ -247,6 +274,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.windows.approvalMinutes',
+    label: 'Time to approve a purchase over budget (minutes)',
     type: 'number',
     description:
       'How long an ABOVE-BUDGET purchase waits for your explicit approval, in minutes. This is the opposite of the veto window: if you say nothing, the purchase is DENIED. Denial is the recoverable outcome, ask again and it goes through, so a short window costs friction while a long one leaves a cart holding a price that may drift. Default 60, which survives a meeting or a commute; raise it if you are away for long stretches.',
@@ -255,6 +283,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
 
   {
     key: 'payments.majorRetailersAdditional',
+    label: 'Shops to add to the trusted list',
     type: 'string',
     description:
       "Comma-separated REGISTRABLE domains (eTLD+1, e.g. 'microcenter.com', not 'www.microcenter.com') to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
@@ -263,6 +292,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.majorRetailersExcluded',
+    label: 'Shops to remove from the trusted list',
     type: 'string',
     description:
       'Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.',
@@ -271,6 +301,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.ebayMinSellerFeedbackCount',
+    label: 'Fewest seller ratings for an eBay purchase',
     type: 'number',
     description:
       "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, or when the figure cannot be read from eBay's own seller widget, the purchase asks for your yes. The listing is read by code from the page the purchase runs on: its purchase controls and eBay's seller card, never the seller's text. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
@@ -278,6 +309,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.ebayMinSellerPositivePercent',
+    label: 'Lowest positive seller rating for an eBay purchase (%)',
     type: 'number',
     description:
       'Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay\'s own feedback widget, never from the seller\'s listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming.',
@@ -285,6 +317,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'payments.notifyChannels',
+    label: 'Other places purchase questions are sent',
     type: 'string',
     description:
       "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (/questions in both terminal apps, and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",

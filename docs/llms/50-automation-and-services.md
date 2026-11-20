@@ -561,7 +561,7 @@ The Agent's `/google` (alias `/gmail`) connects one Google account for both mail
 /google connect                 work out the shortest route and connect
 /google status                  what is connected, proven by reading mail and calendar
 /google reauthorize             fresh consent covering mail and calendar
-/google forget [--yes]          remove stored Google credentials (says what would go, then waits for --yes)
+/google forget [--yes]          remove stored Google credentials (says what would go, then waits for --yes; the yes removes only the values that question named, and keeps one stored or replaced since)
 /google adopt [--yes]           take up Google credentials from files on this machine (~/.gmail-mcp)
 /google client-file <path>      store an OAuth client JSON you already have, then ask for consent
 /google client <client-id> <client-secret>
@@ -569,7 +569,7 @@ The Agent's `/google` (alias `/gmail`) connects one Google account for both mail
 /google calendar-address <url>  store the private iCal address (read-only calendar)
 /google setup [--path app-password|oauth|existing-client]
 /google runbook                 print the step-by-step instructions
-/google approve [<n>] [--yes|--drop]   show sends that were refused; --yes sends the one shown exactly as shown
+/google approve [<n>] [--yes|--drop]   show sends that were refused; --yes sends the one shown exactly as shown (without a number, only the one the last listing showed; a different send is refused, list again)
 ```
 
 The same routes are cards in the Agent workspace under Personal Ops. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
@@ -812,14 +812,14 @@ A webhook registered for the bot blocks polling (Telegram answers `409 Conflict`
 | Setting | Notes |
 | --- | --- |
 | `surfaces.ntfy.baseUrl` | Default `https://ntfy.sh`. |
-| `surfaces.ntfy.chatTopic` | Messages here go to the active shared terminal session. |
-| `surfaces.ntfy.agentTopic` | Messages here start agent work. |
-| `surfaces.ntfy.remoteTopic` | Messages here use daemon-owned remote chat. |
-| `surfaces.ntfy.topic` | Default delivery topic for notifications. |
+| `surfaces.ntfy.chatTopic` | Messages here go to the active shared terminal session (secret). |
+| `surfaces.ntfy.agentTopic` | Messages here start agent work (secret). |
+| `surfaces.ntfy.remoteTopic` | Messages here use daemon-owned remote chat (secret). |
+| `surfaces.ntfy.topic` | Default delivery topic for notifications (secret). |
 | `surfaces.ntfy.token` | Optional access token (secret). Env `NTFY_ACCESS_TOKEN`. |
 | `surfaces.ntfy.defaultPriority` | Default `3`. |
 
-On the public server a topic name is the only thing keeping strangers out, so topics ship unset: `goodvibes surfaces enable ntfy` gives each unset topic an unguessable name, saves it and says which names to subscribe to. ntfy carries no sender identity, so a change asked for over ntfy is refused. `goodvibes surfaces` lists the inbound topics.
+On the public server a topic name is the only thing keeping strangers out, so each topic is a credential: its name is kept in the secret store (daemon tier, key `GOODVIBES_SURFACES_NTFY_CHAT_TOPIC` and so on) and the setting holds a `goodvibes://secrets/` reference; a literal name written into a setting is refused, and the settings screens, channel accounts, status and the model's tools show the reference or `(secret)`, never a name. Setting a topic in a settings screen, the setup wizard or channel setup stores it that way. Topics ship unset: `goodvibes surfaces enable ntfy` gives each unset topic an unguessable name, stores it and says which names to subscribe to, and the daemon does the same when ntfy starts with a topic unset. ntfy carries no sender identity, so a change asked for over ntfy is refused. `goodvibes surfaces` (the owner's own command) lists the topic names to subscribe to. The ntfy subscribe-URL action builds URLs only for a topic it is given.
 
 ### Generic webhook
 

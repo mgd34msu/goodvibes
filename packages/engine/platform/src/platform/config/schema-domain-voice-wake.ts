@@ -96,6 +96,8 @@ export function parseWakeModelList(value: string): string[] {
 export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'voice.wake.enabled',
+    label: 'Listen for the wake word',
+    appliesWhen: 'now',
     type: 'boolean',
     description:
       'Run the wake-word detector, listening continuously for the wake phrase on the configured input device. '
@@ -114,6 +116,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.models',
+    label: 'Wake words to listen for',
     type: 'string',
     description:
       'Comma-separated wake-word models to run concurrently, by id. Default "hey_goodvibes" is the model the platform pins, hosts, '
@@ -127,6 +130,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.threshold',
+    label: 'How sure it must be that it heard the wake word (0 to 1)',
     type: 'number',
     ...numRange(0, 1),
     description:
@@ -140,6 +144,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.patienceFrames',
+    label: 'How long the wake word must be heard (80 ms steps)',
     type: 'number',
     ...intRange(1, 10),
     description:
@@ -149,6 +154,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.cooldownMs',
+    label: 'Ignore the wake word right after it is heard (ms)',
     type: 'number',
     ...intRange(0, 60_000),
     description:
@@ -158,6 +164,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.vadThreshold',
+    label: 'How sure it must be that someone is speaking (0 to 1)',
     type: 'number',
     ...numRange(0, 1),
     description:
@@ -174,6 +181,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.noiseSuppression',
+    label: 'Reduce background noise',
     type: 'enum',
     enumValues: ['none', 'speex'],
     description:
@@ -189,6 +197,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.inputDevice',
+    label: 'Microphone',
     type: 'string',
     description:
       'Capture device to listen on. Empty means the operating system default source. '
@@ -201,6 +210,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.captureCommand',
+    label: 'Recording program',
     type: 'enum',
     enumValues: ['auto', 'pw-record', 'parecord', 'arecord', 'ffmpeg', 'sox'],
     description:
@@ -213,6 +223,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.surfaces.tui',
+    label: 'Listen for the wake word in the terminal app',
     type: 'boolean',
     description:
       'Listen for the wake phrase on the terminal, through a recorder subprocess on the host. On by default: once wake detection '
@@ -222,6 +233,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.surfaces.agent',
+    label: 'Listen for the wake word in the Agent',
     type: 'boolean',
     description:
       'Listen for the wake phrase on the agent surface, through a recorder subprocess on the host, the same capture path the '
@@ -234,16 +246,18 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.surfaces.webui',
+    label: 'Listen for the wake word in the web UI',
     type: 'boolean',
     description:
       'Listen for the wake phrase in the web UI, which runs the detector inside the browser tab on a WASM backend and downloads the '
-      + 'pinned model through the daemon. Off by default because browser capture is a separate stack with its own per-origin '
-      + 'microphone permission prompt, it is opted into per browser, not inherited from the host. While it is off the tab never '
-      + 'calls getUserMedia at all, so no permission prompt appears. A plain-http origin cannot capture and says so instead of '
-      + 'failing silently.',
+      + 'pinned model through the daemon. This daemon\'s setting: once it is on, every browser that opens this daemon\'s web UI '
+      + 'listens, each only after its own microphone permission prompt is accepted. Off by default because browser capture is a '
+      + 'separate stack from the terminal\'s. While it is off a tab never calls getUserMedia at all, so no permission prompt '
+      + 'appears. A plain-http origin cannot capture and says so instead of failing silently.',
   },
   {
     key: 'voice.wake.surfaces.app',
+    label: 'Listen for the wake word in the desktop app',
     type: 'boolean',
     description:
       'Listen for the wake phrase in the desktop companion app, which runs the detector inside its embedded webview on a WASM '
@@ -253,6 +267,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.activationSound',
+    label: 'Sound when the wake word is heard',
     type: 'enum',
     enumValues: ['none', 'chime', 'custom'],
     description:
@@ -262,6 +277,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.activationSoundPath',
+    label: 'Your own wake sound file',
     type: 'string',
     description:
       'Absolute path to the audio file played on wake. Read only when voice.wake.activationSound is "custom"; ignored otherwise. '
@@ -271,6 +287,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.indicator',
+    label: 'Show when the microphone is listening',
     type: 'enum',
     enumValues: ['off', 'statusline', 'banner'],
     description:
@@ -281,6 +298,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.preRollMs',
+    label: 'Audio kept from just before the wake word (ms)',
     type: 'number',
     ...intRange(0, 2000),
     description:
@@ -290,6 +308,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.captureMaxSeconds',
+    label: 'Longest a spoken request may last (seconds)',
     type: 'number',
     ...intRange(0, 120),
     description:
@@ -306,6 +325,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.silenceStopMs',
+    label: 'Silence that ends a spoken request (ms)',
     type: 'number',
     ...intRange(100, 10_000),
     description:
@@ -316,6 +336,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.silenceFloorRms',
+    label: 'Sound level that counts as silence',
     type: 'number',
     ...intRange(0, 8000),
     description:
@@ -336,6 +357,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.speechRetriggerMs',
+    label: 'Sound that counts as talking again (ms)',
     type: 'number',
     ...intRange(0, 2000),
     description:
@@ -350,6 +372,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.autoSubmit',
+    label: 'Send a spoken request without review',
     type: 'boolean',
     description:
       'Submit the transcribed text as a turn automatically instead of placing it in the input for review. Applies to the '
@@ -360,6 +383,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.retainAudio',
+    label: 'Keep recordings on disk',
     type: 'enum',
     enumValues: ['none', 'session-temp'],
     description:
@@ -371,6 +395,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.customModelDir',
+    label: 'Folder of your own wake word models',
     type: 'string',
     description:
       'Directory searched for wake models whose ids are not the pinned default. Empty uses the managed wake model directory '
@@ -379,6 +404,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.maxRestarts',
+    label: 'Restarts after the listener crashes',
     type: 'number',
     ...intRange(0, 20),
     description:
@@ -388,6 +414,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.restartBackoffMs',
+    label: 'Wait before restarting the listener (ms)',
     type: 'number',
     ...intRange(0, 60_000),
     description:
@@ -396,6 +423,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.crashWindowSeconds',
+    label: 'Window in which listener crashes are counted (seconds)',
     type: 'number',
     ...intRange(1, 3600),
     description:
@@ -405,6 +433,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'voice.wake.browserBackend',
+    label: 'How the browser runs the wake word listener',
     type: 'enum',
     enumValues: ['wasm', 'webgpu'],
     description:

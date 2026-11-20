@@ -332,7 +332,7 @@ A line of `goodvibes providers` reads like this:
 | --- | --- |
 | `goodvibes subscription list` | Active and pending subscription sign-ins. |
 | `goodvibes subscription providers` | Providers that offer subscription sign-in, with their redirect address. |
-| `goodvibes subscription inspect <provider>` | One provider's stored sign-in: whether it is active or pending, token type and expiry. Never prints a token. |
+| `goodvibes subscription inspect <provider>` | One provider's stored sign-in: whether it is active or pending, token type and expiry. Never prints a token: with `--output json` the stored sign-in is `{ configured, tokenType, expiresAt, refreshToken: present\|absent, scopes, overrideAmbientApiKeys, createdAt, updatedAt }`. |
 | `goodvibes subscription login <provider> start [--open]` | Starts the sign-in, saves a pending record and prints the authorization address. `--open` opens it in a browser. `goodvibes subscription start <provider>` is a shorter form. |
 | `goodvibes subscription login <provider> finish <code-or-url>` | Finishes the sign-in with the code, or the whole redirect address the browser landed on. `goodvibes subscription finish <provider> <code-or-url>` is a shorter form. |
 | `goodvibes subscription refresh <provider>` | Refreshes the stored token. This form is not in the program's help. |
@@ -1077,6 +1077,8 @@ A listener session is stored with the address that issued it; `/auth logout list
 
 `/secrets <subcommand>` manages persistent secrets with the same forms as the `goodvibes secrets` command, plus `get <KEY>` (shows whether it resolves) and `trust <KEY>`.
 `/secret <NAME>` asks for a value with masked input and keeps it as an environment variable for this session only: `[Secret] Stored NAME (N characters, value hidden). Available to shell/tool runs as $NAME.`
+
+While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <KEY> <value>` (also after `--`), `/config set` and the Agent's `/settings set` for a credential key, `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`.
 `/storage [review|list|delete <key>]` reviews secure storage posture and lists stored key names; deletion is done with `/secrets delete <key>`.
 
 `/usage [turns|agents]` opens the Usage view on a tab.
@@ -1106,6 +1108,8 @@ An invalid value prints `Could not set <key>: <reason>`.
 `/setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]` (alias `/startup`) reviews startup readiness.
 `/setup support-bundle ./bundle` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential.
 `/setup transfer export ./setup.json` writes a setup transfer bundle; `/setup transfer import ./setup.json` applies it on another machine and reports `N setting(s) changed, M file(s) replaced`.
+A confirmation applies exactly what it showed. When `/setup transfer import`, `/managed apply <path>`, `/services trust <name>` or `/hosted kill` finds its target changed between the question and Yes (the file rewritten, the entry edited, the line meaning another session), nothing is done and the question is asked again with `Changed since you looked:` and each change on top (for `/managed apply`, the keys whose values differ); a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
+A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
 `/onboarding` opens the onboarding wizard with current settings loaded.
 `/install [review]` prints install posture.
@@ -1967,9 +1971,11 @@ A tool the server adds later is allowed until it is blocked. To refuse every too
 
 - `/mcp trust` and `/mcp role` write `trustMode` or `role` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`) and apply it at once; it holds after a restart: `<server> is set to "<mode>". Kept in <scope> MCP config <path>; it applies now and after a restart.` A server that comes only from a read-only file gets the value for this session only, and the line says why: `It is set for this session only (<reason>).` `/mcp restore-trust <server>` and `/mcp restore-role <server>` end a value set for this session only. Both programs take `allow-all` and `ask-on-risk` from `/mcp trust` and `/mcp add --trust`; each loosens a protection, so the line asks first and a model's line is refused. Settings → MCP keeps a trust mode the same way (`<server> trust mode is <mode>, kept in <scope> MCP config <path>: it applies now and after a restart.`). `allow-all` is read only from `~/.config/mcp/mcp.json`: written to a project file it is ignored when the file is read.
 - `/mcp block <server> <tool>` lasts for the session. With `--keep` it is written as `deniedTools` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`). `/mcp unblock` removes the block, this session's and the kept one.
-- `/mcp exempt` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused. `/mcp unexempt` removes it.
-- A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp block for this session.`
+- `/mcp exempt` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused. `/mcp unexempt` removes it. `unblock` and `unexempt` each drop only their own kind of rule, and say so when the tool has none: `<tool> on <server> is not blocked; nothing changed.`
+- Settings → MCP takes the same words typed on a server's row (`block <tool>`, `unblock <tool>`, `exempt <tool>`, `unexempt <tool>`), kept in the server's MCP config until you change it.
+- A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or block it for this session only: /mcp block <server> <tool>.`
 - A rule written while a server runs applies at once.
+- The daemon runs the same actions for the web UI and scripts, each method named by the action's word: `mcp.servers.tools.block`, `.unblock`, `.exempt`, `.unexempt` (each kept with the server's entry; a block for one terminal's session is that terminal's), `mcp.servers.trust.set`, `mcp.servers.role.set`, `mcp.servers.reload`, `mcp.servers.quarantine.accept`, `mcp.servers.upsert` (Add a server) and `mcp.servers.remove`. `unblock`, `exempt`, a looser trust level and accepting changed tools are the owner's own acts: refused for the Agent's model. Going back to a saved trust level or role and holding tools back act on one terminal's session, so they are done there.
 - `deniedTools`, `trustMode` `blocked`, the path and host scope and quarantine are enforced by the MCP registry itself, so they apply in every permission mode, `yolo` included.
 
 ### `/mcp`
@@ -2493,7 +2499,7 @@ A run with no prompt is refused after the command line is read, so it prints no 
 - `stream-json`: one JSON object per line as events happen, then the final frame.
 
 When no decision model was in use for the run, its one-line explanation (for example `No decision model is in use: none is set, so decisions take their fallbacks. Next: to use one, set judgment.model, judgment.endpoint or TYPESAFE_API_KEY.`) goes to standard error in every format, and the JSON formats also carry it in `diagnostics`.
-When a request moves from one sign-in of a provider to another (OpenAI: subscription to API key), one line goes to standard error in every format, once per move: `<model> answered through your <provider> <sign-in>: the <previous sign-in> failed (<reason>).`
+When a request moves from one sign-in of a provider to another (OpenAI: subscription to API key), one line goes to standard error in every format, once per move: `<model> answered through your <provider> <sign-in>: the <previous sign-in> failed (<reason>).` The reason is a fixed phrase for the kind of failure with the HTTP status and the provider's short error code, for example `it reached its rate limit (HTTP 429), code rate_limit_exceeded`; the provider's own error text is never repeated.
 Free text in any frame (`error`, `reason`, `question`, `summary`, `detail`, a tool's error) has credentials masked and is cut at 1000 characters followed by `...`. Tool arguments, agent task text, agent output and the full contract request are never included.
 Consumers ignore frame types and fields they do not know. A field shown as optional is left out when it has no value; it is never sent as `null`, except `sessionId` and `usage` in the final frame.
 

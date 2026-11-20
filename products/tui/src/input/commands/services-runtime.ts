@@ -4,7 +4,8 @@ import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/con
 import type { CommandRegistry } from '../command-registry.ts';
 import type { SelectionAction, SelectionItem } from '../selection-modal.ts';
 import { requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { describePendingProjectService, pendingProjectServiceLines, type ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { describePendingProjectService, pendingProjectServiceLines, projectServiceRef, type ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
+import { assertTarget, TargetChangedError, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 const SERVICE_AUTH_TYPES = new Set(['bearer', 'basic', 'api-key', 'oauth']);
@@ -32,14 +33,19 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
     aliases: ['svc'],
     description: 'Manage API service configurations',
     usage: '[open|list|inspect <name>|test <name>|resolve|auth <name>|auth-review|doctor|trust <name>|export <path>|import <path>]',
-    confirm: (args) => args[0] === 'trust' && args[1]
-      ? {
-          title: `Use the service ${args[1]} from this project's services file?`,
-          detail: `A project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as it stands now; if the repository changes its keys, header or host it waits for confirmation again.`,
-          confirmLabel: 'Use it',
-        }
-      : undefined,
-    async handler(args, ctx) {
+    confirm: (args, ctx) => {
+      if (args[0] !== 'trust' || !args[1]) return undefined;
+      // The question names what the entry sends and where; the yes approves that entry only.
+      const pending = requireServiceRegistry(ctx).pendingProjectServices().find((service) => service.name === args[1]);
+      if (!pending) return undefined; // The handler says why there is nothing to confirm.
+      return {
+        title: `Use the service ${args[1]} from this project's services file?`,
+        detail: `${describePendingProjectService(pending)}.\nA project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as shown here; if the repository changes its keys, header or host it waits for confirmation again.`,
+        confirmLabel: 'Use it',
+        reviewed: projectServiceRef(pending),
+      };
+    },
+    async handler(args, ctx, reviewed?: unknown) {
       const sub = args[0] ?? 'open';
       const shellPaths = requireShellPaths(ctx);
       if (sub === 'open' || sub === 'panel') {
@@ -61,11 +67,16 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         try {
-          const result = svcRegistry.confirmProjectService(name);
+          // Confirmed: the entry must still be the one shown, and that one is approved.
+          const shown = reviewed as TargetRef<'project-service'> | undefined;
+          const now = svcRegistry.pendingProjectServices().find((service) => service.name === name);
+          if (shown) assertTarget(shown, now ? projectServiceRef(now) : null, `/services trust ${name}`);
+          const result = svcRegistry.confirmProjectService(name, shown ? now?.digest : undefined);
           ctx.print(result.ok
             ? `Service ${name} from this project is used from now on: ${describePendingProjectService(result.service)}.`
             : `Nothing was confirmed: ${result.reason}.`);
         } catch (error) {
+          if (error instanceof TargetChangedError) throw error;
           ctx.print(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);
         }
         return;

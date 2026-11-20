@@ -24,7 +24,7 @@ import { beginModal, finishModal, scrollCountText, type KitHint, type SurfaceLay
 import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
-import { fixedChoices, isShown, listChoices, renderTypedLine, riskWords } from './typed-line.js';
+import { fixedChoices, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FirstScreenGroup, InputDescription } from './types.js';
 
 export type PanelResult =
@@ -322,7 +322,7 @@ export class GuidedPanel implements SurfaceModal {
     const steps = stepsOf(action);
     const fields = this.stepFields();
     const values = this.values();
-    const line = renderTypedLine(this.command, action.id, values);
+    const line = renderTypedLine(this.command, action.id, withoutSecrets(action, values));
     const f = this.frame(screenWidth, screenHeight, fields.length * 2 + 6, [['⏎', this.stepIndex < steps.length - 1 ? 'next' : 'done'], ['tab', 'field'], ['esc', 'back']]);
     // Text starts at the title's column; the form scrolls so the blank being answered is always shown.
     const l = f.l + 1;
@@ -343,9 +343,12 @@ export class GuidedPanel implements SurfaceModal {
     const room = f.bottom - y - 2 - (this.note ? 2 : 0);
     let first = 0;
     const span = (from: number, to: number): number => { let total = 0; for (let k = from; k <= to; k++) total += heightOf(k, from); return total; };
-    while (first < this.field && span(first, Math.min(this.field, fields.length - 1)) > room) first++;
-    let last = first;
-    while (last + 1 < fields.length && span(first, last + 1) <= room - 1) last++;
+    // One row is kept for the "more below" mark whenever a blank follows the window.
+    const focus = Math.min(this.field, fields.length - 1);
+    const budget = (to: number): number => room - (to < fields.length - 1 ? 1 : 0);
+    while (first < focus && span(first, focus) > budget(focus)) first++;
+    let last = Math.max(first, focus);
+    while (last + 1 < fields.length && span(first, last + 1) <= budget(last + 1)) last++;
     if (first > 0) f.canvas.right(f.r, f.top, `↑ ${first} more above`, { fg: t.textFaint });
     for (let index = first; index <= last; index++) {
       const input = fields[index]!;

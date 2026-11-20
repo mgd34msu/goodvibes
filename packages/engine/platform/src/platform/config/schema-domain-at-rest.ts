@@ -23,12 +23,14 @@ export const atRestConfigDefaults: { atRest: AtRestConfig } = {
 export const atRestConfigSettings: ConfigSettingRow[] = [
   {
     key: 'atRest.redactionEnabled',
+    label: 'Hide keys and tokens in saved transcripts',
     type: 'boolean',
     description:
       'When true (default), credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl), reusing the same pattern set as the telemetry egress. Home paths are NOT redacted. The local execution ledger gets the same treatment only when the application embedding the platform wires the policy in. Crash reports are always redacted, whatever this setting says. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets in the transcript journal are acceptable.',
   },
   {
     key: 'atRest.retentionMaxAgeDays',
+    label: 'Delete logs and transcripts older than (days)',
     type: 'number',
     description:
       'Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.',
@@ -36,6 +38,7 @@ export const atRestConfigSettings: ConfigSettingRow[] = [
   },
   {
     key: 'atRest.retentionMaxTotalMb',
+    label: 'Most space logs and transcripts may use (MB)',
     type: 'number',
     description:
       'Total-size cap (MB) for each of the append-only file sets named under atRest.retentionMaxAgeDays (transcript journals, execution ledger, activity log, crash logs, crash-recovery snapshots). When exceeded, the oldest are deleted first (rotated backups before freshly-written active files) until under budget. Saved conversations are never deleted by it.',

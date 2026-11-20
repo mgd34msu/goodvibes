@@ -102,7 +102,11 @@ export class DurablePaymentOperations {
   report(): { readonly operations: readonly PaymentOperationView[]; readonly unreadable: readonly PaymentUnreadableOperation[] } {
     const { value } = this.index();
     const operations: PaymentOperationView[] = [], unreadable: PaymentUnreadableOperation[] = [];
-    for (const key of new Set([...value.open, ...value.recent])) {
+    // The files are the record; the index is a cache of them. An operation
+    // published and never indexed (a stop between the two) is found by its
+    // file, listed, and put back in the index, so recovery and status see it.
+    const unindexed = this.unindexedOperationIds(value);
+    for (const key of new Set([...value.open, ...value.recent, ...unindexed])) {
       let operation: PaymentOperationView | null;
       try { operation = this.get(key); } catch { operation = null; }
       if (operation) operations.push(operation);
@@ -110,7 +114,26 @@ export class DurablePaymentOperations {
         + 'Inspect that purchase\'s payment evidence (its journal entry and merchant history) before taking further action on it; its status cannot be shown.' }));
     }
     operations.sort((a, b) => b.updatedAtMs - a.updatedAtMs || a.purchaseId.localeCompare(b.purchaseId));
+    for (const operation of operations) {
+      if (!unindexed.includes(operation.purchaseId)) continue;
+      try { this.indexOperation(operation); } catch { /* The file still lists it; the index is repaired on a later read. */ }
+    }
     return { operations, unreadable };
+  }
+
+  /** Operation files in the directory that the index does not name: one directory read. */
+  private unindexedOperationIds(index: { readonly open: readonly string[]; readonly recent: readonly string[] }): string[] {
+    let files: string[];
+    try { files = readdirSync(this.directory); } catch { return []; }
+    const named = new Set([...index.open, ...index.recent]);
+    const found: string[] = [];
+    for (const file of files) {
+      if (!file.endsWith('.json') || file.startsWith('.')) continue;
+      let id: string;
+      try { id = checkoutRequestId(Buffer.from(file.slice(0, -'.json'.length), 'base64url').toString('utf8')); } catch { continue; }
+      if (!named.has(id) && this.path(id) === join(this.directory, file)) found.push(id);
+    }
+    return found;
   }
   private index(): { value: { version: 1; open: string[]; recent: string[] }; observed: FileObservation | null } {
     try {
@@ -131,12 +154,42 @@ export class DurablePaymentOperations {
           if (indexExists) throw new Error();
           let files: string[];
           try { files = readdirSync(this.directory); } catch (missing) { if (!absent(missing)) throw missing; files = []; }
-          if (files.some(file => file.endsWith('.json'))) throw new Error();
+          // Existing evidence never becomes an empty index: the index is a cache
+          // of the operation files, so a lost one is rebuilt from them.
+          if (files.some(file => file.endsWith('.json') && !file.startsWith('.'))) return this.rebuildIndex();
           return { value: { version: 1, open: [], recent: [] }, observed: null };
         } catch { /* Existing evidence cannot become an empty index. */ }
       }
       throw new PaymentOperationStoreError('unavailable');
     }
+  }
+  /**
+   * Rebuild a lost index from the operation files: an empty index is
+   * published under the index lock, then each readable operation is indexed
+   * as its own write would have, oldest first. Throws when any file cannot be
+   * read (its evidence must not be dropped from the listing).
+   */
+  private rebuildIndex(): { value: { version: 1; open: string[]; recent: string[] }; observed: FileObservation | null } {
+    const release = tryAcquireCrossProcessLock(join(this.directory, '.index.lock'));
+    if (!release) throw new PaymentOperationStoreError('busy');
+    const operations: PaymentOperationView[] = [];
+    try {
+      for (const id of this.unindexedOperationIds({ open: [], recent: [] })) {
+        const operation = this.get(id);
+        if (operation === null) throw new PaymentOperationStoreError('unavailable');
+        operations.push(operation);
+      }
+      const path = join(this.directory, 'index');
+      writeFileAtomic(path, `${JSON.stringify({ version: 1, open: [], recent: [] })}\n`, { mode: 0o600, durable: true, cleanupStaleTemps: false,
+        assertCurrent: () => {
+          try { lstatSync(path); } catch (error) { if (absent(error)) return; throw error; }
+          throw new PaymentOperationStoreError('unavailable');
+        } });
+      this.observedIndex = true;
+    } finally { release(); }
+    operations.sort((a, b) => a.updatedAtMs - b.updatedAtMs || a.purchaseId.localeCompare(b.purchaseId));
+    for (const operation of operations) this.indexOperation(operation);
+    return this.index();
   }
   private initializeIndex(): void {
     const release = tryAcquireCrossProcessLock(join(this.directory, '.index.lock'));

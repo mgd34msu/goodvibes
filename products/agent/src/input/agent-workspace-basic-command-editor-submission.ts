@@ -7,7 +7,6 @@ import { buildAgentWorkspaceKnowledgeCommandEditorSubmission, isAgentWorkspaceKn
 import { buildAgentWorkspaceLibraryCommandEditorSubmission, isAgentWorkspaceLibraryCommandSubmissionKind } from './agent-workspace-library-command-editor-submission.ts';
 import { buildAgentWorkspaceMemoryCommandEditorSubmission, isAgentWorkspaceMemoryCommandSubmissionKind } from './agent-workspace-memory-command-editor-submission.ts';
 import { buildAgentWorkspaceMediaCommandEditorSubmission, isAgentWorkspaceMediaCommandSubmissionKind } from './agent-workspace-media-command-editor-submission.ts';
-import { buildAgentWorkspaceMcpCommandEditorSubmission, isAgentWorkspaceMcpCommandSubmissionKind } from './agent-workspace-mcp-command-editor-submission.ts';
 import { buildAgentWorkspaceNotifyEditorSubmission, isAgentWorkspaceNotifyEditorKind } from './agent-workspace-notify-editor-submission.ts';
 import { buildAgentWorkspaceOperationsCommandEditorSubmission, isAgentWorkspaceOperationsCommandSubmissionKind } from './agent-workspace-operations-command-editor-submission.ts';
 import { buildAgentWorkspaceProviderCommandEditorSubmission, isAgentWorkspaceProviderCommandSubmissionKind } from './agent-workspace-provider-command-editor-submission.ts';
@@ -354,9 +353,6 @@ export function buildAgentWorkspaceBasicCommandEditorSubmission(
   }
   if (isAgentWorkspaceTaskCommandSubmissionKind(editor.kind)) {
     return buildAgentWorkspaceTaskCommandEditorSubmission(editor, readField);
-  }
-  if (isAgentWorkspaceMcpCommandSubmissionKind(editor.kind)) {
-    return buildAgentWorkspaceMcpCommandEditorSubmission(editor, readField);
   }
   if (isAgentWorkspaceOperationsCommandSubmissionKind(editor.kind)) {
     return buildAgentWorkspaceOperationsCommandEditorSubmission(editor, readField);

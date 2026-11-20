@@ -626,6 +626,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         route: () => ({ provider: activeRoute.provider, model: activeRoute.modelId, ...(record.reasoningEffort ? { reasoning: { reasoningEffort: record.reasoningEffort } } : {}) }),
         // A verification request is its own provider request, so it takes the request check itself.
         beforeAttempt: async () => { terminal.assertCurrent(); await assertVerificationProvider(); await context.beforeProviderRequest?.(); terminal.assertCurrent(); },
+        // A failed proposal request moves the run along its fallback order like any of its requests.
+        failOver: (error) => agentFailover(error),
         onUsage: (response, durationMs) => {
           record.usage = { ...record.usage!, inputTokens: record.usage!.inputTokens + response.usage.inputTokens,
             outputTokens: record.usage!.outputTokens + response.usage.outputTokens,

@@ -558,6 +558,17 @@ export class HostedSessionSpineIntake {
           } finally {
             this.inFlight.delete(key);
           }
+          // Held for a retry: nothing behind it runs first. The rest of the
+          // lane waits with it, in order, and the next tick delivers the retry
+          // before them (retries go first, in the order they were held).
+          if (this.pending.has(key) && !this.stopped) {
+            for (const held of lane.queue.splice(0)) {
+              const heldKey = pendingKey(held.sessionId, held.inputId);
+              this.inFlight.delete(heldKey);
+              if (!this.pending.has(heldKey)) this.pending.set(heldKey, held);
+            }
+            return;
+          }
         }
       } finally {
         lane.worker = null;
@@ -644,8 +655,7 @@ export class HostedSessionSpineIntake {
     logger.error('[hosted-sessions] a collected input could not be delivered and is now marked failed', {
       sessionId: pending.sessionId, inputId: pending.inputId, attempts, error: detail,
     });
-    await spine.failInput?.(pending.sessionId, pending.inputId, detail).catch(() => undefined);
-    this.alertOwner(pending, attempts, detail);
+    await this.failAndAlert(spine, pending, attempts, detail);
   }
 
   /** Whether this session still has an input queued, collected or being delivered. */
@@ -683,8 +693,7 @@ export class HostedSessionSpineIntake {
       logger.error('[hosted-sessions] a collected input failed and its failure could not be classified; it is now marked failed', {
         sessionId: pending.sessionId, inputId: pending.inputId, attempts: current.attempts, readingFailures,
       });
-      await spine.failInput?.(pending.sessionId, pending.inputId, detail).catch(() => undefined);
-      this.alertOwner(current, current.attempts, detail);
+      await this.failAndAlert(spine, current, current.attempts, detail);
     }
   }
 
@@ -721,17 +730,34 @@ export class HostedSessionSpineIntake {
       sessionId: pending.sessionId, inputId: pending.inputId, attempts: pending.attempts, error: failure.detail,
     });
     assertCurrent(); signal.throwIfAborted();
-    await spine.failInput?.(pending.sessionId, pending.inputId, failure.detail).catch(() => undefined);
-    assertCurrent(); signal.throwIfAborted();
-    this.alertOwner(pending, pending.attempts, failure.detail);
+    await this.failAndAlert(spine, pending, pending.attempts, failure.detail, () => { assertCurrent(); signal.throwIfAborted(); });
+  }
+
+  /**
+   * Mark the input failed on the spine, then tell the owner what is true: that
+   * it was marked failed only once that write resolved, else that the mark
+   * itself failed (a restart may then deliver it again).
+   */
+  private async failAndAlert(spine: HostedSessionSpine, pending: PendingDelivery, attempts: number, detail: string, assertCurrent?: () => void): Promise<void> {
+    let marked = true;
+    try {
+      await spine.failInput?.(pending.sessionId, pending.inputId, detail);
+    } catch (error) {
+      marked = false;
+      logger.error('[hosted-sessions] an undeliverable input could not be marked failed', {
+        sessionId: pending.sessionId, inputId: pending.inputId, error: summarizeError(error),
+      });
+    }
+    assertCurrent?.();
+    this.alertOwner(pending, attempts, detail, marked);
   }
 
   /** Say it on a channel that still works. Never throws into the tick. */
-  private alertOwner(pending: PendingDelivery, attempts: number, detail: string): void {
+  private alertOwner(pending: PendingDelivery, attempts: number, detail: string, marked: boolean): void {
     try {
       this.options.alertOwner?.(
         `A message for hosted session ${pending.sessionId} could not be delivered after ${attempts} attempts `
-        + `and has been marked failed: ${detail}`,
+        + (marked ? `and has been marked failed: ${detail}` : `and could not be marked failed either, so it may be tried again after a restart: ${detail}`),
       );
     } catch (error) {
       logger.error('[hosted-sessions] the owner could not be told about an undelivered message', {

@@ -49,6 +49,7 @@
  * the caller. Nothing catches a secret-store error and forwards its message: the
  * failing call had the card in its arguments.
  */
+import type { Secret } from '../../security/secret.js';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
@@ -71,7 +72,7 @@ import type { CardMetadata } from '../types.js';
  * scope; nothing here chooses where a secret lands.
  */
 export interface PaymentsSecretStore {
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<Secret | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
 }
@@ -160,6 +161,19 @@ interface CardsFile {
  * meant to reach the caller verbatim, and the others carry a store path that
  * must not.
  */
+/**
+ * A card create that failed after some of its material was written, and whose
+ * cleanup could not remove all of it: the card's row is kept (it lists as
+ * incomplete) so the leftover material can be deleted with its id.
+ */
+export class CardCreateIncompleteError extends Error {
+  constructor(readonly cardId: string, readonly fieldsLeft: readonly string[]) {
+    super(`The card could not be stored, and ${fieldsLeft.length} of its saved fields could not be removed again. `
+      + `It is listed as card ${cardId} (incomplete); delete it with payments.cards.delete to remove what was saved.`);
+    this.name = 'CardCreateIncompleteError';
+  }
+}
+
 export class CardStoreUnreadableError extends Error {
   constructor(filePath: string, reason: string) {
     super(
@@ -405,11 +419,16 @@ export class DaemonCardStore implements CardMaterialStore {
       if (storeCvv) await this.putField(cardId, 'cvv', input.cvv, written);
       await this.putField(cardId, 'cardholderName', input.cardholderName, written);
     } catch (error) {
-      await this.clearFields(cardId, written);
-      this.dropRow(cardId);
       // Rethrown as a message written HERE. The original came from a call whose
       // arguments were the card.
       void error;
+      // The row goes only once every field that landed was cleared: material
+      // the cleanup could not remove keeps its visible row (materialComplete
+      // false), so payments.cards.delete can still reach it, and the caller is
+      // told exactly that instead of "nothing was saved".
+      const remaining = await this.clearFields(cardId, written);
+      if (remaining.length > 0) throw new CardCreateIncompleteError(cardId, remaining);
+      this.dropRow(cardId);
       throw new Error('The card could not be written to the daemon secret store.');
     }
     return metadata;
@@ -503,7 +522,8 @@ export class DaemonCardStore implements CardMaterialStore {
   private async fieldValue(cardId: string, field: CardMaterialField): Promise<string | null> {
     if (field === 'cvv' && !this.suppliesStoredCvv()) return null;
     const value = await this.secrets.get(cardSecretKey(cardId, field));
-    return value === null || value.length === 0 ? null : value;
+    // Revealed only here, for the checkout form it is typed into.
+    return value === null || value.empty ? null : value.reveal('dispatch');
   }
 
   private async putField(
@@ -516,14 +536,16 @@ export class DaemonCardStore implements CardMaterialStore {
     written.push(field);
   }
 
-  private async clearFields(cardId: string, fields: readonly CardMaterialField[]): Promise<void> {
+  /** Clears the fields that landed; returns the ones that could not be cleared. */
+  private async clearFields(cardId: string, fields: readonly CardMaterialField[]): Promise<CardMaterialField[]> {
+    const remaining: CardMaterialField[] = [];
     for (const field of fields) {
       try {
         await this.secrets.delete(cardSecretKey(cardId, field));
       } catch {
-        // Best effort. The write that failed is already being reported; a
-        // failure to undo it must not replace that report with a second one.
+        remaining.push(field);
       }
     }
+    return remaining;
   }
 }

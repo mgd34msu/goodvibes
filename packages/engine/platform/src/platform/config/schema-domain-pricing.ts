@@ -22,6 +22,7 @@ export const pricingConfigDefaults = {
 export const pricingConfigSettings: ConfigSettingRow[] = [
   {
     key: 'pricing.modelPrices',
+    label: 'Your own model prices',
     type: 'object',
     description:
       'Manual model prices, keyed provider:model (e.g. "openrouter:deepseek/deepseek-chat"). Each entry: '

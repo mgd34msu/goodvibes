@@ -4,7 +4,7 @@
  * and the model's catalogue entry (label, sentence, typed pattern, what it
  * touches, the risk, and why only the owner may run it).
  */
-import { fixedChoices, linePattern, renderTypedLine, riskWords, actionSentence } from './typed-line.js';
+import { fixedChoices, linePattern, renderTypedLine, riskWords, actionSentence, singleAction } from './typed-line.js';
 import { LASTS_WORDS, type ActionDescription, type CommandDescription, type InputDescription } from './types.js';
 
 function lastsText(action: ActionDescription<never>): string {
@@ -27,12 +27,18 @@ function inputText(input: InputDescription): string {
 /** The help entry for `/help <command>`: its summary, then each action with its sentence and its line. */
 export function renderCommandHelp(description: CommandDescription<never>): string {
   const lines = [`/${description.name}: ${description.title}`, `  ${description.summary}`, ''];
-  lines.push(`  /${description.name} alone opens the list of actions below${description.report ? `; where no list can be shown it runs "${description.actions.find((action) => action.id === description.report)?.label ?? description.report}"` : ''}.`);
+  const single = singleAction(description);
+  if (single) {
+    const needs = single.inputs.some((input) => input.required === true);
+    lines.push(`  /${description.name}${needs ? ' asks for what it needs and then' : ''} ${needs ? 'runs' : 'runs at once'}${single.risk !== 'none' ? ', after asking you' : ''}.`);
+  } else {
+    lines.push(`  /${description.name} alone opens the list of actions below${description.report ? `; where no list can be shown it runs "${description.actions.find((action) => action.id === description.report)?.label ?? description.report}"` : ''}.`);
+  }
   for (const action of description.actions) {
     const risk = riskWords(action.risk);
     lines.push('', `  ${action.label}${risk ? `  (${risk})` : ''}`);
     lines.push(`    ${actionSentence(action, Object.fromEntries(action.inputs.map((input) => [input.id, `<${input.label.toLowerCase()}>`])))}`);
-    lines.push(`    /${description.name} ${linePattern(action)}`);
+    lines.push(`    ${[`/${description.name}`, linePattern(action)].filter(Boolean).join(' ')}`);
     if (Object.keys(action.example).length > 0) lines.push(`    for example: ${renderTypedLine(description, action.id, action.example)}`);
     if (action.ownerOnly) lines.push(`    only when you type it: ${action.ownerOnly.reason}`);
   }
@@ -45,7 +51,7 @@ export function describeActionForModel(description: CommandDescription<never>, a
     id: action.id,
     label: action.label,
     word: action.word,
-    line: `/${description.name} ${linePattern(action)}`,
+    line: [`/${description.name}`, linePattern(action)].filter(Boolean).join(' '),
     example: renderTypedLine(description, action.id, action.example),
     sentence: action.sentence,
     touches: action.touches,

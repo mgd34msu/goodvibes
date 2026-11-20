@@ -2958,6 +2958,16 @@
       "types": "./terminal-shell/dist/command-actions/data.d.ts",
       "import": "./terminal-shell/dist/command-actions/data.js"
     },
+    "./terminal-shell/described-command-kit": {
+      "bun": "./terminal-shell/src/described-command-kit.ts",
+      "types": "./terminal-shell/dist/described-command-kit.d.ts",
+      "import": "./terminal-shell/dist/described-command-kit.js"
+    },
+    "./terminal-shell/workstream-command": {
+      "bun": "./terminal-shell/src/workstream-command.ts",
+      "types": "./terminal-shell/dist/workstream-command.d.ts",
+      "import": "./terminal-shell/dist/workstream-command.js"
+    },
     "./terminal-shell/plain-line-input": {
       "bun": "./terminal-shell/src/plain-line-input.ts",
       "types": "./terminal-shell/dist/plain-line-input.d.ts",
@@ -3242,6 +3252,11 @@
       "bun": "./terminal-shell/src/command-context-contracts.ts",
       "types": "./terminal-shell/dist/command-context-contracts.d.ts",
       "import": "./terminal-shell/dist/command-context-contracts.js"
+    },
+    "./terminal-shell/launch-auto-update": {
+      "bun": "./terminal-shell/src/launch-auto-update.ts",
+      "types": "./terminal-shell/dist/launch-auto-update.d.ts",
+      "import": "./terminal-shell/dist/launch-auto-update.js"
     },
     "./terminal-shell/launch-update-preflight": {
       "bun": "./terminal-shell/src/launch-update-preflight.ts",

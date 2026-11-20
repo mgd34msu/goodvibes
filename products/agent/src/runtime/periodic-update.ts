@@ -37,7 +37,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { channelDeliveriesInFlight } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions, type CheckForUpdateResult } from '../input/commands/update-runtime.ts';
 import { restartOntoUpdatedBinary } from '../cli/launch-auto-update.ts';
-import { readExplicitUpdateKeys, readUpdateSettings, type UpdateSettings } from '../config/update-settings.ts';
+import { readUpdateSettings, updateKeyStated, type UpdateSettings } from '../config/update-settings.ts';
 import { compareVersions, detectInstallKind, normalizeVersion, type UpdateFetchLike } from './update-check.ts';
 import { recordSelfUpdate } from './self-update-receipt.ts';
 import type { ConfigManager } from '../config/index.ts';
@@ -286,7 +286,7 @@ export function resumeArgv(argv: readonly string[], sessionId: string | undefine
 }
 
 export interface StartPeriodicSelfUpdateParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath' | 'getDaemonTierPath'>>;
+  readonly configManager: Pick<ConfigManager, 'getRaw' | 'sourceOf'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath' | 'getDaemonTierPath'>>;
   readonly services: {
     /**
      * The sessions THIS process is running, and how many are mid-turn. Read
@@ -338,7 +338,7 @@ export interface StartPeriodicSelfUpdateParams {
 export function startPeriodicSelfUpdate(params: StartPeriodicSelfUpdateParams): () => void {
   if (IS_WORKSPACE_DISTRIBUTION) return () => {};
   const settings = readUpdateSettings(params.configManager);
-  const autoWasStated = readExplicitUpdateKeys(params.configManager).has('auto');
+  const autoWasStated = updateKeyStated(params.configManager, 'auto');
   const currentVersion = params.currentVersion ?? VERSION;
   const execPath = params.execPath ?? process.execPath;
   if (!periodicUpdateEnabled(settings, { autoWasStated })) {

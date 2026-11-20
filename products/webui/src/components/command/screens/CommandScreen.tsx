@@ -5,13 +5,16 @@
  * reason in a sentence. A screen reads its rows with `useCommandRead` and
  * reads again after any of its sheets ran.
  */
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { COMMAND_ACTIONS } from '../../../lib/generated/command-actions';
 import { invokeMethod } from '../../../lib/goodvibes';
 import { formatError } from '../../../lib/errors';
 import { Button } from '../../ui/Button';
 import { terminalOnlyActions } from '../ActionSheet';
+
+/** False inside a panel whose own header already names the screen. */
+export const CommandScreenTitleShown = createContext(true);
 
 /** The query key prefix of every screen's reads: a sheet that ran reads them all again. */
 export const COMMAND_SCREEN_KEY = ['command-screen'] as const;
@@ -46,11 +49,12 @@ export function CommandScreen({ command, title, summary, actions, testId, childr
 }) {
   const described = COMMAND_ACTIONS.commands.find((entry) => entry.name === command);
   const terminal = terminalOnlyActions(command);
+  const titled = useContext(CommandScreenTitleShown);
   return (
     <section className="gv-command-screen" data-testid={testId} aria-label={title ?? described?.title ?? command}>
       <header className="gv-command-screen__head">
         <div className="gv-command-screen__titles">
-          <h3 className="gv-command-screen__title">{title ?? described?.title ?? command}</h3>
+          {titled ? <h3 className="gv-command-screen__title">{title ?? described?.title ?? command}</h3> : null}
           <p className="gv-command-screen__summary">{summary ?? described?.summary}</p>
         </div>
         {actions ? <div className="gv-command-screen__actions">{actions}</div> : null}

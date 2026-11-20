@@ -271,7 +271,7 @@ sources.
 
 ## Release and license
 
-Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.1](../../docs/releases/3.3.1.md).
+Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
 
 Package: `@goodvibes-jev/daemon` · `private: true`.
 The repository root owns the shared release version for all suite products.

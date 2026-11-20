@@ -70,20 +70,21 @@ cd ~/code/my-project
 goodvibes
 ```
 
-1. **Set up a model.** The first time, a **Welcome to GoodVibes** menu
-   appears; choose **Full guided setup**. Its first page asks what GoodVibes
-   should be able to do: work only in the terminal, or also in a browser, from
-   other devices and with outside apps. Next, **AI provider access**: paste an
-   API key for any provider that takes one, or sign in with a ChatGPT
-   subscription. Then **Default model**: pick the model and how hard it should
-   think. Later pages cover other features, and the last one reviews what you
-   chose. If GoodVibes already finds a provider key in your environment, it
-   skips this: the welcome menu offers that provider, or, with
-   `OPENROUTER_API_KEY` (the default model is OpenRouter's free one), you start
-   at once. `/setup` reopens the setup at any time, `/model` switches
-   models and `/scan` finds model servers on your machine and network.
+1. **Set up a model, in three steps.** When the model it would use is not
+   ready, **Welcome to GoodVibes** asks **Which model should answer you?**:
+   a ChatGPT subscription, Anthropic, OpenRouter, a model found on this
+   computer (Ollama, LM Studio and the like), or another provider. Next, sign
+   in with your browser or paste the API key; a key the provider refuses is
+   not kept. Then the conversation opens with three starting prompts for your
+   folder and one sentence saying when GoodVibes asks before acting. When a key
+   in your environment already makes a provider usable, `a` uses it and skips
+   the sign-in step; with `OPENROUTER_API_KEY` set (the default model is
+   OpenRouter's free one), it asks nothing and opens the conversation. `/setup`
+   sets up the rest one topic at a time, `/model` switches models and `/scan`
+   finds model servers on your machine and network.
 2. **Ask about the project.** Type `What does this project do, and how do I run
-   its tests?` and press Enter. It reads the files it needs and answers.
+   its tests?` and press Enter (or press Tab to put a starting prompt in the
+   box). It reads the files it needs and answers.
 3. **Ask for a change.** Type `Add a --verbose flag to the CLI and run the
    tests.` The first time it wants to write or run something in a folder, it
    asks whether to trust the folder: **Trust this workspace** lets it work,
@@ -91,9 +92,10 @@ goodvibes
    command, you can allow it once, allow it and remember the rule, or deny it
    with a reason it reads.
 
-`?` lists every command, `Esc` interrupts a reply and `Ctrl+C` twice quits.
-`goodvibes doctor` checks the setup. The personal assistant starts with
-`goodvibes-agent`, which opens on a setup workspace the first time.
+`?`, `/help` or `Ctrl+P` lists every command and key, `Esc` interrupts a reply
+and `Ctrl+C` twice quits. `goodvibes doctor` checks the setup. The personal
+assistant starts with `goodvibes-agent`, which runs the same three-step first
+run.
 
 ## What you can do
 
@@ -113,7 +115,7 @@ goodvibes
   `/devices pair channel telegram` connects a Telegram bot; Slack, Discord, Signal,
   WhatsApp, Matrix and others work the same way.
   ([web app](products/webui/docs/operator-guide.md#signing-in-and-pairing),
-  [channels](products/tui/docs/channels-remote-and-api.md#channel-command))
+  [channels](products/tui/docs/channels-remote-and-api.md#channels-command))
 - **Mail and calendar.** In `goodvibes-agent`, `/google connect` links Gmail and
   Google Calendar. Then ask `what's on my calendar tomorrow?`.
   ([Google setup](packages/engine/docs/google-setup-runbook.md))
@@ -214,7 +216,7 @@ The `judgment.policy` setting says what happens when a decision model is set:
 
 You are always told when no decision model is in use: once in the
 conversation, in `goodvibes status` and `goodvibes-agent status`, in headless
-JSON results, and in a bar in the web app. A few features need a decision model
+JSON results, and in the permission mode chip in the web app's header. A few features need a decision model
 and say so when none is in use. How much you are asked under each mode and
 policy: [decision model guide](docs/decision-model-policy.md).
 
@@ -250,7 +252,7 @@ By topic:
 - [Chat channels and the daemon's API](products/tui/docs/channels-remote-and-api.md)
 - [Headless runs](products/agent/docs/headless-run.md) and [exit codes](docs/exit-codes.md)
 - [Purchases](packages/engine/docs/payments.md)
-- [Release notes for 3.3.1](docs/releases/3.3.1.md)
+- [Release notes for 3.3.2](docs/releases/3.3.2.md)
 - [Building on the platform](packages/engine/README.md) and [the Jev decision layer](packages/judgment/README.md)
 - [Security policy](SECURITY.md)
 

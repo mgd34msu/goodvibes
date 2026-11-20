@@ -57,6 +57,8 @@ declares these WebSocket verbs. They require authenticated access; listing decla
 | `sessions.hosted.kill` | Required `sessionId`. | `{ session }` with its termination reason |
 | `sessions.hosted.list` | Optional `includeTerminated`. | `{ sessions }`, most recently updated first |
 | `sessions.hosted.workspaces` | None. | `{ roots }`: the folders a session may be started in |
+| `sessions.hosted.history` | Required `sessionId`. | `{ session, history }`, live or ended, without attaching |
+| `sessions.hosted.share` | Required `sessionId` and `principalId` (a user name, or `pairing:<id>` for a paired device). | `{ session, owners, added }` |
 
 `workspaceRoot` must be an absolute, existing directory on the daemon's machine, and it
 must be the daemon's working directory or a registered workspace (`workspaces.registrations.add`),
@@ -112,9 +114,9 @@ command session are named in that prompt with the platform tool that covers the
 same facts, and a call to one is refused with the reason and the next step. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.
 A `clientId` belongs to the principal that first attached it: another principal that attaches or detaches the same `clientId` is refused with 403 `HOSTED_CLIENT_FORBIDDEN`, so choose a `clientId` of your own.
-The principal that creates a session, and every principal that attaches to it, is one of its owners. Owners are kept with the session when their clients detach or their leases run out, and across a daemon restart; the session's contracts are visible only to its owners (see `contracts.list`).
+The principal that creates a session is its owner. Attaching never makes the caller an owner: an owner (or an admin) adds another principal with `sessions.hosted.share`, and that is the only way another credential joins. A credential below admin attaches to, or reads the history of, only a session its principal created or was shared; anyone else is refused (`NOT_YOURS`, or `HOSTED_SESSION_NOT_OWNED` for history). Owners are kept with the session when their clients detach or their leases run out, and across a daemon restart; the session's contracts are visible only to its owners (see `contracts.list`).
 
-There are no dedicated REST routes for these five hosted verbs. The daemon also
+There are no dedicated REST routes for these hosted verbs. The daemon also
 accepts them through its generic authenticated
 `POST /api/control-plane/methods/<method>/invoke` endpoint, with method parameters
 inside the JSON envelope's `body` property. HTTP requests require an operator

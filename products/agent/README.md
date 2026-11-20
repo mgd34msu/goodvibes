@@ -4,7 +4,7 @@
 
 GoodVibes Agent is a personal assistant that runs in your terminal. It gives you one workspace for chat, research, mail and calendar, reminders and schedules, notes, memory and document drafts, and it can send messages through your chat channels. It works through the GoodVibes daemon on your machine, which keeps the schedules, channels and knowledge it uses; the installer sets the daemon up for you. Anything it sends, spends or writes comes with a plain-language confirmation and a receipt with private details removed. It can reuse the provider and permission settings you already made for the `goodvibes` terminal app, so setup does not start from zero.
 
-<img src="docs/assets/operator-workspace.png" alt="The fullscreen GoodVibes Agent operator workspace. A left column lists operator areas under an Onboarding heading, with Start and Models flagged for attention. The right pane is headed Start, 16 actions, and summarises setup state: 3 of 13 done, 4 need attention, the current chat route, a count of local personas, skills, routines, and memories, and a next step reading Connected-host auth, blocked. Below, a Setting / Default / Current table lists the available actions: use a local model with no sign-in, sign in to a provider, choose main model, import GoodVibes settings, reasoning effort medium, save history true, and a Finish setup row. A footer shows the workspace key hints." width="900">
+<img src="docs/assets/operator-workspace.png" alt="The fullscreen GoodVibes Agent operator workspace. A left column lists operator areas under an Onboarding heading, with Start and Models flagged for attention. The right pane is headed Start, 16 actions, and summarises setup state: 3 of 13 done, 4 need attention, the current chat route, a count of local personas, skills, routines, and memories, and a next step reading Connected-host auth, blocked. Below, a Setting / Default / Current table lists the available actions: use a local model with no sign-in, sign in to a provider, choose main model, import GoodVibes settings, reasoning effort medium, save history true, and a Finish setup row. A footer shows the workspace key hints. The screenshot is from an earlier release: the first run is now three steps before the conversation, and each workspace row opens the guided form of a slash command." width="900">
 
 ## Install and start
 
@@ -14,13 +14,13 @@ Install with the [suite installer](../../docs/installation.md), which installs t
 curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Then run `goodvibes-agent`. The first time, it opens a setup workspace where you sign in to a model provider (or pick a local model), choose your main model, optionally import settings from `goodvibes`, and finish setup; after that it opens on a fresh conversation. `/agent` reopens the workspace at any time. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
+Then run `goodvibes-agent`. When no model is ready, it runs the same three-step first run as `goodvibes`: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. `/setup` sets up everything else one topic at a time (`/setup import-settings` brings over what you set in `goodvibes`), and `/agent` or `Ctrl+G` opens the workspace at any time. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 
 ## A short tour
 
-**The workspace is the product.** `goodvibes-agent` opens straight into a fullscreen operator workspace on first run and until setup is finished; after that a relaunch starts a fresh conversation. Reopen the workspace any time with `/agent`, `/home`, or `/operator`; slash commands and CLI subcommands are power-user and scriptable mirrors of the same actions. Press `/` inside the workspace to search every action by name, category, command, or detail.
+**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `/agent` or `Ctrl+G`; each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. Browsing the workspace never reaches the network: a report that reads a mailbox, a provider or the daemon runs only when you ask for it with `Ctrl+R`. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
 
 **One assistant, several jobs.** Beyond normal chat, the workspace gives you read-only web research with explicit hand-off into Agent Knowledge, versioned document drafting with blind model comparison, a Personal Ops area for inbox/agenda/task/reminder/note requests, and an Operator Runtime view of the connected host's own methods and service posture.
 
@@ -28,7 +28,7 @@ Then run `goodvibes-agent`. The first time, it opens a setup workspace where you
 
 **Local behavior is yours to shape.** A friendly `VIBE.md` personality file, separate from project instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), plus local memory, notes, personas, and skills all live under the Agent home and are scanned for secret-looking content before they ever reach a prompt. Personas capture a reusable voice or role; skills capture a reusable capability; routines capture a reusable sequence you can start in chat and, as a separate explicit and confirmation-gated step, promote to a connected schedule.
 
-**Automation stays visible, and you decide what is yours to decide.** Reminders, schedules, channel sends, media generation, and visible background agents all show up in one autonomy queue. Who approves the rest follows `permissions.mode`, as in the terminal app: owner-only items (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) come to you in every mode but `yolo` (asked, or held for the end of the run in `just-vibes`), and Jev never answers them; in the default `jev-decides` mode Jev, the decision model, answers the judgment calls, and with no working decision model you are asked instead. Purchases inside the limits you set go ahead after a veto window. See [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
+**Automation stays visible, and you decide what is yours to decide.** What waits for you, what is running, what finished and what is scheduled show in Your agents (`F2`, `Ctrl+O` or `/agents`), the same panel as in the terminal app; a scheduled run that failed while the Agent was closed is named in one line when it starts. Who approves the rest follows `permissions.mode`, as in the terminal app: owner-only items (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) come to you in every mode but `yolo` (asked, or held for the end of the run in `just-vibes`), and Jev never answers them; in the default `jev-decides` mode Jev, the decision model, answers the judgment calls, and with no working decision model you are asked instead. Purchases inside the limits you set go ahead after a veto window. See [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
 **The model can plan its own route.** Ask a plain question like "email the team a summary" or "what's blocked in setup" and the underlying model can call a route planner that maps the request to the right tool and confirmation boundary before doing anything. It does not have to guess at internal tool names, and ambiguous requests come back as candidates instead of a wrong guess.
 
@@ -82,7 +82,7 @@ Other useful overrides:
 - `GOODVIBES_AGENT_HOME=/path/to/agent-home`: run with an isolated Agent home instead of the default one.
 - `GOODVIBES_AGENT_RUNTIME_URL=http://host:port` (or the `--runtime-url` flag): point at a GoodVibes host on a different address; `GOODVIBES_AGENT_BASE_URL` is accepted as a legacy alias.
 - `~/.goodvibes/agent/providers/*.json`: local, hot-reloaded custom provider definitions.
-- `/settings action:"import"` (or `import_goodvibes_settings`): preview, then apply, provider/UI/permission/subscription/surface/tool/daemon-endpoint settings already configured for goodvibes-tui or another published GoodVibes platform store, without mutating the source.
+- `/setup import-settings` (or the model tool `import_goodvibes_settings`): preview, then apply, provider/UI/permission/subscription/surface/tool/daemon-endpoint settings already configured for goodvibes-tui or another published GoodVibes platform store, without mutating the source.
 
 The full settings catalog, the checkpoint-guard keys, and the shared-settings-import contract are in [docs/tools-and-commands.md](docs/tools-and-commands.md) and [docs/getting-started.md](docs/getting-started.md).
 
@@ -109,8 +109,8 @@ daemon holds (never the number, CVV or name) and the addresses.
 
 ### Native work controls (local Jev implementation)
 
-`/work` discovers the authenticated daemon's native project without legacy
-planning lookup; `/work <daemon-project-id>` selects it explicitly.
+`/work open` discovers the authenticated daemon's native project without legacy
+planning lookup; `/work open <daemon-project-id>` selects it explicitly.
 `/work start|status|cancel|resume <work-id>` operates an existing native work
 item. Commands derive attempt identity and revisions from the live ledger.
 
@@ -143,7 +143,7 @@ path. Neither path uses a second legacy classification or source-less work
 start. Missing authority, unsupported attachments or an unknown dispatch
 produce a visible diagnostic; there is no legacy conversation fallback.
 
-The exact original and delivery mode survive restart. `/work intake-status`
+The exact original and delivery mode survive restart. `/work intake`
 inspects and reopens observation; `intake-retry`, `intake-resume` and
 `intake-cancel` recover or cancel that same original. A lost reply never creates
 fresh IDs or switches delivery modes. An input whose journal save failed never
@@ -180,7 +180,7 @@ Both products use the same command contract:
 
 - `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
   `goal` (a string) and `criteria` (an ordered array of strings).
-- `/work submission-status` looks up the retained request without writing work.
+- `/work submission` looks up the retained request without writing work.
 - `/work submission-retry` first looks up that same request. Only a `not-found`
   result can lead to replay of the exact retained request.
 - `/work submission-discard` first looks up that same request. When the host
@@ -219,7 +219,7 @@ once its submission has a validated receipt, or when `submission-discard` drops
 it after the host reported it does not have it, and one whose outcome is not
 yet known is never evicted.
 
-After a restart, use `submission-status` or `submission-retry` to recover the
+After a restart, use `submission` or `submission-retry` to recover the
 original request. Both first look it up using that same identity. Retry does not
 reread the source file, generate new IDs or refresh the revision. Only an explicit
 retry after `not-found` can send the identical durably confirmed request. A
@@ -288,7 +288,7 @@ The Agent consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `
 
 ## Stability
 
-GoodVibes ships as one suite version. Changes are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.1](../../docs/releases/3.3.1.md).
+GoodVibes ships as one suite version. Changes are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
 
 ## License
 

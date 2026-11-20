@@ -17,7 +17,8 @@ afterEach(async () => {
 });
 
 function harness(root: string): Harness {
-  const value = makeHarness({ root, contract: { maxActiveContracts: 0 }, plan: oneUnitPlan(), scripts: {} });
+  // One contract runs at a time (the setting's floor) and its unit never finishes, so each start stays where it was put.
+  const value = makeHarness({ root, contract: { maxActiveContracts: 1 }, plan: oneUnitPlan(), scripts: { u1: () => [{ text: '', stop: { kind: 'hang' } }] } });
   harnesses.push(value);
   return value;
 }

@@ -140,7 +140,8 @@ independent of the job it fires. The schedule endpoints manage those records.
 | `automation.schedules.list` | Return schedule records |
 | `automation.schedules.create` | Create a schedule record |
 | `automation.schedules.delete` | Delete a schedule record |
-| `automation.schedules.enable` / `automation.schedules.disable` | Turn a schedule on or off without deleting it |
+| `automation.schedules.pause` / `automation.schedules.resume` | Pause a schedule or resume it, without deleting it |
+| `automation.schedules.preview` | Read a schedule as typed (a time in words, an ISO time, a cron pattern, `every 30m`, `in 2h`) and return the reading and the next run; nothing is kept |
 | `automation.schedules.run` | Trigger a schedule immediately |
 
 > **Core-verb rename (see CHANGELOG 1.0.0):** this family was renamed from the bare

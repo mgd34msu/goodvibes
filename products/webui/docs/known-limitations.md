@@ -85,8 +85,8 @@ mistaken for hidden contracts.
 
 ## Sessions and realtime
 
-- The session union list is daemon-capped at the 50 most recent sessions, and
-  the view states the cap. `sessions.search` reaches full history for
+- The daemon sends the session list a page at a time; Work's "Show older
+  sessions" loads the next page, back to the first. `sessions.search` reaches full history for
   companion-chat session titles (Chat's history search) but cannot see inside
   message bodies.
 - Several verb families emit no wire event yet (fleet workstream rows,

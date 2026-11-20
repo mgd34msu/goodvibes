@@ -26,7 +26,7 @@ const ENGINE_ROOT = resolve(__dirname, '..');
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 /** The CI jobs, in the order a full run takes them. */
-const JOBS = ['gates', 'build', 'typecheck', 'proofs', 'live-sandbox', 'measure', 'package'] as const;
+const JOBS = ['gates', 'build', 'journeys', 'typecheck', 'proofs', 'live-sandbox', 'measure', 'package'] as const;
 type Job = typeof JOBS[number];
 
 interface Step {
@@ -87,6 +87,11 @@ const STEPS: readonly Step[] = [
   // ownership and presentation data (generated:check), so a renamed or removed
   // setting key fails here.
   script('build', 'build'),
+
+  // journeys: the sixteen product run-throughs (scripts/runthrough), each in an
+  // isolated home on loopback against a scripted model, three at a time. They
+  // run from source; the web UI journey builds its own copy.
+  script('journeys', 'journeys'),
 
   // typecheck: what build did not compile (test, type-test, installer and
   // product projects) against the declarations build wrote, then the checks

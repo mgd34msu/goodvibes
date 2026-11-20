@@ -2425,19 +2425,20 @@ No surface computes a budget, a ladder step, or a window outcome.
 A purchase nobody asks for in the moment, "order dog food every month", a gift
 a scheduled routine buys, has no explicit owner request, so gate 0 refuses it
 (`not-owner-request`). The owner authorises such purchases in advance with
-`/payments standing add` in either terminal app (`payments.standing.create`):
+`/payments repeat` in either terminal app (`payments.standing.create`); bare, it
+opens a form:
 
 ```
-/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]
-/payments standing add shop.example dog food 60.00 120.00 30 2027-06-30
+/payments repeat --shop <shop> [--shop <shop>] --item <item> --each <amount> --per-period <amount> [--days <n>] [--until <date>]
+/payments repeat --shop shop.example --item dog food --each 60.00 --per-period 120.00 --days 30 --until 2027-06-30
 ```
 
 Each entry holds the item in the owner's words, one or more shop domains, the
 most one purchase may come to, the most all purchases under it may come to over
-the last `<days>` days, and an optional last day. `/payments standing` lists
-them with what is left in the current period; `/payments standing remove <id>`
-withdraws one. Adding and removing are confirmed in a picker and sent with the
-owner's confirmation; both verbs are owner-only, so an agent can read the list
+the last `--days` days (30 when not given), and an optional last day.
+`/payments repeats` lists them with what is left in the current period;
+`/payments stop-repeat <id>` withdraws one. Adding and removing are confirmed
+and sent with the owner's confirmation; both verbs are owner-only, so an agent can read the list
 (`payments.standing.list`) but never write it.
 
 A scheduled or triggered run begins the purchase with `standingId` set to the
@@ -2512,7 +2513,7 @@ reference plus a secret-store write is
 `products/tui/src/config/secret-config.ts` (`buildSecretBackedConfigUpdate`,
 which re-exports the platform's secret-backed config helpers) and
 `input/settings-modal-secrets.ts`. Card entry itself is
-`products/tui/src/input/commands/payment-card-intake.ts` (`/payments card`),
+`products/tui/src/input/commands/payment-card-intake.ts` (`/payments add-card`),
 which collects the card through concealed prompts and sends it to the selected
 daemon in one `payments.cards.create` request; the card never touches the
 terminal's own config or secret store.

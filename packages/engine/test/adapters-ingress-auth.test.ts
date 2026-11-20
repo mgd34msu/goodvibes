@@ -9,14 +9,19 @@
  * starts), with none and with a wrong one (401, and the daemon is asked
  * nothing). Signature surfaces are signed in the test with keys made here.
  *
- * The adapters, the Teams token verifier, the settings and the secret store
- * are real; the rest of the daemon context only records what an adapter asked
- * of it, and Microsoft's key server is the injected fetch.
+ * The adapters, the Teams token verifier, and every daemon piece behind them
+ * are real, composed as the daemon composes them (_helpers/surface-daemon.ts):
+ * settings, secret store, service registry, route bindings, session broker,
+ * channel policy (which names one owner on every surface) and the
+ * surface-action helper whose adapter context the adapters get. The agent
+ * runtime, where the model begins, records each spawn request; Microsoft's
+ * key server is the injected fetch.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { createHmac, generateKeyPairSync, sign, webcrypto, type KeyObject } from 'node:crypto';
 import { rmSync } from 'node:fs';
-import { scratchSettings } from './_helpers/scratch-settings.ts';
+import { surfaceDaemon, type SurfaceDaemon } from './_helpers/surface-daemon.ts';
+import { daemonOperationLog } from '../platform/src/platform/daemon/operations-log.ts';
 import { ntfyInboundDedup, surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { handleBlueBubblesSurfaceWebhook } from '../platform/src/platform/adapters/bluebubbles/index.ts';
 import { handleDiscordSurfaceWebhook } from '../platform/src/platform/adapters/discord/index.ts';
@@ -36,63 +41,58 @@ import { handleTelephonySurfaceWebhook } from '../platform/src/platform/adapters
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
 import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.ts';
 
-type Call = { kind: string; input: unknown };
 type Credential = 'right' | 'wrong' | 'none';
 
-const settingsRoots: string[] = [];
-afterEach(() => {
+const daemons: SurfaceDaemon[] = [];
+afterEach(async () => {
   surfaceInboundDedup.clear(); ntfyInboundDedup.clear();
-  for (const root of settingsRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const daemon of daemons.splice(0)) { await daemon.stop(); rmSync(daemon.root, { recursive: true, force: true }); }
 });
 
-/** The daemon's real settings and secret store for one row, in a scratch home removed after the case. `github.secret` is the GitHub hook's own secret, not a setting. */
-async function settings(values: Record<string, unknown>) {
-  const scratch = await scratchSettings(Object.fromEntries(Object.entries(values).filter(([key]) => key !== 'github.secret')));
-  settingsRoots.push(scratch.root);
-  return scratch;
+/** Every channel surface's policy names one owner, so every sender in these rows is refused. */
+const REFUSING = Object.fromEntries(['webhook', 'telegram', 'slack', 'discord', 'whatsapp', 'telephony', 'signal', 'imessage', 'bluebubbles',
+  'matrix', 'mattermost', 'google-chat', 'msteams', 'ntfy', 'homeassistant'].map((surface) => [surface, { allowlistUserIds: ['U-OWNER-ONLY'] }]));
+
+/**
+ * The daemon's channel pieces over a scratch home (surface-daemon.ts): the settings as given, and a
+ * service credential (`service.field`) kept in the secret store and named in the owner's services.json.
+ * `github.secret` is the GitHub hook's own secret, handed to its route as the daemon does.
+ */
+async function daemonFor(config: Record<string, unknown>, serviceSecrets: Record<string, string> = {}): Promise<SurfaceDaemon> {
+  const services: Record<string, Record<string, unknown>> = {};
+  const secrets: Record<string, string> = {};
+  for (const [name, value] of Object.entries(serviceSecrets)) {
+    const [service, field] = name.split('.') as [string, string];
+    const key = `${service.toUpperCase()}_${field.toUpperCase()}`;
+    services[service] = { name: service, authType: 'api-key', tokenKey: `${service.toUpperCase()}_TOKEN`, ...services[service], [`${field}Key`]: key };
+    secrets[key] = value;
+  }
+  const daemon = await surfaceDaemon({
+    settings: Object.fromEntries(Object.entries(config).filter(([key]) => key !== 'github.secret')),
+    services, secrets, policies: REFUSING,
+  });
+  daemons.push(daemon);
+  return daemon;
 }
 
-/** A daemon context over real settings that records what the adapter asked of it; the channel policy refuses every sender. */
-async function recordingContext(config: Record<string, unknown>, secrets: Record<string, string> = {}) {
-  const calls: Call[] = [];
-  const { configManager, secretsManager } = await settings(config);
-  const record = (kind: string) => (input: unknown) => { calls.push({ kind, input }); };
-  const context = {
-    serviceRegistry: { resolveSecret: async (service: string, field: string) => secrets[`${service}.${field}`] ?? null },
-    configManager,
-    secretsManager,
-    routeBindings: {
-      upsertBinding: async (input: { surfaceKind: string; externalId: string; metadata?: Record<string, unknown> }) => {
-        record('upsertBinding')(input);
-        return { ...input, id: 'binding-1', metadata: input.metadata ?? {} };
-      },
-    },
-    sessionBroker: {
-      getSession: () => null,
-      findPreferredSession: async () => null,
-      listSessions: () => [],
-      submitMessage: async (input: unknown) => {
-        record('submitMessage')(input);
-        return { mode: 'spawn', task: { prompt: 'task' }, session: { id: 'session-1' }, input: { id: 'input-1' } };
-      },
-      bindAgent: async () => undefined,
-    },
-    authorizeSurfaceIngress: async (input: unknown) => {
-      record('authorizeSurfaceIngress')(input);
-      return { allowed: false, reason: 'user-not-allowlisted' };
-    },
-    parseSurfaceControlCommand: () => null,
-    performSurfaceControlCommand: async () => 'ok',
-    performInteractiveSurfaceAction: async () => 'ok',
-    trySpawnAgent: (input: unknown) => { record('trySpawnAgent')(input); return { id: 'agent-1' }; },
-    queueSurfaceReplyFromBinding: () => undefined,
-    surfaceDeliveryEnabled: () => true,
-    signWebhookPayload: (body: string, secret: string) => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`,
-    queueWebhookReply: record('queueWebhookReply'),
-    githubWebhookSecret: (config['github.secret'] as string | undefined) ?? null,
-  };
-  return { calls, context: context as never };
+/** What the router hands the GitHub route (http/router.ts handleGitHubWebhook). */
+function githubContext(daemon: SurfaceDaemon, secret: string) {
+  return {
+    serviceRegistry: daemon.serviceRegistry,
+    githubWebhookSecret: secret,
+    trySpawnAgent: daemon.trySpawnAgent,
+    awaitAgent: async () => null,
+    operations: daemonOperationLog(daemon.configManager),
+  } as unknown as Parameters<typeof handleGitHubAutomationWebhook>[1];
 }
+
+/** What reached the daemon: the policy's audit, route bindings, stored messages and agent spawns. */
+const footprint = (daemon: SurfaceDaemon) => ({
+  asked: daemon.channelPolicy.listAudit(1_000).length,
+  bindings: daemon.routeBindings.listBindings().length,
+  stored: daemon.storedMessages().length,
+  spawned: daemon.spawns.length,
+});
 
 const hmacHex = (secret: string, text: string) => createHmac('sha256', secret).update(text).digest('hex');
 const json = (body: unknown) => JSON.stringify(body);
@@ -144,7 +144,7 @@ interface AdapterRow {
   readonly config: Record<string, unknown>;
   readonly secrets?: Record<string, string>;
   readonly request: (credential: Credential) => Request | Promise<Request>;
-  readonly handle: (request: Request, context: never) => Promise<Response>;
+  readonly handle: (request: Request, daemon: SurfaceDaemon) => Promise<Response>;
   /** GitHub has no channel policy: the right signature must get past authentication instead. */
   readonly noPolicy?: true;
 }
@@ -157,63 +157,63 @@ const ADAPTERS: readonly AdapterRow[] = [
   {
     surface: 'webhook', answer: 403, config: { 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' },
     request: (c) => post('http://localhost/webhook', json({ task: 'hello', userId: 'u1' }), tokenHeader('x-goodvibes-webhook-secret', 'hook-secret', c)),
-    handle: (r, ctx) => handleGenericWebhookSurface(r, ctx),
+    handle: (r, d) => handleGenericWebhookSurface(r, d.webhookContext()),
   },
   {
     surface: 'telegram', answer: 200, config: { 'surfaces.telegram.webhookSecret': 'tg-secret' },
     request: (c) => post('http://localhost/webhook/telegram', json({ update_id: 1, message: { message_id: 1, chat: { id: 5, type: 'group' }, from: { id: 9 }, text: 'lunch anyone?' } }),
       tokenHeader('x-telegram-bot-api-secret-token', 'tg-secret', c)),
-    handle: (r, ctx) => handleTelegramSurfaceWebhook(r, ctx, {}),
+    handle: (r, d) => handleTelegramSurfaceWebhook(r, d.adapterContext(), {}),
   },
   {
     surface: 'slack', answer: 200, config: { 'surfaces.slack.signingSecret': 'slack-secret' },
     request: (c) => slackRequest('command=%2Fgoodvibes&text=hello&user_id=U1&channel_id=C1&team_id=T1', c),
-    handle: (r, ctx) => handleSlackSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleSlackSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'discord', answer: 200, config: {}, secrets: { 'discord.publicKey': discordPublicKey },
     // An application command with no prompt: authorised and refused by the policy, no follow-up work.
     request: (c) => discordRequest(json({ id: 'i1', application_id: 'app-1', type: 2, token: 't', channel_id: 'c1', member: { user: { id: 'u1' } }, data: { name: 'goodvibes' } }), c),
-    handle: (r, ctx) => handleDiscordSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleDiscordSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'whatsapp', answer: 200, config: { 'surfaces.whatsapp.provider': 'meta-cloud', 'surfaces.whatsapp.signingSecret': 'wa-secret', 'surfaces.whatsapp.phoneNumberId': 'phone-1' },
     request: (c) => post('http://localhost/webhook/whatsapp', whatsappBody,
       c === 'none' ? {} : { 'x-hub-signature-256': `sha256=${hmacHex(c === 'right' ? 'wa-secret' : 'not-the-secret', whatsappBody)}` }),
-    handle: (r, ctx) => handleWhatsAppSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleWhatsAppSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'telephony', answer: 200, config: { 'surfaces.telephony.authToken': 'twilio-token' },
     request: (c) => twilioRequest(c),
-    handle: (r, ctx) => handleTelephonySurfaceWebhook(r, ctx),
+    handle: (r, d) => handleTelephonySurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'signal', answer: 403, config: { 'surfaces.signal.token': 'signal-token' },
     request: (c) => post('http://localhost/webhook/signal', json({ source: '+15550002', message: 'hello', timestamp: 1 }), tokenHeader('x-goodvibes-signal-token', 'signal-token', c)),
-    handle: (r, ctx) => handleSignalSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleSignalSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'imessage', answer: 403, config: { 'surfaces.imessage.token': 'imessage-token' },
     request: (c) => post('http://localhost/webhook/imessage', json({ chatId: 'chat-1', message: 'hello', guid: 'g1' }), tokenHeader('x-goodvibes-imessage-token', 'imessage-token', c)),
-    handle: (r, ctx) => handleIMessageSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleIMessageSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'bluebubbles', answer: 403, config: { 'surfaces.bluebubbles.password': 'bb-password' },
     request: (c) => post('http://localhost/webhook/bluebubbles', json({ message: { text: 'hello', chatGuid: 'iMessage;-;+15550003', senderId: '+15550003', guid: 'g2' } }),
       tokenHeader('x-goodvibes-bluebubbles-token', 'bb-password', c)),
-    handle: (r, ctx) => handleBlueBubblesSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleBlueBubblesSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'matrix', answer: 403, config: { 'surfaces.matrix.webhookSecret': 'matrix-secret' },
     request: (c) => post('http://localhost/webhook/matrix', json({ event: { room_id: '!room:example.test', sender: '@u:example.test', event_id: '$e1', content: { body: 'hello', msgtype: 'm.text' } } }),
       tokenHeader('x-goodvibes-matrix-token', 'matrix-secret', c)),
-    handle: (r, ctx) => handleMatrixSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleMatrixSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'mattermost', answer: 403, config: { 'surfaces.mattermost.webhookSecret': 'mm-secret' },
     request: (c) => post('http://localhost/webhook/mattermost', json({ channel_id: 'c1', channel_type: 'D', user_id: 'u1', post_id: 'p1', text: 'hello' }),
       tokenHeader('x-goodvibes-mattermost-token', 'mm-secret', c)),
-    handle: (r, ctx) => handleMattermostSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleMattermostSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'google-chat', answer: 200, config: { 'surfaces.googleChat.verificationToken': 'gchat-token' },
@@ -221,23 +221,23 @@ const ADAPTERS: readonly AdapterRow[] = [
       type: 'MESSAGE', ...(c === 'none' ? {} : { token: c === 'right' ? 'gchat-token' : 'gchat-token-wrong' }),
       message: { name: 'spaces/s/messages/m', text: 'hello', sender: { name: 'users/1' } }, space: { name: 'spaces/s', type: 'DM' }, user: { name: 'users/1' },
     }), {}),
-    handle: (r, ctx) => handleGoogleChatSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleGoogleChatSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'msteams', answer: 403, config: { 'surfaces.msteams.webhookSecret': 'teams-secret' },
     request: (c) => post('http://localhost/webhook/msteams', json({ type: 'message', id: 'a1', text: 'hello', conversation: { id: 'conv-1', conversationType: 'personal' }, from: { id: 'u1' }, serviceUrl: 'https://smba.example.test/' }),
       tokenHeader('x-goodvibes-msteams-token', 'teams-secret', c)),
-    handle: (r, ctx) => handleMSTeamsSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleMSTeamsSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'ntfy', answer: 403, config: { 'surfaces.ntfy.enabled': true, 'surfaces.ntfy.token': 'ntfy-token', 'surfaces.ntfy.agentTopic': ntfyTopic },
     request: (c) => post('http://localhost/webhook/ntfy', json({ id: 'n1', topic: ntfyTopic, message: 'hello' }), tokenHeader('x-ntfy-token', 'ntfy-token', c)),
-    handle: (r, ctx) => handleNtfySurfaceWebhook(r, ctx),
+    handle: (r, d) => handleNtfySurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'homeassistant', answer: 403, config: { 'surfaces.homeassistant.enabled': true, 'surfaces.homeassistant.webhookSecret': 'ha-secret' },
     request: (c) => post('http://localhost/webhook/homeassistant', json({ message: 'hello', conversationId: 'c1' }), tokenHeader('x-goodvibes-homeassistant-secret', 'ha-secret', c)),
-    handle: (r, ctx) => handleHomeAssistantSurfaceWebhook(r, ctx),
+    handle: (r, d) => handleHomeAssistantSurfaceWebhook(r, d.adapterContext()),
   },
   {
     surface: 'github', answer: 200, config: { 'github.secret': 'gh-secret' }, noPolicy: true,
@@ -245,26 +245,27 @@ const ADAPTERS: readonly AdapterRow[] = [
       'x-github-event': 'ping', 'x-github-delivery': 'd1',
       ...(c === 'none' ? {} : { 'x-hub-signature-256': `sha256=${hmacHex(c === 'right' ? 'gh-secret' : 'not-the-secret', githubBody)}` }),
     }),
-    handle: (r, ctx) => handleGitHubAutomationWebhook(r, ctx),
+    handle: (r, d) => handleGitHubAutomationWebhook(r, githubContext(d, 'gh-secret')),
   },
 ];
 
 test('every webhook adapter answers 401 to a missing, wrong or replayed credential and asks nothing; with the right one a refused sender starts nothing', async () => {
   const outcomes: Array<Record<string, unknown>> = [];
   for (const row of ADAPTERS) {
+    const daemon = await daemonFor(row.config, row.secrets);
     for (const credential of ['right', 'wrong', 'none'] as const) {
-      const { calls, context } = await recordingContext(row.config, row.secrets);
-      const response = await row.handle(await row.request(credential), context);
-      const asked = calls.map((call) => call.kind);
+      const before = footprint(daemon);
+      const response = await row.handle(await row.request(credential), daemon);
+      const after = footprint(daemon);
       outcomes.push({
         surface: row.surface, credential,
         status: response.status,
         // The right credential reaches the policy (or, with no policy, passes authentication); the
         // policy refuses the sender, so no message is stored and no agent starts. Nothing else reaches anything.
         reached: credential === 'right'
-          ? (row.noPolicy ? response.status !== 401 && response.status !== 503 : asked.includes('authorizeSurfaceIngress'))
-            && !asked.includes('submitMessage') && !asked.includes('trySpawnAgent')
-          : asked.length === 0,
+          ? (row.noPolicy ? response.status !== 401 && response.status !== 503 : after.asked > before.asked)
+            && after.stored === before.stored && after.spawned === before.spawned
+          : JSON.stringify(after) === JSON.stringify(before),
       });
     }
   }
@@ -275,18 +276,19 @@ test('every webhook adapter answers 401 to a missing, wrong or replayed credenti
   const previousSignalEnv = process.env.SIGNAL_BRIDGE_TOKEN;
   process.env.SIGNAL_BRIDGE_TOKEN = 'env-token';
   try {
-    const extra: Array<{ name: string; config: Record<string, unknown>; secrets?: Record<string, string>; send: (context: never) => Promise<Response> }> = [
+    const extra: Array<{ name: string; config: Record<string, unknown>; secrets?: Record<string, string>; send: (daemon: SurfaceDaemon) => Promise<Response> }> = [
       { name: 'slack replayed', config: { 'surfaces.slack.signingSecret': 'slack-secret' },
-        send: (ctx) => handleSlackSurfaceWebhook(slackRequest('command=%2Fgoodvibes&text=hello&user_id=U1&channel_id=C1&team_id=T1', 'right', stale), ctx) },
+        send: (d) => handleSlackSurfaceWebhook(slackRequest('command=%2Fgoodvibes&text=hello&user_id=U1&channel_id=C1&team_id=T1', 'right', stale), d.adapterContext()) },
       { name: 'discord replayed', config: {}, secrets: { 'discord.publicKey': discordPublicKey },
-        send: async (ctx) => handleDiscordSurfaceWebhook(await discordRequest(json({ id: 'i2', application_id: 'app-1', type: 2, token: 't', channel_id: 'c1', member: { user: { id: 'u1' } }, data: { name: 'goodvibes' } }), 'right', stale), ctx) },
+        send: async (d) => handleDiscordSurfaceWebhook(await discordRequest(json({ id: 'i2', application_id: 'app-1', type: 2, token: 't', channel_id: 'c1', member: { user: { id: 'u1' } }, data: { name: 'goodvibes' } }), 'right', stale), d.adapterContext()) },
       { name: 'signal unresolvable reference', config: { 'surfaces.signal.token': 'goodvibes://secrets/goodvibes/SIGNAL_TOKEN_THAT_IS_GONE' },
-        send: (ctx) => handleSignalSurfaceWebhook(post('http://localhost/webhook/signal', json({ source: '+15550002', message: 'hello' }), { 'x-goodvibes-signal-token': 'env-token' }), ctx) },
+        send: (d) => handleSignalSurfaceWebhook(post('http://localhost/webhook/signal', json({ source: '+15550002', message: 'hello' }), { 'x-goodvibes-signal-token': 'env-token' }), d.adapterContext()) },
     ];
     for (const row of extra) {
-      const { calls, context } = await recordingContext(row.config, row.secrets);
-      const response = await row.send(context);
-      outcomes.push({ surface: row.name, credential: 'right', status: response.status, reached: calls.length === 0 });
+      const daemon = await daemonFor(row.config, row.secrets);
+      const before = footprint(daemon);
+      const response = await row.send(daemon);
+      outcomes.push({ surface: row.name, credential: 'right', status: response.status, reached: JSON.stringify(footprint(daemon)) === JSON.stringify(before) });
     }
   } finally {
     if (previousSignalEnv === undefined) delete process.env.SIGNAL_BRIDGE_TOKEN;

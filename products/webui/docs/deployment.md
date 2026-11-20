@@ -81,7 +81,8 @@ Because the bundle and the API arrive same-origin over HTTPS, everything
 works with zero cross-origin configuration:
 
 - Open the HTTPS hostname in your phone's browser.
-- Sign in once with your operator token. The daemon binds it to an HttpOnly,
+- Sign in once: scan the code `goodvibes pair` shows, or use one of the other
+  ways on the sign-in screen. The daemon binds the sign-in to an HttpOnly,
   SameSite=Strict, Secure cookie that no page script can read; nothing
   token-shaped is kept in the browser's storage.
 - The app is now reachable from anywhere on your tailnet.
@@ -94,7 +95,7 @@ opening the app over HTTPS) rather than showing a broken control.
 ## Off the tailnet: the rendezvous relay
 
 When a device cannot reach the daemon directly (not on the tailnet, no LAN
-route), a stored relay pairing lets the app tunnel its calls end to end
+route), a relay pairing lets the app tunnel its calls end to end
 encrypted through a rendezvous relay server. The pairing is a transport
 bootstrap only (relay URL, rendezvous id, daemon public key); it signs nobody
 in, and the ordinary token pairing still handles authentication on top.
@@ -108,11 +109,13 @@ holds changes nothing and asks nothing. Relay use is opt-in and probe-driven, so
 directly, requests stay direct. State-changing calls over the relay require a
 passkey step-up (a WebAuthn assertion) before the daemon accepts them, so
 register a passkey from Settings, Account before relying on the relay away from home.
+Over the relay the sign-in and the relay pairing are held only for the life of
+the page: a reload asks for the relay code and a sign-in again.
 
 ## Signing in from a phone
 
 Run `goodvibes pair` on the machine with the daemon. The QR it prints encodes
-a link to the app with a one-time operator token in the URL fragment. Open it
+a link to the app with a one-time sign-in code in the URL fragment. Open it
 on the phone (or scan it with the sign-in screen's in-page scanner) and the
 app signs in without any copy/paste, stripping the secret from the URL
 immediately. A pairing link can also carry a hand-off bundle of setup offers,

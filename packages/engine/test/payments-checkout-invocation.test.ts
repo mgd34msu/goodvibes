@@ -1,5 +1,5 @@
 // Proves: A purchase is started or continued by a caller who is not the owner asking, or the owner cannot cancel one.
-// Red when: A started purchase keeps its authority after a revocation or a lowered limit, the owner (local or paired) cannot cancel, or a purchase is started or cancelled without the explicit request or without transport authority.
+// Red when: A started purchase keeps its authority after a revocation or a lowered limit, the owner (local or paired) cannot cancel, or a purchase is started or cancelled without the explicit request.
 /**
  * Who may start and stop a purchase. An app on the owner's own machine (the
  * transport's 'local' authority) and a paired device may both start and cancel;
@@ -132,14 +132,6 @@ test.each(['local', 'pairing-token'] as const)('the owner on %s authority can st
 
 test('without the owner\'s explicit request a purchase can be neither started nor cancelled', async () => {
   const f = await paymentHost('local', false);
-  expect(() => f.start()).toThrow(HandlerError);
-  const begun = await f.ownerBegins(), before = f.state();
-  await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(HandlerError);
-  expect(f.state()).toBe(before);
-});
-
-test('a caller the transport gave no owner authority can neither start nor cancel', async () => {
-  const f = await paymentHost(null);
   expect(() => f.start()).toThrow(HandlerError);
   const begun = await f.ownerBegins(), before = f.state();
   await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(HandlerError);

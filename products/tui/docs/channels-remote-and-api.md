@@ -39,7 +39,7 @@ the daemon restarts is started after the restart.
 
 ## Home Assistant
 
-The Home Assistant surface is configured from onboarding or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
+The Home Assistant surface is configured from `/setup chat-apps` or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
 
 Relevant settings:
 
@@ -224,7 +224,7 @@ Set `behavior.notifyAfterSeconds` in `/settings open behavior` (or `settings.jso
 Notifications are delivered in this order:
 
 1. **Desktop notification.** `notify-send` on Linux, `osascript` on macOS. The platform handles platform detection; the call is a silent no-op when neither is available.
-2. **Outbound webhook / ntfy topic.** If you have webhook URLs configured (via `/notify add <url>`), the notification is also sent as a plain-text POST to all configured endpoints. This works with ntfy.sh topics and any service accepting a plain POST body.
+2. **Outbound webhook / ntfy topic.** If you have webhook URLs configured (via `/notify add <url>`), the notification is also sent as a plain-text POST to all configured endpoints. This works with ntfy.sh topics and any service accepting a plain POST body. Each address carries its own key, so it is kept in the secret store and `notifications.webhookUrls` holds only a `goodvibes://secrets/` reference to it; screens show only the address's host.
 
 ### Notification content
 

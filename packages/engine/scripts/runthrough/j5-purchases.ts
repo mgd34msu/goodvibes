@@ -81,7 +81,7 @@ writeFileSync(join(s.home.home, '.config', 'chromium-flags.conf'), `--host-resol
 // The owner's browser: started here, debugging port on loopback, its own profile in the scratch folder.
 const debugPort = freePort();
 s.home.allow(debugPort);
-const ownerBrowser = Bun.spawn(['/usr/bin/chromium', '--headless=new', `--remote-debugging-port=${debugPort}`, '--remote-debugging-address=127.0.0.1',
+const ownerBrowser = Bun.spawn([process.env.RUNTHROUGH_CHROMIUM ?? '/usr/bin/chromium', '--headless=new', `--remote-debugging-port=${debugPort}`, '--remote-debugging-address=127.0.0.1',
   `--user-data-dir=${join(s.home.root, 'owner-browser')}`, `--host-resolver-rules=${resolverRules}`, '--ignore-certificate-errors', '--no-first-run',
   '--no-default-browser-check', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-sandbox', 'about:blank'], {
   env: { HOME: s.home.home, XDG_CONFIG_HOME: join(s.home.home, '.config'), PATH: process.env.PATH ?? '/usr/bin' }, stdout: 'ignore', stderr: 'ignore',

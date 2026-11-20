@@ -177,7 +177,10 @@ test('after a restart, a unit whose check had passed is not run again and what i
   // u1 (group g1) finishes and passes; u2 (group g2, after g1) is working when the process stops.
   const first = makeHarness({ root, plan: twoUnitPlan(), scripts: { u1: finishes('src/csv.ts', 'Finished the parser.'), u2: writesThenHangs('src/convert.ts') } });
   const id = (await startContract(first)).contract.id;
-  await until(first, () => unitOf(first, id, 'u1')?.status === 'passed' && unitOf(first, id, 'u2')?.status === 'running');
+  // The wait also ends when the contract ends, so a run that stops early fails on the states below.
+  await until(first, () => (unitOf(first, id, 'u1')?.status === 'passed' && unitOf(first, id, 'u2')?.status === 'running') || ended(first, id));
+  expect({ contract: viewOf(first, id).status, u1: unitOf(first, id, 'u1')?.status, u2: unitOf(first, id, 'u2')?.status })
+    .toEqual({ contract: 'running', u1: 'passed', u2: 'running' });
   const before = structuredClone(viewOf(first, id));
   await first.dispose();
   first.store.flush();
@@ -190,10 +193,11 @@ test('after a restart, a unit whose check had passed is not run again and what i
   expect(report.resumed.map(entry => entry.contractId)).toEqual([id]);
   await until(second, () => ended(second, id));
   const done = viewOf(second, id);
+  // u1 given an agent again is the first thing checked: the contract then fails, which would hide it.
+  expect(second.agentsOf('u1')).toEqual([]);
   expect(done.status).toBe('passed');
 
   const u1 = done.units.find(unit => unit.id === 'u1')!, u2 = done.units.find(unit => unit.id === 'u2')!;
-  expect(second.agentsOf('u1')).toEqual([]);
   expect(second.events.filter(event => event.type === 'CONTRACT_UNIT_SPAWNED').map(event => event.type === 'CONTRACT_UNIT_SPAWNED' ? event.unitId : '')).toEqual(['u2']);
   expect(u1.agentIds).toEqual(before.units[0]!.agentIds);
   expect(u1.checks.map(check => check.id)).toEqual(before.units[0]!.checks.map(check => check.id));

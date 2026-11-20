@@ -68,5 +68,5 @@ asset cache stamps. Existing legacy URLs continue to map into Chat, Work,
 Library, Personal and Settings while preserving deep-link fragments.
 
 See [known limitations](docs/known-limitations.md) for the remaining
-integration work, and the [3.3.1 release notes](../../docs/releases/3.3.1.md)
+integration work, and the [3.3.2 release notes](../../docs/releases/3.3.2.md)
 for what changed in this release.

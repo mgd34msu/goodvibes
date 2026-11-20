@@ -24,10 +24,10 @@ High-signal TUI routes:
 
 | Surface | Purpose |
 | --- | --- |
-| `/agent` | Open the fullscreen operator workspace. |
-| `/work [daemon-project-id]` | Inspect native work, intent, attention, evidence and history on the authenticated connected host; read only. |
-| `/workstream` | Plan work as a draft (`propose <goal>`), review and edit it (`show`, `edit`, `drop`, `move`, `retask`), then `approve` and `launch` it as a contract; `list`, `status`, `cancel` or `reply` to running workstreams, `retry <id> <unit>` to give one unit a fresh agent, and `budget <id> <dollars>` to let a workstream waiting on its budget continue. |
-| `/help` | Discover registered slash commands. |
+| `/agent` | Open the Agent workspace (also `Ctrl+G`), at a page when one is named. |
+| `/work` | Work on the connected host: open it, ask for work in your own words (`request`), start, cancel or resume a piece of work, submit work from a file (`submit-file`), recover input waiting to be admitted, import old planning records (`import-preview`, `import`), and see how the planner spreads work. |
+| `/workstream` | Plan work as a draft (`plan`), review and change it (`plans`, `show`, `replan`, `edit`, `drop`, `move`), then `approve` and `launch` it, or `discard` it; `start` work on a request, `list`, `status`, `stop` or `answer` running workstreams, `retry` to run a step again, and `budget` to change a workstream's spending limit. |
+| `/help` | Every command and every key in one searchable list (also `?` and `Ctrl+P`). |
 | `/health`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
 | `/model`, `/provider`, `/effort` | Inspect or change provider/model/reasoning routes. |
 | `/knowledge` | Use isolated Agent Knowledge. |
@@ -38,7 +38,7 @@ High-signal TUI routes:
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
 | `/agents hand-off` | Hand explicit build/fix/review work to the terminal app with a handoff brief. Each hand-off is recorded in the Agent home; `/agents handed-off` lists them and `/agents handed-off <session>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
-An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in the Activity modal) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
+An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents, `F2` or `Ctrl+O`) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
 
 Composer markers: a line that starts with `!` runs the rest as a shell command and shows its output, and that output goes in front of your next message as context; `!@<path>` in a message is replaced by the file's text, and `@<path>` or `@<url>` adds the file, a folder listing or a link note (each file is capped, and the cut is stated); an image cannot be sent with a message and is refused with your text back in the composer; `!# <text>` pins the text to session memory and sends it; a single line that starts with `# ` (a hash and a space) saves the rest as a session-memory note and sends nothing (`#482`, `## headings` and text of several lines that starts with `#` are sent as typed). The TUI reads these markers the same way.
 
@@ -238,11 +238,11 @@ Execution routes:
 - Duplicate-consolidation candidates expose survivor ids, visible field diffs, low-level update/stale/delete/rollback routes, and first-class `agent_learning_consolidation` preview/stale/delete/rollback/recreate phase routes. Stale writes a durable receipt with a rollback route (earlier merge receipts can still be rolled back), delete refuses records that have not already been staged stale, and post-delete receipts preserve snapshots plus exact-id recreate guidance. Confirmed recreate is separate from rollback and refuses when current records would force a different id. Each phase writes its receipt before it changes any record, so a failure partway leaves the earlier state recoverable; a rollback is recorded and cannot be repeated, and delete receipts are kept until their records are recreated. An unreadable receipts file stops the phase instead of being replaced. `mode:"receipts"` lists ids, phases and routes; `receiptId` shows one receipt with its recreate guidance. Rolling back a stale phase restores each record's review state only; content edited since stays.
 - Reviewed-note, completed-work, completed-research, and saved-session memory/behavior proposals reuse selected-note promotion, memory-create, or learned-behavior capture routes. Non-consolidation writes stay on `agent_local_registry` or visible workspace actions.
 - Agent document draft browse/show/create/revise/review/comment/suggest/accept-suggestion/reject-suggestion/artifact-insert/export dispatches through `agent_documents`; export artifacts include reviewer-ready comment and suggestion summaries.
-- Reviewer-readiness checks are visible through Agent Workspace -> Documents & Compare -> Review readiness preflight and read-only through `agent_harness mode:"document_ops"` or `mode:"document_ops_lane" laneId:"reviewer_readiness"`; they return exact routes for resolving comments, accepting/rejecting suggestions, attaching evidence, revealing comparisons, applying or leaving model-route decisions, and repairing handoff evidence before export/archive/apply.
-- The review packet wizard is visible through Agent Workspace -> Documents & Compare -> Review packet wizard and read-only through `mode:"document_ops_lane" laneId:"review_packet_wizard"`; it reports six-step progress, the current user/model route, backtracking routes, refreshed-preset lineage when a packet preset was repaired, final archive review guidance, and the confirmed share route.
-- Agent Workspace -> Documents & Compare -> Save packet preset and `agent_review_packet_presets mode:"save"` store one reusable local packet preset artifact with document/export/comparison/judgment/route-decision/handoff/archive/related artifact ids; `mode:"list"` and `mode:"show"` inspect presets, flag missing or superseded saved ids, and recommend newer matching reuse routes when metadata is sufficient, without mutation.
-- Agent Workspace -> Documents & Compare -> Refresh packet preset and `mode:"refresh"` save a new local preset artifact from those freshness recommendations after confirmation, preserving the source preset for audit history and never mutating documents, model routes, handoffs, or archives.
-- Agent Workspace -> Documents & Compare -> Share review packet and `agent_review_packet_share` validate one saved handoff archive artifact, preview the delivery target and packet evidence ids, and after explicit confirmation send the packet evidence with the ZIP attached where the surface carries attachments (otherwise the message names it, and `agent_artifacts mode:"export"` writes the file to send by hand).
+- Reviewer-readiness checks are `/documents readiness` and read-only through `agent_harness mode:"document_ops"` or `mode:"document_ops_lane" laneId:"reviewer_readiness"`; they return exact routes for resolving comments, accepting/rejecting suggestions, attaching evidence, revealing comparisons, applying or leaving model-route decisions, and repairing handoff evidence before export/archive/apply.
+- The review packet steps are `/documents packet-steps` and read-only through `mode:"document_ops_lane" laneId:"review_packet_wizard"`; it reports six-step progress, the current user/model route, backtracking routes, refreshed-preset lineage when a packet preset was repaired, final archive review guidance, and the confirmed share route.
+- `/documents save-preset` and `agent_review_packet_presets mode:"save"` store one reusable local packet preset artifact with document/export/comparison/judgment/route-decision/handoff/archive/related artifact ids; `mode:"list"` and `mode:"show"` inspect presets, flag missing or superseded saved ids, and recommend newer matching reuse routes when metadata is sufficient, without mutation.
+- `/documents refresh-preset` and `mode:"refresh"` save a new local preset artifact from those freshness recommendations after confirmation, preserving the source preset for audit history and never mutating documents, model routes, handoffs, or archives.
+- `/documents share-packet` and `agent_review_packet_share` validate one saved handoff archive artifact, preview the delivery target and packet evidence ids, and after explicit confirmation send the packet evidence with the ZIP attached where the surface carries attachments (otherwise the message names it, and `agent_artifacts mode:"export"` writes the file to send by hand).
 - `agent_model_compare mode:"apply"` saves an apply-winner route-decision receipt after a confirmed route update, while `mode:"routeDecision" decision:"left-unchanged"` saves a receipt without changing the selected model; `mode:"handoffArchive"` carries matching route-decision receipt artifacts into the ZIP, README, archive metadata, and redacted manifest, except for a handoff that hides model identities, whose archive leaves out the source comparison and route-decision receipts. Candidate labels are shuffled before a run so candidate A is not always the model in use, and `apply` and `routeDecision` read the winner model from the judged comparison, so a blind judgment can be applied; analytics and synthesis count one judgment per comparison, the newest.
 - Review packet defaults use the latest document/export/comparison/judgment/route-decision/handoff evidence, falling back to saved preset metadata only when live packet evidence is missing, to prefill document export, compare handoff/archive, winner-apply, leave-unchanged decision, save-preset, and share forms while preserving editable fields and confirmation gates.
 - Start deep research routing with `research action:"briefing"` when the model needs one read-only next-action queue across visible runs, source review, saved report artifacts, certified live platform/daemon runner/render evidence, browser readiness, and exact follow-up routes.
@@ -388,8 +388,8 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | Command | Purpose |
 | --- | --- |
 | `/accounts` | Review provider auth routes, subscription windows, and billing-path safety. |
-| `/agents open` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). |
-| `/agent` | Open the GoodVibes Agent operator workspace. |
+| `/agents open` | Your agents: what is waiting for you, running, scheduled and finished (also F2 and Ctrl+O). |
+| `/agent` | Open the Agent workspace (also Ctrl+G). |
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
 | `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
 | `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |
@@ -416,7 +416,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/session` | Sessions: resume, save, copy, save the conversation as a Markdown or text file, read the cross-session task graph. |
 | `/google` | Connect the Google account behind mail and calendar: adopt credentials already on this machine, or run the setup flow. |
 | `/health` | Opens its list; from a model or script prints the short status (`✓ Everything is working.`, or each problem with `Fix:` and its line). Actions: See what needs attention (`report`), Check one area (`check <area>`), Describe a problem (`diagnose <symptom>`), See the runtime store (`state`), Check the connected host's compatibility (`compat [--json]`, Agent Knowledge route readiness). |
-| `/help` | Show available commands and keyboard shortcuts. |
+| `/help` | Every command and every key in one searchable list (also `?` and `Ctrl+P`); `/help <command>` prints one command's actions. |
 | `/image` | Attach an image file to the next message. |
 | `/help keys` | List keyboard bindings and the file that changes them. |
 | `/knowledge` | Use isolated Agent Knowledge. |
@@ -431,14 +431,14 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/session next error` | Jump to the next error message in the conversation. |
 | `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (asks first), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. The same description as the terminal app's `/notes`. |
-| `/notifications` | Show every notice and notification in full, newest first (each notice also shows briefly as a toast). |
+| `/notifications` | Show every notice and notification in full, newest first. The status bar counts unread notices, and `Ctrl+N` opens them. |
 | `/notify` | Manage and send configured Agent webhook notifications. |
 | `/paste` | Insert clipboard text or image into the prompt. |
 | `/about-me` | Your profile: read what GoodVibes knows about you, show one field, look one person up by name, trace where a fact came from, correct one, add a note, undo the last change to a field, or forget one. Here the People section is counted rather than listed, because this output lands in the transcript; the same command at a shell prints the full list on a terminal and counts it when stdout is captured (a pipe, or a shell tool a model drives). |
 | `/payments` | Opens its list of actions: See your cards (`/payments cards`), See what is waiting for your answer (`/payments pending`), Approve one purchase ahead of time (`/payments approve <shop> --most <amount> <item>`), Allow a repeat purchase (`/payments repeat --shop <shop> --item <item> --each <amount> --per-period <amount> [--days <n>] [--until <date>]`), See repeat purchases you have allowed (`/payments repeats`), Stop a repeat purchase (`/payments stop-repeat <repeat purchase>`), Add a card (`/payments add-card`, each field hidden), Remove a card (`/payments remove-card <card>`), Set your billing or shipping address (`/payments address <billing\|shipping>`). Card material is stored at daemon scope and never shown back; budgets, windows and security-code handling live in Settings > Payments. |
 | `/personas` | Manage Agent-local personas and VIBE.md personality files. |
 | `/pin` | Pin a model to the favorites list. |
-| `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `/plugin disable <name>`, `/plugin reload`, `/plugin quarantine <name> [add\|lift]`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
+| `/plugin-trust` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin-trust enable <name>`, `disable <name>`, `reload`, `quarantine <name>`, `lift <name>`), and set what each one may register: `/plugin-trust trust <name> <untrusted\|limited\|trusted>`, `capabilities <name>`, `verify <name>`, `trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
 | `/session prev error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
 | `/provider` | Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed. |
@@ -450,10 +450,9 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/schedule` | Inspect schedules, create confirmed reminders, and promote routines to connected schedules. |
 | `/secrets` | Manage secrets, external secret refs, and storage policy. |
 | `/security` | Opens its list; from a model or script prints the short status. Actions: the review, paired-device tokens, risky MCP routes; what is trusted, this folder's trust (`folder`, `trust-folder`, `restrict-folder`: until you trust the folder, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start), the trust summary file (`save-trust`, `read-trust`); the policy bundles; the sandbox and MCP containment. |
-| `/session` | Inspect session continuity and cross-session graph state. |
 | `/settings` | Open, inspect, set, or reset Agent settings. |
-| `/setup` | Open the Agent workspace; on a fresh Agent home the workspace opens into setup first. |
-| `/skills` | Manage Agent-local skills and skill bundles. |
+| `/setup` | Set GoodVibes up, one topic at a time: each topic opens one form; `/setup first-run` runs the three-step first run again. |
+| `/my-skills` | Manage Agent-local skills and skill bundles. |
 | `/status` | Shows the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
 | `/tasks` | Read runtime tasks here and on the connected host; changes are refused with the reason. |
 | `/title` | Show or set the conversation title. |
@@ -471,11 +470,11 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 
 ## Native work ledger (read only)
 
-`/work` opens Work & Approvals and reads the configured, authenticated connected
+`/work open` opens the native work view and reads the configured, authenticated connected
 host. With no selected project, Agent asks `projectPlanning.status` with empty
 input for the host's project identity. That passive discovery requires
 `read:knowledge`; it does not grant it. If discovery is unavailable, use
-`/work <daemon-project-id>` to explicitly select a project. The daemon still
+`/work open <daemon-project-id>` to explicitly select a project. The daemon still
 checks project identity and `read:work-ledger` on every ledger read. Agent never
 uses its local planning ID or configuration directory as a shared ledger store.
 

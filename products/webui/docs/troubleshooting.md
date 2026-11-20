@@ -58,7 +58,9 @@ If the daemon binds to `0.0.0.0`, the Vite proxy should still connect to
 Expected auth paths:
 
 - username/password through daemon login
-- explicit operator token pasted by user and validated with daemon
+- the code from `goodvibes pair`, scanned or opened as its link
+- a sign-in code pasted by the user under "Other ways to sign in" and checked
+  by the daemon
 - on the direct route, the daemon's HttpOnly sign-in cookie (`goodvibes_session`,
   unreadable by the page) and the readable marker beside it (`goodvibes_identity`,
   no credential); over the relay, a bearer held in the page's memory until it reloads

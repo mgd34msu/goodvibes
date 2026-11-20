@@ -66,7 +66,7 @@ The TUI normally adopts a compatible GoodVibes daemon it finds already listening
 
 Two ways to point a TUI instance at a daemon it did not start itself:
 
-**Interactive.** In the onboarding wizard's Network step, set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This saves the token beside that daemon's address in the terminal's own connected-daemon credentials (`~/.goodvibes/tui/connected-daemons.json`; the local daemon's `operator-tokens.json` is not touched), saves the address as `daemon.connectedHost.url`, and restarts the external-services controller immediately so you see whether the connection succeeded before finishing the rest of onboarding. The local bind settings (`controlPlane.*`) are left alone, so finishing onboarding keeps the connection, and running onboarding again starts from it. Choosing "Start a new daemon" clears `daemon.connectedHost.url` and the TUI goes back to the daemon on this machine.
+**Interactive.** In `/setup other-devices` (Use it from other devices), set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This saves the token beside that daemon's address in the terminal's own connected-daemon credentials (`~/.goodvibes/tui/connected-daemons.json`; the local daemon's `operator-tokens.json` is not touched), saves the address as `daemon.connectedHost.url`, and restarts the external-services controller immediately so you see whether the connection succeeded before you save the form. The local bind settings (`controlPlane.*`) are left alone, so saving keeps the connection, and opening the form again starts from it. Choosing "Start a new daemon" clears `daemon.connectedHost.url` and the TUI goes back to the daemon on this machine.
 
 **Non-interactive.** Set the `GOODVIBES_DAEMON_TOKEN` environment variable to run the daemon with a fixed, known token, and point the TUI at the same host/port and token:
 
@@ -173,13 +173,13 @@ If `direct` is enabled and the certificate files are missing or invalid, GoodVib
 
 ### TLS plaintext warning
 
-If a control plane or HTTP listener is configured with `hostMode` other than `local` and `tls.mode = off`, GoodVibes emits a `[SECURITY]` warning at startup. The same warning appears in the onboarding wizard network step whenever a network-facing service is selected without TLS.
+If a control plane or HTTP listener is configured with `hostMode` other than `local` and `tls.mode = off`, GoodVibes emits a `[SECURITY]` warning at startup. The same warning appears in the `/setup other-devices` form whenever a network-facing service is selected without TLS.
 
 To suppress the warning, set `controlPlane.tls.mode` or `httpListener.tls.mode` to `direct` (or use the `proxy` deployment shape with a terminating reverse proxy).
 
 ### Cloudflare Zero Trust Tunnel and trustProxy
 
-When the onboarding wizard applies with the Zero Trust Tunnel Cloudflare component selected, it writes:
+When `/setup cloudflare` is saved with the Zero Trust Tunnel Cloudflare component selected, it writes:
 
 - `controlPlane.trustProxy = true`
 - `httpListener.trustProxy = true`
@@ -189,7 +189,7 @@ The two `trustProxy` keys let the login rate-limiter key on the client address t
 
 **What `X-Forwarded-For` alone leaves open:** it is a header any client can set. A client that reaches the port directly, bypassing the tunnel, sets its own rate-limit bucket key and can rotate it at will.
 
-`httpListener.trustCloudflare` closes that gap for the HTTP listener. The client address comes from `CF-Connecting-IP`, and only when the connecting peer is itself inside Cloudflare's published ranges (`isCloudflareIp`); otherwise the header is ignored. It requires `httpListener.trustProxy`. With that off, `CF-Connecting-IP` is ignored whatever this says, and the onboarding wizard's Zero Trust Tunnel step writes both, so this route arrives with the narrower read already on.
+`httpListener.trustCloudflare` closes that gap for the HTTP listener. The client address comes from `CF-Connecting-IP`, and only when the connecting peer is itself inside Cloudflare's published ranges (`isCloudflareIp`); otherwise the header is ignored. It requires `httpListener.trustProxy`. With that off, `CF-Connecting-IP` is ignored whatever this says, and `/setup cloudflare` with the Zero Trust Tunnel selected writes both, so this route arrives with the narrower read already on.
 
 **What is still open:** the control plane has no `trustCloudflare` equivalent, so its rate-limiter is still keyed on `X-Forwarded-For`. Keep both ports reachable only through the tunnel. Restrict inbound traffic to Cloudflare egress IPs, which is what you want regardless, since direct exposure also bypasses tunnel-level access policies.
 
@@ -197,7 +197,7 @@ The two `trustProxy` keys let the login rate-limiter key on the client address t
 
 CORS enforcement is off by default (permissive, no origin checking) and is meant for multi-user, internet-exposed, or enterprise deployments where browser-based CSRF is a concern.
 
-The listener takes `enforceCors` and `allowedOrigins` as constructor parameters, and neither is a `ConfigKey` the onboarding wizard can write. What it does read from config when the constructor says nothing is the shared control-plane allowlist, so those are the settings to write. They are daemon-owned, so set them through the daemon rather than by editing the TUI settings file:
+The listener takes `enforceCors` and `allowedOrigins` as constructor parameters, and neither is a `ConfigKey` a `/setup` form can write. What it does read from config when the constructor says nothing is the shared control-plane allowlist, so those are the settings to write. They are daemon-owned, so set them through the daemon rather than by editing the TUI settings file:
 
 ```sh
 goodvibes-daemon config set controlPlane.cors.enabled true
@@ -253,7 +253,7 @@ Key commands:
 | --- | --- |
 | `/services list\|show\|check\|test\|check-auth\|trust\|export\|import\|open` | See, check and move your API services, and use one a project defines |
 | `/presets` | Pick, load and save presets (display, model and behaviour settings), and export, inspect or import them as a file |
-| `/setup transfer export\|inspect\|import` | Move setup-transfer bundles between environments |
+| `/startup transfer-export\|transfer-inspect\|transfer-import` | Move setup-transfer bundles between environments |
 
 Service entries can use an existing `tokenKey` field, a SecretRef in the key field, or explicit `tokenRef` / `passwordRef` / `webhookUrlRef` / `signingSecretRef` / `publicKeyRef` / `appTokenRef` fields:
 
@@ -306,7 +306,7 @@ GoodVibes exposes integration-helper and control/state APIs for external clients
 
 The front doors into this layer cover provider login/logout flows, install and update posture review, trust review bundles, bridge status/review/export/import paths, setup deep links, and portable install/update/auth review bundles with deeplink review and bundle packaging for operator surfaces.
 
-The setup surface is broader than a single readiness screen. It also covers onboarding and doctor flows, review of services, hooks, remote, and sandbox posture, support-bundle export, setup-transfer export/inspect/import, and deep links into the cockpit, security, remote, knowledge, incident, hooks, orchestration, and tasks operator surfaces.
+The setup surface is broader than a single readiness screen. It also covers the `/setup` topics, `/startup` checks, review of services, hooks, remote, and sandbox posture, support-bundle export, setup-transfer export/inspect/import, and deep links into the cockpit, security, remote, knowledge, incident, hooks, orchestration, and tasks operator surfaces.
 
 ## Core control-plane entrypoints
 

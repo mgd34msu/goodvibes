@@ -3,7 +3,7 @@
  *
  * The built web UI (RUNTHROUGH_WEBUI_DIST, built by run.ts with vite) is
  * served by the daemon itself (controlPlane.webui.serve). A Chromium
- * (RUNTHROUGH_CHROMIUM, default /usr/bin/chromium) driven by the repository's
+ * (RUNTHROUGH_CHROMIUM, set by run.ts; default /usr/bin/chromium) driven by the repository's
  * Playwright opens it with a pairing link, so it signs in as a paired device
  * (the daemon binds the device token to its HttpOnly cookie; the journey checks
  * that no storage a page script can read holds it, across a reload).
@@ -47,6 +47,9 @@ try {
   // Pair the browser as a device, as the pairing QR does.
   const minted = await invoke(s.daemon, owner, 'pairing.tokens.create', { name: 'rt-browser' });
   const device = (minted.body as { token?: { token?: string } }).token?.token ?? '';
+  // Playwright makes the profile under TMPDIR, and Chromium's singleton socket
+  // in it must fit a Unix socket path (about 100 bytes): the home's short link.
+  process.env.TMPDIR = s.home.env.TMPDIR!;
   browser = await playwright.launch({ executablePath: chromium, headless: true, args: ['--no-sandbox', '--disable-gpu'] });
   const page = await browser.newPage();
   const errors: string[] = [];

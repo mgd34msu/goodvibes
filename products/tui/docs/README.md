@@ -23,10 +23,10 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Live spoken answers (`/voice`), TTS provider/voice configuration, local player requirements, and streaming voice API behavior.
 
 - [Cloudflare batch and control plane](cloudflare-batch.md)
-  Optional Workers/Queues batch setup, bootstrap-token flow, daemon routes, onboarding fields, and `/cloudflare` commands.
+  Optional Workers/Queues batch setup, bootstrap-token flow, daemon routes, setup form fields, and `/cloudflare` commands.
 
 - [Home Assistant surface](homeassistant-surface.md)
-  Home Assistant companion setup, daemon callbacks, webhook security, and onboarding/settings fields.
+  Home Assistant companion setup, daemon callbacks, webhook security, and setup and settings fields.
 
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
   Session memory, durable memory, structured knowledge, connectors, extractors, embeddings, artifacts, and multimodal analysis.

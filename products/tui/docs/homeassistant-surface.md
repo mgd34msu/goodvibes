@@ -1,16 +1,16 @@
 # Home Assistant surface
 
-GoodVibes can expose a Home Assistant companion surface through the daemon. The TUI owns onboarding, settings, and auto-start selection; the platform daemon owns Home Assistant API calls, callback verification, tool/action metadata, and event delivery.
+GoodVibes can expose a Home Assistant companion surface through the daemon. The TUI owns setup, settings, and auto-start selection; the platform daemon owns Home Assistant API calls, callback verification, tool/action metadata, and event delivery.
 
-## Onboarding
+## Setup
 
-Select `Connect GoodVibes to external apps and services`, then select `Home Assistant surface`. Each field on the dedicated setup screen writes one config key:
+Run `/setup chat-apps` (Connect chat apps and services), then select `Home Assistant surface`. Each field on the dedicated setup screen writes one config key:
 
 | Field | Writes | Notes |
 | --- | --- | --- |
 | Auto-start this surface | `surfaces.homeassistant.enabled` | |
 | Home Assistant URL | `surfaces.homeassistant.instanceUrl` | |
-| Home Assistant access token | `surfaces.homeassistant.accessToken` | Raw values are stored as `goodvibes://` secret refs through the wizard secret policy |
+| Home Assistant access token | `surfaces.homeassistant.accessToken` | Raw values are stored as `goodvibes://` secret refs through the setup form's secret policy |
 | Home Assistant webhook secret | `surfaces.homeassistant.webhookSecret` | |
 | Default conversation ID | `surfaces.homeassistant.defaultConversationId` | |
 | Remote session idle TTL | `surfaces.homeassistant.remoteSessionTtlMs` | Defaults to 20 minutes |
@@ -21,7 +21,7 @@ If auto-start is set to `No`, the setup values are saved but the surface stays i
 
 ## Settings
 
-Home Assistant values are also editable after onboarding:
+Home Assistant values are also editable after setup:
 
 - `/settings open surfaces.homeassistant.instanceUrl` opens the fullscreen configuration workspace with the Home Assistant settings available under `Surfaces`.
 - Edit `surfaces.homeassistant.instanceUrl` inline from the `Surfaces` category to update the instance URL.

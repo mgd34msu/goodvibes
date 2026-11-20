@@ -41,7 +41,7 @@ test('an approval granted at the command-class tier reaches the daemon with that
     expect(decided.decision).toMatchObject({ remember: true, rememberTier: 'command-class' });
     const rules = await daemon.invoke(daemon.ownerToken, 'permissions.rules.list');
     expect(rules.status).toBe(200);
-    expect((rules.body as { rules?: Array<{ tier?: string; tool?: string; description?: string }> }).rules).toEqual(
+    expect((rules.body as { rules?: { tier?: string; tool?: string; description?: string }[] }).rules).toEqual(
       [expect.objectContaining({ tier: 'command-class', tool: 'exec', description: expect.stringContaining('bun') })]);
   } finally {
     await daemon.stop();

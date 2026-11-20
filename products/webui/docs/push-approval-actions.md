@@ -5,18 +5,22 @@ shell shows it with two action buttons: **Allow** and **Deny**.
 
 ## What ships today (works against the current daemon)
 
-- **In-app buttons.** The Approvals section of the Work view has Approve /
-  Deny / Claim / Cancel buttons backed by the real `approvals.*` operator
-  methods. This is the primary way to decide an approval and needs nothing new.
+- **In the app.** An approval opens in Work, and in the chat that raised it,
+  as its card with its choices; "I'll handle this" claims it and "Cancel this
+  request" withdraws it. The buttons call the real `approvals.*` operator
+  methods, and each answer names the revision of the approval it was shown, so
+  an answer to an approval that changed since is refused and the current state
+  is shown. This is the primary way to decide an approval.
 - **Notification action buttons that hand off to the app.** The service worker
   (`public/sw.js`) adds `Allow` / `Deny` buttons to an approval notification.
   Tapping one opens the app at
   `/?view=approvals-tasks#approval-action=<approve|deny>&approval-id=<id>`.
-  The app, which holds the operator token, reads that fragment on open and
+  The app, signed in by its cookie, reads that fragment on open and
   scrubs it. **Allow** opens that approval in Work so you can read what is being
   asked and press Approve yourself: a link in a page or a message must not be able
   to approve a tool call just by being opened. **Deny** is applied on open
-  (refusing is always safe) and toasts the result. A tap on a notification
+  (refusing is always safe) against the approval as it reads at that moment,
+  and toasts the result. A tap on a notification
   whose approval already ended (it expired, or another surface answered it
   first) toasts "Already expired, nothing changed" (or the actual state) instead
   of "Denied": the daemon answers such a call with `applied: false`. See:
@@ -40,10 +44,10 @@ One-tap background decide, approving or denying straight from the
 notification without opening a window, is intentionally left out. A service
 worker cannot make that call today:
 
-- The service worker holds no operator token. The token lives in
-  `localStorage` (`createBrowserTokenStore`), which a service worker cannot
-  read. So the worker cannot authenticate an `approvals.approve` / `.deny`
-  request on its own.
+- The service worker makes no daemon call of its own. The browser's sign-in
+  is an HttpOnly cookie that no script reads, and the worker holds no
+  credential scoped to one decision, so an `approvals.approve` / `.deny`
+  request is always made by the signed-in app after you have seen the ask.
 - We will not fake it (e.g. fire an unauthenticated request that silently
   fails, or cache a long-lived token in the worker).
 

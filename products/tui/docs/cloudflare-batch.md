@@ -10,9 +10,9 @@ GoodVibes can optionally use Cloudflare Workers and Queues for batch-capable dae
 
 The TUI owns the user flow. The platform daemon owns all Cloudflare API calls, token creation, validation, discovery, provisioning, verification, repair paths, and secret persistence. The TUI never calls Cloudflare APIs directly.
 
-## Onboarding
+## Setup
 
-Select `Use Cloudflare for batch or remote daemon work` on the first onboarding screen. The Cloudflare screen configures:
+`/setup cloudflare` (Use Cloudflare) opens the Cloudflare form; `/cloudflare setup` opens the same guided setup. The form configures:
 
 | Field | Choices / notes |
 | --- | --- |
@@ -21,11 +21,11 @@ Select `Use Cloudflare for batch or remote daemon work` on the first onboarding 
 | Components | Workers and Queues are the normal defaults; Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2 are advanced optional components (see What provisioning sets up) |
 | Resource names/refs | Account, zone/domain, worker, queue, tunnel, Access, KV, DO, R2, and Secrets Store identifiers |
 | Token setup path | One of the five paths in the next section |
-| Provision on apply | Whether the final onboarding apply provisions resources immediately |
+| Provision on apply | Whether saving the form provisions resources immediately |
 
 ## Token setup
 
-The wizard supports these paths:
+The setup form supports these paths:
 
 - Save settings only: persist configuration and provision later.
 - Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The daemon keeps a record of the operational token it made (its id, never its value) and returns that token again for the same account, zone and components, across retries, the final apply and restarts; a new token, for a changed selection, revokes the one it replaces, and the result says whether that worked. Disable revokes it too when a bootstrap token is given (set in the wizard, or `/cloudflare disable --bootstrap-token <token>` / `--bootstrap-env <ENV_NAME>`); otherwise it says the token is still live. A token Cloudflare no longer has counts as revoked, and its record is cleared.
@@ -51,7 +51,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare disable [--keep-cron] [--keep-worker-subdomain] [--bootstrap-token <token> | --bootstrap-env <ENV_NAME>]
 ```
 
-Bare `/cloudflare` opens its list of actions (from a model or script it runs `status`). `/cloudflare setup` opens onboarding in edit mode. All other actions call platform-owned daemon routes under local daemon admin/auth. The Agent has the same `/cloudflare` command over its connected host (without the setup wizard); the model may run its reads, while `create-token`, `provision` and `disable` count only when the owner types them.
+Bare `/cloudflare` opens its list of actions (from a model or script it runs `status`). `/cloudflare setup` opens the guided Cloudflare setup, the same form as `/setup cloudflare`. All other actions call platform-owned daemon routes under local daemon admin/auth. The Agent has the same `/cloudflare` command over its connected host (without the guided setup); the model may run its reads, while `create-token`, `provision` and `disable` count only when the owner types them.
 
 `create-token` returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. `--new` always makes a new token and revokes the one it replaces.
 
@@ -61,7 +61,7 @@ Each action accepts only its own flags, and a line is refused before anything is
 
 `/cloudflare provision` also accepts `--no-verify` (skip the check after provisioning), `--no-store-token` (do not store the API token), `--no-workers-dev` (do not enable the workers.dev route), `--worker-cron`, `--daemon-url`, `--worker-url`, `--dlq`, and `--operator-token` and `--worker-client-token`. Every token typed on the line (`--token`, `--bootstrap-token`, `--operator-token`, `--worker-client-token`, `--worker-token`) is hidden as it is typed and kept out of the input history and the shown line.
 
-`/cloudflare provision` accepts the same major platform daemon fields the onboarding screen exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
+`/cloudflare provision` accepts the same major platform daemon fields the setup form exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
 
 ## Daemon routes
 
@@ -79,7 +79,7 @@ The TUI integrates with these daemon routes, each backing the matching `/cloudfl
 | `POST /api/cloudflare/verify` | Verify the provisioned resources |
 | `POST /api/cloudflare/disable` | Turn the integration off |
 
-Errors return JSON with `error`; failures raised by the Cloudflare integration also carry a `code`. Sign-in and request-body failures (401, 403, 400) carry only `error`. The TUI displays route failures as actionable wizard or command output and does not block normal local daemon usage unless the user explicitly depends on Cloudflare provisioning.
+Errors return JSON with `error`; failures raised by the Cloudflare integration also carry a `code`. Sign-in and request-body failures (401, 403, 400) carry only `error`. The TUI displays route failures as actionable setup-form or command output and does not block normal local daemon usage unless the user explicitly depends on Cloudflare provisioning.
 
 ## What provisioning sets up
 

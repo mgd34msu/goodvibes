@@ -23,7 +23,7 @@ goodvibes-agent
 ```
 
 Commands are installed in `~/.local/bin`; add that directory to `PATH` if
-needed. A fresh Agent home opens setup. After setup is applied, a relaunch opens
+needed. A fresh Agent home opens first run. After that, a launch opens
 a fresh conversation, with a notice about your last session when one exists so you can choose to resume it.
 
 Agent needs a connected daemon, accepted credentials and the scopes required
@@ -48,110 +48,54 @@ for endpoint configuration and diagnostics.
 
 ## First run
 
-Use the interactive workspace first. CLI subcommands are secondary support paths for install checks, setup inspection, and scriptable mirrors.
+When the model a session would use is not ready, `goodvibes-agent` opens first
+run, which is three steps and the same as in the terminal app:
 
-The workspace opens into a set of operator areas. Each area below names what it covers; the Setup area carries the guided path from a fresh install to a working connected host and model route, and the rest become useful as soon as setup is applied.
+1. Choose how to get a model, from what is already set up on this computer:
+   keys found in the environment, model servers found on this computer, or
+   another provider.
+2. Sign in, or paste a key. A key the provider refuses is not kept.
+3. Start: the conversation opens with its starting prompts and one sentence
+   saying when GoodVibes asks before acting. The starting prompts show on every
+   empty conversation, and Tab fills in the next one.
 
-- Setup:
-  - guided first-run wizard with progress, current-step route hints, saved setup checkpoints, checkpoint auto-advance evidence when a saved step is already ready, backtracking routes, setup-smoke rerun/save routes, repeated-blocker focus from saved smoke history, and closeout state from critical blocker, saved smoke, and user completion-marker evidence
-  - visible checklist for runtime, connected-host auth, provider/model, install smoke, and follow-on capabilities
-  - prioritized first-run plan
-  - primary handoffs from every actionable setup row to the safest visible form, diagnostic, or confirmed route
-  - GoodVibes settings import preview/apply
-  - read-only setup repair decisions
-  - token-safe install smoke checks
-  - setup smoke: `setup action:"smoke"` without fields returns the checklist with no approval; with the user-run output in `fields` it saves one redacted evidence artifact (write admission). Evidence with every user-run check recorded is `passed`, and the install-smoke row reads ready
-  - setup readiness from the Agent's own checks: the host probe and auth check (run only for the rows that report them), saved smoke evidence, and the Agent Knowledge readiness from the last `host action:"status"`
-  - confirmed onboarding finish marker write
-  - route-level provider-health-backed model readiness scores
-  - Model Routing readiness and benchmark-evidence actions
-  - hardware-scored local model cookbook with setup/download guidance
-  - certified local serving diagnostics with host-published start/repair route evidence
-  - confirmed benchmark action/history
-  - connected-host compatibility reporting against the public Agent routes
-  - live service probe evidence
-  - token-safe connected-host auth posture with exact pairing route ids
-  - confirmed local token create/repair
-  - offline GoodVibes host bootstrap commands
-  - diagnostic/status repair recommendations
-  - inspect-first confirmed service install/start/restart routes with success criteria and certified service receipt outcomes
-  - Agent Knowledge readiness
-  - isolated Agent profile creation and switching
-  - redacted support bundle export for troubleshooting handoffs
-  - provider subscription session posture
-  - provider auth review with redacted export
-- Home: assistant cockpit lanes for setup, chat/model choice, browser cockpit/PWA handoff, project work, Personal Ops, research/docs, background supervision, and safety/recovery, plus briefing, model refresh, health, doctor, and compatibility actions.
-- Knowledge: isolated Agent Knowledge status, ask/search, inspection, and confirmed ingest.
-- Research: read-only web research and URL inspection, a visible Research briefing next-action queue, workflow planning with bounded public source-candidate search, certified live platform/daemon browser-runner and visual-report render evidence when published, project-local visible research runs with log tails, browser-backed runner readiness/fallback posture, source queue, credibility review, reviewed-source bundles, plus confirmed sourced report artifacts with source maps, citation coverage checks, repair hints, and optional visual report packets.
-- Documents & Compare:
-  - versioned markdown document drafts
-  - review comments
-  - AI suggestion review
-  - draft browse/show/create/revise/review/suggest/accept/reject/artifact-attach/artifact-insert/export with reviewer-ready comment and suggestion summaries
-  - chronological review packet timeline across document/comment/suggestion/compare/judgment/route-decision/packet-preset/handoff/archive events with stale preset attention
-  - a read-only review packet wizard with progress/current-step routes/backtracking/final archive review/refreshed-preset lineage/share handoff
-  - visible reviewer-readiness preflight before export/archive/apply
-  - inline readiness badges at document export, reviewer handoff/archive, and route-apply forms
-  - packet defaults that prefill the next export/handoff/archive/apply/leave-unchanged/save-preset/share ids from the latest review packet while falling back to saved preset metadata only when live evidence is missing
-  - file uploads into saved artifacts
-  - document and artifact exports to workspace files
-  - source checks against attached evidence
-  - generated media artifacts
-  - saved artifact browse/show/export/package/archive
-  - reviewed artifact-to-Knowledge promotion
-  - saved packet preset save/list/show/refresh routes with missing/superseded id freshness checks and confirmed refresh into a new preset artifact
-  - confirmed reviewer packet share through `agent_review_packet_share`: the ZIP is attached where the surface carries attachments (as the file, or a download link on text-only surfaces), and no ZIP bytes appear in the transcript
-  - saved text artifact reuse in blind comparison
-  - confirmed blind model comparison with:
-    - delayed reveal
-    - durable JSON comparison artifacts
-    - saved review boards
-    - side-by-side reviewer views
-    - split-pane reviewer handoff diffs with section jumps plus recent-handoff defaults and visible recent choices
-    - saved judgment artifacts
-    - confirmed apply and leave-unchanged route-decision receipts
-    - task/document/benchmark-filtered preference analytics/synthesis
-    - markdown report export
-    - reviewer handoff artifacts
-    - one-click reviewer handoff ZIP archives with matching route-decision receipt evidence
-    - confirmed winner route updates
-- Personal Ops:
-  - a read-only daily briefing plan across inbox, agenda, tasks, reminders, routines, delivery, notes, and the autonomy queue
-  - a read-only review queue for saved inbox thread/calendar event items, refreshable provider-read routes, daemon/platform provider read-model records, and follow-up boundaries
-  - inbox/calendar connector readiness
-  - request intake that turns "triage my inbox", "brief my calendar", task, reminder, note, routine, and delivery asks into the safest lane/route/fields/confirmation boundary
-  - email/calendar-capable MCP setup routes
-  - expanded connector tool classification for read-only versus write-like inbox/calendar actions
-  - schema-derived operation records with required fields, sample inputs, schema routes, confirmation flags, and fresh-read routes
-  - inbox triage/draft and calendar agenda/conflict workflow cards with inspect routes
-  - ordered execution plans for connector reads/local drafting/confirmed effects
-  - confirmed read-only MCP execution for selected inbox/calendar reads with bounded redacted output
-  - normalized review cards
-  - optional saved redacted review-card artifacts
-  - structured next-route packets for refresh/lane/queue/artifact/local-draft/confirmed-effect boundaries
-  - saved review artifacts resurfaced as redacted inbox thread/calendar event queue records
-  - a receipt for every mail the Agent sent (`google action:"mail.send"`), event it created (`google action:"calendar.create"`) and reminder it scheduled, listed in the inbox, calendar and reminders lanes with its outcome (succeeded, failed, or unknown when the provider could not confirm)
-  - live records for Agent-owned notes, routines, schedule receipts, delivery channels, and redacted delivery receipts
-- Memory & Skills:
-  - VIBE.md personality inspection and import
-  - project context file inspection
-  - durable Agent-local memory records
-  - scratchpad notes
-  - reusable personas
-  - reusable skills and skill bundles
-  - startable routines with explicit schedule promotion
-  - learned behavior capture from completed work
-  - prompt injection limited to safe VIBE.md, safe project context, and reviewed/confident setup-ready behavior
-  - visible Local Context and Personas workspace health counts for VIBE.md/project context files
-  - setup/curator visibility for blocked or truncated VIBE.md files
-  - model-visible context inspection for blocked or truncated project context files
-  - a Prompt context action that shows the currently applied prompt order, recent durable receipt ids, selected/suppressed context records, and approximate token budget
-  - a Prompt plan action that explains prompt-active records, suppressed review/setup work, proposal queues, consolidation queues, and scored review routes before context expands
-  - a learning curator for review/setup/stale/duplicate-consolidation/reviewed-note/completed-work/completed-research/saved-session memory and behavior candidates, including guided duplicate-consolidation phase helpers with receipts
-- Channels: companion pairing, an ordered channel setup guide, channel readiness, channel triage, notification targets, allowlist/status review, redacted confirmed-send receipts, and confirmed sends.
-- Voice & Media: TTS setup, image input, confirmed generated media, voice workflow posture, paired-phone camera/screen/location/command readiness read from the daemon's device runtime (paired devices and live grants), and browser/PWA readiness with certified category-route and first-run receipt evidence when the connected host publishes it.
-- Work & Automation: work-plan tracking, approvals, schedules, reminders, and explicit operator actions.
-- Operator Runtime: daemon status, method discovery, confirmed write/admin routes, visible autonomous agents, and cancellation/status follow-up.
+Leaving part way and starting again resumes from where you were. After first
+run the splash names the model in use. Everything else is set up later with
+`/setup`, which lists topics and opens one form per topic (`/setup first-run`
+runs the three steps again).
+
+## The Agent workspace
+
+`Ctrl+G` (or `/agent`) opens the Agent workspace; `Ctrl+P`, `?` and `/help`
+open the list of every command and key instead. The workspace is a set of
+pages, each a list of rows. A row changes a setting, opens the shared model
+picker, or opens the guided form of the slash command that does it, the same
+form the command opens when you type it. The side pane says what the selected
+row does and shows that command's own report. Browsing the workspace never
+reaches the network: a report that reads a mailbox, a provider or the daemon
+runs only when you ask with `Ctrl+R`.
+
+| Page | What it holds |
+| --- | --- |
+| Home | Everything the assistant can do, grouped by what you want to get done; or close it and type |
+| Setup | The rows of one `/setup` topic |
+| Models | The model the assistant answers with, and optional models for side jobs |
+| Behavior | How much it checks in, when it shortens the history, and whether you see its reasoning |
+| Tools & Permissions | What the assistant may do without asking |
+| Interface | Theme, streaming, line numbers and where messages go |
+| Personal Ops | Your inbox, calendar, notes and reminders, and the accounts behind them |
+| Research | Web research with its sources, and sourced reports |
+| Documents & Files | Drafts and their review, saved files, and comparing models on one task |
+| Conversation | This conversation and your saved ones: save, resume, find and export |
+| Tools & MCP | The tool servers the assistant can use, and the secrets they need |
+| Knowledge | What the assistant knows from the pages, files and bookmarks you added |
+| Profiles | Separate Agent homes and the starters they are made from |
+| Your Profile | What GoodVibes knows about you, and how to correct or forget a fact |
+| Memory, Notes, Personas, Skills, Routines | What the assistant remembers, your scratchpad, how it talks, its procedures, and workflows you start by name or on a schedule |
+| Work & Approvals | What is running, what waits for your answer, and your to-do list |
+| Automation | Schedules on the connected host, and the limits on them |
+| Messaging | Chat apps and notification channels |
+| Finish | Mark setup finished, so later starts open the conversation |
 
 Press `/` inside the Agent workspace to search actions by name, category, command, or detail.
 
@@ -286,7 +230,7 @@ Source queue records keep credibility, score, report-ready source lines, source 
 
 Use `research action:"report_artifact" artifactId:"..."` to inspect one saved report before export, archive, share, or Knowledge promotion. The visual-report contract names required sections, citation/source-map acceptance criteria, report save, review-packet, ZIP archive routes, and certified browser/PWA render read models with render route, redacted render URL, source-map count, citation coverage, visual sections, publication, and receipt evidence so richer rendering stays tied to the same reviewed artifacts. Use confirmed Agent Knowledge ingest actions when a reviewed source should become durable.
 
-Use Agent Workspace -> Documents & Compare when a document needs:
+Use `/documents`, `/artifacts` and `/compare` (the rows of the Documents & Files page open their actions) when a document needs:
 
 - a versioned markdown draft
 - review comments
@@ -294,7 +238,7 @@ Use Agent Workspace -> Documents & Compare when a document needs:
 - review status
 - reviewer-ready document artifact export
 - chronological review packet timeline with stale-preset attention
-- guided review packet progress/routes/backtracking/final archive review/refreshed-preset lineage/share handoff
+- the review packet steps (`/documents packet-steps`): what is ready, what is missing and the line that fixes it
 - reviewer-readiness preflight for unresolved comments/suggestions/source artifacts/comparison reveal/route decisions/handoff evidence
 - inline readiness badges at export/archive/apply points
 - packet-default prefill for the next export/handoff/archive/apply/leave-unchanged/save-preset/share form
@@ -319,7 +263,7 @@ Use Agent Workspace -> Documents & Compare when a document needs:
   - one-click reviewer handoff ZIP archives with matching route-decision receipt evidence
 - confirmed packet share through `agent_review_packet_share` when the user wants to send the archive to a configured channel, a bound route or a webhook
 
-Use the Artifacts area and Voice & Media workspace for images, source files, generated media, and exported sessions. Generated media returns artifact ids and metadata, not inline base64.
+Use `/artifacts` for saved images, source files, generated media and exported sessions, and `/media make` to make an image or video. Generated media returns artifact ids and metadata, not inline base64.
 
 ## Connected host
 
@@ -343,9 +287,9 @@ export GOODVIBES_AGENT_RUNTIME_URL=http://host:port
 
 Host diagnostics:
 
-- Agent Workspace -> Home -> Host compatibility
-- Agent Workspace -> Home -> Doctor diagnostics
-- Agent Workspace -> Home -> Review health
+- `/health compat`: the connected host's compatibility
+- `/health`: what needs attention, with the line that fixes each problem
+- `/health check <area>`: one area in detail
 - `goodvibes-agent status --json`
 - `goodvibes-agent doctor`
 - `goodvibes-agent compat`

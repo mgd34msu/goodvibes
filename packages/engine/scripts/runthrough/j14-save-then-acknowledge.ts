@@ -9,10 +9,17 @@
  *    script runs) holds the reply's POST without answering; the daemon is
  *    killed while it holds and started again; the answer reaches the
  *    conversation once after the restart.
+ *  - the update hold: a daemon that has stopped taking new work before an
+ *    update (its one DaemonWorkAdmission closed by hold-preload.ts, as the
+ *    self-update closes it before the handover) keeps a channel message that
+ *    arrives during the hold, starts nothing, and answers it once after an
+ *    orderly restart.
  *
  * Each path package of the save-then-acknowledge work adds its step here.
  */
 import { createHmac } from 'node:crypto';
+import { join } from 'node:path';
+import { textOf } from './fake-model.ts';
 import { Journey, api, operatorToken, short, stage, startDaemon, waitFor, type Daemon } from './lib.ts';
 
 const journey = new Journey('j14-save-then-acknowledge');
@@ -189,6 +196,39 @@ try {
     'POST /api/automation/jobs (delivery mattermost ch-auto); run it; the recorder holds the delivery; SIGKILL; restart',
     `job ${job.status} ${short(job.text, 100)}; run ${run.status}; held ${autoHeld}; deliveries after the restart ${autoPosts.length}`,
     autoHeld && autoPosts.length === 1);
+
+  // The update hold: admission closed, a message arrives, nothing starts; it is answered once after the restart.
+  await daemon.stop();
+  daemon = await startDaemon(s.home, [], { ...env,
+    BUN_OPTIONS: `--preload ${join(import.meta.dir, 'guard.ts')} --preload ${join(import.meta.dir, 'hold-preload.ts')}` });
+  process.kill(daemon.pid, 'SIGUSR2');
+  const closedOn = await waitFor(() => /admission closed on (\d+) instance/.exec(daemon.output())?.[1], 10_000);
+  s.model.scriptWrapped('RTJ14HOLDMSG', [{ text: 'RTJ14HOLDMSG answered after the update.' }]);
+  // Counted from here: every model request and every answer to the owner's conversation.
+  const requestsBefore = s.model.requests.length;
+  const answersBefore = answered('dm-U-OWNER').length;
+  const holdMessage = await inbound('U-OWNER', 'RTJ14HOLDMSG what is on today?', 'post-j14-hold');
+  const holdText = await holdMessage.text();
+  const holdOutcome = (() => { try { return (JSON.parse(holdText) as { outcome?: string }).outcome; } catch { return undefined; } })();
+  // A turn the hold failed to stop would reach the scripted model within moments; give it the time to show.
+  const startedDuringHold = await waitFor(() => s.model.requests.length > requestsBefore ? true : undefined, 5_000);
+  const holdAnswers = () => answered('dm-U-OWNER').slice(answersBefore);
+  const answersDuringHold = holdAnswers().length;
+  await daemon.stop();
+  daemon = await startDaemon(s.home, [], env);
+  await waitFor(() => holdAnswers().length > 0 ? true : undefined, 30_000);
+  // Long enough for a second answer to show.
+  await Bun.sleep(5_000);
+  const turns = s.model.requests.slice(requestsBefore);
+  const sawMessage = turns.some((request) => request.messages.some((message) => message.role === 'user' && textOf(message.content).includes('RTJ14HOLDMSG what is on today?')));
+  journey.check('a channel message that arrives while the daemon holds for an update starts nothing and is answered once after the restart',
+    'hold-preload.ts closes admission (SIGUSR2); POST /webhook/mattermost; orderly stop; start without the preload',
+    `admission closed on ${closedOn ?? 'none'}; message ${holdMessage.status} ${short(holdText, 160)}; model requests during the hold ${startedDuringHold ? 'some' : 0}, answers ${answersDuringHold}; after the restart: model requests ${turns.length} (the message in them ${sawMessage}), answers ${JSON.stringify(holdAnswers().map((post) => short(String(post.body.message), 60)))}`,
+    closedOn === '1' && holdMessage.status === 202 && holdOutcome === 'waiting-for-restart' && startedDuringHold === undefined && answersDuringHold === 0
+      && sawMessage && holdAnswers().length === 1 && String(holdAnswers()[0]!.body.message).includes('RTJ14HOLDMSG answered after the update.'),
+    startedDuringHold ? 'the hold did not stop the turn: it started while the daemon was closed to new work'
+      : holdAnswers().length === 0 ? 'the held message was never answered after the restart' : holdAnswers().length > 1 ? `the held message was answered ${holdAnswers().length} times`
+      : !sawMessage ? 'the turn after the restart did not carry the held message to the model' : undefined);
 } catch (error) {
   journey.check('journey ran to the end', 'j14', error instanceof Error ? error.stack ?? error.message : String(error), false);
 } finally {

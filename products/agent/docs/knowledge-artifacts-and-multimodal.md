@@ -49,7 +49,7 @@ Agent Knowledge writes are explicit-user-action paths. Slash commands that inges
 
 ## Ask and search
 
-Use Agent Workspace -> Knowledge -> Ask Agent Knowledge for source-backed Agent Knowledge answers. `/knowledge ask <query>` and `goodvibes-agent ask <query>` are scriptable equivalents over the same route. Default output is concise:
+Use `/knowledge ask <query>` (the Knowledge page's "Ask your knowledge a question" row opens the same form) for source-backed Agent Knowledge answers. `goodvibes-agent ask <query>` is the scriptable equivalent over the same route. Default output is concise:
 
 - answer text or a clear no-match state;
 - confidence when present;
@@ -60,7 +60,7 @@ Use Agent Workspace -> Knowledge -> Ask Agent Knowledge for source-backed Agent 
 
 The command layer does not turn search results into an answer locally and does not apply client-side filters to hide contamination. It rejects contaminated payloads; the connected host must still return Agent-owned data for the route to succeed.
 
-Use Agent Workspace -> Knowledge -> Search Agent Knowledge for interactive search. `/knowledge search <query>` and `goodvibes-agent search <query>` query the isolated Agent Knowledge search route and render bounded results with title, id, type, score, source, URL, and snippets when available. Empty Agent stores return an explicit empty state.
+Use `/knowledge search <query>` (the Knowledge page's "Search your knowledge" row) for interactive search. It and `goodvibes-agent search <query>` query the isolated Agent Knowledge search route and render bounded results with title, id, type, score, source, URL, and snippets when available. Empty Agent stores return an explicit empty state.
 
 Read-only inspection is available from the TUI Knowledge workspace first, with CLI equivalents for scripts:
 
@@ -98,16 +98,16 @@ Do not map VIBE.md, project context files, local memory, notes, routines, skills
 
 Artifacts are first-class runtime objects for files, images, audio, video, generated outputs, and delegation results. Agent Knowledge use of artifacts must still go through Agent-specific ingest routes when those are available.
 
-The saved artifact browser is available from Agent Workspace -> Artifacts -> Browse artifacts and through `agent_artifacts`. It lists recent uploads, exports, generated media, source artifacts, session artifacts, comparison artifacts, sourced research reports, and exported document drafts with filters for query, kind, MIME type, purpose, and source. `agent_artifacts mode:"show"` inspects one artifact by id with redacted metadata and a bounded preview for text-like content only; binary bytes and inline base64 stay out of the transcript.
+The saved artifact list is `/artifacts list` (also a row on the Documents & Files page) and `agent_artifacts`. It lists recent uploads, exports, generated media, source artifacts, session artifacts, comparison artifacts, sourced research reports, and exported document drafts with filters for query, kind, MIME type, purpose, and source. `agent_artifacts mode:"show"` inspects one artifact by id with redacted metadata and a bounded preview for text-like content only; binary bytes and inline base64 stay out of the transcript.
 
 Related saved-artifact actions:
 
-- Agent Workspace -> Artifacts -> Export saved artifact copies one reviewed artifact to a workspace file after typed confirmation, preserves exact bytes for text or binary artifacts, and refuses overwrite unless explicitly enabled.
-- Agent Workspace -> Artifacts -> Export package copies selected reviewed artifact ids into a workspace package directory or ZIP archive with exact bytes under `artifacts/`, a redacted `manifest.json`, and a README.
-- Agent Workspace -> Artifacts -> Attach to document draft links one reviewed saved artifact id to a document without rewriting the body.
-- Promote to Knowledge and Documents & Compare -> Promote artifact to Knowledge ingest one reviewed saved artifact id through the isolated Agent Knowledge artifact route after typed confirmation.
+- `/artifacts export` copies one reviewed artifact to a workspace file after typed confirmation, preserves exact bytes for text or binary artifacts, and refuses overwrite unless explicitly enabled.
+- `/artifacts package` copies selected reviewed artifact ids into a workspace package directory or ZIP archive with exact bytes under `artifacts/`, a redacted `manifest.json`, and a README.
+- `/documents attach-artifact` links one reviewed saved artifact id to a document without rewriting the body.
+- `/knowledge ingest-artifact` ingests one reviewed saved artifact id through the isolated Agent Knowledge artifact route after typed confirmation.
 
-Agent Workspace -> Voice & Media -> Generate media creates image/video artifacts through configured media providers after typed confirmation. The main conversation can perform the same confirmed action with the `agent_media_generate` tool when the user explicitly asks for generated media. Generated media output is summarized as artifact ids, MIME types, filenames, and source URLs when present; inline base64 is not printed into the transcript.
+`/media make` creates image/video artifacts through configured media providers after confirmation, and `/media collect` collects a job that was still being made. The main conversation can perform the same confirmed action with the `agent_media_generate` tool when the user explicitly asks for generated media. Generated media output is summarized as artifact ids, MIME types, filenames, and source URLs when present; inline base64 is not printed into the transcript.
 
 The model can use first-class tools for the common route-selection, Knowledge, document, packet preset, packet share, artifact, autonomy, research, model/provider, computer/browser, device/voice, security, media, and comparison workflows; the full tool catalog with a one-line purpose per tool is in [Tools and commands](tools-and-commands.md). `route action:"plan"` maps a plain user request to the preferred visible Agent route, alternatives, missing fields, confirmation boundary, workspace matches, and harness mode matches without executing tools.
 
@@ -131,7 +131,7 @@ Research reports save one confirmed sourced markdown artifact with a source map,
 
 `agent_artifacts mode:"export"` copies exact saved artifact bytes to a validated workspace path after confirmation and refuses accidental overwrite; `mode:"package"` copies selected saved artifacts into a validated workspace directory with exact bytes, redacted metadata, README, and manifest; `mode:"archive"` writes the same package payload as one ZIP file. `agent_knowledge_ingest` accepts `sourceKind:"artifact"` plus `artifactId` for reviewed saved-artifact promotion.
 
-Blind model comparison can run from a direct prompt or a saved text artifact id, and saves a local JSON artifact with the full prompt, blinded outputs, source artifact metadata, and reveal map while keeping model identities hidden in the transcript until reveal. Saved artifacts can be reopened as blind review boards from Documents & Compare, and from there:
+Blind model comparison can run from a direct prompt or a saved text artifact id, and saves a local JSON artifact with the full prompt, blinded outputs, source artifact metadata, and reveal map while keeping model identities hidden in the transcript until reveal. Saved comparisons are reviewed with `/compare review`, and from there:
 
 - rendered as side-by-side reviewer views with related document/artifact excerpts
 - converted into confirmed judgment artifacts
@@ -143,7 +143,7 @@ Blind model comparison can run from a direct prompt or a saved text artifact id,
 - applied to the main model route only through a separate confirmed winner-update action
 - saved as apply-winner or leave-unchanged route-decision receipt artifacts
 
-Documents & Compare shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events plus a read-only review packet wizard for progress, current route hints, backtracking, route-decision guidance, refreshed-preset lineage, final archive review, and the confirmed share route.
+`/documents timeline` shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events, and `/documents packet-steps` shows the review packet steps: what is ready, what is missing and the line that fixes it.
 
 The workspace's Documents & Files rows open the actions of `/documents`, `/artifacts` and `/compare`; `/documents readiness` lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
 

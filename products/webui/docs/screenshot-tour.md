@@ -39,8 +39,9 @@ is open the sidebar folds to an icon rail.
 ## Library
 
 Library holds Memory, Knowledge and Review. Memory shows each record's type,
-scope and confidence, and says which search mode actually ran. Knowledge is the
-regular Knowledge/Wiki surface; Review is everything waiting on a human call.
+scope and confidence, and says which search mode actually ran. Knowledge shows
+what is known by subject, each fact with where it came from; Review is
+everything waiting on a human call.
 
 ![Library on the Memory section with filters and confidence on each record](assets/screenshots/library-memory.png)
 
@@ -56,7 +57,8 @@ account says so rather than showing an empty page.
 Settings is a dialog with seven pages (General, Account, Models and providers,
 Voice, Notifications, Memory, Permissions) and a search box. Models and
 providers shows the current model new chats use and each provider's sign-in
-state.
+state. Permissions opens with the four permission modes as cards. The chip at
+the right of the header names the mode in force, and opens that page.
 
 ![Settings dialog open on Models and providers](assets/screenshots/settings-models.png)
 

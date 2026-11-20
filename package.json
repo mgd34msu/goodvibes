@@ -40,6 +40,7 @@
     "test": "bun packages/engine/scripts/test.ts",
     "test:live": "bun packages/engine/scripts/test.ts --live",
     "test:e2e": "bun packages/engine/scripts/test.ts --e2e",
+    "journeys": "bun packages/engine/scripts/runthrough/run.ts",
     "test:installer": "bun packages/engine/scripts/test.ts scripts",
     "test:judgment": "bun packages/engine/scripts/test.ts packages/judgment/test",
     "test:one": "bun packages/engine/scripts/test.ts",

@@ -134,6 +134,33 @@ Supported chat behavior:
 Provider/model controls in the composer update daemon model selection. Message
 sends themselves do not include provider/model routing.
 
+An approval or question a chat is waiting on appears in that chat, as a card
+below the last message with its choices, and the chat header shows a chip
+("asking you · 1") that lists them. Work lists the same asks. Once one is
+decided, here or anywhere else, the card folds to one dim line saying what was
+decided.
+
+A turn's tool calls read as one collapsed line ("Read 2 files, edited 1 · 4 s")
+that opens to one line per call, worded as the terminal words it; the raw
+result is behind each call's Details. A reply that failed or was refused is a
+row in the conversation: what happened, the cause and what was changed, then
+buttons for the next step (Try again, Use another model, Details, or Choose a
+model or Sign in again for a refusal). The prompt above it stays as typed, and
+the row is the same after a reload.
+
+## Command palette and guided sheets
+
+Search (Ctrl K) opens the command palette: chats, places to go, settings
+sections, and every slash-command action the daemon can run. Picking an action
+opens its guided sheet, with the same blanks, the same sentence above the
+button and the same "what happened" line as the terminal. A schedule or trigger
+described in words is read back by the daemon first, and the sheet shows what
+will be kept before you save it. An action only a terminal can do is listed
+with the reason. The palette also opens four screens built the same way:
+Schedules, MCP servers and tools, Repeat purchases, and Triggers. Typing `/`
+in the chat composer offers only `/new`; other commands are run from the
+palette.
+
 ## Attachments
 
 Attachments are uploaded as daemon artifacts before the chat message is sent.
@@ -266,8 +293,9 @@ and a background poll keeps the list fresh while it is down.
 
 ### Sessions
 
-The daemon caps the session list at the 50 most recent and the page says so
-rather than implying completeness. In a session's detail you can:
+Open sessions between turns sit behind their own line; the daemon sends them a
+page at a time, and "Show older sessions" at the end of the list loads the next
+page, back to the first. In a session's detail you can:
 
 - read its transcript
 - steer a live session (on a phone, plain Enter sends); a steer sent while the

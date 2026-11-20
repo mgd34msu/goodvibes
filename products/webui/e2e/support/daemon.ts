@@ -58,7 +58,7 @@ function freePort(): Promise<number> {
 function listeningPorts(): number[] {
   const ports = new Set<number>();
   for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
-    let text = '';
+    let text: string;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
     for (const line of text.split('\n').slice(1)) {
       const fields = line.trim().split(/\s+/);
@@ -168,7 +168,7 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
     child.once('exit', (code) => fail(new Error(`the daemon exited ${code} before it was ready: ${output.slice(-1500)}`)));
   });
   const baseUrl = `http://127.0.0.1:${ports.controlPlane}`;
-  const tokens = JSON.parse(readFileSync(join(daemonHome, 'operator-tokens.json'), 'utf8')) as { token?: string; operator?: { token?: string }; tokens?: Array<{ token?: string }> };
+  const tokens = JSON.parse(readFileSync(join(daemonHome, 'operator-tokens.json'), 'utf8')) as { token?: string; operator?: { token?: string }; tokens?: { token?: string }[] };
   const ownerToken = [tokens.token, tokens.operator?.token, ...(tokens.tokens ?? []).map((entry) => entry.token)].find((entry): entry is string => typeof entry === 'string' && entry.length > 0);
   if (!ownerToken) throw new Error('the daemon wrote no operator token');
   const api: RealDaemon['api'] = async (token, method, path, body) => {

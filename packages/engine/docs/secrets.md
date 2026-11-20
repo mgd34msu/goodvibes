@@ -112,12 +112,14 @@ and other daemon-owned integration credentials.
 
 Store secret refs in config; store the secret values in the backing secret
 provider. A setting that holds a credential (a channel token, `cluster.secret`,
-a Cloudflare token reference and the rest of the declared list) takes only a
-`goodvibes://secrets/` reference: a plain value is refused with the command that
-stores it (`/secrets set <KEY> <value>`, or the settings screen, which stores the
-value and writes the reference for you). Card number, expiry, CVV and cardholder
+a Cloudflare token reference, the ntfy topic names, an incoming or outbound
+webhook URL, the notification webhook URLs and the rest of the declared list)
+takes only a `goodvibes://secrets/` reference: a plain value is refused with the
+command that stores it (`/secrets set <KEY> <value>`, `/notify add <url>` for a
+notification webhook, or the settings screen, which stores the value and writes
+the reference for you). Card number, expiry, CVV and cardholder
 name are never settings; cards are kept in the daemon's card store through
-`/payments card` or the web UI.
+`/payments add-card` or the web UI.
 
 ## Where stored secrets are read from
 

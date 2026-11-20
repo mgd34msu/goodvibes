@@ -57,9 +57,9 @@ If the connected host is unavailable, unauthenticated, or incompatible with Agen
 
 Use the TUI first for those checks:
 
-- Agent Workspace -> Home -> Host compatibility
-- Agent Workspace -> Home -> Doctor diagnostics
-- Agent Workspace -> Home -> Review health
+- `/health compat`: the connected host's compatibility
+- `/health`: what needs attention, with the line that fixes each problem
+- `/health check <area>`: one area in detail
 
 `goodvibes-agent status --json`, `goodvibes-agent doctor`, and `goodvibes-agent compat` are scriptable equivalents for install checks and automation. `status` always exits 0. `doctor` exits 1 only when it reports a must-fix `risk` finding (posture advisories that say no action is needed do not count); warnings leave it at 0, and `doctor --strict` exits 1 on any finding.
 

@@ -27,6 +27,24 @@ is never installed behind your back: a code lookup says which server is missing
 and how to install it, and `/intelligence install <file|language>` installs it
 into your GoodVibes bin directory when you ask.
 
+## First run
+
+When the model a session would use is not ready, `goodvibes` opens first run,
+which is three steps and the same in the Agent:
+
+1. Choose how to get a model, from what is already set up on this computer:
+   keys found in the environment, model servers found on this computer, or
+   another provider.
+2. Sign in, or paste a key. A key the provider refuses is not kept.
+3. Start: the conversation opens with its starting prompts and one sentence
+   saying when GoodVibes asks before acting. The starting prompts show on every
+   empty conversation, and Tab fills in the next one.
+
+Leaving part way and starting again resumes from where you were: a provider
+chosen but not signed in opens step 2. After first run the splash names the
+model in use. Everything else is set up later with `/setup`, which lists
+topics and opens one form per topic.
+
 ## Configure a model provider
 
 API keys resolve from environment variables first, then from the GoodVibes
@@ -217,10 +235,12 @@ These slash commands are the fastest way to get oriented once the TUI is running
 
 | Command | What it opens |
 | --- | --- |
-| `/model` | The fullscreen provider/model workspace for main chat, helper, tool LLM, and TTS LLM routing |
-| `/settings` | The fullscreen configuration workspace for inspecting and editing runtime settings |
+| `/help` (also `?` and `Ctrl+P`) | One searchable list of every command and every key |
+| `/model` | Your model and the others you can use, switching, and backup models |
+| `/settings` | The settings screen; every setting is shown by a plain name with its key beside it |
+| `/setup` | Setting GoodVibes up, one topic at a time |
 | `/knowledge status` | The knowledge runtime's current posture |
-| `/plugin browse` and `/marketplace` | The plugin ecosystem and the curated marketplace |
+| `/plugin` and `/marketplace` | Your plugins, and the curated marketplace |
 | `/remote` | Remote peers and node-host runners, if you use them |
 | `/mcp` | Add, edit, remove, reload, and inspect MCP servers while the TUI is running |
 

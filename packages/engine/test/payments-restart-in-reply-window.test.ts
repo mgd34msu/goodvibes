@@ -15,21 +15,26 @@
  * files. A second set of those objects over the same files is the restarted
  * daemon; the first daemon's stop is its own stop signal. Stand-ins: the
  * merchant (a loopback store that records each order POST), the channel that
- * carried the unclear reply, the card and address stores, and Jev's readings
- * (a fixture port).
+ * carried the unclear reply, and Jev's readings (a fixture port). The card and
+ * the shipping address are the owner's, in the daemon's card store over its
+ * secret store and in its settings, each start reading them from disk.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
+import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { configBackedAddressStore } from '../platform/src/platform/payments/host/address-store.ts';
+import { DaemonCardStore } from '../platform/src/platform/payments/host/card-store.ts';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.ts';
-import type { CardMaterial, CardMaterialStore } from '../platform/src/platform/payments/card-material.ts';
 import { CheckoutRegistry } from '../platform/src/platform/payments/checkout-registry.ts';
 import { runCheckout, type CheckoutControls, type CheckoutFlowDeps, type CheckoutOutcome, type PurchaseRequest } from '../platform/src/platform/payments/checkout-flow.ts';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../platform/src/platform/payments/checkout-window-checkpoint.ts';
 import type { PaymentNotifier, PaymentNoticeWindow } from '../platform/src/platform/payments/payment-ports.ts';
 import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox.ts';
-import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests, type CardMetadata, type CurrencyCode, type PostalAddress } from '../platform/src/platform/payments/types.ts';
+import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests, type CurrencyCode, type PostalAddress } from '../platform/src/platform/payments/types.ts';
 import { DurableBudgetLedger } from '../platform/src/platform/payments/host/budget-store.ts';
 import { DurableCheckoutJournal } from '../platform/src/platform/payments/host/checkout-journal-store.ts';
 import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.ts';
@@ -50,20 +55,19 @@ usePaymentsReadings();
 const ORIGIN = 'https://www.bestbuy.com';
 const PURCHASE = 'p-restart';
 const usd = parseCurrencyCode('USD') as CurrencyCode;
-const CARD: CardMaterial = { number: '4012888888881881', expiryMonth: '07', expiryYear: '2029', cvv: '318', cardholderName: 'Pat Fixture' };
-const METADATA: CardMetadata = { id: 'card-1', label: 'Test card', brand: 'visa', last4: '1881', kind: 'virtual',
-  expiryMonth: 7, expiryYear: 2029, issuerCapMinorUnits: null, addedAt: '2026-07-01T00:00:00.000Z' };
 const ADDRESS: PostalAddress = { name: 'Pat Fixture', line1: '500 Test Street', line2: '', city: 'Detroit', region: 'MI', postalCode: '48226', country: 'US' };
 const CONTROLS: CheckoutControls = {
   cardFields: [{ field: 'number', target: 'ccnum' }, { field: 'expiry', target: 'ccexp' }, { field: 'cvv', target: 'cccvv' }, { field: 'cardholderName', target: 'ccname' }],
   shippingTargets: ['ship-standard', 'ship-two-day', 'ship-overnight'],
   placeOrderTarget: 'place',
 };
-const REQUEST: PurchaseRequest = {
+/** The purchase, paying with the card the owner stored in this home. */
+let cardId: string;
+const request = (): PurchaseRequest => ({
   purchaseId: PURCHASE, merchantDomain: 'www.bestbuy.com', checkoutUrl: `${ORIGIN}/checkout`,
   item: unsafeOwnerSuppliedTextForTests('Mechanical keyboard, tenkeyless'),
-  requestedLines: [{ label: 'Mechanical keyboard, tenkeyless', quantity: 1 }], cardId: 'card-1', preferredTier: 'normal',
-};
+  requestedLines: [{ label: 'Mechanical keyboard, tenkeyless', quantity: 1 }], cardId, preferredTier: 'normal',
+});
 /** The owner's Telegram chat with the daemon's bot, and the veto notice the first daemon sent there. */
 const BOT = { id: '7001', username: 'goodvibes_test_bot' };
 const NOTICE_RECEIPT: ChannelDeliveryReceipt = { surfaceKind: 'telegram', conversationId: '1001', messageId: '501', accountId: BOT.id };
@@ -80,6 +84,29 @@ afterEach(async () => {
   await merchant.close();
 });
 
+/** The daemon's settings, secret store and card store over the files in `dir`, opened afresh by each start. */
+function ownerStores() {
+  const settings = new ConfigManager({ configDir: join(dir, '.goodvibes', 'goodvibes'), homeDir: dir, surfaceRoot: 'goodvibes',
+    daemonTierPath: join(dir, '.goodvibes', 'daemon', 'settings.json'), ownsDaemonTier: true });
+  const secrets = new SecretsManager({ projectRoot: join(dir, 'project'), globalHome: dir, surfaceRoot: 'goodvibes', policy: 'require_secure' });
+  // The daemon's own adapter over its secret store (products/daemon/src/runtime/payments-composition.ts).
+  const cards = new DaemonCardStore({ filePath: join(dir, 'payments-cards.json'), cvvHandling: () => 'stored', secrets: {
+    get: key => secrets.get(key),
+    set: async (key, value) => { await secrets.set(key, value, { scope: 'daemon', medium: 'secure' }); },
+    delete: async key => { await secrets.delete(key, { scope: 'daemon' }); },
+  } });
+  return { settings, cards, addresses: configBackedAddressStore(settings, settings.preparePostalAddress.bind(settings)) };
+}
+
+/** What the owner set up in this home before the purchase: the shipping address and one card. */
+async function ownerSetUp(): Promise<void> {
+  mkdirSync(join(dir, '.goodvibes', 'goodvibes'), { recursive: true });
+  const { settings, cards } = ownerStores();
+  for (const [field, value] of Object.entries(ADDRESS)) if (value !== '') settings.set(`payments.shippingAddress.${field}` as ConfigKey, value as never);
+  cardId = (await cards.create({ label: 'Test card', kind: 'virtual', number: '4012888888881881', expiryMonth: 7, expiryYear: 2029,
+    cvv: '318', cardholderName: 'Pat Fixture', issuerCapMinorUnits: null })).id;
+}
+
 /** One daemon's payment objects over the shared files. */
 function daemon(now: () => number) {
   const questions = new QuestionStore({ path: join(dir, 'owner-questions.sqlite') });
@@ -89,12 +116,12 @@ function daemon(now: () => number) {
   closers.push(() => stop.abort());
   const ledger = new DurableBudgetLedger(join(dir, 'budget.json'), now);
   const registry = new CheckoutRegistry(new DurableCheckoutJournal(join(dir, 'checkout-journal.json')));
-  const cards: CardMaterialStore = { metadata: async () => METADATA, read: async () => CARD };
+  const { cards, addresses } = ownerStores();
   const deps = (notifier: PaymentNotifier): CheckoutFlowDeps => ({
     registry, cards, redactor: new CardMaterialRedactor(),
     driver: new FixtureCheckoutDriver({ merchant, pageUrl: `${ORIGIN}/checkout` }),
     ledger, purchases: new DaemonPurchaseLedger({ filePath: join(dir, 'purchases.json') }),
-    addresses: { read: async () => ADDRESS },
+    addresses,
     notifier: withOwnerInbox(notifier, inbox, kind => kind === 'approval' ? 60 : 10),
     untrusted: new UntrustedContentLedger(),
     merchantJudge: { judge: async () => ({ qualifies: true, confident: true, recourse: 'established retailer with a returns process' }) },
@@ -135,11 +162,12 @@ function channel(vetoAnswer: 'not-understood' | null | 'quiet', telegram = false
  * its checkpoint kept, then stops. Returns the checkpoint as the host stored it.
  */
 async function firstDaemonStopsDuringFollowUp(now: () => number, window: 'approval' | 'veto' = 'approval', telegram = false): Promise<CheckoutWindowCheckpoint> {
+  await ownerSetUp();
   const first = daemon(now);
   const file = join(dir, 'window-checkpoint.json');
   let armed!: () => void;
   const followUpArmed = new Promise<void>(resolve => { armed = resolve; });
-  const run = runCheckout(REQUEST, await readFixtureCheckout(merchant), CONTROLS, {
+  const run = runCheckout(request(), await readFixtureCheckout(merchant), CONTROLS, {
     ...first.deps(channel(window === 'approval' ? 'not-understood' : 'quiet', telegram)),
     retainWindowCheckpoint: async checkpoint => {
       writeFileSync(file, JSON.stringify(checkpoint));
@@ -187,7 +215,7 @@ function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint
     target: { channel: 'telegram' as const, request: { target: { kind: 'surface', surfaceKind: 'telegram', address: NOTICE_RECEIPT.conversationId } }, backfillable: false } }] : [];
   const history: PaymentReplyHistory | undefined = telegram && { version: 1, windows: [{
     startedAtMs: checkpoint.record.updatedAtMs, binding: paymentReplyHistoryBinding(checkpoint), entries: telegram.archived }] };
-  const run = (): Promise<CheckoutOutcome> => readFixtureCheckout(merchant).then(reading => runCheckout(REQUEST, reading, CONTROLS, {
+  const run = (): Promise<CheckoutOutcome> => readFixtureCheckout(merchant).then(reading => runCheckout(request(), reading, CONTROLS, {
     ...next.deps(channel(null)),
     retainWindowCheckpoint: async kept => { if ((kept.record.windowDeadlineMs ?? 0) > Date.now()) telegram?.reopened(); },
     resumeWindow: {

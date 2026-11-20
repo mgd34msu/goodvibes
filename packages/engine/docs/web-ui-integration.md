@@ -34,8 +34,9 @@ own routes always keep precedence over the bundle: every `/api/*` path, `/login`
 `/webhook/*`, `/task`, the OpenAI-compatible prefix, and every other top-level path
 segment any operator method advertises (for example `/status` and `/config`) is
 dispatched to the API and never served as a file, so an SPA fallback can never shadow
-a liveness probe or an admin read with the HTML shell. The bundle is public; the
-app still token-authenticates every API call.
+a liveness probe or an admin read with the HTML shell. The bundle is public; every
+API call still needs a sign-in. The bundled web UI signs in with the `goodvibes_session`
+cookie, which page scripts cannot read; nothing token-shaped is kept in browser storage.
 
 When `controlPlane.webui.bundleDir` is empty, the daemon serves `web.staticAssetsDir`
 instead (default `dist/web`, resolved against the daemon's working directory). Setting

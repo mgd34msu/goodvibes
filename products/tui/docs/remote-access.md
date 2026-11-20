@@ -153,7 +153,10 @@ http://<server-lan-address>:3421
 
 (the web UI is served by the daemon on its control-plane port; `3423` is only a development server's port)
 
-Log in with the user from step 3.
+Sign in by running `goodvibes pair` on the server and scanning its code (or
+opening its link) on this device. The other ways, a pasted sign-in code, the
+relay code and a username and password, are under "Other ways to sign in". The
+sign-in is kept in a cookie the page cannot read.
 
 **You should now see** the webui cockpit over plain `http`, covering
 sessions, agents, and steering. This is the honest plain-`http` tier;

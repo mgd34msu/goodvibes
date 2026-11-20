@@ -6,7 +6,7 @@
 
 It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), keeps its settings, sessions, and secrets on your own machine, and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
 
-<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in cyan-to-magenta gradient, the version and tagline beneath it, the active model and tool count, the working directory, a line offering to resume the last session, and a hint line reading Ctrl+P panels / ? help / F2 fleet. A status footer shows mode, token usage, context usage, and the daemon and web listener addresses." width="900">
+<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in cyan-to-magenta gradient, the version and tagline beneath it, the active model and tool count, the working directory, a line offering to resume the last session, and a hint line. A status footer shows mode, token usage, context usage, and the daemon and web listener addresses. The screenshot is from an earlier release: the hint line now reads Ctrl+P commands / ? help / F2 agents, and the status bar starts with Asks: and the permission mode." width="900">
 
 ## Install and start
 
@@ -16,7 +16,7 @@ Install with the [suite installer](../../docs/installation.md), which installs t
 curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Then run `goodvibes` in a project directory. On the first run it helps you choose a model provider and sign in, by API key or with a ChatGPT subscription; `/setup` reopens that setup at any time. The [getting started guide](docs/getting-started.md) covers providers and keys in full. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
+Then run `goodvibes` in a project directory. When no model is ready, the first run takes three steps: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation with three starting prompts for the folder. `/setup` sets up everything else one topic at a time, and its `Run first-run again` opens the three steps again. The [getting started guide](docs/getting-started.md) covers providers and keys in full. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 
@@ -36,9 +36,9 @@ The footer keeps an honest running total: fresh input tokens separated from cach
 
 The first time you open a directory, GoodVibes asks how much it is allowed to do there. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. `/security trust-folder` changes it later.
 
-<img src="docs/assets/permission-prompt.png" alt="An execution approval prompt. A header reads EXECUTE, Shell Execution Approval, one more waiting. Fields list the requesting session, the tool exec, the full command mkdir -p build, the working directory, a Risk line reading HIGH write in red, the surface and radius, a summary, the decision class, the effects: process execution, filesystem mutation, possible network access, a reviewer checklist, and the raw tool arguments. Below, four numbered remember options scope an approval to this exact command, to every mkdir command, to every exec call in this project, or to the rest of the session in memory only. The action line reads: Y Allow once, 1-4 Allow and remember, N Deny, or type a reason to deny." width="900">
+<img src="docs/assets/permission-prompt.png" alt="An execution approval prompt. A header reads EXECUTE, Shell Execution Approval, one more waiting. Fields list the requesting session, the tool exec, the full command mkdir -p build, the working directory, a Risk line reading HIGH write in red, the surface and radius, a summary, the decision class, the effects: process execution, filesystem mutation, possible network access, a reviewer checklist, and the raw tool arguments. Below, four numbered remember options scope an approval to this exact command, to every mkdir command, to every exec call in this project, or to the rest of the session in memory only. The action line reads: Y Allow once, 1-4 Allow and remember, N Deny, or type a reason to deny. The screenshot is from an earlier release; the card now reads as a question and has no risk line." width="900">
 
-After that, reads, searches, edits inside the workspace and commands a saved rule covers start at once. What only you decide (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) comes to you in every mode but `yolo` (asked, or held for the end of the run in `just-vibes`), and Jev never answers it; purchases over your limits come to you through the payment windows. Everything else is a judgment call, and `permissions.mode` decides who answers it. The default is `jev-decides`: Jev, the decision model, decides judgment calls, and with no working decision model you are asked instead. When you are asked, the prompt shows what will run, in which directory, its assessed risk, and what it can affect. You can allow it once, deny it (optionally typing a reason the model sees), or remember the decision at whichever scope fits: this exact command, this command shape, this tool for the whole project, or just for the rest of the session.
+After that, reads, searches, edits inside the workspace and commands a saved rule covers start at once. What only you decide (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) comes to you in every mode but `yolo` (asked, or held for the end of the run in `just-vibes`), and Jev never answers it; purchases over your limits come to you through the payment windows. Everything else is a judgment call, and `permissions.mode` decides who answers it. The default is `jev-decides`: Jev, the decision model, decides judgment calls, and with no working decision model you are asked instead. When you are asked, the card is a question in a sentence (`Run this command?`, `Change a file outside this folder?`), with the folder on the right, what it acts on (the whole command, the paths, the change), and one sentence saying what it will do. Only a call that cannot be undone is shown in red, with `This can't be undone.` You can allow it once (`y`), deny it (`n`, or start typing a reason the model sees), or remember the decision (`a`) at whichever scope fits: this exact command, this command shape, this path, this tool, or just for the rest of the session. Enter presses the selected button, which is `No` for anything that cannot be undone and for money spent or a message sent as you; nothing that cannot be undone can be remembered.
 
 The other modes:
 
@@ -59,42 +59,44 @@ Models come from a live catalog, so the picker lists far more than a hardcoded s
 
 The `synthetic` provider groups the same model across every backend that serves it into one entry. Pick it and requests route to whichever backend is healthy, failing over on rate limits and transient errors without changing the model you chose, and without ever crossing the free, paid, and subscription boundaries. Any OpenAI-compatible API can be added as a custom provider by dropping a JSON file in `~/.goodvibes/tui/providers/`. It is hot-reloaded. See [docs/providers-and-routing.md](docs/providers-and-routing.md).
 
-### The Agents control room
+### Your agents
 
-<img src="docs/assets/fleet-panel.png" alt="The Fleet panel open beside the conversation. It lists background work as rows with a kind, a name, elapsed time, token count, and cost: a CI watch poller and a runtime heartbeat watcher at 4 minutes 23 seconds each, and an idle code indexer. The detail region below shows the selected watcher's id, state idle, elapsed time, model, tokens, cost, a headline reading CI watch poller, healthy, an activity phase, and an approvals line. The action hints read j/k navigate, Enter attach, K kill, A archive finished, v archived, n host agent." width="900">
+<img src="docs/assets/fleet-panel.png" alt="The Fleet panel open beside the conversation. It lists background work as rows with a kind, a name, elapsed time, token count, and cost: a CI watch poller and a runtime heartbeat watcher at 4 minutes 23 seconds each, and an idle code indexer. The detail region below shows the selected watcher's id, state idle, elapsed time, model, tokens, cost, a headline reading CI watch poller, healthy, an activity phase, and an approvals line. The action hints read j/k navigate, Enter attach, K kill, A archive finished, v archived, n host agent. The screenshot is from an earlier release; the panel is now Your agents." width="900">
 
-Work that is not conversation opens in modals instead of scrolling past in the transcript. Agents, reached with `F2`, is the live control room for agents, WRFC chains, workstreams, watchers, scheduled jobs and hosted sessions: what is running, for how long, at what token cost, and what it is waiting on. You can open a running agent to watch its live tail or steer it, back out with `Esc` without stopping it, stop it with `Ctrl+X` (it asks first), pause and resume, and archive finished work. Usage (`/usage`) shows context pressure, tokens and cost; Changes (`/changes`) shows changed files with a tinted diff, a semantic summary, hunk staging and review comments; Notifications (`/notifications`) keeps the history. The screenshot above predates the modal redesign.
+Work that is not conversation opens in modals instead of scrolling past in the transcript. Your agents, opened with `F2`, `Ctrl+O` or `/agents`, is the same panel in this app and in the Agent. It lists what is waiting for you first (the agent and what it asks; Enter brings its card to the front), then each running agent with what it is doing, the agents that finished this session, and what is scheduled, with the platform's own background services behind one line (`Background services  N healthy ›`) and an unhealthy one listed by itself. You can open a running agent to watch its live tail or steer it, back out with `Esc` without stopping it, stop it and what it started with `s` or `Ctrl+X` (it asks first), start a new one with `n`, pause or resume a schedule with `p`, and archive finished work. Usage (`/usage`) shows context pressure, tokens and cost; Changes (`/changes`) shows changed files with a tinted diff, a semantic summary, hunk staging and review comments; Notifications (`/notifications`, or `Ctrl+N`) keeps every notice. Notices no longer take over the status bar: they wait in a count there (`2 notices`).
 
 ### Everything else is a command
 
-<img src="docs/assets/help-overlay.png" alt="A searchable help overlay titled Help, Commands, with a search field and results grouped by category. Under Provider Accounts is the /accounts command with review, panel, show, routes, and repair subcommands and a one-line description. Under Fleet is /agents, described as hosting third-party coding agents as fleet rows over ACP. Under Experience is /approval, for reviewing action-specific approval classes. A line reads 147 below, and the hints read Up/Down Navigate, Enter Run, / Search, Esc Close." width="820">
+<img src="docs/assets/help-overlay.png" alt="A searchable help overlay titled Help, Commands, with a search field and results grouped by category. Under Provider Accounts is the /accounts command with review, panel, show, routes, and repair subcommands and a one-line description. Under Fleet is /agents, described as hosting third-party coding agents as fleet rows over ACP. Under Experience is /approval, for reviewing action-specific approval classes. A line reads 147 below, and the hints read Up/Down Navigate, Enter Run, / Search, Esc Close. The screenshot is from an earlier release; the list now also holds every key, and /approval lists the kinds of approval and the approvals waiting on you." width="820">
 
-Press `?` for a searchable, categorized list of every slash command with its arguments and description. The same list is generated into [docs/commands-reference.md](docs/commands-reference.md).
+Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of everything you can do: every command, view and setting, with the keyboard shortcuts at the end. Every slash command is guided: typing it alone opens a short list of what it can do, and an action with blanks opens a form that shows the line it will run. Each command has one name and no short aliases. The same list is generated into [docs/commands-reference.md](docs/commands-reference.md); the commands this release removed or renamed are listed in the [3.3.2 release notes](../../docs/releases/3.3.2.md#removed-and-renamed-commands).
 
 ### Keys worth knowing on day one
 
 | Key | Does |
 | --- | --- |
 | `Enter` / `Shift+Enter` | Send the message / insert a newline |
-| `?` | Help and command picker (on an empty prompt) |
+| `?` | The list of every command and key (on an empty prompt) |
 | `@` | File picker: insert a path into the prompt |
 | `Tab` | Complete a path, or toggle collapse on the nearest block. With the session chips showing and an empty composer, switch to the next session |
 | `Ctrl+F` | Search the conversation |
 | `Ctrl+Y` / `Ctrl+S` | Copy / save the nearest block |
-| `Ctrl+P` / `Ctrl+K` | Command palette: search and run any command, view or setting |
-| `F2` / `Ctrl+O` | Open or close Agents |
+| `Ctrl+P` / `Ctrl+K` | The same list as `?`: search and run any command, view or setting |
+| `F2` / `Ctrl+O` | Open or close Your agents |
+| `Ctrl+N` | Open the notices the status bar counts |
+| `Alt+R` / `Alt+O` / `Alt+I` | On a failed turn: try again, use another model, show the details |
 | `Shift+Tab` | Cycle this session's permission mode (asks before `yolo`; the saved default is unchanged). With the session chips showing and an empty composer, switch to the previous session |
 | `Esc` | Close the top modal (one level), clear the composer, leave an agent or process view (never stops it), or interrupt main's turn |
 | `Ctrl+X` | Inside an agent or process view: stop it (press twice to confirm) |
 | `Ctrl+C` | Clear input, cancel a running turn. Press twice to quit |
 
-Most bindings are customizable in `~/.goodvibes/tui/keybindings.json`, and `/help keys` shows what is currently bound. Four keys are fixed and stay out of that file: `F2` (Fleet), `Esc` (leave the current mode), `?` (help), and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
+Most bindings are customizable in `~/.goodvibes/tui/keybindings.json`, and `/help keys` shows what is currently bound. Four keys are fixed and stay out of that file: `F2` (Your agents), `Esc` (leave the current mode), `?` (help), and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
 
 ---
 
 ## What's in the box
 
-Each row links to the page that documents it. The product's own `?` overlay and `/help` are always the current authority.
+Each row links to the page that documents it. The product's own `?` list (`/help`) is always the current authority.
 
 | Area | What you get | Docs |
 | --- | --- | --- |
@@ -104,7 +106,7 @@ Each row links to the page that documents it. The product's own `?` overlay and 
 | Keyboard | The complete binding reference, and how to rebind | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Agents and workflows | Built-in and custom archetypes, spawning, git worktree isolation, automation and scheduled jobs | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Extending it | Hooks and hook chains, the plugin manifest and API, MCP servers, the curated marketplace | [tools-and-commands.md](docs/tools-and-commands.md) |
-| Diagnostics | Evaluation suites, deterministic replay, incident bundles, telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
+| Diagnostics | Evaluation suites, deterministic replay, failure reports (`/health`), telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
 | CLI flags | Session lifecycle (`--continue`, `--resume`, `--fork`), non-interactive mode, output formats, host selection | [cli-flags.md](docs/cli-flags.md) |
 | Knowledge and memory | Session and durable memory, a structured knowledge store with connectors and extractors, embeddings and retrieval, artifacts, multimodal analysis | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Session durability | Saved session after every turn plus a crash snapshot at each turn moment, offered at the next start | [session-durability.md](docs/session-durability.md) |
@@ -201,8 +203,8 @@ number, CVV or name).
 
 ### Native work controls (local Jev implementation)
 
-`/work` discovers the authenticated daemon's native project without legacy
-planning lookup; `/work <daemon-project-id>` selects it explicitly.
+`/work open` discovers the authenticated daemon's native project without legacy
+planning lookup; `/work open <daemon-project-id>` selects it explicitly.
 In the Native Work modal, select a work item's control row: `s` starts, `i`
 inspects status, `c` cancels, and `r` explicitly resumes. The row names the
 attempt targeted by status/cancel; execution progress paints without a new key.
@@ -247,13 +249,13 @@ File/context references and folded paste/image markers remain declared unsupport
 sources; they are not expanded into replacement owner authority. Generic, model
 and nested command invocations cannot submit a new owner request.
 
-Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and
+Use `/work intake`, `/work intake-retry`, `/work intake-resume` and
 `/work intake-cancel` to inspect or recover the retained native input. Uncertain
 writes retain the original request IDs and source; repeated submission while
 pending cannot replace them. Host/principal changes and late cancelled results
 cannot dispatch stale local turns.
 
-`/workstream list`, `status`, `cancel` and `reply` continue to address historical
+`/workstream list`, `status`, `stop` and `answer` continue to address historical
 legacy contract IDs. They do not inspect or cancel newly admitted native work;
 use `/work` for native execution status and cancellation.
 
@@ -263,7 +265,7 @@ Both products use the same command contract:
 
 - `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
   `goal` (a string) and `criteria` (an ordered array of strings).
-- `/work submission-status` looks up the retained request without writing work.
+- `/work submission` looks up the retained request without writing work.
 - `/work submission-retry` first looks up that same request. Only a `not-found`
   result can lead to replay of the exact retained request.
 - `/work submission-discard` first looks up that same request. When the host
@@ -296,7 +298,7 @@ binding is removed once its submission has a validated receipt, or when
 whose outcome is not yet known is never evicted. Corrupt, oversized,
 symlink-backed or unconfirmable state fails closed without a submission.
 
-After a restart, use `submission-status` or `submission-retry` to recover the
+After a restart, use `submission` or `submission-retry` to recover the
 original request. Both first look it up using that same identity. Retry does not
 reread the source file, generate new IDs or refresh the revision. Only an explicit
 retry after `not-found` can send the identical durably confirmed request. A
@@ -318,7 +320,7 @@ source; inspect `/work` and use its separate explicit Start control.
 
 ### TUI host credentials
 
-Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. `/devices pair host` is passive guidance, and companion pairing is `/devices pair device`. See [host pairing and recovery](docs/host-pairing.md).
+Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. `/devices pair host` shows what that pairing would do, and with `--apply` reviews and confirms it in this terminal; companion pairing is `/devices pair device`. See [host pairing and recovery](docs/host-pairing.md).
 
 ---
 
@@ -381,7 +383,7 @@ src/
 
 ## Stability
 
-GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.1](../../docs/releases/3.3.1.md).
+GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
 
 ## License
 

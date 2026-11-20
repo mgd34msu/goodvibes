@@ -6,65 +6,45 @@
  * way the product records them: the adapters write the route bindings from the
  * messages they receive, and the channel policies name each surface's owner.
  *
- * Real route bindings over their file, real channel policies, real settings
- * and secret store, the real Telegram, Slack and generic webhook adapters; the
- * delivery port records the conversation it was asked to send on and the
- * receipt it was asked to keep.
+ * The real Telegram, Slack and generic webhook adapters and every daemon
+ * piece behind them, composed as the daemon composes them
+ * (_helpers/surface-daemon.ts): settings, secret store, route bindings,
+ * session broker, channel policies and the surface-action helper. The agent
+ * runtime records each spawn request; the decision model is off. The delivery
+ * port records the conversation it was asked to send on and the receipt it
+ * was asked to keep.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { processTelegramUpdate } from '../platform/src/platform/adapters/telegram/index.ts';
 import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.ts';
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
-import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
-import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
-import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
 import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
 import { deliverOwnerAlert, type OwnerAlertDelivery } from '../platform/src/platform/daemon/owner-alert.ts';
-import { scratchSettings } from './_helpers/scratch-settings.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
+import { surfaceDaemon, type SurfaceDaemon } from './_helpers/surface-daemon.ts';
 
-const dirs: string[] = [];
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+const daemons: SurfaceDaemon[] = [];
+afterEach(async () => {
+  for (const daemon of daemons.splice(0)) { await daemon.stop(); rmSync(daemon.root, { recursive: true, force: true }); }
   surfaceInboundDedup.clear();
 });
 
 test('an owner alert is offered only to the owner\'s own private chat, never to a group, a channel, a webhook route or a friend\'s chat', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-owner-alert-'));
-  dirs.push(dir);
-  const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(dir, 'bindings.json')) });
-  await routeBindings.start();
-  const policy = new ChannelPolicyManager({ storePath: join(dir, 'policies.json') });
-  await policy.upsertPolicy('telegram', { allowlistUserIds: ['42', '77'] });
-  await policy.upsertPolicy('slack', { allowlistUserIds: ['U-OWNER'] });
-  await policy.upsertPolicy('webhook', { allowlistUserIds: ['hook-owner'] });
-
-  const { configManager, secretsManager } = await scratchSettings({ 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' }, join(dir, 'home'));
-  let agents = 0;
-  const context = {
-    serviceRegistry: { resolveSecret: async () => null },
-    configManager,
-    secretsManager,
-    routeBindings,
-    sessionBroker: {
-      getSession: () => null,
-      submitMessage: async () => ({ mode: 'spawn', task: { prompt: 'task' }, session: { id: 'session-1' }, input: { id: `input-${++agents}` } }),
-      bindAgent: async () => undefined,
+  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const daemon = await surfaceDaemon({
+    settings: { 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' },
+    policies: {
+      telegram: { allowlistUserIds: ['42', '77'], allowGroupMessages: true, requireMention: false },
+      slack: { allowlistUserIds: ['U-OWNER'], allowGroupMessages: true, requireMention: false },
+      webhook: { allowlistUserIds: ['hook-owner'] },
     },
-    authorizeSurfaceIngress: async () => ({ allowed: true }),
-    parseSurfaceControlCommand: () => null,
-    performSurfaceControlCommand: async () => 'ok',
-    performInteractiveSurfaceAction: async () => 'ok',
-    trySpawnAgent: () => ({ id: `agent-${++agents}` }),
-    queueSurfaceReplyFromBinding: () => undefined,
-    surfaceDeliveryEnabled: () => true,
-    signWebhookPayload: () => '',
-    queueWebhookReply: () => undefined,
-  } as never;
+  });
+  daemons.push(daemon);
+  const { routeBindings, channelPolicy: policy } = daemon;
+  const context = daemon.adapterContext();
 
   // The owner's private chat, a group the owner writes in, and a friend's private chat on Telegram.
   const telegram = (updateId: number, chat: Record<string, unknown>, fromId: number) => processTelegramUpdate({
@@ -82,7 +62,8 @@ test('an owner alert is offered only to the owner\'s own private chat, never to 
   await handleGenericWebhookSurface(new Request('http://localhost/webhook', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-webhook-secret': 'hook-secret' },
     body: JSON.stringify({ task: 'hello', userId: 'hook-owner', conversationKind: 'direct', callbackUrl: 'https://caller.example.test/hook' }),
-  }), context);
+  }), daemon.webhookContext());
+  retirePolicy();
   const surfaces = routeBindings.listBindings().map((binding) => binding.surfaceKind).sort();
   expect(surfaces).toEqual(['slack', 'telegram', 'telegram', 'telegram', 'webhook']);
 

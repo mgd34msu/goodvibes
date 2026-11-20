@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| Latest published minor line (currently 2.0.x) | :white_check_mark: |
+| Latest published minor line (currently 3.3.x) | :white_check_mark: |
 | Earlier minor or major lines | :x: |
 
 Security fixes land in the latest published minor line. Earlier lines are not patched; upgrade to the latest release to receive security updates.

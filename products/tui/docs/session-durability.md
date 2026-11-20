@@ -100,7 +100,7 @@ the next save of that session is written without the branch.
 If a session was killed before the first snapshot was written (i.e., no last-session pointer
 exists), `--continue` and a bare `--resume` print "No previous conversation to continue. This is
 a new one; /session list shows saved ones." in the transcript and then start as a plain launch
-would: onboarding for a new user, or the setup wizard where a returning user left it. **Recovery path:** the startup recovery
+would: first run when the model is not ready yet, otherwise a fresh conversation. **Recovery path:** the startup recovery
 modal (see "The startup recovery modal" in [getting-started.md](getting-started.md)) offers to
 resume from the recovery snapshot if one exists, or use `/session resume <id>` once a snapshot
 exists.

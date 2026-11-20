@@ -120,7 +120,7 @@ so a headless install cannot slip past the check.
 
 ## Connecting from a machine with no browser
 
-`/calendar connect <google|outlook> --device` connects without a browser on this
+`/calendar connect <google|outlook> --with device` connects without a browser on this
 machine.
 
 - **Outlook** shows a device code: open the link it prints on any device and enter
@@ -128,7 +128,7 @@ machine.
 - **Google** does not grant calendar access through a device code, so it prints a
   sign-in link instead. Open it on any device and approve. The browser then lands on
   a `127.0.0.1` address that does not load; copy that whole address and run
-  `/calendar connect google --code <address>` within ten minutes. The same Desktop-app
+  `/calendar connect google --with code --code <address>` within ten minutes. The same Desktop-app
   client works for both the browser and the pasted sign-in.
 
 ## Verifying it took

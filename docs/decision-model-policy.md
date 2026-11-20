@@ -80,7 +80,7 @@ starts failing and once when it answers again, and never repeats a failure every
 turn. `goodvibes status` and `goodvibes-agent status` show the policy and a
 "Decision model" line; a headless run prints the line on stderr and adds
 `diagnostics.decisionModel` to its JSON result without changing the exit code;
-WebUI shows it in a bar under the header.
+WebUI shows it in the mode chip in its header (for example "Jev decides · asking you for now"), and the terminal programs' status bar shows it after `Asks:`.
 
 Without a decision model, conversation, tools, editing, command and test
 execution, final responses and saved-session recovery work as usual; ordinary
@@ -128,7 +128,7 @@ valid values, and the product runs on Hybrid.
 
 - **`plan`** is a separate read-only posture: read-only tools run, and every
   mutating or exec call is refused. `/plan` toggles it.
-- **For one session:** `Shift+Tab` in `goodvibes` cycles the mode of the
+- **For one session:** `Shift+Tab` in `goodvibes` or `goodvibes-agent` cycles the mode of the
   current session only and asks once before switching to `yolo`; the key is
   the rebindable `cycle-permission-mode`.
 - **For one launch:** `--just-vibes` or `--yolo` on `goodvibes` or

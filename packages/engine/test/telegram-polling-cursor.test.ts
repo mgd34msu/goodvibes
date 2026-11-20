@@ -7,11 +7,15 @@
  * did not settle: nothing is lost and nothing already handled runs twice.
  *
  * Real Telegram ingress supervisor in polling mode, real Bot API client, the
- * real offset file, settings, secrets, service registry, session broker and
- * route bindings over their files. The Bot API is a loopback server that
- * records each offset it was asked for; the agent runtime is a stand-in that
- * records each start and refuses the first start for one update. A restart is
- * a second set of these objects over the same files.
+ * real offset file, and every daemon piece behind it composed as the daemon
+ * composes them (_helpers/surface-daemon.ts): settings, secrets, service
+ * registry, session broker, route bindings, the channel policy (the three
+ * senders are allowlisted) and the surface-action helper whose adapter context
+ * the poller gets. The Bot API is a loopback server that records each offset
+ * it was asked for; the agent runtime, where the model begins, records each
+ * spawn request and answers that no agent is free to the first one for one
+ * update; the decision model is off. A restart is a second set of these
+ * objects over the same files.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -20,17 +24,13 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
-import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
-import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
 import { TelegramBotApi } from '../platform/src/platform/channels/telegram/api.ts';
 import { TelegramIngressSupervisor } from '../platform/src/platform/channels/telegram/ingress.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
-import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
-import { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
-import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
-import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { localOwnerActor } from '@goodvibes-jev/engine/daemon-api/http-policy';
+import { surfaceDaemon } from './_helpers/surface-daemon.ts';
 
 const TOKEN = '7000001:fixture-token';
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -90,44 +90,29 @@ async function botApi() {
 
 /** One daemon's Telegram receiving pieces over the home's files. */
 async function daemon(root: string, apiUrl: string, runtime: { starts: string[]; refuseFirst: string; refused: boolean }) {
-  const configManager = new ConfigManager({ configDir: join(root, 'config'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
-  const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: join(root, 'home'), projectRoot: join(root, 'project') });
-  const subscriptionManager = new SubscriptionManager(join(root, 'home', 'subscriptions.json'), { secrets: secretsManager });
-  const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'project', 'services.json') }, { secretsManager, subscriptionManager });
-  const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
-  const sessionBroker = new SharedSessionBroker({
-    storePath: join(root, 'sessions.json'), routeBindings,
-    agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false },
-  });
-  await sessionBroker.start();
-  let agents = 0;
-  const context = {
-    configManager, serviceRegistry, secretsManager, routeBindings, sessionBroker,
-    authorizeSurfaceIngress: async () => ({ allowed: true }),
-    parseSurfaceControlCommand: () => null,
-    performSurfaceControlCommand: async () => 'ok',
-    performInteractiveSurfaceAction: async () => 'ok',
-    queueSurfaceReplyFromBinding: () => undefined,
-    surfaceDeliveryEnabled: () => true,
+  const pieces = await surfaceDaemon({
+    root,
+    policies: { telegram: { allowlistUserIds: ['101', '102', '103'] } },
     // The agent runtime: records each start; the first start for one message finds no free agent.
-    trySpawnAgent: (input: { task: string }) => {
-      runtime.starts.push(input.task);
-      if (input.task.includes(runtime.refuseFirst) && !runtime.refused) {
+    spawn: (request) => {
+      const task = String((request.input as { task?: unknown }).task ?? '');
+      runtime.starts.push(task);
+      if (task.includes(runtime.refuseFirst) && !runtime.refused) {
         runtime.refused = true;
         return Response.json({ error: 'no agent is free' }, { status: 503 });
       }
-      return { id: `agent-${++agents}-${runtime.starts.length}` };
+      return { id: `agent-${runtime.starts.length}` } as never;
     },
-  };
+  });
   const supervisor = new TelegramIngressSupervisor({
-    configManager, secretsManager, serviceRegistry,
-    buildSurfaceAdapterContext: () => context as never,
+    configManager: pieces.configManager, secretsManager: pieces.secretsManager, serviceRegistry: pieces.serviceRegistry,
+    buildSurfaceAdapterContext: () => pieces.adapterContext(),
     offsetFilePath: join(root, 'telegram-offset.json'),
     createApi: (token) => new TelegramBotApi(token, (input, init) => fetch(input, init), apiUrl),
   });
   return {
-    configManager, sessionBroker, supervisor,
-    async stop() { await supervisor.stop(); await sessionBroker.stop(); },
+    configManager: pieces.configManager, sessionBroker: pieces.sessionBroker, supervisor,
+    async stop() { await supervisor.stop(); await pieces.stop(); },
   };
 }
 
@@ -137,6 +122,8 @@ test('a stop part-way through a batch resumes at the first update that did not s
   const previousToken = process.env.TELEGRAM_BOT_TOKEN;
   process.env.TELEGRAM_BOT_TOKEN = TOKEN;
   cleanups.push(() => { if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = previousToken; });
+  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  cleanups.push(retirePolicy);
   const api = await botApi();
   const runtime = { starts: [] as string[], refuseFirst: 'message 2', refused: false };
 
@@ -155,6 +142,8 @@ test('a stop part-way through a batch resumes at the first update that did not s
   await first.stop();
   firstRunning = false;
   expect(runtime.starts.filter((task) => task.includes('message 3'))).toEqual([]);
+  // What the stopped daemon left on disk: update 1 confirmed, update 2 not.
+  expect(new TelegramOffsetStore(join(root, 'telegram-offset.json'), '7000001').load()).toEqual({ mode: 'resume', offset: 2 });
 
   const second = await daemon(root, api.url, runtime);
   cleanups.push(() => second.stop());

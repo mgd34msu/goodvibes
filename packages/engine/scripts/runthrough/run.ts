@@ -13,8 +13,8 @@
  *
  * The web UI journey needs the built web UI: it is built once into
  * <dir>/webui-dist with vite (skipped when RUNTHROUGH_WEBUI_DIST names a
- * built copy). Chromium comes from RUNTHROUGH_CHROMIUM (default
- * /usr/bin/chromium).
+ * built copy). Chromium (j5, j7) comes from RUNTHROUGH_CHROMIUM, else the
+ * web UI's Playwright build, else /usr/bin/chromium.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -60,6 +60,23 @@ const tasks: Task[] = policies
   }))
   : selected.map((name): Task => ({ name, label: '', dir, env: {} }));
 
+/**
+ * The Chromium j5 and j7 drive: RUNTHROUGH_CHROMIUM when set, else the build
+ * the web UI's Playwright installed (`playwright install chromium`, what CI
+ * installs), else /usr/bin/chromium. None of them present is a usage error,
+ * never a journey that fails halfway.
+ */
+const BROWSER_JOURNEYS = ['j5-purchases', 'j7-webui'];
+let chromiumPath = process.env.RUNTHROUGH_CHROMIUM;
+if (!chromiumPath && selected.some((name) => BROWSER_JOURNEYS.includes(name))) {
+  const { chromium } = await import(join(REPO, 'products/webui/node_modules/@playwright/test/index.js')) as { chromium: { executablePath(): string } };
+  chromiumPath = [chromium.executablePath(), '/usr/bin/chromium'].find((candidate) => candidate && existsSync(candidate));
+  if (!chromiumPath) {
+    process.stdout.write(`[runthrough] no Chromium for ${selected.filter((name) => BROWSER_JOURNEYS.includes(name)).join(', ')}: run \`node products/webui/node_modules/@playwright/test/cli.js install chromium\` or set RUNTHROUGH_CHROMIUM\n`);
+    process.exit(2);
+  }
+}
+
 let webuiDist = process.env.RUNTHROUGH_WEBUI_DIST;
 /**
  * The source the built web UI came from: the commit, the uncommitted changes
@@ -97,7 +114,7 @@ async function worker(): Promise<void> {
     rmSync(join(task.dir, task.name.split('-')[0]!), { recursive: true, force: true });
     const t0 = performance.now();
     const child = Bun.spawn([process.execPath, join(import.meta.dir, `${task.name}.ts`)], {
-      env: { ...process.env, ...task.env, RUNTHROUGH_DIR: task.dir, ...(webuiDist ? { RUNTHROUGH_WEBUI_DIST: webuiDist } : {}) },
+      env: { ...process.env, ...task.env, RUNTHROUGH_DIR: task.dir, ...(webuiDist ? { RUNTHROUGH_WEBUI_DIST: webuiDist } : {}), ...(chromiumPath ? { RUNTHROUGH_CHROMIUM: chromiumPath } : {}) },
       stdout: 'pipe', stderr: 'pipe',
     });
     const out = await new Response(child.stdout).text();

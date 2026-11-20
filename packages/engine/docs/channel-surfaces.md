@@ -382,6 +382,8 @@ or Home Assistant service target before dispatching work.
   so the topics ship unset: switching ntfy on (`goodvibes surfaces enable ntfy`,
   or the daemon starting with `surfaces.ntfy.enabled` true) gives each unset
   topic an unguessable name, saves it and says which names to subscribe to.
+  Each topic name is kept in the secret store, with only a reference in the
+  settings file, and is shown masked.
   The names earlier builds shipped (`goodvibes-chat`, `goodvibes-agent`,
   `goodvibes-ntfy`) are not subscribed on ntfy.sh; `surfaces check ntfy` names
   the setting to clear or change.

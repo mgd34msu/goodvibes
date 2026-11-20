@@ -206,6 +206,7 @@ the jobs that read it restore it instead of rebuilding.
 | --- | --- |
 | `gates` | The source-only checks: errors, products, credential scope, judgment lint, events, version, flag graduation, internal ids, architecture, platform console, no `any`, the admission scan of the web UI's browser journey files, contracts, the web UI's engine imports, the release asset scripts |
 | `build` | `bun run build` once (the web UI build checks its committed settings-schema snapshot first) |
+| `journeys` | `bun run journeys`: the sixteen product run-throughs from source, each in an isolated home on loopback, with bubblewrap and the web UI's Playwright Chromium |
 | `typecheck` | The test, type-test, installer and product projects against the built declarations; API reports, exports, examples, browser compatibility, package metadata |
 | `proofs` | `bun run test` |
 | `live-sandbox` | `bun run test:live` inside real bubblewrap, where a skip fails |

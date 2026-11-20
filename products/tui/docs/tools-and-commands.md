@@ -261,7 +261,7 @@ Representative slash-command families, with a one-line summary of each:
 
 | Command | Summary |
 | --- | --- |
-| `/model` | Select or display the current LLM model |
+| `/model` | Your model and the others you can use, switching, backup models, and reading the list of models again |
 | `/settings` | Open the settings screen at a setting (`/settings open <setting>`), see one (`get`), change one (`set <key> <value>`; a credential goes to the secret store) or put it back (`reset`) |
 | `/memory` | Project memory: remember decisions, constraints, incidents and patterns with where each came from; bare opens the list of actions |
 | `/knowledge` | Structured knowledge graph: ingest URLs and bookmarks, inspect issues, and build compact prompt packets |
@@ -271,20 +271,17 @@ Representative slash-command families, with a one-line summary of each:
 | `/marketplace` | Browse the unified plugin and skill marketplace |
 | `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
 | `/schedule` | Manage automation jobs and scheduled runs |
-| `/voice` | Toggle always-speak mode and provision the managed local voice runtime and wake-word models |
 | `/voice` | Hear an answer spoken (`speak`), speak every answer (`on`, `off`), stop playback, and set up the local voice runtime and the wake word |
 | `/cloudflare` | Inspect and manage optional Cloudflare batch and control-plane integration |
 | `/mcp` | Manage MCP servers and their tools |
 | `/health` | Is everything working: the short status, one area in detail, a problem described, this session's failure reports (see, save, keep in memory), stopping an agent, the runtime store |
 | `/replay` | Deterministic replay: load, step, seek, diff, and export recorded runs |
 | `/eval` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
-| `/session` | Session lifecycle and orchestration: list, resume, fork, save, export, and cross-session task handoff |
 | `/todo` | Track a persistent, workspace-scoped work plan |
 | `/web-search` | Provider-backed web search with ranked results and source labels |
 | `/media` | Make an image or a video through a configured provider (`make`), collect a job still running (`collect`), see the providers |
 | `/codebase` | Build, inspect, and search the repo source-tree code index |
 | `/workstream` | Start work, or propose a plan, review and edit it, then approve and launch it; inspect, stop, retry a unit, raise the budget, or answer a running workstream |
-| `/checkpoint` | Create a manual workspace checkpoint for forensic retention |
 | `/checkpoint` | Workspace checkpoints: list them, make one, put the files back to one (`restore <n\|id>`, previewed), or go back to an earlier turn (`rewind`, previewed) |
 | `/editor` | Edit the current composer draft in your `$EDITOR`, then resume with the result |
 
@@ -310,7 +307,9 @@ A typed line that starts with `!` runs the rest as a shell command in the workin
 | `fork` | Branch a session into a new one |
 | `save [name] [--yes]` | Save the current session. Refuses to replace a different saved conversation that already uses the name; `--yes` replaces it deliberately |
 | `info` | Show the current session's details |
-| `export <id\|.> [format]` | Export a session (`.` is the current one) |
+| `save-file [format]` | Save this conversation as a file (Markdown or plain text) |
+| `save-saved <id\|.> [format]` | Save a saved session as a file (`.` is the current one) |
+| `upload [format]` | Upload this conversation and get a link; asks first |
 | `search <query>` | Search saved sessions |
 | `delete <id>` | Delete a saved session |
 | `events [kind] [start-row] [--last N]` | List transcript events, optionally filtered to one kind. Shows the newest 16 by default with the range (`events 285-300 of 300`) and the command for the earlier and later pages; a start row shows the page from that row, `--last N` sets the page size |
@@ -322,13 +321,13 @@ The orchestration subcommands manage a cross-session task DAG with cycle detecti
 | Subcommand | Does |
 | --- | --- |
 | `link-task <taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]` | Register a task in the graph, optionally with a dependency edge |
-| `handoff <taskId> --to <sid>` | Hand a task off to another session |
+| `hand-off <taskId> --to <sid>` | Hand a task off to another session |
 | `graph [--session <sid>] [--format text\|json]` | Render the task graph |
 | `cancel <taskId> [--scope task\|subtree\|session]` | Cancel a task, its subtree, or the session's tasks |
 
 Run `/session` with no arguments to open its list of actions; a model or a script gets this session's details.
 
-`/model` opens the fullscreen provider/model workspace. The left rail chooses the target route (`Main Chat`, `Helper Model`, `Tool LLM`, `TTS LLM`, or `Embeddings`), and the main table filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping. `/provider` opens the same workspace in provider-first mode so users can choose a provider and then a model for the active target.
+`/model` opens its list of actions: see your model and the others you can use (`list`), switch (`use <model>`), read the list of models again from every provider (`refresh`, which says for each provider how many models it found or why its list could not be read), and add or remove backup models (`backup`, `drop-backup`). Clicking the model in the status bar opens the fullscreen provider/model picker. The left rail chooses the target route (`Main Chat`, `Helper Model`, `Tool LLM`, `TTS LLM`, or `Embeddings`), and the main table filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping.
 
 `/work open` opens native work and recovery. `/work request <goal>` submits the exact original terminal request through native conversation intake, with no historical planning fallback. `/work history` opens saved historical records without readiness evaluation, suggested answers, approval controls, or a planning interview; they are read only. The active plan is the project work plan (`/todo`). The planner is `/work planner`, `planner-explain`, `planner-mode`, `planner-override` and `planner-reset`.
 
@@ -340,7 +339,7 @@ Run `/session` with no arguments to open its list of actions; a model or a scrip
 
 Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/help keys` to view current bindings.
 
-Four keys are fixed and are not in the rebindable table: `F2` (open or close Agents), `Esc` (exit the current mode), `?` (help/command picker on an empty prompt), and `@` (file picker). `Shift+Tab` is `cycle-permission-mode` in the table. Everything else below resolves through the keybindings table and can be reassigned.
+Four keys are fixed and are not in the rebindable table: `F2` (open or close Your agents), `Esc` (exit the current mode), `?` (the list of every command and key, on an empty prompt), and `@` (file picker). `Shift+Tab` is `cycle-permission-mode` in the table. Everything else below resolves through the keybindings table and can be reassigned.
 
 ### Input and editing
 
@@ -362,12 +361,12 @@ Four keys are fixed and are not in the rebindable table: `F2` (open or close Age
 | `Ctrl+Shift+Z` | Redo prompt edit |
 | `Ctrl+V` | Paste (image or text) |
 | `@` | Open file picker (insert file path) |
-| `?` | Open help/command picker (empty prompt) |
-| `r` / `m` | After a turn error: retry the turn / open the model picker (any other key dismisses) |
+| `?` | Open the list of every command and key (empty prompt) |
+| `Alt+R` / `Alt+O` / `Alt+I` / `Alt+S` | On the newest failed turn's row: try again / use another model / details / sign in again |
 
 `Ctrl+W` uses whitespace-delimited word boundaries (readline/unix-word-rubout semantics), while `Alt+D`, `Alt+B`, and `Alt+F` use Unicode word boundaries (letters, digits, underscore).
 
-`Ctrl+K` is the command palette, not kill-to-end-of-line. The readline kill that historically owned `Ctrl+K` is bound to `Alt+K` instead, so the capability is kept rather than lost. `Ctrl+U` and `Alt+U` are likewise split. `Ctrl+U` kills to the start of the line and pushes the text onto the kill ring (readline convention), while `Alt+U` clears the whole buffer regardless of cursor position and pushes nothing.
+`Ctrl+K` opens the list of every command and key (the same as `Ctrl+P`, `?` and `/help`), not kill-to-end-of-line. The readline kill that historically owned `Ctrl+K` is bound to `Alt+K` instead, so the capability is kept rather than lost. `Ctrl+U` and `Alt+U` are likewise split. `Ctrl+U` kills to the start of the line and pushes the text onto the kill ring (readline convention), while `Alt+U` clears the whole buffer regardless of cursor position and pushes nothing.
 
 ### Navigation
 
@@ -401,14 +400,15 @@ Every view opens as a modal over the dimmed conversation, and `Esc` closes one l
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+P` / `Ctrl+K` | Command palette: every command, view and setting; older view names (fleet, tokens, git, …) are search words too |
-| `F2` / `Ctrl+O` | Agents: running and finished agents, WRFC chains, workflows and hosted sessions; steer (`s`), stop (`Ctrl+X`, asks first; `Ctrl+X` again confirms), open an agent or background process full screen (`Enter`) |
+| `Ctrl+P` / `Ctrl+K` | The list of every command and key (also `?` and `/help`); older view names (fleet, tokens, git, …) are search words too, and the keyboard shortcuts are the last group |
+| `F2` / `Ctrl+O` | Your agents: what is waiting for you, running, scheduled and finished, with background services behind one line; open an agent or background process full screen (`Enter`), stop it and what it started (`s` or `Ctrl+X`, asks first) |
+| `Ctrl+N` | The notices the status bar counts |
 | `/usage` | Usage: context bar with the compaction threshold, session totals, per-turn bars, fleet cost split, compact now |
 | `/changes` | Changes: changed files with +/- counts, a tinted syntax-colored diff, the semantic summary, hunk navigation (`]` `[`), stage hunk (`space`), review comments (`c`), mark reviewed (`m`), open in editor (`o`) |
 | `/notifications` | Notification history |
 | `/resume` | Session picker, with hosted sessions in a Hosted group |
 
-An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
+An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
 
 `Esc` in a view goes back up one level (a child agent returns to the agent that started it, then main) and never stops anything. Stopping is `Ctrl+X`: the first press asks, the second stops. The status line always says what the next `Esc` does.
 
@@ -434,7 +434,7 @@ The config modals (`/memory`, `/todo`, `/marketplace`, `/plugin`, `/services ope
 | Key | Action |
 |-----|--------|
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
-| `Ctrl+K` | Open the command palette (search and run any command) |
+| `Ctrl+K` | Open the list of every command and key (search and run any command) |
 | `Shift+Tab` | Cycle this session's execution mode: ask-me → jev-decides → just-vibes → yolo, asking before yolo (declining moves on to ask-me); the saved default changes only in `/settings` (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
 | `Alt+C` | Cancel the running tool call (the turn continues) |
@@ -720,7 +720,7 @@ Manage installed plugins via `/plugin enable|disable|reload|list`. `/plugin relo
 
 - local plugin discovery across configured search directories
 - plugin inspect/review output with trust tier, quarantine posture, declared and withheld capabilities, and signature fingerprint visibility
-- `/plugin list|inspect|review|browse|catalog-review|publish-local|install|update|uninstall`
+- `/plugin list|inspect|review|dirs|capabilities|trust|quarantine|lift|verify|publish-local|unpublish`; browsing, installing, updating and uninstalling from the catalog are `/marketplace browse|review|install|update|uninstall`
 
 ### Curated ecosystem catalogs
 
@@ -738,9 +738,9 @@ Beyond direct local plugins, a local-first curated distribution channel covers p
 > settings-sync and marketplace, plugins, skills, hooks, policy, security,
 > knowledge, memory, docs→keybindings, qr-code→pairing, work-plan,
 > project-planning→planning. The runtime-ops consoles (cockpit, orchestration,
-> tasks, worktrees, approvals, communication, …) open **Agents**; tokens and
+> tasks, worktrees, approvals, communication, …) open **Your agents**; tokens and
 > cost open **Usage**; git, diff and review open **Changes**. The old names
-> still work as command palette search words.
+> still work as search words in the list `/help`, `?` and `Ctrl+P` open.
 
 Many commands also have matching modals and control rooms. High-signal examples:
 
@@ -812,7 +812,7 @@ Without that override, `/voice speak` uses the current chat provider/model. Live
 
 ## Cloudflare batch commands
 
-Cloudflare integration is optional and keeps local immediate daemon behavior by default. Select `Use Cloudflare for batch or remote daemon work` in onboarding to configure it visually, or use `/cloudflare` for runtime actions.
+Cloudflare integration is optional and keeps local immediate daemon behavior by default. `/setup cloudflare` (Use Cloudflare) configures it in one form, and `/cloudflare` runs the actions.
 
 The high-signal subcommands, in the order a setup normally uses them:
 
@@ -839,7 +839,7 @@ Some command families are especially important when you are running GoodVibes as
 - `/remote` for dispatching and recovering distributed work
 - `/security sandbox` and `/security sandbox-sessions` for isolation review and the live sandbox sessions
 
-There is no standalone `/workflow` command; contract and workflow state is visible in Agents (`F2`, `Ctrl+O` or `/agents`).
+There is no standalone `/workflow` command; contract and workflow state is visible in Your agents (`F2`, `Ctrl+O` or `/agents`).
 
 For the exec sandbox and what REPL and MCP isolation currently is, see [Sandbox](sandbox.md).
 

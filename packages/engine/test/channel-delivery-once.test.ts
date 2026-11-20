@@ -10,8 +10,9 @@
  * daemon had stored but not yet sent when it stopped.
  *
  * Real pieces: the session broker and route bindings over their files, the
- * settings manager, the reply pipeline, the daemon's surface-delivery helper
- * and its ntfy sender. The ntfy channel plugin is wired as the built-in one is
+ * settings manager, secret store and service registry, the reply pipeline,
+ * the daemon's surface-delivery helper and its ntfy sender. The agent
+ * runtime, where the model begins, reports no running agent. The ntfy channel plugin is wired as the built-in one is
  * (its reply goes to the helper's ntfy sender); the ntfy server is a loopback
  * server that records every message it receives. A restart is a second set of
  * these objects over the same files, with the process's ntfy repeat memory
@@ -31,7 +32,11 @@ import { AutomationRouteStore } from '../platform/src/platform/automation/store/
 import { ChannelReplyPipeline } from '../platform/src/platform/channels/reply-pipeline.ts';
 import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.ts';
 import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
+import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
+import { isSurfaceDeliveryEnabled } from '../platform/src/platform/daemon/surface-policy.ts';
+import { isSurfaceFeatureGateEnabled } from '../platform/src/platform/runtime/feature-flags/gates.ts';
+import { scratchSettings } from './_helpers/scratch-settings.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';
 import type { PendingSurfaceReply } from '../platform/src/platform/daemon/types.ts';
@@ -70,7 +75,10 @@ async function ntfyServer(refuse: (request: number, body: string) => boolean = (
  * never returns, as when the daemon is killed there; `dies` is called on arrival.
  */
 async function daemon(root: string, options: { readonly dies?: () => void } = {}) {
-  const configManager = new ConfigManager({ configDir: join(root, 'config'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
+  // The daemon's settings and secret store over the home's files; no ntfy credential is stored.
+  const { configManager, secretsManager } = await scratchSettings({}, root);
+  const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'project', 'services.json') },
+    { secretsManager, subscriptionManager: new SubscriptionManager(join(root, 'home', 'subscriptions.json'), { secrets: secretsManager }) });
   const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
   const sessionBroker = new SharedSessionBroker({
     storePath: join(root, 'sessions.json'), routeBindings,
@@ -81,13 +89,12 @@ async function daemon(root: string, options: { readonly dies?: () => void } = {}
   const channelReplyPipeline = new ChannelReplyPipeline({ channelPlugins, routeBindings, waitBeforeRetry: async () => undefined });
   const helper = new DaemonSurfaceDeliveryHelper({
     pendingSurfaceReplies: new Map<string, PendingSurfaceReply>(),
-    channelReplyPipeline, configManager, routeBindings, sessionBroker, channelPlugins,
-    secretsManager: { get: async () => null, getGlobalHome: () => null },
-    // No ntfy credential is registered.
-    serviceRegistry: { resolveSecret: async () => null },
+    channelReplyPipeline, configManager, routeBindings, sessionBroker, channelPlugins, secretsManager, serviceRegistry,
+    // The agent runtime, where the model begins: no agent is running.
     agentManager: { getStatus: () => null },
     authToken: () => null,
-    surfaceDeliveryEnabled: () => true,
+    // As the facade decides it, with no feature-flag manager.
+    surfaceDeliveryEnabled: (surface: Parameters<typeof isSurfaceDeliveryEnabled>[1]) => isSurfaceFeatureGateEnabled(null, surface) && isSurfaceDeliveryEnabled(configManager, surface),
   } as unknown as ConstructorParameters<typeof DaemonSurfaceDeliveryHelper>[0]);
   // As the built-in ntfy plugin is registered: its reply goes to the helper's ntfy sender.
   channelPlugins.register({
@@ -123,7 +130,7 @@ test('an answer is sent once across a restart, and one first reported after the 
   const first = await daemon(root);
   let firstRunning = true;
   cleanups.push(async () => { if (firstRunning) await first.stop(); });
-  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
+  first.configManager.setMany([{ key: 'surfaces.ntfy.enabled' as ConfigKey, value: true }, { key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
 
   const answered = await conversation(first, 'topic-answered', 'agent-answered');
   const later = await conversation(first, 'topic-later', 'agent-later');
@@ -159,7 +166,7 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
   const first = await daemon(root, { dies: () => reachedSend() });
   let firstRunning = true;
   cleanups.push(async () => { if (firstRunning) await first.stop(); });
-  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
+  first.configManager.setMany([{ key: 'surfaces.ntfy.enabled' as ConfigKey, value: true }, { key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
   const session = await conversation(first, 'topic-owed', 'agent-owed');
 
   // The answer is stored, then the daemon stops inside the send.
@@ -202,7 +209,7 @@ test('an answer refused once by a rate limit still arrives once, and a retried p
   });
   const d = await daemon(root);
   cleanups.push(() => d.stop());
-  d.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
+  d.configManager.setMany([{ key: 'surfaces.ntfy.enabled' as ConfigKey, value: true }, { key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
 
   const short = await conversation(d, 'topic-short', 'agent-short');
   await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-short', sessionId: short, body: 'a short answer' });

@@ -28895,12 +28895,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "tz",
               "label": "Time zone",
-              "help": "For a pattern or a description; blank for this machine's (America/Chicago)",
+              "help": "For a pattern or a description; blank for this machine's time zone",
               "kind": "text",
               "freeTextReason": "a time zone such as Europe/Vienna",
               "required": {
                 "default": "",
-                "defaultMeans": "this machine's time zone (America/Chicago)"
+                "defaultMeans": "this machine's time zone"
               },
               "typed": {
                 "flag": "--tz"
@@ -29586,12 +29586,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "tz",
               "label": "Time zone",
-              "help": "For a pattern or a description; blank for this machine's (America/Chicago)",
+              "help": "For a pattern or a description; blank for this machine's time zone",
               "kind": "text",
               "freeTextReason": "a time zone such as Europe/Vienna",
               "required": {
                 "default": "",
-                "defaultMeans": "this machine's time zone (America/Chicago)"
+                "defaultMeans": "this machine's time zone"
               },
               "typed": {
                 "flag": "--tz"

@@ -1746,6 +1746,7 @@ export class Orchestrator {
       currentSubmissionKey: this.currentSubmissionKey,
       pendingToolCalls: this._pendingToolCalls,
       setPendingToolCalls: (calls) => { this._pendingToolCalls = calls; },
+      turnCancelled: this.abortController?.signal.aborted === true,
     }, resolvedResults, reason);
   }
 

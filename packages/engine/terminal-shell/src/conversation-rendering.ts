@@ -309,7 +309,9 @@ export function createConversationRenderer(presentation: ConversationPresentatio
      * model's own call draws in the work tree. Never touches message history.
      */
     function logConversationToolResult(context: Pick<ConversationRenderContext, 'history' | 'treeGlyphSet'>, width: number, toolCall: ToolCall, status: 'done' | 'error', resultSummary: string, durationMs: number, errorMsg?: string | undefined): void {
-        renderStandaloneBead(context, width, toolCall, status, errorMsg ? `${resultSummary ? `${resultSummary} · ` : ''}${errorMsg}` : resultSummary, durationMs);
+        // The error is added only when it says something the summary does not (never "exit code 1 · exit code 1").
+        const extra = errorMsg && errorMsg !== resultSummary && !resultSummary.includes(errorMsg) ? errorMsg : '';
+        renderStandaloneBead(context, width, toolCall, status, extra ? `${resultSummary ? `${resultSummary} · ` : ''}${extra}` : resultSummary, durationMs);
     }
     function renderStandaloneBead(context: Pick<ConversationRenderContext, 'history' | 'treeGlyphSet'>, width: number, toolCall: ToolCall, status: 'done' | 'error', summary: string, durationMs: number | undefined): void {
         const glyphs = laneGlyphs(context.treeGlyphSet ?? 'rounded');

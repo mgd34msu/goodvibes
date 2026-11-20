@@ -948,6 +948,8 @@ export type ReconciliationDeps = {
   currentSubmissionKey: string | null;
   pendingToolCalls: ToolCall[];
   setPendingToolCalls: (calls: ToolCall[]) => void;
+  /** True when the owner cancelled the turn: its unfinished calls end cancelled, not failed. */
+  turnCancelled?: boolean | undefined;
 };
 
 export function reconcileUnresolvedToolCalls(
@@ -980,7 +982,15 @@ export function reconcileUnresolvedToolCalls(
   const turnId = deps.currentSubmissionKey ?? `reconciled:${Date.now()}`;
 
   for (const sr of syntheticResults) {
-    if (deps.runtimeBus) {
+    if (deps.runtimeBus && deps.turnCancelled) {
+      // The owner's cancel stopped these calls: observers see them cancelled, whatever moment the cancel caught them in.
+      emitToolCancelled(deps.runtimeBus, deps.emitterContext(turnId), {
+        callId: sr.callId,
+        turnId,
+        tool: unresolved.find((call) => call.id === sr.callId)?.name ?? 'unknown',
+        reason: TOOL_CALL_CANCELLED_MESSAGE,
+      });
+    } else if (deps.runtimeBus) {
       emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
         callId: sr.callId,
         turnId,

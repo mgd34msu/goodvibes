@@ -31,7 +31,7 @@ bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 
 The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 11 to 28): the default suite, 142 files and 475 cases, took 19.6 to 25.4 s and 174 to 220 file-seconds over fifteen runs in a row, its slowest file 4.6 to 6.8 s. By group (files, cases, file-seconds): engine 125, 397, 155 to 184; judgment 4, 30, 0.5 to 1.3; installer 6, 29, 6.5 to 11.7; Agent 3, 12, 7.0 to 12.6; terminal 3, 5, 4.5 to 8.4; daemon 1, 2, 1.1 to 2.3. `test:live`, 5 files, 3.3 s and 5.6 file-seconds; `test:e2e`, 2 files, 8.6 s and 16.4 file-seconds.
 
-The journeys (`packages/engine/scripts/runthrough/`) are sixteen product runs, not tests: each starts the real programs from source in its own home on loopback, against a scripted model, and fails when a step the product owes does not happen. `bun run journeys` runs all of them three at a time; `bun run journeys -- --only j14` runs one. They need python3, openssl, bubblewrap and a Chromium (`RUNTHROUGH_CHROMIUM`, else the web UI's Playwright build, else `/usr/bin/chromium`). `bun run validate` runs them after `build`, and CI runs them as the `journeys` job (`bun run validate --job journeys`). Measured 2026-11-20 on 12 cores: 216 to 224 s over five runs in a row, j5 about 200 s of it.
+The journeys (`packages/engine/scripts/runthrough/`) are sixteen product runs, not tests: each starts the real programs from source in its own home on loopback, against a scripted model, and fails when a step the product owes does not happen. `bun run journeys` runs all of them three at a time; `bun run journeys -- --only j14` runs one. They need python3, openssl, bubblewrap and a Chromium (`RUNTHROUGH_CHROMIUM`, else the web UI's Playwright build, else `/usr/bin/chromium`). They are run by hand before a release; they are not part of `bun run validate` or CI. Measured 2026-11-20 on 12 cores: 216 to 224 s over five runs in a row, j5 about 200 s of it.
 
 Before anything runs, the runner parses every selected file and refuses the whole run, naming file, line and rule, on:
 
@@ -89,7 +89,7 @@ MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted
 
 ## Gates: if you touch X, run Y
 
-`bun run validate` runs all of these, and every other check CI runs on a pull request, in CI's order: each CI job is `bun run validate --job <job>` (`gates`, `build`, `journeys`, `typecheck`, `proofs`, `live-sandbox`, `measure`, `package`; `--help` lists the steps of each). When a step fails it prints the step and the command; continue with `bun run validate --from <step>` or repeat one with `bun run validate --only <step>`.
+`bun run validate` runs all of these, and every other check CI runs on a pull request, in CI's order: each CI job is `bun run validate --job <job>` (`gates`, `build`, `typecheck`, `proofs`, `live-sandbox`, `measure`, `package`; `--help` lists the steps of each). When a step fails it prints the step and the command; continue with `bun run validate --from <step>` or repeat one with `bun run validate --only <step>`.
 
 | If you touch | Run | When it fails |
 | --- | --- | --- |

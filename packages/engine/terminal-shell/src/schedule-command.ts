@@ -158,7 +158,7 @@ function timingInputs(step: number, required: boolean): readonly InputDescriptio
     { id: 'at', label: 'At', help: 'A date and time such as 2026-12-01T09:00', kind: 'date-time', required: need('keep its timing'), typed: { flag: '--at' }, step, showWhen: { input: 'how', is: 'at' } },
     { id: 'every', label: 'Every', help: 'An interval such as 15m, 2h or 1d', kind: 'text', freeTextReason: 'an interval such as 15m', required: need('keep its timing'), typed: { flag: '--every' }, step, showWhen: { input: 'how', is: 'every' } },
     { id: 'cron', label: 'Pattern', help: 'Five cron fields, such as 0 9 * * 1-5', kind: 'text', freeTextReason: 'a cron expression', required: need('keep its timing'), typed: { flag: '--cron' }, step, showWhen: { input: 'how', is: 'cron' } },
-    { id: 'tz', label: 'Time zone', help: `For a pattern or a description; blank for this machine's (${LOCAL_ZONE})`, kind: 'text', freeTextReason: 'a time zone such as Europe/Vienna', required: { default: '', defaultMeans: `this machine's time zone (${LOCAL_ZONE})` }, typed: { flag: '--tz' }, step: step + 1 },
+    { id: 'tz', label: 'Time zone', help: 'For a pattern or a description; blank for this machine\'s time zone', kind: 'text', freeTextReason: 'a time zone such as Europe/Vienna', required: { default: '', defaultMeans: 'this machine\'s time zone' }, typed: { flag: '--tz' }, step: step + 1 },
     { id: 'stagger', label: 'Spread the start', help: 'Start up to this long after the pattern\'s time, such as 5m, so many runs do not start at once', kind: 'text', freeTextReason: 'a duration such as 5m', required: { default: '', defaultMeans: 'start on time' }, typed: { flag: '--stagger' }, step: step + 1 },
   ];
 }

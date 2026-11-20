@@ -31632,7 +31632,7 @@
     {
       "name": "ReconciliationDeps",
       "kind": "type",
-      "text": "export type ReconciliationDeps = { conversation: Pick<ConversationManager, 'addToolResults' | 'addNotice' | 'hostInstructions'>; runtimeBus: RuntimeEventBus | null; emitterContext: EmitterContextFactory; isReconciliationEnabled: () => boolean; currentSubmissionKey: string | null; pendingToolCalls: ToolCall[]; setPendingToolCalls: (calls: ToolCall[]) => void; }; ;; via EmitterContextFactory = type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/index.js').EmitterContext; ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; ToolCall = export interface ToolCall { id: string; name: string; arguments: Record<string, unknown>; argumentError?: string | undefined; }"
+      "text": "export type ReconciliationDeps = { conversation: Pick<ConversationManager, 'addToolResults' | 'addNotice' | 'hostInstructions'>; runtimeBus: RuntimeEventBus | null; emitterContext: EmitterContextFactory; isReconciliationEnabled: () => boolean; currentSubmissionKey: string | null; pendingToolCalls: ToolCall[]; setPendingToolCalls: (calls: ToolCall[]) => void; turnCancelled?: boolean | undefined; }; ;; via EmitterContextFactory = type EmitterContextFactory = (turnId: string) => import('../runtime/emitters/index.js').EmitterContext; ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; ToolCall = export interface ToolCall { id: string; name: string; arguments: Record<string, unknown>; argumentError?: string | undefined; }"
     },
     {
       "name": "ReconciliationEvent",

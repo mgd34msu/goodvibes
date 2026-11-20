@@ -23,11 +23,26 @@ export const PROVIDER_ID = 'rtfake';
 export const MODEL_ID = 'rt-1';
 
 /** Free loopback ports; each is added to the guard's allow list. */
+/**
+ * A free loopback port below the kernel's ephemeral range. A home keeps its
+ * ports across daemon restarts; a port from the ephemeral range (what port 0
+ * hands out) can be taken while the daemon is down by any outgoing connection
+ * or port-0 listener on the machine, and the daemon then cannot bind it again.
+ */
+const EPHEMERAL_LOW = (() => {
+  try { return Number(readFileSync('/proc/sys/net/ipv4/ip_local_port_range', 'utf8').trim().split(/\s+/)[0]) || 32768; } catch { return 32768; }
+})();
+const PORT_FLOOR = 10_000;
 export function freePort(): number {
-  const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
-  const port = server.port;
-  server.stop(true);
-  return port;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const port = PORT_FLOOR + Math.floor(Math.random() * Math.max(1, EPHEMERAL_LOW - PORT_FLOOR));
+    try {
+      const server = Bun.listen({ hostname: '127.0.0.1', port, socket: { data() {} } });
+      server.stop(true);
+      return port;
+    } catch { /* taken: try another */ }
+  }
+  throw new Error(`no free loopback port between ${PORT_FLOOR} and ${EPHEMERAL_LOW}`);
 }
 
 export interface Home {
@@ -276,12 +291,15 @@ async function startDaemonOnce(home: Home, extraArgs: readonly string[], extraEn
   const decoder = new TextDecoder();
   let ready = false;
   const logFile = join(home.root, 'daemon.log');
-  void (async () => { for await (const chunk of child.stdout) { const text = decoder.decode(chunk); output += text; appendFileSync(logFile, text); if (/host started \((ready|degraded)\)/.test(output)) ready = true; } })();
-  void (async () => { for await (const chunk of child.stderr) { const text = decoder.decode(chunk); output += text; appendFileSync(logFile, text); } })();
+  const readOut = (async () => { for await (const chunk of child.stdout) { const text = decoder.decode(chunk); output += text; appendFileSync(logFile, text); if (/host started \((ready|degraded)\)/.test(output)) ready = true; } })();
+  const readErr = (async () => { for await (const chunk of child.stderr) { const text = new TextDecoder().decode(chunk); output += text; appendFileSync(logFile, text); } })();
   const deadline = Date.now() + 60_000;
   while (!ready && Date.now() < deadline && child.exitCode === null) await Bun.sleep(100);
   if (!ready) {
     child.kill('SIGKILL');
+    // The reason a daemon gives for exiting is its last stderr line: read both streams to their end before saying it did not start.
+    await child.exited;
+    await Promise.allSettled([readOut, readErr]);
     throw new Error(`daemon did not start (exit ${child.exitCode}): ${output.slice(-1500)}`);
   }
   const stopWith = async (signal: NodeJS.Signals) => {

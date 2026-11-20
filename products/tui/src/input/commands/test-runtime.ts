@@ -51,9 +51,6 @@ const STREAM_FLUSH_INTERVAL_MS = 250;
 /** Cap on individually-listed failing test file names before truncating. */
 const MAX_FAILING_NAMES_SHOWN = 20;
 
-/** Lines of raw output shown when structured results could not be parsed. */
-const RAW_TAIL_LINES = 30;
-
 const FAIL_LINE_RE = /^==> (.+?)\s+\[FAIL\]$/gm;
 const SUMMARY_LINE_RE = /^Test files: (\d+), passed: (\d+), failed: (\d+)$/m;
 // Plain `bun test` output: " N pass" / " N fail" counters (tests, not files),
@@ -392,10 +389,8 @@ async function runResolvedTest(
       ok ? 'done' : 'error',
       `exit code ${exitCode}`,
       durationMs,
-      ok ? undefined : `exit code ${exitCode}`,
     );
-    const tail = combinedOutput.split('\n').slice(-RAW_TAIL_LINES).join('\n');
-    ctx.print(`(could not parse structured test results; showing raw tail)\n${tail}`);
+    // The output was already shown as it streamed (flushDisplay above): printed once, never again as a tail.
     ctx.session.conversationManager.addNotice(
       `[Test] exit code ${exitCode} (could not parse structured test results)`,
       { level: ok ? 'info' : 'error' }

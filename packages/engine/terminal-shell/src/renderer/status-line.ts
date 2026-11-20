@@ -30,13 +30,14 @@
  * agents, the menu keycap the palette.
  *
  * When the row is short, pieces give way in this order until it fits: the
- * menu keycap, the cost, optional chips, the mode's reason shortens
- * (`decision model unreachable` → `unreachable`), the mode's reason goes (it
- * is in the notices and on a click), the notices lose their keycap (the count
- * stays), the branch loses its state word (`branch main`): the words that
- * may shorten go before any segment; then the branch, the context, the
- * background summary (unless it holds focus), the model, the notices, the
- * mode's keycap. The mode's words, `asking you for now`, the
+ * menu keycap, the cost, optional chips; a reason that only states a choice
+ * (`no decision model set`, `decision models switched off`) goes (it is in
+ * the notices and on a click); the notices lose their keycap (the count
+ * stays), the branch loses its state word (`branch main`), the context goes,
+ * the branch goes; a reason that reports a failure (`decision model
+ * unreachable`, `failing`) shortens (`unreachable`); the background summary
+ * (unless it holds focus), the model, the notices, the mode's keycap; last a
+ * failure reason goes. The mode's words, `asking you for now`, the
  * kept chips and the esc hint always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
  * the context, the branch, the cost, the menu keycap).
@@ -371,6 +372,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         return LEFT_X + leftW + (rightW > 0 ? GAP + rightW : 0);
     };
     const fits = (): boolean => total(plan) <= rightEdge;
+    // The decision model (or the daemon) failing or out of reach, as opposed to a choice the owner made.
+    const failureReason = asks?.because !== undefined && /\b(unreachable|failing|cannot be reached|not reachable)\b/.test(asks.because);
     // Give way in the order of the file header, stopping as soon as the row fits.
     const steps: Array<() => void> = [
         () => { plan.menu = false; },
@@ -380,16 +383,21 @@ export function renderStatusLine(options: StatusLineOptions): Line {
             if (idx >= 0)
                 plan.chips.splice(idx, 1);
         }),
-        () => { plan.asks = { ...plan.asks, because: 'short' }; },
-        () => { plan.asks = { ...plan.asks, because: 'none' }; },
+        // A reason that only states a choice goes first; one that reports a failure is kept to the last.
+        ...(failureReason ? [] : [
+            () => { plan.asks = { ...plan.asks, because: 'short' }; },
+            () => { plan.asks = { ...plan.asks, because: 'none' }; },
+        ]),
         () => { plan.noticesKey = false; },
         () => { plan.branchShort = true; },
-        () => { plan.branch = false; },
         () => { plan.context = false; },
+        () => { plan.branch = false; },
+        ...(failureReason ? [() => { plan.asks = { ...plan.asks, because: 'short' }; }] : []),
         () => { if (!bg?.focused) plan.summary = false; },
         () => { plan.model = false; },
         () => { plan.notices = false; },
         () => { plan.asks = { ...plan.asks, key: false }; },
+        ...(failureReason ? [() => { plan.asks = { ...plan.asks, because: 'none' }; }] : []),
     ];
     for (const step of steps) {
         if (fits())

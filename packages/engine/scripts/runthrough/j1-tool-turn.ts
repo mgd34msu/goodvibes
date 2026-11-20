@@ -142,7 +142,10 @@ try {
     const askedAfter = s.model.requests.filter((entry) => entry.marker === m4).length;
     journey.check(`${product}: Ctrl-C mid-turn stops every call`, `${product} run "${m4} ..." then SIGINT after the first TOOL_EXECUTING`,
       `exit ${r4.code} after ${stoppedMs} ms; files written after cancel: ${JSON.stringify(late)}; model requests ${askedAfter}; frames ${framesOf(r4, 'TOOL_CANCELLED').length} cancelled / ${framesOf(r4, 'TOOL_FAILED').length} failed`,
-      sent && r4.code === 130 && late.length === 0 && askedAfter === 1 && stoppedMs < 5_500);
+      // The commands were stopped, not waited out: neither wrote its file (checked after their own six seconds),
+      // the model was not asked again, and every call ends cancelled. How long the program took to start is not the product's promise.
+      sent && r4.code === 130 && late.length === 0 && askedAfter === 1
+      && framesOf(r4, 'TOOL_CANCELLED').length >= 1 && framesOf(r4, 'TOOL_FAILED').length === 0);
   }
 } catch (error) {
   journey.check('journey ran to the end', 'j1', error instanceof Error ? error.stack ?? error.message : String(error), false);

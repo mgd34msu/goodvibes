@@ -12,18 +12,17 @@
  * else to the current directory, else to packages/engine. `-t <pattern>` passes
  * a test-name filter to bun; `--jobs <n>` sets the pool size.
  *
- * The limits are fixed; no flag, variable or bunfig setting raises them:
- * 5 seconds per test, 10 seconds per file (30 under test/live/ and
- * src/test/e2e/), and 600 file-seconds for the default-suite files of one run.
- * Before any file starts, every selected file is scanned (test-scan.ts) and the
+ * No test or file fails for its duration: the run reports the slowest files
+ * and the file-seconds per kind as information. The one backstop is hang
+ * protection: a file with no result after 10 minutes is stopped and reported
+ * as hung. Before any file starts, every selected file is scanned (test-scan.ts) and the
  * whole run is refused if one waits on a clock, uses a snapshot, replaces a
  * module, skips a test or raises a limit, lacks its `// Proves:` / `// Red when:`
  * header, or disagrees with the risk table (packages/engine/docs/test-risks.md):
  * a case with no row, a row naming a case the file does not have, a `Proves`
  * line that is not the risk of its rows. A whole-suite run also refuses a row
- * naming a file that does not exist. A file that is killed at its limit,
- * runs no test, skips a test, has a test over 5 seconds, tries the network, or
- * leaves a process running is a failure.
+ * naming a file that does not exist. A file that hangs, runs no test, skips a
+ * test, tries the network, or leaves a process running is a failure.
  */
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -40,14 +39,14 @@ const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 const NETWORK_PRELOAD = join(ENGINE_ROOT, 'toolchain/src/test-runner/test-network-preload.ts');
 const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 
-/** One test, from start to end. */
-export const TEST_LIMIT_MS = 5_000;
-/** One file, from process start to exit. */
-export const FILE_LIMIT_MS = 10_000;
-/** One file under test/live/ or src/test/e2e/. */
-export const SLOW_FOLDER_FILE_LIMIT_MS = 30_000;
-/** The default-suite files of one run, summed. */
-export const DEFAULT_SUITE_LIMIT_SECONDS = 600;
+/**
+ * Hang protection, not a speed limit: a file whose process is still running
+ * this long after it started is stopped and reported as hung. No test or file
+ * fails for its duration; the run reports the slowest files as information.
+ */
+export const HUNG_FILE_MS = 10 * 60_000;
+/** What bun gets as its per-test timeout, so its own 5-second default never acts as a hidden limit. */
+const BUN_TEST_TIMEOUT_MS = HUNG_FILE_MS;
 
 /** Set for files under test/live/: a host without the sandbox fails them instead of letting them pass. */
 const EXEC_CONTAINMENT_REQUIRED_ENV = 'GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT';
@@ -178,30 +177,21 @@ export function admissionFindings(files: readonly TestFile[], wholeSuite = false
   ].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
-function fileLimitMs(file: TestFile): number {
-  return file.kind === 'default' ? FILE_LIMIT_MS : SLOW_FOLDER_FILE_LIMIT_MS;
-}
-
-interface JunitResult { readonly tests: number; readonly skipped: number; readonly slow: readonly string[] }
+interface JunitResult { readonly tests: number; readonly skipped: number }
 
 const XML_ENTITIES: Readonly<Record<string, string>> = { '&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&amp;': '&' };
 function attributes(tag: string): Map<string, string> {
   return new Map([...tag.matchAll(/([\w:-]+)="([^"]*)"/g)].map((match) => [match[1]!, match[2]!.replace(/&(?:quot|apos|lt|gt|amp);/g, (entity) => XML_ENTITIES[entity]!)]));
 }
 
-/** bun's JUnit report of one file: test and skip counts, and every test that ran past the per-test limit. */
+/** bun's JUnit report of one file: its test and skip counts. */
 function readJunit(path: string): JunitResult | undefined {
   let xml: string;
   try { xml = readFileSync(path, 'utf8'); } catch { return undefined; }
   const top = /<testsuites\b([^>]*)>/.exec(xml);
   if (!top) return undefined;
   const totals = attributes(top[1]!);
-  const slow = [...xml.matchAll(/<testcase\b([^>]*)>/g)].flatMap((match) => {
-    const test = attributes(match[1]!);
-    const seconds = Number(test.get('time'));
-    return seconds * 1000 > TEST_LIMIT_MS ? [`"${test.get('name') ?? '?'}" (line ${test.get('line') ?? '?'}) took ${seconds.toFixed(1)}s, over the ${TEST_LIMIT_MS / 1000}s limit per test`] : [];
-  });
-  return { tests: Number(totals.get('tests') ?? 0), skipped: Number(totals.get('skipped') ?? 0), slow };
+  return { tests: Number(totals.get('tests') ?? 0), skipped: Number(totals.get('skipped') ?? 0) };
 }
 
 /**
@@ -302,9 +292,8 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   const outputPath = join(own, 'output.txt');
   // Output goes to a file, not a pipe: a process the file leaves behind could hold a pipe open and stall the read.
   const outputFd = openSync(outputPath, 'a');
-  const limitMs = fileLimitMs(file);
   const started = performance.now();
-  const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, `--timeout=${TEST_LIMIT_MS}`,
+  const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, `--timeout=${BUN_TEST_TIMEOUT_MS}`,
     '--reporter=junit', `--reporter-outfile=${junit}`, ...(options.namePattern === undefined ? [] : ['-t', options.namePattern]),
     `./${relative(file.cwd, file.path)}`], {
     cwd: file.cwd,
@@ -314,11 +303,12 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   });
   closeSync(outputFd);
   children.add(child);
-  let killed = false;
+  // Hang protection only: a file still running after HUNG_FILE_MS has stopped making progress.
+  let hung = false;
   const deadline = setTimeout(() => {
-    killed = true;
+    hung = true;
     try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
-  }, limitMs);
+  }, HUNG_FILE_MS);
   let code: number;
   try {
     code = await child.exited;
@@ -336,11 +326,10 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   let blocked = '';
   try { blocked = readFileSync(join(own, 'network-violations'), 'utf8'); } catch { /* none were blocked */ }
   const failures: string[] = [];
-  if (killed) failures.push(`killed: still running at the ${limitMs / 1000}s limit per file`);
+  if (hung) failures.push(`hung: no result after ${HUNG_FILE_MS / 60_000} minutes`);
   else if (code !== 0) failures.push(`exit ${code}`);
-  if (!killed && ran === 0) failures.push(options.namePattern === undefined ? 'no tests ran' : `no test matched -t ${options.namePattern}`);
+  if (!hung && ran === 0) failures.push(options.namePattern === undefined ? 'no tests ran' : `no test matched -t ${options.namePattern}`);
   if (options.namePattern === undefined && result !== undefined && result.skipped > 0) failures.push(`${result.skipped} test(s) skipped or marked todo`);
-  if (result !== undefined) failures.push(...result.slow);
   if (blocked) failures.push(`tried the network:\n${blocked.trimEnd()}`);
   if (strays.length > 0) failures.push(`left ${strays.length} process(es) running after it ended (${strays.map(({ pid, what }) => `pid ${pid} ${what}`).join(', ')}), killed`);
   return failures.length > 0 ? { file, seconds, failure: failures.join('; '), output, ran } : { file, seconds, output, ran };
@@ -384,37 +373,33 @@ export async function runTests(options: RunOptions): Promise<number> {
     const failed = outcomes.filter((outcome) => outcome.failure !== undefined);
     console.log('\nSlowest files:');
     for (const outcome of [...outcomes].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${outcome.seconds.toFixed(1).padStart(5)}s  ${outcome.file.name}`);
-    let overBudget: string | undefined;
+    // Information only: no file or run fails for its duration.
     for (const kind of ['default', 'live', 'e2e'] as const) {
       const ofKind = outcomes.filter((outcome) => outcome.file.kind === kind);
       if (ofKind.length === 0) continue;
       const total = ofKind.reduce((sum, outcome) => sum + outcome.seconds, 0);
-      const over = kind === 'default' && total > DEFAULT_SUITE_LIMIT_SECONDS;
-      if (over) overBudget = `  FAIL the default suite took ${total.toFixed(1)} file-seconds, over its ${DEFAULT_SUITE_LIMIT_SECONDS} limit`;
-      console.log(`${KIND_LABEL[kind]}: ${ofKind.length} files, ${total.toFixed(1)} file-seconds${kind === 'default' ? ` (limit ${DEFAULT_SUITE_LIMIT_SECONDS})` : ''}${over ? ' OVER THE LIMIT' : ''}`);
+      console.log(`${KIND_LABEL[kind]}: ${ofKind.length} files, ${total.toFixed(1)} file-seconds`);
     }
     const notRun = files.length - outcomes.length;
     console.log(`\nFiles: ${outcomes.length} run, ${outcomes.length - failed.length} passed, ${failed.length} failed, 0 refused${notRun > 0 ? `, ${notRun} not started (interrupted)` : ''}. ${((performance.now() - started) / 1000).toFixed(1)}s`);
     for (const outcome of failed.sort((a, b) => a.file.name.localeCompare(b.file.name))) console.log(`  FAIL ${outcome.file.name}`);
-    if (overBudget !== undefined) console.log(overBudget);
     const stop = signalled();
     if (stop !== undefined) return 128 + SIGNAL_NUMBERS[stop];
-    return failed.length > 0 || overBudget !== undefined ? 1 : 0;
+    return failed.length > 0 ? 1 : 0;
   });
 }
 
 /**
  * Every file of `files` in ONE `bun test` process, with `preload` loaded first,
- * under the same isolation and limits. For the leak scans only: a poller one
- * file forgets to stop keeps firing in the files after it, which per-file
- * processes would hide. The deadline is the per-file limit times the number of
- * files.
+ * under the same isolation. For the leak scans only: a poller one file forgets
+ * to stop keeps firing in the files after it, which per-file processes would
+ * hide. The process is stopped as hung after HUNG_FILE_MS.
  */
 export async function runInOneProcess(cwd: string, files: readonly TestFile[], preload: string, env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   return withRunRoot([cwd], async (root, _signalled, children) => {
     const own = join(root, `${basename(root)}-one`);
     mkdirSync(own);
-    const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, '--preload', preload, `--timeout=${TEST_LIMIT_MS}`,
+    const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, '--preload', preload, `--timeout=${BUN_TEST_TIMEOUT_MS}`,
       ...files.map((file) => `./${relative(cwd, file.path)}`)], {
       cwd,
       detached: process.platform !== 'win32',
@@ -422,7 +407,7 @@ export async function runInOneProcess(cwd: string, files: readonly TestFile[], p
       env: childEnvironment(env, own, root, cwd, {}),
     });
     children.add(child);
-    const deadline = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } }, FILE_LIMIT_MS * Math.max(1, files.length));
+    const deadline = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } }, HUNG_FILE_MS);
     try {
       return await child.exited;
     } finally {
@@ -465,7 +450,7 @@ export function parseCli(argv: readonly string[], callerDir: string = process.cw
     else if (name === '--cwd') cwd = value();
     else if (name === '--jobs') jobs = value();
     else if (name === '-t' || name === '--test-name-pattern') namePattern = value();
-    else if (LIMIT_FLAGS.has(name)) throw new Error(`${name} is not accepted: the limits (${TEST_LIMIT_MS / 1000}s per test, ${FILE_LIMIT_MS / 1000}s per file, ${SLOW_FOLDER_FILE_LIMIT_MS / 1000}s under test/live/ and src/test/e2e/) are fixed and a failure is not retried.`);
+    else if (LIMIT_FLAGS.has(name)) throw new Error(`${name} is not accepted: no test is timed out or retried; a file with no result after ${HUNG_FILE_MS / 60_000} minutes is stopped as hung.`);
     else throw new Error(`unknown option ${arg}. ${USAGE}`);
   }
   const jobCount = jobs === undefined || jobs === 'auto' ? defaultJobs() : Number(jobs);

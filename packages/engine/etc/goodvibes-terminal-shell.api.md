@@ -855,6 +855,11 @@ export interface HerdrTransportContext {
 export function hostModeForHostname(hostname: string): RuntimeHostMode;
 
 // @public
+export function ignoreGoneTerminalWrites(stream: {
+    on(event: 'error', listener: (error: Error) => void): unknown;
+}): void;
+
+// @public
 export function inferProviderFromModel(model: string): string | undefined;
 
 // @public

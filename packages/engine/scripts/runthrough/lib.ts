@@ -9,7 +9,7 @@
  * run's root, and every product process loads guard.ts, which refuses any
  * connection that is not to a loopback port this run opened.
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, symlinkSync, unlinkSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, symlinkSync, unlinkSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Subprocess } from 'bun';
 
@@ -512,6 +512,9 @@ export async function startGroup(names: readonly string[], options: Omit<HomeOpt
   const udp = names.map(() => freePort());
   const nodes: GroupNode[] = [];
   for (const [index, name] of names.entries()) {
+    // Each node starts from a fresh home, as every journey does: run.ts clears
+    // only the journey's own home, and a node left in a group refuses `cluster create`.
+    rmSync(join(base, name), { recursive: true, force: true });
     const home = makeHome(base, name, { ...options, modelBaseURL: model.baseURL });
     const file = join(home.daemonHome, 'settings.json');
     const current = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;

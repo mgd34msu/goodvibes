@@ -1208,6 +1208,11 @@
       "text": "export declare function hostModeForHostname(hostname: string): RuntimeHostMode;"
     },
     {
+      "name": "ignoreGoneTerminalWrites",
+      "kind": "function",
+      "text": "export declare function ignoreGoneTerminalWrites(stream: { on(event: 'error', listener: (error: Error) => void): unknown; }): void; ;; via Error = interface Error { name: string; message: string; stack?: string; }"
+    },
+    {
       "name": "inferProviderFromModel",
       "kind": "function",
       "text": "export declare function inferProviderFromModel(model: string): string | undefined;"

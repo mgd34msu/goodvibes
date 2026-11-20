@@ -10,6 +10,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { pidIsAlive } from '../power/child-hygiene.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
 
 /** The refusal for a job id the scheduler does not know; the daemon answers it 404. */
 function unknownKnowledgeJob(id: string): GoodVibesError {
@@ -73,6 +74,12 @@ export interface KnowledgeSchedulingContext {
     input: { readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined },
     signal: AbortSignal,
   ) => Promise<Record<string, unknown>>;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) a due schedule does not run and its stored due time
+   * is not moved, so it runs once after the restart.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 export class KnowledgeScheduleService {
@@ -630,6 +637,11 @@ export class KnowledgeScheduleService {
       return;
     }
     if (this.runningSchedules.has(schedule.id)) return;
+    // The daemon takes no new work (a self-update's restart): the schedule stays due and is asked about again.
+    if (this.context.workAdmitted?.() === false) {
+      this.armScheduleTimer(schedule, now + WORK_ADMISSION_RECHECK_MS);
+      return;
+    }
     if (!this.storeHasContent()) {
       // Every scheduled job works on sources and nodes; an empty store has
       // nothing for it. Nothing is written: no run, no schedule update. The

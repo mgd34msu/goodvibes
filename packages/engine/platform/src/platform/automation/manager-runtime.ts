@@ -117,6 +117,12 @@ interface AutomationManagerConfig {
   readonly featureFlags?: FeatureFlagReader | undefined;
   /** Where a run's answer goes when its job names no delivery target or every target failed: the owner inbox. */
   readonly unattendedRuns?: UnattendedRuns | undefined;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) no scheduled, heartbeat or retry run starts; what is
+   * due stays due and runs once after the restart. Absent: always admitted.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 export interface AutomationHeartbeatResult {
@@ -186,6 +192,8 @@ export class AutomationManager {
   private readonly roleIssuer = new FenceIssuer('automation role');
   /** The fence of each run being started, by run id, so cancelling the run retires its fence too. */
   private readonly runFences = new Map<string, FenceIssuer>();
+  /** Whether new work is admitted now; see AutomationManagerConfig.workAdmitted. */
+  private readonly workAdmitted: () => boolean;
 
   constructor(config: AutomationManagerConfig) {
     this.configManager = config.configManager;
@@ -198,6 +206,7 @@ export class AutomationManager {
     this.providerRegistry = config.providerRegistry;
     this.agentStatusProvider = config.agentStatusProvider;
     this.spawnTask = config.spawnTask;
+    this.workAdmitted = config.workAdmitted ?? ((): boolean => true);
     this.cancelTask = config.cancelTask;
     if (config.runtimeStore) {
       this.runtimeDispatch = createDomainDispatch(config.runtimeStore);
@@ -768,7 +777,8 @@ export class AutomationManager {
     const processed: AutomationRun[] = [];
     const failed: Array<{ jobId: string; error: string }> = [];
     for (const wake of queued) {
-      if (this.activeRunCount() >= this.maxConcurrentRuns()) break;
+      // At the limit, or while the daemon takes no new work: the wakes stay queued for a later heartbeat.
+      if (this.activeRunCount() >= this.maxConcurrentRuns() || !this.workAdmitted()) break;
       const job = this.jobs.get(wake.jobId);
       // One run of a job at a time, as for timers: the wake stays queued and is
       // processed by a later heartbeat once the running run has finished.
@@ -900,6 +910,7 @@ export class AutomationManager {
       hasRunningRun: (jobId) => this.hasRunningRun(jobId),
       runsHere: (scheduledJob) => this.runsHere(scheduledJob),
       claimOccurrence: (scheduledJob) => this.claimOccurrence(scheduledJob),
+      admitted: this.workAdmitted,
     }, job);
   }
 
@@ -1105,6 +1116,7 @@ export class AutomationManager {
     return {
       jobs: this.jobs,
       retryTimers: this.retryTimers,
+      admitted: this.workAdmitted,
       capacityWaits: this.capacityWaits,
       deliveryManager: this.deliveryManager,
       activeRunCount: () => this.activeRunCount(),

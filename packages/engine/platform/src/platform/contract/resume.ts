@@ -36,6 +36,7 @@ import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { loadWorkstreamSnapshot } from '../orchestration/persistence.js';
 import { awaitNativeResumeConditions, nativeDecisionState } from './native-decisions.js';
 import { logger } from '../utils/logger.js';
+import type { Refusal } from '@goodvibes-jev/engine/errors';
 import { queueSessionNudge, type UnitCheckLoop } from './agent-hooks.js';
 import { engineItem, type GroupRunner } from './group-runner.js';
 import type { ContractRun } from './run-context.js';
@@ -60,6 +61,12 @@ export interface ResumeReport {
   readonly reaped: readonly { readonly contractId: string; readonly reason: string }[];
   /** Contracts already running here or held by the active policy; left as they are. */
   readonly skipped: readonly string[];
+  /**
+   * Contracts whose checkpoint was refused on read (quarantined): not resumed
+   * and not started again. Each refusal names the quarantined file and the
+   * next step; the host shows it to the owner.
+   */
+  readonly refused: readonly { readonly contractId: string; readonly refusal: Refusal }[];
 }
 
 /** The run claim on a stored contract: taken here, held by another live process, or not takeable at all (with why). */
@@ -201,6 +208,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     const queued: string[] = [];
     const reaped: { contractId: string; reason: string }[] = [];
     const skipped: string[] = [];
+    const refused: { contractId: string; refusal: Refusal }[] = [];
     const pending: ContractRun[] = [];
     for (const contractId of deps.store.listStoredIds()) {
       if (deps.isLive(contractId)) {
@@ -210,7 +218,8 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
       if (deps.store.endedSummary(contractId) !== undefined) continue;
       const read = deps.store.load(contractId);
-      // A refused checkpoint is quarantined (its path is logged) and never started again from its admission.
+      // A refused checkpoint is quarantined and never started again from its admission; the report carries why.
+      if (read.kind === 'failed') { refused.push({ contractId, refusal: read.refusal }); continue; }
       if (read.kind !== 'present') continue;
       const contract = read.value;
       if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
@@ -304,7 +313,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     // Legacy continuations settle here as before (the host drains recovery through this call); each ends its own contract on failure.
     await Promise.all(continuations);
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });
-    return { resumed, queued, reaped, skipped };
+    return { resumed, queued, reaped, skipped, refused };
   }
 
   function prepareResume(run: ContractRun): void {

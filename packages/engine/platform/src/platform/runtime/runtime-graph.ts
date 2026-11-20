@@ -141,6 +141,7 @@ import { composeContractRunner, resumeContracts } from './contract-composition.j
 import { createContractOperatorService } from '../contract/operator-service.js';
 import { fleetCeilingRefusal, makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
 import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from './memory/index.js';
+import { DaemonWorkAdmission } from '../daemon/work-admission.js';
 import { createSessionStorageServices } from './session-storage-services.js';
 import { createChannelComposition } from './channel-composition.js';
 import { createRemoteExecutionServices } from './remote-execution-composition.js';
@@ -210,6 +211,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const admitExpensiveWork = (label: string): { allowed: boolean; reason?: string | undefined } =>
     admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
   const isKnowledgeBackgroundPaused = (): boolean => pauseController.isPaused('knowledge-self-improvement');
+  // The one admission (daemon/work-admission.ts): a daemon closes it for a self-update's restart. Every
+  // scheduler below asks it before an occurrence starts and leaves a due one due while it is closed.
+  const workAdmission = new DaemonWorkAdmission();
+  const workAdmitted = (): boolean => workAdmission.open;
 
   const gatewayMethods = new GatewayMethodCatalog();
   const panelManager = seams.panelManager ?? createNoopPanelManager();
@@ -330,6 +335,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')),
     resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }, 'dispatch'),
     privateDeliveryHosts,
+    workAdmitted,
   });
   scope.ownUntilRegistered('watcher registry', () => watcherRegistry.dispose());
   watcherRegistry.attachRuntime({ runtimeStore, runtimeBus });
@@ -431,6 +437,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     providerRegistry,
     featureFlags,
     unattendedRuns,
+    workAdmitted,
     // The run's agent is how a run ends: the manager reads its status to
     // settle the run and stops it to cancel the run or end it at its timeout.
     ...createAutomationAgentControls(agentManager, () => unattendedRuns.connectedTools()),
@@ -468,13 +475,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const agentKnowledgeSemanticService = new KnowledgeSemanticService(agentKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
   scope.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
   const wikiService = wikiStore && wikiSemanticService
-    ? new KnowledgeService(wikiStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: wikiSemanticService, admitExpensiveWork })
+    ? new KnowledgeService(wikiStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: wikiSemanticService, admitExpensiveWork, workAdmitted })
     : undefined;
   if (wikiService) {
     scope.ownUntilRegistered('knowledge service', () => wikiService.dispose());
     wikiService.attachRuntimeBus(runtimeBus);
   }
-  const agentKnowledgeService = new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: agentKnowledgeSemanticService, admitExpensiveWork });
+  const agentKnowledgeService = new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: agentKnowledgeSemanticService, admitExpensiveWork, workAdmitted });
   scope.ownUntilRegistered('agent knowledge service', () => agentKnowledgeService.dispose());
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   // With no wiki, the project's knowledge service is the agent's own.
@@ -652,6 +659,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ...(roots.logDir === undefined ? {} : { logDir: roots.logDir }),
     ...(roots.telemetryDir === undefined ? {} : { telemetryDir: roots.telemetryDir }),
     ...(seams.currentSessionId ? { currentSessionId: seams.currentSessionId } : {}),
+    workAdmitted,
   });
   scope.ownUntilRegistered('config file watch', stopConfigWatch);
   scope.ownUntilRegistered('store snapshot scheduler', () => storeSnapshotScheduler.stop());
@@ -1021,6 +1029,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     memoryGovernor,
     cacheRegistry,
     pauseController,
+    workAdmission,
     configManager,
     featureFlags,
     runtimeBus,

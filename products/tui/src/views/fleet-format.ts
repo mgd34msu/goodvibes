@@ -136,39 +136,21 @@ export function renderFleetDetailLines(
     : disp.label;
 
   // Only facts that are known: no "model unknown", no "cost unpriced", no internal id.
-  const facts: Array<[string, string]> = [];
-  if (blocked || stopping) facts.push([`${stateLabel} `, color]);
-  if (node.model) facts.push([` model `, C.label], [node.model, C.info]);
-  facts.push([' time ', C.label], [formatElapsed(node.elapsedMs), C.value]);
-  const line1 = buildViewLine(width, [[' ', C.dim], ...facts]);
-  const files = node.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)
-    ? `${node.progress.filesRead} read · ${node.progress.filesChanged} changed` : null;
-  const tokens = fleetUsageTokens(node.usage) !== null ? formatFleetTokens(node.usage) : null;
-  const cost = hasFleetCost(node.costUsd, node.costState) ? formatFleetCost(node.costUsd, node.costState) : null;
-  const line2Parts: Array<[string, string]> = [];
-  if (files) line2Parts.push([' files ', C.label], [files, C.value]);
-  if (tokens) line2Parts.push([' tokens ', C.label], [tokens, C.value]);
-  if (cost) line2Parts.push([' cost ', C.label], [cost, C.value]);
-  const line2 = line2Parts.length > 0 ? [buildViewLine(width, line2Parts)] : [];
-  // The headline (task/phase identity, replaced in place) gets its own row
-  // when present, with the stall marker appended, the detail block mirrors
-  // exactly what the tree row's steady slot shows.
+  // One fact per line, and only facts that are known: no "model unknown", no
+  // "cost unpriced", no internal id. The row above already carries the title.
+  const fact = (label: string, value: string, tone: string = C.value): Line => buildViewLine(width, [[` ${label} `, C.label], [value, tone]]);
+  const factLines: Line[] = [];
+  if (blocked || stopping) factLines.push(buildViewLine(width, [[' ', C.dim], [stateLabel, color]]));
+  if (node.model) factLines.push(fact('model', node.model, C.info));
+  factLines.push(fact('time', formatElapsed(node.elapsedMs)));
+  if (node.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)) {
+    factLines.push(fact('files', `${node.progress.filesRead} read · ${node.progress.filesChanged} changed`));
+  }
+  if (fleetUsageTokens(node.usage) !== null) factLines.push(fact('tokens', formatFleetTokens(node.usage)));
+  if (hasFleetCost(node.costUsd, node.costState)) factLines.push(fact('cost', formatFleetCost(node.costUsd, node.costState)));
   const stallMarker = fleetStallMarker(node);
-  const headlineText = node.headline
-    ? `${node.headline.text}${stallMarker ? ` · ${stallMarker}` : ''}`
-    : stallMarker;
-  const headlineLine = headlineText
-    ? [buildViewLine(width, [
-        [' headline ', C.label],
-        [truncateDisplay(headlineText, Math.max(0, width - 11)), stallMarker ? (C.warn ?? DEFAULT_VIEW_PALETTE.warn) : C.value],
-      ])]
-    : [];
-  const line3 = node.currentActivity
-    ? [buildViewLine(width, [
-        [' now ', C.label],
-        [truncateDisplay(node.currentActivity.text, Math.max(0, width - 6)), C.dim],
-      ])]
-    : [];
+  if (stallMarker) factLines.push(fact('quiet', stallMarker.replace(/^quiet /, ''), C.warn ?? DEFAULT_VIEW_PALETTE.warn));
+  if (node.currentActivity) factLines.push(fact('now', truncateDisplay(node.currentActivity.text, Math.max(0, width - 6)), C.dim));
   // The contract DTO carries its own workspace/application facts. Unit snapshots
   // do not expose an individual worktree/conflict list, so none is invented here.
   const raw = node.kind === 'contract' ? node.raw : (node.raw as { contract?: unknown } | undefined)?.contract;
@@ -189,5 +171,5 @@ export function renderFleetDetailLines(
   // The task graph's edges/pool posture for a workstream row (fetched + cached
   // by fleet-acts); rendered in-view under the chain, /graph still available.
   const graphLines = graphSnapshot ? renderGraphPostureLines(graphSnapshot, width, C) : [];
-  return [line1, ...line2, ...headlineLine, ...line3, ...contractLines, ...checkLines, ...graphLines];
+  return [...factLines, ...contractLines, ...checkLines, ...graphLines];
 }

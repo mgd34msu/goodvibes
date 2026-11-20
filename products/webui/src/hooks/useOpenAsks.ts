@@ -1,21 +1,27 @@
 /**
- * The asks waiting for the person (lib/asks.ts), from two reads the app shares:
+ * The asks waiting for the person (lib/asks.ts), from reads the app shares:
  * `approvals.list` (the key and request the shell and Work already use,
  * revalidated by `approval-update` frames) and one `inbox.list` of the open
  * questions, purchase windows, claims, held actions and reports (revalidated by
- * `owner-inbox-update` frames). Each is polled only while the event stream is
- * not live. The sidebar badge, Work and the chat's inline card read the same
- * two cached answers, so a chat opening adds no request.
+ * `owner-inbox-update` frames). While a waiting approval arrives without its
+ * presentation, one more `inbox.list` of the open approvals carries their words
+ * (under the approvals key, so the same frames revalidate it); it is not made
+ * once the approvals list carries them itself. Each is polled only while the
+ * event stream is not live. The sidebar badge, Work and the chat's inline card
+ * read the same cached answers, so a chat opening adds no request.
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { client as platformClient } from '../lib/goodvibes';
 import { useEventStreamState } from '../lib/event-stream';
 import { queryKeys } from '../lib/queries';
-import { INBOX_ASK_KINDS, openAsks, readInboxAskItems, type OpenAsk } from '../lib/asks';
+import { INBOX_ASK_KINDS, openAsks, readApprovalWords, readInboxAskItems, wirePresentation, type OpenAsk } from '../lib/asks';
+import { approvalReading } from '../lib/approvals';
 
 /** The cache key of the open inbox asks; under `ownerInbox`, so an `owner-inbox-update` frame revalidates it. */
 export const OPEN_INBOX_ASKS_KEY = [...queryKeys.ownerInbox, 'open-asks'] as const;
+/** The words of the open approvals, when the approvals list does not carry them; under `approvals`, so an `approval-update` frame revalidates it. */
+const OPEN_APPROVAL_WORDS_KEY = [...queryKeys.approvals, 'words'] as const;
 /** The daemon's largest inbox.list page. */
 const LIST_LIMIT = 500;
 const FALLBACK_POLL_MS = 15_000;
@@ -35,9 +41,20 @@ export function useOpenAsks(enabled = true): { asks: OpenAsk[]; isPending: boole
     refetchInterval: streamLive ? false : FALLBACK_POLL_MS,
     retry: false,
   });
+  const needWords = useMemo(
+    () => (approvals.data?.approvals ?? []).some((record) => approvalReading(record).phase === 'waiting' && wirePresentation(record) === undefined),
+    [approvals.data],
+  );
+  const approvalWords = useQuery({
+    queryKey: OPEN_APPROVAL_WORDS_KEY,
+    queryFn: async () => readApprovalWords(await platformClient.operator.invoke('inbox.list', { status: 'open', kinds: ['approval'], limit: LIST_LIMIT })),
+    enabled: enabled && needWords,
+    refetchInterval: streamLive ? false : FALLBACK_POLL_MS,
+    retry: false,
+  });
   const asks = useMemo(
-    () => openAsks(approvals.data?.approvals ?? [], inbox.isError ? [] : inbox.data ?? []),
-    [approvals.data, inbox.data, inbox.isError],
+    () => openAsks(approvals.data?.approvals ?? [], inbox.isError ? [] : inbox.data ?? [], approvalWords.isError ? undefined : approvalWords.data),
+    [approvals.data, inbox.data, inbox.isError, approvalWords.data, approvalWords.isError],
   );
   return { asks, isPending: approvals.isPending };
 }

@@ -534,7 +534,9 @@ export function useChatStream({
           turnToolActivityRef.current = [];
           pendingToolInputRef.current.clear();
           syncedSetTurnState('error');
-          setTurnError(firstString(payload, ['error']) || 'Companion chat turn failed.');
+          // A stored failed reply says why in the conversation (its failure row); only a turn
+          // with no stored reply says it above the composer.
+          if (!failedReplyId) setTurnError(firstString(payload, ['error']) || 'Companion chat turn failed.');
           setActiveToolCalls([]);
           void invalidateChatState(activeSessionId);
         }

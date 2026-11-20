@@ -6,6 +6,7 @@ import type { AutomationRunTrigger } from './types.js';
 import { computeNextRun, jobEnablement } from './manager-runtime-helpers.js';
 import { summarizeError } from '../utils/error-display.js';
 import { scheduleCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
+import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
 
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
@@ -56,6 +57,12 @@ interface AutomationSchedulingContext {
    * the job to run, or null when it must not run here.
    */
   readonly claimOccurrence?: ((job: AutomationJob) => Promise<AutomationJob | null>) | undefined;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) a due occurrence does not start and stays due: its
+   * stored next run time is not moved, so it runs once after the restart.
+   */
+  readonly admitted?: (() => boolean) | undefined;
 }
 
 function completeOneShotJob(context: Pick<AutomationSchedulingContext, 'jobs' | 'timers' | 'saveJobs'>, current: AutomationJob, reason: string): void {
@@ -131,7 +138,14 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     return;
   }
 
-  const timer = setTimeout(() => {
+  const fire = (): void => {
+    // The daemon takes no new work (a self-update's restart): the occurrence stays due and is asked about again.
+    if (context.admitted?.() === false) {
+      const recheck = setTimeout(fire, WORK_ADMISSION_RECHECK_MS);
+      recheck.unref?.();
+      context.timers.set(job.id, recheck);
+      return;
+    }
     const waitKey = scheduleCapacityWaitKey(job.id);
     const waiting = context.capacityWaits?.get(waitKey);
     context.capacityWaits?.delete(waitKey);
@@ -202,7 +216,8 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
         });
       })
       .finally(() => { if (claimedHere) advance(); });
-  }, delayMs);
+  };
+  const timer = setTimeout(fire, delayMs);
   timer.unref?.();
   context.timers.set(job.id, timer);
 }

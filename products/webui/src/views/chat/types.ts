@@ -49,8 +49,12 @@ export interface ChatMessage {
   artifacts?: readonly Record<string, unknown>[];
   /** Delivery state: optimistic on local messages; the daemon's honesty marker on stored ones. */
   deliveryState?: string;
-  /** On a reply whose deliveryState is 'failed': why it failed. */
-  failureReason?: string;
+  /**
+   * On a reply whose deliveryState is 'failed': the failure reading its row is
+   * drawn from (platform core/turn-failure.ts), or, on a reply stored before
+   * the reading existed, the reason in words (TurnFailureRow reads either).
+   */
+  failureReason?: unknown;
   /** Alternative state keys from server shapes. */
   status?: string;
   state?: string;

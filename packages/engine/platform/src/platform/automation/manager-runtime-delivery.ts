@@ -13,6 +13,8 @@ import type { ScheduleRunOutcome } from '@goodvibes-jev/engine/contracts';
 export interface AutomationFailureFollowUpContext {
   readonly jobs: Map<string, AutomationJob>;
   readonly retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Whether new work is admitted (daemon/work-admission.ts); a retry due while it is not waits as at the concurrency limit. */
+  readonly admitted?: (() => boolean) | undefined;
   /** Retries held back at the concurrency limit, for the capacity report. */
   readonly capacityWaits?: Map<string, AutomationCapacityWait> | undefined;
   readonly deliveryManager: AutomationDeliveryManager | null;
@@ -136,7 +138,7 @@ export function scheduleAutomationFailureFollowUp(
     // must not cancel the retry of that occurrence; an operator or the
     // failure threshold pausing it does.
     if (!latestJob || (!latestJob.enabled && latestJob.pausedReason !== 'one-shot-complete')) return;
-    if (context.activeRunCount() >= context.maxConcurrentRuns()) {
+    if (context.activeRunCount() >= context.maxConcurrentRuns() || context.admitted?.() === false) {
       scheduleAutomationFailureFollowUp(context, latestJob, run, retryAllowed, false);
       if (context.retryTimers.has(retryKey)) {
         context.capacityWaits?.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey });

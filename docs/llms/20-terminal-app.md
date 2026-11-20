@@ -232,13 +232,13 @@ Decision: ASK
 A file write is explained with the tool name and path: `goodvibes doctor explain write ./src/app.ts`.
 Every `doctor` finding is described under "Checking an installation with doctor and status" in the install part.
 
-### `goodvibes onboarding` (alias `setup`)
+### `goodvibes setup`
 
-`goodvibes onboarding` opens the terminal app on the onboarding wizard.
-`goodvibes onboarding status` prints whether onboarding has been shown for this user and exits:
+`goodvibes setup` opens the terminal app on `/setup`: the setup topics, one form each.
+`goodvibes setup status` prints whether first run has been done for this user and exits:
 
 ```text
-$ goodvibes onboarding status
+$ goodvibes setup status
 GoodVibes onboarding status
   checked: no
   scope: none
@@ -829,9 +829,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 
 ### Help, navigation and display
 
-`/help` (aliases `/h`, `/?`) opens a list of every command with its description; picking a row runs that command. Pressing `?` on an empty composer does the same.
-`/commands` (alias `/cmds`) opens a scrollable list of every visible command.
-`/palette` (alias `/k`) opens the command palette, the same as `Ctrl+P`. Without an interface it prints `The command palette is unavailable in this context.`
+`?` on an empty composer, `/help` (aliases `/h`, `/?`), `/commands` (alias `/cmds`), `/palette` (alias `/k`) and `Ctrl+P` all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; below 70 columns there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines. Without an interface `/help` prints every command with its usage, and `/palette` prints `The command palette is unavailable in this context.`
 `/shortcuts` (aliases `/keys`, `/keybinds`) shows the keyboard reference. `/keybindings` (alias `/kb`) lists the current bindings and the path of `keybindings.json`.
 `/find` (alias `/findtext`) searches this conversation's transcript, the same as `Ctrl+F`. `/search` searches the web instead.
 
@@ -1089,13 +1087,11 @@ An invalid value prints `Could not set <key>: <reason>`.
 `/settings-sync` works with settings sync bundles: `review` (what it alone gives a model or script), `export <file>`, `pull <file>` (changes that touch security are shown and asked about first), `conflicts`, `resolve <setting> local|synced`, `inspect <file>`, `show <setting>`, `failures` and `open` (the settings sync screen). The staged bundle, rollbacks and locks are `/managed`'s.
 `/managed` applies a managed settings bundle (settings an administrator sets for a machine): `review`, `staged`, `history`, `inspect <file>`, `stage <file>`, `export <profile> <file>`, `apply <file> [--key <setting>]...`, `apply-staged [--key <setting>]...`, `rollback <apply>`, `lock <setting> <who> <reason>` and `unlock <setting>` (the owner's only; it asks first). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A bundle that changes a setting that touches security shows those changes and asks first, and what is applied is exactly what was shown: `apply <file>` stages the bundle it read once and applies that stage, `apply-staged` applies the stage it showed; a different stage put there since by another window or process is refused and nothing is applied. A locked key cannot be changed from Settings or `/config` until `/managed unlock <setting>`.
 
-`/setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]` (alias `/startup`) reviews startup readiness.
-`/setup support-bundle ./bundle` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential.
-`/setup transfer export ./setup.json` writes a setup transfer bundle; `/setup transfer import ./setup.json` applies it on another machine and reports `N setting(s) changed, M file(s) replaced`.
-A confirmation applies exactly what it showed. When `/setup transfer import` or `/services trust <name>` finds its target changed between the question and Yes (the file rewritten, the entry edited), nothing is done and the question is asked again with `Changed since you looked:` and each change on top ; a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
+`/setup` is a guided command. Bare, it lists topics; each opens one form for that topic, and the form's `Save` writes only what changed on it, then checks it. The topics: `Choose a model` (`/setup model`), `Sign in or out of a provider` (`sign-in`), `Add a provider of your own` (`add-provider <name> <address>`), `Store a password or key` (`store-key`), under `Reach GoodVibes from elsewhere…` the topics `Keep everything on this computer` (`local-only`), `Open GoodVibes in a browser` (`browser`), `Use it from other devices` (`other-devices`), `Receive webhooks` (`webhooks`) and `Use Cloudflare` (`cloudflare`), then `Connect chat apps and services` (`chat-apps`), `Who can sign in here` (`who-signs-in`), `How GoodVibes works with you` (`how-it-works`), under `Features and switches…` the topics `Safety and sandboxing` (`safety`), `Memory and context` (`memory`), `Telemetry`, `Automation`, `Paired devices and voice` (`devices-voice`), `Provider behaviour` (`provider-behaviour`) and `Advanced switches` (`advanced`), then `History and privacy` (`history`, opens the setting), `Bring over settings from the terminal app` (shown with `Agent only`; the terminal app already uses these settings) and `Run first-run again` (`first-run`). A form that opens the computer to the network also asks for the account that signs in from other devices. Esc closes a form without saving.
+Under `Check, export or move your setup…` are the setup checks and transfers: `/setup review`, `doctor`, `services`, `hooks`, `remote` and `sandbox` show what this setup has; `/setup support-bundle <dir> [--overwrite]` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential, and `/setup support-bundle-inspect <dir>` reads one back; `/setup export <path> [--overwrite]` writes the setup review as JSON; `/setup transfer-export <path> [--overwrite]` writes a setup transfer bundle, `/setup transfer-inspect <path>` reads one, and `/setup transfer-import <path>` shows the plan (every changed setting and replaced file) and applies it on Yes, reporting `N setting(s) changed, M file(s) replaced`; `/setup link <view> [item]` prints a `goodvibes://` link and `/setup open-link <link>` opens one.
+A confirmation applies exactly what it showed. When `/setup transfer-import` or `/services trust <name>` finds its target changed between the question and Yes (the file rewritten, the entry edited), nothing is done and the question is asked again with `Changed since you looked:` and each change on top ; a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
-`/onboarding` opens the onboarding wizard with current settings loaded.
 `/install [review]` prints install posture.
 `/update [check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]` (alias `/upgrade`) checks for a newer release and, for binary installs, downloads, verifies and applies it or rolls back. Updates are described under "Updating" in the install part.
 `/power [status|on|off|toggle]` shows or sets the daemon-held keep-awake (the same as `Alt+A`).

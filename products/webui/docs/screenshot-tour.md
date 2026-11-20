@@ -28,11 +28,11 @@ expands on demand.
 
 ## Work
 
-Work lists everything running for you in one place, with what needs you first.
-The segmented control filters to Sessions, Agents or Processes. An item opens in
-a detail pane beside the list (an approval here, with its command, risk, a
-Remember choice, and Approve and Deny). While the detail is open the sidebar
-folds to an icon rail.
+Work lists everything working for you in one place, grouped as Waiting for you,
+Running now, Scheduled and Finished, with the platform's own services behind one
+line. An item opens in a detail pane beside the list (an ask here, as its card:
+the question in a sentence, what it will do, and the choices). While the detail
+is open the sidebar folds to an icon rail.
 
 ![Work with an approval open in the detail pane and the sidebar folded to a rail](assets/screenshots/work-needs-you.png)
 

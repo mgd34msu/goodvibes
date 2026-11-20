@@ -377,6 +377,11 @@ export class SharedSessionBroker {
     return 'held';
   }
 
+  /** Start the messages that wait to start (a refused update handover reopened the daemon's admission). */
+  startWaitingMessages(): void {
+    this.scheduleCapacityDrain();
+  }
+
   /** An agent ended: start waiting messages once the manager has released its slot. */
   private scheduleCapacityDrain(): void {
     if (this.capacityWaiting.size === 0) return;

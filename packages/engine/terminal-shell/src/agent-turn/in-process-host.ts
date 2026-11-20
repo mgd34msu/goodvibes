@@ -28,6 +28,7 @@ import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engin
 import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { readConnectedHostPairing } from './connected-host-auth.js';
+import { describeUnreadableAgentHostPairing } from './connected-host-pairing-store.js';
 import { createConnectedHost, type ConnectedHostConnection } from './connected-host-client.js';
 
 /** The daemon hosting this Agent turn, as the connected-host client reaches it. */
@@ -72,8 +73,8 @@ export function createAgentInProcessHost(options: AgentInProcessHostOptions): Ag
     if (pairing.status === 'unavailable') {
       return { ...paired, token: null, unavailable: {
         code: 'credential_unreadable',
-        reason: 'the Agent host-bound pairing store could not be read safely',
-        next: ['repair or remove the Agent pairing store under ~/.goodvibes/agent/connected-host-pairings, then retry'],
+        reason: describeUnreadableAgentHostPairing(pairing),
+        next: ['repair or remove the saved pairing under ~/.goodvibes/agent/connected-host-pairings, then retry'],
       } };
     }
     // Read live: a rotated operator token is used from the next call on.

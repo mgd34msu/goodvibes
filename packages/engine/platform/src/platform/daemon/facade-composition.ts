@@ -12,7 +12,7 @@ import { composeHostedSessionsForFacade } from './hosted-sessions-composition.js
 import { createFacadeWorkProposalStore } from './facade-work-proposal-store.js';
 import { readConversationGateConfig, type ConversationGateConfigReader } from '../agents/conversation-gate.js';
 import { continuationContractOptions, decideContinuationEscalation } from '../agents/conversation-continuation.js';
-import { gateSurfaceSpawn, type SurfaceIngressOrigin } from './surface-conversation-gate.js';
+import { gateSurfaceSpawn, WAITING_FOR_RESTART_OUTCOME, type SurfaceIngressOrigin } from './surface-conversation-gate.js';
 import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
@@ -55,7 +55,7 @@ import { emitBatchJobSettled } from '../runtime/emitters/providers.js';
 import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
-import { DaemonWorkAdmission } from './work-admission.js';
+import { DaemonWorkAdmission, isAdmissionRefusal } from './work-admission.js';
 import { configuredBrowserOrigins } from './http/browser-origin.js';
 import { DaemonBatchManager } from '../batch/index.js';
 import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
@@ -124,6 +124,7 @@ function ensureAgentKnowledgeService(runtimeServices: RuntimeServices, ownership
     runtimeBus: runtimeServices.runtimeBus,
     semanticService,
     admitExpensiveWork,
+    workAdmitted: () => runtimeServices.workAdmission?.open !== false,
   });
   ownership.registry.add('supplemental Agent knowledge service', () => service.dispose());
   semanticService.setGapRepairer(createWebKnowledgeGapRepairer({
@@ -1028,10 +1029,15 @@ export function configureDaemonSessionContinuation(options: {
       if (spawned instanceof Response) {
         // The fleet is full: the input waits, queued, for the next agent to end.
         if (spawned.status === 429) return { disposition: 'capacity', reason: 'every agent slot is taken' };
+        // The daemon is restarting into an update: the input waits, queued, and starts after the restart.
+        if (isAdmissionRefusal(spawned)) return { disposition: 'capacity', reason: 'the daemon is not taking new work until its restart' };
         if (spawned.status === 202) {
           const result: unknown = await spawned.clone().json();
           if (result && typeof result === 'object' && 'outcome' in result && result.outcome === 'waiting-for-capacity') {
             return { disposition: 'capacity', reason: 'every agent slot is taken' };
+          }
+          if (result && typeof result === 'object' && 'outcome' in result && result.outcome === WAITING_FOR_RESTART_OUTCOME) {
+            return { disposition: 'capacity', reason: 'the daemon is not taking new work until its restart' };
           }
           if (result && typeof result === 'object' && 'outcome' in result && result.outcome === 'work-proposed'
             && 'proposalId' in result && typeof result.proposalId === 'string') {

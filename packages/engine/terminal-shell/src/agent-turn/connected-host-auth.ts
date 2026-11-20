@@ -1,4 +1,4 @@
-import { agentHostPairingStorePath, canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.js';
+import { agentHostPairingStorePath, canonicalizePairingHost, describeUnreadableAgentHostPairing, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.js';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -95,7 +95,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
     const pairing = readPairing(homeDirectory, hostUrl);
     if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
     if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The reply to this Agent\'s pairing request was lost. Run goodvibes-agent setup pair to repeat the same request; the host answers it with the credential it made, or makes it now.' }, pairing);
-    if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
+    if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: describeUnreadableAgentHostPairing(pairing) }, pairing);
   }
   const path = connectedHostOperatorTokenPath(homeDirectory);
   // The operator file is the token of the daemon on THIS machine: never presented to a host elsewhere.

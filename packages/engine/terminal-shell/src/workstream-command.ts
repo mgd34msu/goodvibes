@@ -185,6 +185,11 @@ function workstreamDescription<Ctx extends WorkstreamCommandContext>(start: Star
     summary: 'Plan, start, follow and steer work that runs in steps',
     group: 'Work',
     report: 'list',
+    firstScreenRows: [
+      'list', 'start', 'plan', 'plans', 'status',
+      { label: 'Steer a running workstream', actions: ['answer', 'retry', 'budget', 'stop'] },
+      { label: 'Change a plan before it runs', actions: ['show', 'replan', 'edit-step', 'drop-step', 'move-step', 'approve', 'launch', 'discard'] },
+    ],
     actions: [
       readAction<Ctx>({
         id: 'list', label: 'See your workstreams', word: 'list',

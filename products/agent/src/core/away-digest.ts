@@ -44,10 +44,9 @@ export interface AwayDigestInput {
   /**
    * Why the daemon's approval record could not be read, when it could not.
    *
-   * A count of zero from an unreadable list means "nobody could be asked", not
-   * "nothing is waiting", and those two must not print the same. When this is
-   * set the digest says so instead of silently omitting the approvals line.
-   * Null (or absent) means the record was read and the count is complete.
+   * When set, a count shown is qualified ("more may be waiting on the host");
+   * with nothing counted it adds nothing, since an unreadable record is not
+   * something that happened. Null (or absent): the count is complete.
    */
   readonly approvalsUnavailableReason?: string | null | undefined;
   /** Optional channel deliveries since lastSeenAt. */
@@ -63,25 +62,16 @@ export interface AwayDigestInput {
    * the scheduled time) since lastSeenAt, same wire source as failedRuns.
    */
   readonly missedRuns?: readonly AwayDigestRunItem[];
-  /**
-   * Why the host's run outcomes could not be read, when a configured host did
-   * not answer. Without it a host outage reads as "nothing failed or was missed";
-   * with it the digest says the check did not happen. Null or absent when the
-   * runs were read, or no host is configured so there was nothing to ask.
-   */
-  readonly runsUnavailableReason?: string | null | undefined;
 }
 
 export interface AwayDigest {
   readonly headline: string;
-  readonly lines: readonly string[];
+  /** One plain sentence: "While you were away, the scheduled run nightly failed (03:00)." */
+  readonly text: string;
 }
 
-/**
- * Maximum number of lines in the digest body (the headline is extra).
- * Keeps the digest compact enough to scan without scrolling.
- */
-const MAX_LINES = 5;
+/** At most this many things are named in the sentence; the rest are counted. */
+const MAX_CLAUSES = 3;
 
 /**
  * Format a relative time from `from` to `at`, e.g. "9:00" or "yesterday 9:00".
@@ -127,112 +117,52 @@ export function formatRelativeTime(targetMs: number, nowMs: number = Date.now())
 }
 
 /**
- * Build a friendly digest from a plain snapshot. Returns null when there is
- * nothing to report or when lastSeenAt is null (first run).
+ * Build the digest from a plain snapshot: one sentence naming what happened
+ * while the owner was away, or null when nothing did (or on a first run).
+ * Only things that happened are said. A source that could not be read is not
+ * news here: the caller posts that once as a notice.
  */
 export function buildAwayDigest(input: AwayDigestInput): AwayDigest | null {
   if (input.lastSeenAt === null) return null;
-
-  const lines: string[] = [];
   const now = Date.now();
+  const at = (when: number | undefined): string => (when ? ` (${formatDigestTime(when, now)})` : '');
+  const clauses: string[] = [];
 
-  // ── Pending approvals (highest urgency first) ──────────────────────────────
+  // Asks first: they are waiting on the owner now.
   if (input.pendingApprovals > 0) {
-    const word = input.pendingApprovals === 1 ? 'approval is waiting' : 'approvals are waiting';
-    lines.push(`${input.pendingApprovals} ${word} for you`);
+    const n = input.pendingApprovals;
+    const more = input.approvalsUnavailableReason ? ' (more may be waiting on the host)' : '';
+    clauses.push(`${n} ${n === 1 ? 'ask is' : 'asks are'} waiting for you${more}`);
   }
 
-  // ── Tasks that completed/changed ──────────────────────────────────────────
-  const doneTasks = input.tasks.filter(
-    (t) => t.status === 'done' || t.status === 'completed' || t.status === 'finished',
-  );
-  const failedTasks = input.tasks.filter(
-    (t) => t.status === 'failed' || t.status === 'error',
-  );
+  const doneTasks = input.tasks.filter((t) => t.status === 'done' || t.status === 'completed' || t.status === 'finished');
+  const failedTasks = input.tasks.filter((t) => t.status === 'failed' || t.status === 'error');
+  if (failedTasks.length === 1) clauses.push(`${failedTasks[0]!.title} needs attention`);
+  else if (failedTasks.length > 1) clauses.push(`${failedTasks.length} tasks need attention`);
 
-  if (doneTasks.length === 1) {
-    const t = doneTasks[0]!;
-    const when = t.completedAt ? ` (${formatDigestTime(t.completedAt, now)})` : '';
-    lines.push(`A task finished: ${t.title}${when}`);
-  } else if (doneTasks.length > 1) {
-    lines.push(`${doneTasks.length} tasks finished since you were away`);
-  }
-
-  if (failedTasks.length === 1) {
-    lines.push(`A task needs attention: ${failedTasks[0]!.title}`);
-  } else if (failedTasks.length > 1) {
-    lines.push(`${failedTasks.length} tasks need attention since you were away`);
-  }
-
-  // ── Connected-host automation run outcomes (failed / missed) ────────────────
   const failedRuns = input.failedRuns ?? [];
+  if (failedRuns.length === 1) clauses.push(`the scheduled run ${failedRuns[0]!.name} failed${at(failedRuns[0]!.at)}`);
+  else if (failedRuns.length > 1) clauses.push(`${failedRuns.length} scheduled runs failed`);
+
   const missedRuns = input.missedRuns ?? [];
+  if (missedRuns.length === 1) clauses.push(`the scheduled run ${missedRuns[0]!.name} was missed while this computer slept${at(missedRuns[0]!.at)}`);
+  else if (missedRuns.length > 1) clauses.push(`${missedRuns.length} scheduled runs were missed while this computer slept`);
 
-  if (failedRuns.length === 1) {
-    const r = failedRuns[0]!;
-    const when = r.at ? ` (${formatDigestTime(r.at, now)})` : '';
-    lines.push(`A scheduled run failed: ${r.name}${when}`);
-  } else if (failedRuns.length > 1) {
-    lines.push(`${failedRuns.length} scheduled runs failed since you were away`);
-  }
+  if (doneTasks.length === 1) clauses.push(`${doneTasks[0]!.title} finished${at(doneTasks[0]!.completedAt)}`);
+  else if (doneTasks.length > 1) clauses.push(`${doneTasks.length} tasks finished`);
 
-  if (missedRuns.length === 1) {
-    const r = missedRuns[0]!;
-    const when = r.at ? ` (${formatDigestTime(r.at, now)})` : '';
-    lines.push(`A scheduled run was missed while asleep: ${r.name}${when}`);
-  } else if (missedRuns.length > 1) {
-    lines.push(`${missedRuns.length} scheduled runs were missed while asleep`);
-  }
+  const fired = input.schedules.reduce((sum, s) => sum + Math.max(1, s.runCount), 0);
+  if (input.schedules.length === 1) clauses.push(`${input.schedules[0]!.name} ran${fired > 1 ? ` ${fired} times` : ''}${at(input.schedules[0]!.lastRunAt)}`);
+  else if (input.schedules.length > 1) clauses.push(`${input.schedules.length} schedules ran`);
 
-  // ── Schedule runs ─────────────────────────────────────────────────────────
-  if (input.schedules.length === 1) {
-    const s = input.schedules[0]!;
-    const last = s.lastRunAt ? ` (last: ${s.name}, ${formatDigestTime(s.lastRunAt, now)})` : '';
-    lines.push(`1 reminder fired${last}`);
-  } else if (input.schedules.length > 1) {
-    // Find the most-recently fired for the "last:" note
-    const sorted = [...input.schedules].sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0));
-    const mostRecent = sorted[0]!;
-    const last = mostRecent.lastRunAt
-      ? `, last: ${mostRecent.name}, ${formatDigestTime(mostRecent.lastRunAt, now)}`
-      : '';
-    lines.push(`${input.schedules.length} reminders fired${last}`);
-  }
-
-  // ── Channel deliveries ────────────────────────────────────────────────────
   const deliveries = input.deliveries ?? [];
-  if (deliveries.length === 1) {
-    lines.push(`1 message delivered: ${deliveries[0]!.label}`);
-  } else if (deliveries.length > 1) {
-    lines.push(`${deliveries.length} messages delivered`);
-  }
+  if (deliveries.length === 1) clauses.push(`a message was delivered to ${deliveries[0]!.label}`);
+  else if (deliveries.length > 1) clauses.push(`${deliveries.length} messages were delivered`);
 
-  // Nothing to report at all: stay silent. An unreadable approval record is not
-  // by itself news, the Activity modal and /health approvals are where that is asked
-  // and answered, and announcing it at every launch of an agent with no host
-  // configured would be noise, not honesty.
-  if (lines.length === 0 && !input.runsUnavailableReason) return null;
-
-  // But once the digest IS rendering, the approvals count in it must not be
-  // read as complete when it is not. The line goes LAST so it qualifies the
-  // count above rather than displacing anything, and it is emitted whether the
-  // count is zero or not, a short count and an absent one are equally
-  // misleading if the owner cannot tell which they are looking at.
-  const reserved = (input.approvalsUnavailableReason ? 1 : 0) + (input.runsUnavailableReason ? 1 : 0);
-  const capacity = MAX_LINES - reserved;
-  const shown = lines.length > capacity
-    ? [...lines.slice(0, capacity - 1), `and ${lines.length - (capacity - 1)} more in Activity`]
-    : lines;
-  const qualified = [
-    ...shown,
-    ...(input.runsUnavailableReason ? [`Could not check for failed or missed scheduled runs: ${input.runsUnavailableReason}`] : []),
-    ...(input.approvalsUnavailableReason
-      ? [`Approvals on the connected host could not be read, so any approval count above may be short: ${input.approvalsUnavailableReason}`]
-      : []),
-  ];
-
-  return {
-    headline: 'While you were away',
-    lines: qualified,
-  };
+  if (clauses.length === 0) return null;
+  const shown = clauses.length > MAX_CLAUSES
+    ? [...clauses.slice(0, MAX_CLAUSES - 1), `${clauses.length - (MAX_CLAUSES - 1)} more things happened`]
+    : clauses;
+  const list = shown.length === 1 ? shown[0]! : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]!}`;
+  return { headline: 'While you were away', text: `While you were away, ${list}.` };
 }

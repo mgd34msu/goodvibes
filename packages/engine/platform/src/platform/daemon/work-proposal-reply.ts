@@ -40,7 +40,8 @@ export interface WorkProposalReplyDeps {
    * pending proposal, so the run is pre-authorized by construction and must
    * NOT be re-gated.
    */
-  readonly startAgreedWork: (proposal: WorkProposalRecord, note?: string) => Promise<void>;
+  /** `held`: the daemon is restarting into an update; the proposal stays accepted and unstarted and starts after the restart. */
+  readonly startAgreedWork: (proposal: WorkProposalRecord, note?: string) => Promise<'started' | 'held' | 'not-started'>;
   /** Send a short acknowledgement back over the proposal's own channel. */
   readonly replyOnChannel: (proposal: WorkProposalRecord, text: string) => Promise<void>;
   /** Close the held message's input when the proposal will not run. */
@@ -184,9 +185,8 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
     steered: Boolean(reply.note),
   });
   try {
-    await deps.startAgreedWork(resolved, reply.note);
-    // Started: a restart from here on does not start it again.
-    store.markStarted?.(resolved.id);
+    // Started (or settled as not started): a restart from here on does not start it again.
+    if (await deps.startAgreedWork(resolved, reply.note) !== 'held') store.markStarted?.(resolved.id);
   } catch (error) {
     // The proposal is already terminal, so a throw here would otherwise leave
     // the owner's "yes" answered by nothing.

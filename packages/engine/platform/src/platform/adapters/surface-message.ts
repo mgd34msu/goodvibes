@@ -17,6 +17,7 @@ import { ingressAnswerResponse, type IngressAudience } from './helpers.js';
 import { duplicateDeliveryResponse, surfaceInboundDedup } from './inbound-dedup.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isAdmissionRefusal } from '../daemon/work-admission.js';
 
 type IngressInput = Parameters<SurfaceAdapterContext['authorizeSurfaceIngress']>[0];
 
@@ -84,7 +85,7 @@ export async function answerSurfaceControl(
 
 export interface SurfaceMessageDeps extends SurfaceControlDeps {
   readonly sessionBroker: Pick<SurfaceAdapterContext['sessionBroker'], 'submitMessage' | 'bindAgent'>
-    & Partial<Pick<SurfaceAdapterContext['sessionBroker'], 'failInput'>>;
+    & Partial<Pick<SurfaceAdapterContext['sessionBroker'], 'failInput' | 'holdForCapacity'>>;
   readonly trySpawnAgent: (...args: Parameters<SurfaceAdapterContext['trySpawnAgent']>) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
   readonly queueSurfaceReplyFromBinding?: SurfaceAdapterContext['queueSurfaceReplyFromBinding'] | undefined;
 }
@@ -222,6 +223,15 @@ export async function submitSurfaceMessage(
   }
 
   const spawned = await context.trySpawnAgent({ mode: 'spawn', task: submission.task ?? input.text }, input.logLabel, submission.session.id);
+  // The daemon is restarting into an update: the saved message waits, queued, and the broker starts it after the restart.
+  if (spawned instanceof Response && isAdmissionRefusal(spawned)
+    && await context.sessionBroker.holdForCapacity?.(submission.session.id, submission.input.id)) {
+    input.committed?.();
+    return {
+      kind: 'answered', outcome: 'waiting-for-restart',
+      response: Response.json({ ok: true, acknowledged: true, queued: true, outcome: 'waiting-for-restart', sessionId: submission.session.id, inputId: submission.input.id }, { status: 202 }),
+    };
+  }
   if (spawned instanceof Response) {
     const answer = await readSpawnAnswer(spawned);
     // The row says failed now, with the reason, instead of waiting out the start window.
@@ -364,6 +374,7 @@ export function gateAnswerText(outcome: string): string {
     case 'work-proposal-undelivered': return 'The work proposal could not be shown here, so nothing was started. Send the request again.';
     case 'work-proposal-expired': return 'The work proposal expired before it could be answered. Send the request again.';
     case 'waiting-for-capacity': return 'All agents are busy right now. Your message is queued and will be answered as soon as one is free.';
+    case 'waiting-for-restart': return 'Received. The assistant is restarting into an update; your message is kept and answered as soon as it is back.';
     default: return 'Received; nothing was started.';
   }
 }

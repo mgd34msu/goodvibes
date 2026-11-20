@@ -63,11 +63,15 @@ export interface AutomationRunsSinceResult {
    * ran" from "could not check" and say so.
    */
   readonly unavailable?: string;
-  /** `not_configured`: no host to ask, which is not news. `no_answer`: a configured host did not answer. */
-  readonly unavailableKind?: 'not_configured' | 'no_answer';
+  /**
+   * `not_configured`: no host to ask, which is not news. `unreadable`: the saved
+   * credential for the host exists and could not be read (`unavailable` says
+   * what to do). `no_answer`: a configured host did not answer.
+   */
+  readonly unavailableKind?: 'not_configured' | 'unreadable' | 'no_answer';
 }
 
-const unavailableResult = (reason: string, unavailableKind: 'not_configured' | 'no_answer'): AutomationRunsSinceResult =>
+const unavailableResult = (reason: string, unavailableKind: 'not_configured' | 'unreadable' | 'no_answer'): AutomationRunsSinceResult =>
   ({ runs: [], deliveries: [], unavailable: reason, unavailableKind });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -149,7 +153,8 @@ export async function listAutomationRunsSince(
     if (!isHostFailure(error)) return unavailableResult(error instanceof Error ? error.message : String(error), 'no_answer');
     const notConfigured = error.kind === 'auth_required'
       && (error.refusal.code === 'no_credential' || error.refusal.code === 'dial_disabled');
-    return unavailableResult(error.refusal.reason, notConfigured ? 'not_configured' : 'no_answer');
+    const unreadable = error.kind === 'auth_required' && error.refusal.code === 'credential_unreadable';
+    return unavailableResult(error.refusal.reason, notConfigured ? 'not_configured' : unreadable ? 'unreadable' : 'no_answer');
   }
 }
 

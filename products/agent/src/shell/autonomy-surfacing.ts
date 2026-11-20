@@ -186,7 +186,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
       }
 
       const runsSince = await runsReading;
-      if (lastSeenAt !== null) runsRead = runsSince.unavailableKind === 'no_answer' ? 'failed' : 'read';
+      if (lastSeenAt !== null) runsRead = runsSince.unavailableKind === 'no_answer' || runsSince.unavailableKind === 'unreadable' ? 'failed' : 'read';
       lifetime.signal.throwIfAborted();
 
       const completedRuns = runsSince.runs.filter((run) => run.status === 'completed');
@@ -222,16 +222,17 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
         deliveries: runsSince.deliveries,
         failedRuns,
         missedRuns,
-        runsUnavailableReason: runsSince.unavailableKind === 'no_answer' ? runsSince.unavailable : null,
       });
 
-      if (digest !== null) {
-        const lines = tasksUnavailableReason
-          ? [...digest.lines, `Tasks could not be read, so finished tasks may be missing above: ${tasksUnavailableReason}`]
-          : digest.lines;
-        options.router.high(`[Status] ${[digest.headline, ...lines].join('\n  ')}`);
-        options.render();
+      // Only what happened goes into the conversation. A record that exists and
+      // could not be read is a notice, said once per launch, with what to do; a
+      // host that is not set up, or not running, is not news.
+      if (digest !== null) options.router.high(digest.text);
+      if (runsSince.unavailableKind === 'unreadable' && runsSince.unavailable) {
+        options.router.low(`Could not check for scheduled runs that failed or were missed while you were away: ${runsSince.unavailable}`);
       }
+      if (tasksUnavailableReason) options.router.low(`Could not read the task list, so finished tasks were not checked: ${tasksUnavailableReason}`);
+      if (digest !== null || runsSince.unavailableKind === 'unreadable' || tasksUnavailableReason) options.render();
 
       // Drafting skills only has material when something finished since the
       // person was last here; it waits for an idle shell so it never competes

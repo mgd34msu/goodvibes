@@ -4,6 +4,7 @@ import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
 import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { bridgeHeldForOwnerToInbox, bridgeJevDecisionsToInbox, processHeldForOwner, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { bridgeContractQuestionsToInbox, contractQuestionEventsOf } from '@goodvibes-jev/engine/platform/platform/contract';
 import { createDaemonBootController, type DaemonBootController } from './boot-tasks.js';
@@ -60,6 +61,13 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     // Legacy recovery can await planning or execution. Serve the host while
     // that work runs, and abort/drain it before releasing its dependencies.
     const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+    // A contract whose checkpoint was refused at start is the owner's to decide: a receipt the next
+    // attached terminal or web UI shows, with what happened and what to do, not only a log line.
+    void contractRecovery.then((report) => {
+      if (!report || report.refused.length === 0) return;
+      const receipts = daemonReceiptStoreAt(daemonReceiptsPath(services.configManager));
+      for (const { refusal } of report.refused) receipts.record(`${refusal.reason} ${refusal.state}. Next: ${refusal.next.join(' ')}`);
+    });
     // What a contract asks its owner (retry or cancel a failed unit, accept an unchecked result, ...) waits in the
     // owner inbox beside everything else, and an answer there is the contract's reply; contracts.reply still answers it too.
     if (services.ownerInbox) {

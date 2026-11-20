@@ -22,6 +22,13 @@ export type BeginAgentHostPairingResult = BeginHostPairingResult<typeof AGENT_HO
 export type CompleteAgentHostPairingResult = CompleteHostPairingResult<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type RemoveAgentHostPairingResult = RemoveHostPairingResult<typeof AGENT_HOST_PAIRING_UNAVAILABLE_REASON>;
 export type AgentHostPairingIO = HostPairingIO;
+/** An unreadable pairing in plain words: what failed and what to do (the store's own detail). */
+export function describeUnreadableAgentHostPairing(pairing: AgentHostPairingUnavailable): string {
+  const detail = pairing.reason.startsWith(AGENT_HOST_PAIRING_UNAVAILABLE_REASON)
+    ? pairing.reason.slice(AGENT_HOST_PAIRING_UNAVAILABLE_REASON.length).trim()
+    : pairing.reason;
+  return `This Agent's saved pairing with the GoodVibes host could not be read.${detail ? ` ${detail}` : ''}`;
+}
 export const {
   canonicalizePairingHost,
   hostPairingStorePath: agentHostPairingStorePath,

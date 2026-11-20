@@ -358,6 +358,12 @@ export interface RuntimeServices {
   readonly cacheRegistry: CacheRegistry;
   /** Backpressure seam the governor drives to pause/resume deferrable background jobs. */
   readonly pauseController: PauseController;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts): a daemon closes it
+   * for a self-update's restart, and this graph's schedulers leave a due
+   * occurrence due while it is closed. Absent on a hand-built host: always open.
+   */
+  readonly workAdmission?: import('../daemon/work-admission.js').DaemonWorkAdmission | undefined;
   readonly shellPaths: ShellPathService;
   readonly configManager: ConfigManager;
   readonly featureFlags: FeatureFlagManager;

@@ -512,7 +512,8 @@ export function settledTurnLabel(turnState: TurnState): string {
     case 'session expired': return 'Your sign-in expired.';
     case 'stopped': return 'Stopped.';
     case 'stopped locally': return 'Stopped showing the reply. This daemon cannot stop the turn itself.';
-    case 'error': return 'The reply failed.';
+    // A failed reply says what happened in the conversation, as its failure row.
+    case 'error': return '';
     default: return '';
   }
 }

@@ -144,6 +144,8 @@ export interface KnowledgeServiceConfig {
    * refused with an honest structured error instead of piling on allocation.
    */
   readonly admitExpensiveWork?: ((label: string) => { allowed: boolean; reason?: string | undefined }) | undefined;
+  /** Whether new work is admitted (daemon/work-admission.ts); a schedule due while it is not stays due for after the restart. */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 /** `recompileFailures` lists sources that could not be recompiled; every other source was. */
@@ -221,6 +223,7 @@ export class KnowledgeService {
       store: this.store,
       emitIfReady: this.emitIfReady.bind(this),
       runJobByKind: this.runJobByKind.bind(this),
+      ...(this.options.workAdmitted ? { workAdmitted: this.options.workAdmitted } : {}),
     });
   }
 

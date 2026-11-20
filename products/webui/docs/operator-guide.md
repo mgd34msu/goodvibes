@@ -195,16 +195,26 @@ closes or stops, the next takes over, so one wake phrase is heard and sent once.
 
 ## Work
 
-Work is one list of everything running for you, in three groups: Needs you
-(the daemon's attention states and retained compatibility records), Running, and
-Finished. A segmented control filters the list to All,
-Sessions, Agents or Processes, and a search box narrows it. The Show select
-switches between Active (the default), Active and finished (adds the Finished
-group) and Archive. The header line counts what is running and what needs you; in
-the Archive it counts what is archived. Select a row to open
-its detail beside the list (over the page on a phone). New offers Ask for work
-to be done, Run a background task, Start a session in a folder, CI watch and a
-one-off CI status check.
+Work is one list of everything working for you, grouped by what you would do
+about it: Waiting for you (approvals, questions, purchase windows and anything
+else that needs your answer, each in a sentence), Running now, Scheduled
+(schedules, triggers and CI watches between runs, with when they run and how the
+last run went) and Finished (the ten newest). The header chip says how many
+things wait for you; the sidebar badge and the account menu's "running" are the
+same counts. The platform's own services (heartbeats, pollers, the code index)
+sit behind one line, "Background services: 4 healthy", which opens to each one
+and its state; a service that stalls or fails becomes a row under Needs
+attention, with Restart when it can be restarted. Open sessions between turns
+are behind their own line. A search box narrows the rows, and the Show select
+switches between Active (the default) and Archive. Select a row to open its
+detail beside the list (over the page on a phone). An ask opens as its card:
+who asked and when, the question, what it acts on, what it will do, the
+choices, and "Why am I asked?" and "Details" (the tool, its arguments, who
+requested it, the session and the decision trail). "I'll handle this" marks an
+ask as yours when more than one person can answer; "Cancel this request" is
+offered to the person who asked. New offers Ask for work to be done, Run a
+background task, Start a session in a folder, CI watch and a one-off CI status
+check.
 
 Under the list, Archive finished processes moves fully finished processes out of
 the default list straight away, without a confirmation. They stay readable under

@@ -6,7 +6,6 @@
  * a release is tagged.
  */
 export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
-  'activity',
   'agent',
   'agent-profile',
   'agents',
@@ -76,7 +75,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'notes',
   'notifications',
   'notify',
-  'onboarding',
   'ops',
   'orchestration',
   'owner-profile',

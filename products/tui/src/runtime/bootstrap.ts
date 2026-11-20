@@ -359,6 +359,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Recovery can await a planner or executor. Let the shell render while it
   // runs, and stop/drain recovery before shutdown releases its dependencies.
   const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+  // A contract whose checkpoint was refused at start is shown to the owner with what to do, not only logged.
+  void contractRecovery.then((report) => {
+    for (const { refusal } of report?.refused ?? []) {
+      systemMessageRouter.high(`[Contracts] ${refusal.reason} ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
+    }
+  });
   // The work-plan writes recovery queued are flushed by the graph's contract-runner disposal, which runs after this.
   bootstrapUnsubs.unshift(async () => {
     services.contractRunner.dispose();

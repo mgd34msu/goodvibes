@@ -222,6 +222,8 @@ export class DaemonServer {
   private readonly surfaceActionHelper: DaemonSurfaceActionHelper;
   private readonly transportEventsHelper: DaemonTransportEventsHelper;
   private readonly httpRouter: DaemonHttpRouter;
+  /** Whether the daemon takes new work (work-admission.ts); the agent spawn asks it. */
+  private readonly workAdmission: import('./work-admission.js').DaemonWorkAdmission;
   /** Sweeps channel health and tells the owner over a channel that still works; see facade-channel-health.ts. */
   private readonly channelHealth: import('../channels/index.js').ChannelHealthWatcher;
   /** Ends the subscription that settles channel replies on each agent's terminal event. */
@@ -394,6 +396,7 @@ export class DaemonServer {
     this.workProposals = collaborators.workProposals;
     this.transportEventsHelper = collaborators.transportEventsHelper;
     this.httpRouter = collaborators.httpRouter;
+    this.workAdmission = collaborators.workAdmission;
     this.channelHealth = buildDaemonChannelHealthWatcher(resolved, {
       delivery: collaborators.surfaceDeliveryHelper,
       ingressAlarm: collaborators.ingressAlarm,
@@ -467,7 +470,8 @@ export class DaemonServer {
       // The continuation reaches the same gate the inbound message did.
       surfaceActionHelper: this.surfaceActionHelper,
       configReader: this.configManager,
-      hasFreeAgentSlot: () => this.agentManager.hasFleetCapacity(),
+      // While the daemon takes no new work a message is not read either: it is read once, after the restart.
+      hasFreeAgentSlot: () => this.workAdmission.open && this.agentManager.hasFleetCapacity(),
     });
 
     this.distributedRuntime.attachRuntime({
@@ -1566,6 +1570,10 @@ export class DaemonServer {
     }, approvalId, action, req);
   }
   private trySpawnAgent(input: Parameters<AgentManager['spawn']>[0], logLabel = 'DaemonServer', sessionId?: string): AgentRecord | Response {
+    // Every agent the daemon starts for a request, a channel message, agreed work or a follow-up starts here:
+    // while it takes no new work (a self-update's restart) the start is refused, and the channel paths keep the message.
+    const closed = this.workAdmission.refusalResponse();
+    if (closed) return closed;
     try {
       const copied = Array.isArray((input as { tools?: readonly string[] }).tools)
         ? {

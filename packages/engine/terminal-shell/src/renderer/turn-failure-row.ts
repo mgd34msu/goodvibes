@@ -71,17 +71,20 @@ function blank(width: number): Line {
  * words after it stay together where they fit. A word longer than the room is
  * broken across rows, never cut.
  */
-function flow(segments: readonly Segment[], width: number): Line[] {
+function flow(segments: readonly Segment[], width: number, hang = 0): Line[] {
   const end = Math.max(TEXT_COL + 1, width - LAYOUT.RIGHT_MARGIN);
+  // A continued row starts under the first row's text after `hang` columns (a detail's value under its value).
+  const start = Math.min(TEXT_COL + hang, end - 1);
   const lines: Line[] = [];
   let line = blank(width);
   let x = TEXT_COL;
-  const newline = (): void => { lines.push(line); line = blank(width); x = TEXT_COL; };
+  let rowStart = TEXT_COL;
+  const newline = (): void => { lines.push(line); line = blank(width); x = start; rowStart = start; };
   for (const segment of segments) {
     if (segment.chip) {
       const chip = ` ${segment.text} `;
       const need = getDisplayWidth(chip);
-      if (x > TEXT_COL && x + need > end) newline();
+      if (x > rowStart && x + need > end) newline();
       x = put(line, x, chip, segment.style);
       continue;
     }
@@ -89,12 +92,12 @@ function flow(segments: readonly Segment[], width: number): Line[] {
     const words = segment.text.split(/(?<= )/);
     for (const word of words) {
       const w = getDisplayWidth(word.trimEnd());
-      if (x > TEXT_COL && x + w > end) {
+      if (x > rowStart && x + w > end) {
         newline();
         if (word.trim().length === 0) continue;
       }
-      let rest = x === TEXT_COL ? word.replace(/^ +/, '') : word;
-      while (getDisplayWidth(rest.trimEnd()) > end - x && x === TEXT_COL) {
+      let rest = x === rowStart ? word.replace(/^ +/, '') : word;
+      while (getDisplayWidth(rest.trimEnd()) > end - x && x === rowStart) {
         // One word wider than the row: break it.
         let cut = 0, used = 0;
         for (const ch of rest) { const cw = getDisplayWidth(ch); if (used + cw > end - x) break; used += cw; cut += ch.length; }
@@ -134,7 +137,7 @@ export function renderTurnFailureRow(reading: TurnFailureReading, width: number,
       lines.push(...flow([
         { text: `${row.label.padEnd(labelWidth)}  `, style: faint },
         { text: row.value.replace(/\s*\n\s*/g, ' '), style: dim },
-      ], width));
+      ], width, labelWidth + 2));
     }
   }
   if (!state.keys) return lines;

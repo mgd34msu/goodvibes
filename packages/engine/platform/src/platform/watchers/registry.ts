@@ -80,6 +80,12 @@ export interface WatcherRegistryOptions {
    * such a value is sent as written.
    */
   readonly resolveHeaderValue?: ((value: string) => Promise<string | null>) | undefined;
+  /**
+   * Whether new work is admitted (daemon/work-admission.ts). While it is not (a
+   * self-update's restart) a timed run is skipped, as if the daemon were already
+   * down; the restored watcher runs on its usual rhythm after the restart.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 /** The last snapshot save that failed, while no later save has succeeded. */
@@ -319,6 +325,7 @@ export class WatcherRegistry {
   private readonly privateDeliveryHosts: () => readonly string[];
   private readonly runTimeoutMs: number;
   private readonly resolveHeaderValue: ((value: string) => Promise<string | null>) | undefined;
+  private readonly workAdmitted: () => boolean;
   private pendingSave: ReturnType<typeof setTimeout> | null = null;
   private saveFailure: WatcherSnapshotSaveFailure | undefined;
   /** The group's copy of the url watchers (cluster/group-work.ts), once attached; it acts only while this machine is in a group. */
@@ -337,6 +344,7 @@ export class WatcherRegistry {
       ?? ((url, init) => postToPublicWebhook(url, init, { allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts() }));
     this.runTimeoutMs = options.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.resolveHeaderValue = options.resolveHeaderValue;
+    this.workAdmitted = options.workAdmitted ?? ((): boolean => true);
   }
 
   /**
@@ -556,6 +564,8 @@ export class WatcherRegistry {
    * the next holder counts its interval from it.
    */
   private runOnTimer(id: string, failure = 'Watcher interval run failed'): void {
+    // Nothing new starts while the daemon takes no new work; the timer stays armed.
+    if (!this.workAdmitted()) return;
     const watcher = this.watchers.get(id);
     const group = this.group;
     if (!watcher || !group || !this.sharedWithGroup(watcher) || !group.shared()) {

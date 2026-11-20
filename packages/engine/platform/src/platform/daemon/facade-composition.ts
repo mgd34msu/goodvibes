@@ -16,6 +16,9 @@ import { gateSurfaceSpawn, WAITING_FOR_RESTART_OUTCOME, type SurfaceIngressOrigi
 import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
+import { existsSync } from 'node:fs';
+import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
+import { startOwedGitHubEvents, type GitHubReplyOperation } from '../adapters/github/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '../runtime/events/index.js';
@@ -784,6 +787,17 @@ export function createDaemonFacadeCollaborators(
     void surfaceActionHelper.resumeAgreedWork().catch((error: unknown) => {
       logger.warn('Agreed work held for a restart could not be started after admission reopened', { error: summarizeError(error) });
     });
+    // GitHub events taken during the hold (saved as owed work in the operation log) start now.
+    if (existsSync(daemonOperationsPath(runtime.configManager))) {
+      void startOwedGitHubEvents({
+        operations: daemonOperationLog<GitHubReplyOperation>(runtime.configManager),
+        trySpawnAgent: (input, logLabel, sessionId) => options.trySpawnAgent(input, logLabel, sessionId),
+        awaitAgent: async (agentId) => { await runtime.agentManager.join(agentId); return runtime.agentManager.getStatus(agentId); },
+        resolveToken: async () => (await runtime.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null,
+      }).catch((error: unknown) => {
+        logger.warn('GitHub events held for a restart could not be started after admission reopened', { error: summarizeError(error) });
+      });
+    }
   });
   const httpRouter = new DaemonHttpRouter({
     workAdmission,

@@ -527,6 +527,27 @@ async function invokeOperator(methodId: string, input?: unknown, signal?: AbortS
   return OWNER_APPROVAL_WRITES.has(methodId) ? acceptOwnerApprovalAnswer(answer) : answer;
 }
 
+/**
+ * An operator method the owner ran by pressing a sheet's button (a slash
+ * command action drawn from lib/generated/command-actions.ts), so it carries
+ * the explicit-user-request claim the payment and grant handlers require. By
+ * the method's REST route when it has one, else through the generic method
+ * invoke (a method newer than the generated routes goes there too). A method
+ * the browser platform routes itself (sessions.*, accounts.snapshot) goes
+ * there; none of those reads the claim.
+ */
+export async function invokeOwnerMethod(methodId: string, input: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<unknown> {
+  const route = EXTRA_METHOD_ROUTES[methodId];
+  if (route) {
+    const { path, rest } = interpolateRoute(route, input);
+    if (route.method === 'GET') return requestJson(path, { method: route.method, query: rest, signal });
+    if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal, explicitUserRequest: true });
+    return requestJson(path, { method: route.method, body: rest, signal, explicitUserRequest: true });
+  }
+  if (BROWSER_COVERED_METHOD_IDS.has(methodId)) return invokeOperator(methodId as OperatorMethodId, input as OperatorMethodInput<OperatorMethodId>, signal);
+  return requestJson(`/api/control-plane/methods/${methodId}/invoke`, { method: 'POST', body: { body: input }, signal, explicitUserRequest: true });
+}
+
 /** The writes the daemon can put to the owner instead of applying (see lib/owner-approval.ts). */
 const OWNER_APPROVAL_WRITES: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'sessions.permissionMode.set']);
 

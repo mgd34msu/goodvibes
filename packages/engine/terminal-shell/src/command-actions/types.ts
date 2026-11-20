@@ -94,8 +94,15 @@ export interface ActionDescription<Ctx> {
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   /** The action id that undoes this one. */
   readonly undoneBy?: string | undefined;
-  /** How the web UI runs it: an operator method and which input fills which field, or why only a terminal can. */
-  readonly operator?: { readonly method: string; readonly fields: Readonly<Record<string, string>> } | { readonly terminalOnly: string } | undefined;
+  /**
+   * How the web UI runs it: an operator method and which input fills which
+   * field, or why only a terminal can. With `preview`, `fields` fill that
+   * method's input instead (plus `zone`, the browser's time zone): it reads
+   * the values the way `run` does (a described time, a trigger's definition)
+   * and answers `{ summary, input }`; the sheet shows the summary above its
+   * button and then runs `method` with `input`. Nothing is kept by a preview.
+   */
+  readonly operator?: { readonly method: string; readonly fields: Readonly<Record<string, string>>; readonly preview?: string | undefined } | { readonly terminalOnly: string } | undefined;
   /** Filled-in inputs for the help entry and the round-trip check. */
   readonly example: ActionValues;
   /**

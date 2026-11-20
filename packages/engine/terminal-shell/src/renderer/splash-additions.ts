@@ -42,7 +42,7 @@ function blank(): Block['rows'][number] {
  * Draw the additions into a viewport whose splash is already centred.
  * `modeKey` is the bound key that changes the mode ("shift+tab").
  */
-export function drawSplashAdditions(viewport: readonly Line[], height: number, width: number, options: { readonly modeKey: string }): Line[] {
+export function drawSplashAdditions(viewport: readonly Line[], height: number, width: number, options: { readonly modeKey?: string | undefined }): Line[] {
   const out = [...viewport];
   const view = readSplashAdditions();
   const first = out.findIndex((line) => !isBlank(line));
@@ -84,9 +84,9 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   if (firstRun?.kind === 'set' && view.asksBefore) {
     const rows = wrapSegments([
       { text: view.asksBefore, tone: 'dim' },
-      { text: ' ' },
-      { text: options.modeKey, chip: true },
-      { text: ' changes how often it asks.   Web UI, phone, channels and everything else:', tone: 'dim' },
+      // The key that changes the mode, as bound; with none bound, the clause about it is left out.
+      ...(options.modeKey ? [{ text: ' ' }, { text: options.modeKey, chip: true }, { text: ' changes how often it asks.', tone: 'dim' as const }] : []),
+      { text: '   Web UI, phone, channels and everything else:', tone: 'dim' },
       { text: ' ' },
       { text: view.setupCommand, chip: true },
       { text: ' whenever you want them.', tone: 'dim' },

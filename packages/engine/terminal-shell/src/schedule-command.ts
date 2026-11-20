@@ -7,28 +7,22 @@
  * host. That is the host each app installs when it registers the command.
  */
 import {
-  formatEveryInterval,
-  normalizeAtSchedule,
-  normalizeCronSchedule,
-  normalizeCronStaggerMs,
-  normalizeEverySchedule,
-  readNaturalLanguageSchedule,
-  type AutomationExecutionPolicy,
-  type AutomationExternalContentSource,
+  buildAutonomySchedulePrompt,
+  formatScheduleTime as formatScheduleTimeIn,
+  formatScheduleTiming as formatScheduleTimingIn,
+  readScheduleTiming,
+  scheduleCreateTimingFields,
+  scheduleFieldsFromValues,
+  ScheduleValuesError,
   type AutomationScheduleDefinition,
-  type AutomationSessionTarget,
-  type AutomationWakeMode,
-  type CreateAutomationJobInput,
+  type ScheduleFields,
 } from '@goodvibes-jev/engine/platform/platform/automation';
-import { deliveryChannelProblem, parseChannelDeliveryTarget } from '@goodvibes-jev/engine/platform/platform/channels';
-import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '@goodvibes-jev/engine/platform/platform/providers';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { REASONING_EFFORT_SEVERITY } from '@goodvibes-jev/engine/platform/platform/providers';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, readList, type ListRow } from './command-actions/lists.js';
 import type { ActionValues, CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
-import { buildAutonomySchedulePrompt } from './agent-turn/autonomy-schedule.js';
 
 /** A schedule as `/schedule` shows it, the same for every place one is kept. */
 export interface ScheduleView {
@@ -45,8 +39,8 @@ export interface ScheduleView {
   readonly outcome?: string | undefined;
 }
 
-/** A routine's fields apart from its timing, name and prompt, in the shape both places take. */
-export type ScheduleFields = Omit<CreateAutomationJobInput, 'schedule' | 'name' | 'prompt'>;
+/** A routine's fields apart from its timing, name and prompt, in the shape both places take (one owner: the automation module). */
+export type { ScheduleFields };
 
 /** A reading of a described time ("every weekday at 9am") that one line may run at a time. */
 export interface ScheduleReadingSlot {
@@ -85,37 +79,16 @@ const LOCAL_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** One zone for every time this command prints: this machine's, named. */
 export function formatScheduleTime(ms: number | undefined): string {
-  if (ms === undefined || !Number.isFinite(ms)) return 'not planned';
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: LOCAL_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(new Date(ms));
-  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? '';
-  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} ${LOCAL_ZONE}`;
+  return formatScheduleTimeIn(ms, LOCAL_ZONE);
 }
 
-/** A schedule's timing in words. */
+/** A schedule's timing in words, its times in this machine's zone. */
 export function formatScheduleTiming(schedule: AutomationScheduleDefinition): string {
-  switch (schedule.kind) {
-    case 'cron':
-      return [schedule.expression, schedule.timezone ? `[${schedule.timezone}]` : '', schedule.staggerMs !== undefined ? `[stagger ${schedule.staggerMs}ms]` : ''].filter(Boolean).join(' ');
-    case 'every':
-      return `every ${formatEveryInterval(schedule.intervalMs)}`;
-    case 'at':
-      return `once at ${formatScheduleTime(schedule.at)}`;
-  }
+  return formatScheduleTimingIn(schedule, LOCAL_ZONE);
 }
 
 /** The daemon's and host's create fields for a timing (`cron`, `every` or `at`), the one mapping both apps use. */
-export function scheduleTimingFields(schedule: AutomationScheduleDefinition): { readonly kind: 'cron' | 'every' | 'at'; readonly cron?: string; readonly every?: string; readonly at?: string; readonly timezone?: string; readonly staggerMs?: number } {
-  switch (schedule.kind) {
-    case 'cron':
-      return { kind: 'cron', cron: schedule.expression, ...(schedule.timezone ? { timezone: schedule.timezone } : {}), ...(schedule.staggerMs !== undefined ? { staggerMs: schedule.staggerMs } : {}) };
-    case 'every':
-      return { kind: 'every', every: formatEveryInterval(schedule.intervalMs) };
-    case 'at':
-      return { kind: 'at', at: new Date(schedule.at).toISOString() };
-  }
-}
+export const scheduleTimingFields = scheduleCreateTimingFields;
 
 // ---------------------------------------------------------------------------
 // Live list, read only when a guided step or a completion asks
@@ -188,39 +161,26 @@ function timingInputs(step: number, required: boolean): readonly InputDescriptio
 
 /** The timing the values give, or undefined when none was given; throws a refusal sentence. */
 async function timingOf(values: ActionValues, ctx: ScheduleCommandContext, line: string): Promise<AutomationScheduleDefinition | undefined> {
-  const timezone = values.tz || undefined;
-  const staggerMs = values.stagger ? normalizeCronStaggerMs(values.stagger) : undefined;
-  if (values.stagger && staggerMs === undefined) throw commandRefusal(`"${values.stagger}" is not a duration to spread the start by (such as 5m). Nothing was kept.`);
-  try {
-    if (values.cron) return normalizeCronSchedule(values.cron, timezone, staggerMs);
-    if (values.every) return normalizeEverySchedule(values.every);
-    if (values.at) {
-      const at = Date.parse(values.at);
-      if (Number.isNaN(at)) throw new Error(`"${values.at}" is not a date and time. Use one such as 2026-12-01T09:00 (read in ${LOCAL_ZONE} when it has no zone).`);
-      if (at <= Date.now()) throw new Error(`${formatScheduleTime(at)} has already passed.`);
-      return normalizeAtSchedule(at);
-    }
-  } catch (error) {
-    throw commandRefusal(`Not kept: ${summarizeError(error)}`);
-  }
-  if (!values.when) return undefined;
   // A second run of the same line while the first is still being read starts no second reading.
-  const readings = ctx.commandReadings;
+  const described = Boolean(values.when) && !values.cron && !values.every && !values.at;
+  const readings = described ? ctx.commandReadings : undefined;
   readings?.cancel('schedule');
   const begun = readings?.begin('schedule', line);
   if (begun && !begun.ok) throw commandRefusal(begun.reason === 'pending' ? 'This schedule is already being read; it is kept when the reading finishes. Nothing new was started.' : 'Schedule reading is not available while the terminal is closing. Nothing was kept.');
   const slot = begun && begun.ok ? begun : undefined;
   try {
-    ctx.print('Reading when it runs…');
-    const parsed = await readNaturalLanguageSchedule({ phrase: values.when, now: Date.now(), timezone: timezone ?? LOCAL_ZONE, staggerMs }, {
+    const schedule = await readScheduleTiming(values, {
+      zone: LOCAL_ZONE,
       ...(slot ? { signal: slot.signal, beforeAttempt: slot.assertCurrent } : {}),
+      onReading: () => ctx.print('Reading when it runs…'),
       onRetry: () => { if (!slot || slot.current()) ctx.print('Still reading when it runs…'); },
     });
     if (slot && !slot.current()) throw commandRefusal('A newer line replaced this one; nothing was kept.');
-    if (parsed.kind === 'unknown') throw commandRefusal(`Not kept: the timing is ${parsed.reason}; give it as a date (--at), an interval (--every) or a pattern (--cron) instead.`);
-    if (parsed.schedule.kind === 'at' && parsed.schedule.at <= Date.now()) throw commandRefusal('Not kept: that time has already passed.');
-    ctx.print(`Read as: ${formatScheduleTiming(parsed.schedule)}`);
-    return parsed.schedule;
+    if (schedule && described) ctx.print(`Read as: ${formatScheduleTiming(schedule)}`);
+    return schedule;
+  } catch (error) {
+    if (error instanceof ScheduleValuesError) throw commandRefusal(error.message);
+    throw error;
   } finally {
     slot?.finish();
   }
@@ -263,33 +223,11 @@ const MORE: readonly InputDescription[] = [
   { id: 'paused', label: 'Start paused', help: 'Kept, but runs only once you resume it', kind: 'choice', choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }], required: { default: 'no', defaultMeans: 'no' }, typed: { flag: '--paused', switchOn: 'yes' }, step: 4 },
 ];
 
-function targetOf(value: string): AutomationSessionTarget {
-  return { kind: value as 'isolated' | 'main' | 'background' | 'pinned', createIfMissing: true };
-}
-
 function fieldsOf(values: ActionValues): ScheduleFields {
-  const deliver = values.deliver?.trim();
-  const problem = deliver ? deliveryChannelProblem(deliver) : undefined;
-  if (problem) throw commandRefusal(`Answer goes to: ${problem}. Write a channel such as telegram or slack:C123, or leave it blank for the owner inbox. Nothing was kept.`);
-  if (values.reasoning && reasoningEffortRank(values.reasoning) === -1) throw commandRefusal(`"${values.reasoning}" is not a reasoning effort (${REASONING_EFFORT_SEVERITY.join(', ')}).`);
-  const fallback = values.fallback?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? [];
-  const tools = values.tool?.split('\n').map((entry) => entry.trim()).filter(Boolean) ?? [];
-  return {
-    ...(values.model ? { model: values.model } : {}),
-    ...(values.provider ? { provider: values.provider } : {}),
-    ...(values.template ? { template: values.template } : {}),
-    ...(values.reasoning ? { reasoningEffort: values.reasoning as AutomationExecutionPolicy['reasoningEffort'] } : {}),
-    ...(values.thinking ? { thinking: values.thinking } : {}),
-    ...(values.wake ? { wakeMode: values.wake as AutomationWakeMode } : {}),
-    ...(values.source ? { externalContentSource: values.source as AutomationExternalContentSource } : {}),
-    target: targetOf(values.target || 'isolated'),
-    ...(fallback.length > 0 ? { fallbackModels: fallback } : {}),
-    ...(tools.length > 0 ? { toolAllowlist: tools } : {}),
-    ...(values.outside === 'yes' ? { allowUnsafeExternalContent: true } : {}),
-    ...(values.light === 'yes' ? { lightContext: true } : {}),
-    ...(deliver ? { delivery: { mode: 'surface' as const, targets: [parseChannelDeliveryTarget(deliver)] } } : {}),
-    enabled: values.paused !== 'yes',
-  };
+  try { return scheduleFieldsFromValues(values); } catch (error) {
+    if (error instanceof ScheduleValuesError) throw commandRefusal(error.message);
+    throw error;
+  }
 }
 
 async function pick(ctx: ScheduleCommandContext, id: string): Promise<ScheduleView> {
@@ -357,12 +295,14 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       sentence: '"{prompt}" will run at the times you gave, whether or not this app is open, until you change it.',
       done: 'Scheduled.',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove',
+      // The web UI's sheet has the daemon read the blanks (a described time included) and show the reading before it keeps it.
       operator: {
         method: 'automation.schedules.create',
+        preview: 'automation.schedules.preview',
         fields: {
-          prompt: 'prompt', cron: 'cron', every: 'every', at: 'at', timezone: 'tz', name: 'name', model: 'model', provider: 'provider',
-          template: 'template', reasoningEffort: 'reasoning', thinking: 'thinking', wakeMode: 'wake', fallbackModels: 'fallback:lines', toolAllowlist: 'tool:lines',
-          externalContentSource: 'source', 'target.kind': 'target',
+          action: '="add"', prompt: 'prompt', when: 'when', at: 'at', every: 'every', cron: 'cron', tz: 'tz', stagger: 'stagger', name: 'name',
+          target: 'target', model: 'model', provider: 'provider', deliver: 'deliver', outside: 'outside', source: 'source', reasoning: 'reasoning',
+          thinking: 'thinking', wake: 'wake', fallback: 'fallback', tool: 'tool', template: 'template', light: 'light', paused: 'paused',
         },
       },
       example: { prompt: 'summarise open pull requests', when: 'every weekday at 9am' },
@@ -436,7 +376,11 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
       sentence: '{schedule} will run with what you changed, until you change it again.',
       done: 'Changed {schedule}.',
       touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { method: 'automation.jobs.update', fields: { jobId: 'schedule', name: 'name', prompt: 'prompt' } },
+      operator: {
+        method: 'automation.jobs.update',
+        preview: 'automation.schedules.preview',
+        fields: { action: '="change"', schedule: 'schedule', when: 'when', at: 'at', every: 'every', cron: 'cron', tz: 'tz', stagger: 'stagger', name: 'name', prompt: 'prompt', task: 'task', success: 'success' },
+      },
       example: { schedule: 'weekly-report', cron: '0 8 * * 1' },
       async run(values, ctx) {
         const view = await pick(ctx, values.schedule!);

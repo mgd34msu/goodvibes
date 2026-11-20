@@ -30,8 +30,11 @@ export interface ActionData extends Omit<ActionShape, 'inputs'> {
   readonly riskWords?: string;
   readonly ownerOnly?: { readonly reason: string; readonly instead: string };
   readonly undoneBy?: string;
-  readonly operator: { readonly method: string; readonly fields: Readonly<Record<string, string>> } | { readonly terminalOnly: string };
+  /** `preview`: a method that reads the values first and answers `{ summary, input }` (see the engine's ActionDescription.operator). */
+  readonly operator: { readonly method: string; readonly fields: Readonly<Record<string, string>>; readonly preview?: string } | { readonly terminalOnly: string };
   readonly inputs: readonly InputData[];
+  /** A question heading each form step, by step (index 0 is step 1). */
+  readonly stepTitles?: readonly string[];
 }
 
 export interface CommandActionsData {

@@ -31,6 +31,8 @@ function inputData(input: InputDescription): Record<string, unknown> {
     ...(input.freeTextReason ? { freeTextReason: input.freeTextReason } : {}),
     required: input.required,
     typed: input.typed,
+    ...(input.step !== undefined ? { step: input.step } : {}),
+    ...(input.showWhen ? { showWhen: input.showWhen } : {}),
   };
 }
 
@@ -50,6 +52,7 @@ function actionData(command: CommandDescription<never>, action: ActionDescriptio
     ...(action.undoneBy ? { undoneBy: action.undoneBy } : {}),
     operator: action.operator ?? { terminalOnly: 'Done from a terminal app.' },
     inputs: action.inputs.map(inputData),
+    ...(action.stepTitles && action.stepTitles.length > 0 ? { stepTitles: action.stepTitles } : {}),
   };
 }
 

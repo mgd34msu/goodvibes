@@ -831,6 +831,8 @@ export class DaemonServer {
           operations: daemonOperationLog<GitHubReplyOperation>(this.configManager),
           awaitAgent: async (agentId) => { await this.agentManager.join(agentId); return this.agentManager.getStatus(agentId); },
           resolveToken: async () => (await this.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null,
+          // Events taken while the previous process held its update admission start now, once.
+          trySpawnAgent: (input, logLabel, sessionId) => this.trySpawnAgent(input, logLabel, sessionId),
         }).catch((error: unknown) => {
           logger.error('DaemonServer: GitHub answers owed before the restart could not be finished', { error: summarizeError(error) });
         });

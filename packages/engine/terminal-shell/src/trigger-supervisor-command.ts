@@ -7,7 +7,7 @@
  * loosens a protection, so a model's line is refused and the owner is asked.
  */
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { normalizeEverySchedule } from '@goodvibes-jev/engine/platform/platform/automation';
+import { watchDefinitionFromValues, WatchValuesError } from '@goodvibes-jev/engine/platform/platform/triggers';
 import { readTriggerOperatorStatus, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
 import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
@@ -155,52 +155,15 @@ const THEN: readonly FixedChoice[] = [
   { value: 'run', label: 'Run a command you approved', help: 'One of the commands you let triggers run.' },
 ];
 
-function slug(name: string): string {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  return base || 'trigger';
-}
-
 async function definitionOf(values: ActionValues, ctx: TriggerCommandContext): Promise<Record<string, unknown>> {
-  if (values.kind === 'written') {
-    let written: unknown;
-    try { written = JSON.parse(values.definition ?? ''); } catch (error) { throw commandRefusal(`The definition is not JSON: ${display(error instanceof Error ? error.message : error)}. Nothing was made.`); }
-    if (!written || typeof written !== 'object' || Array.isArray(written)) throw commandRefusal('The definition is a JSON object: { spec, action? } (the id and label come from its name). Nothing was made.');
-    return { ...(written as Record<string, unknown>), id: slug(values.name!), label: values.name };
+  const found = values.then === 'run' ? (await listGrants(ctx)).find((entry) => display(entry['id']) === values.grant) : undefined;
+  const grant = found ? { id: display(found['id']), digest: String(found['digest'] ?? ''), command: argvOf(found) } : undefined;
+  try {
+    return watchDefinitionFromValues(values, grant);
+  } catch (error) {
+    if (error instanceof WatchValuesError) throw commandRefusal(display(error.message), error.next);
+    throw error;
   }
-  const words = (values.command ?? '').split('\n').filter(Boolean);
-  const command = words[0];
-  const args = words.slice(1);
-  let spec: Record<string, unknown>;
-  const interval = (): number => {
-    try { return normalizeEverySchedule(values.every || '5m').intervalMs; } catch { throw commandRefusal(`"${values.every}" is not an interval such as 5m or 1h. Nothing was made.`); }
-  };
-  switch (values.kind) {
-    case 'finishes':
-      if (!command) throw commandRefusal('Give the command to start. Nothing was made.');
-      spec = { kind: 'on-exit', command, ...(args.length > 0 ? { args } : {}) };
-      break;
-    case 'prints':
-      if (!command) throw commandRefusal('Give the command to keep running. Nothing was made.');
-      try { new RegExp(values.match ?? ''); } catch { throw commandRefusal(`"${values.match}" is not a pattern a line can match. Nothing was made.`); }
-      spec = { kind: 'stream', command, ...(args.length > 0 ? { args } : {}), match: { kind: 'regex', pattern: values.match } };
-      break;
-    case 'page':
-      if (!/^https?:\/\//i.test(values.url ?? '')) throw commandRefusal('A web address starts with https:// (or http://). Nothing was made.');
-      spec = { kind: 'condition', probe: { kind: 'http', url: values.url, capture: 'body' }, extract: { kind: 'raw' }, rule: { kind: 'change' }, intervalMs: interval() };
-      break;
-    default:
-      if (!values.path) throw commandRefusal('Give the file to watch. Nothing was made.');
-      spec = { kind: 'condition', probe: { kind: 'file', path: values.path, capture: 'stat' }, extract: { kind: 'raw' }, rule: { kind: 'change' }, intervalMs: interval() };
-  }
-  let action: Record<string, unknown>;
-  if (values.then === 'run') {
-    const grant = (await listGrants(ctx)).find((entry) => display(entry['id']) === values.grant);
-    if (!grant) throw commandRefusal(`No approved command ${values.grant ?? ''}; nothing was made.`, 'Let triggers run it first: /triggers allow-command.');
-    action = { kind: 'action-grant', grantId: values.grant, digest: grant['digest'] };
-  } else {
-    action = { kind: 'agent-turn', ...(values.say ? { prompt: values.say } : {}), ...(values.deliver ? { deliverTo: values.deliver } : {}) };
-  }
-  return { id: slug(values.name!), label: values.name, spec, action };
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +230,12 @@ export const TRIGGERS_COMMAND: CommandDescription<TriggerCommandContext> = {
       sentence: '{name} will watch what you gave and act each time it fires, until you change it.',
       done: 'Watching: {name}.',
       touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'stop',
-      operator: { terminalOnly: 'Watching for something is set up from a terminal app.' },
+      // The web UI's sheet has the daemon read the blanks into the definition and show what it will watch before it is made.
+      operator: {
+        method: 'watchers.triggers.create',
+        preview: 'watchers.triggers.preview',
+        fields: { name: 'name', kind: 'kind', command: 'command', match: 'match', url: 'url', path: 'path', every: 'every', then: 'then', say: 'say', deliver: 'deliver', grant: 'grant', definition: 'definition' },
+      },
       example: { name: 'Build finished', command: 'npm\nrun\nbuild' },
       async run(values, ctx) {
         const definition = await definitionOf(values, ctx);

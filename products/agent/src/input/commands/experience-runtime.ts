@@ -1,6 +1,5 @@
 import {
-  createApprovalMatrixCommand,
-  COMMON_APPROVAL_SUMMARIES,
+  createApprovalCommand,
   createVoiceExperienceCommand,
 } from '@goodvibes-jev/engine/terminal-shell/experience-commands';
 import '@goodvibes-jev/engine/terminal-shell/voice-settings-review';
@@ -9,7 +8,6 @@ import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
-import { handleApprovalOperatorAction } from './operator-actions-runtime.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import {
   agentWakeCapabilities,
@@ -54,28 +52,11 @@ export function registerExperienceRuntimeCommands(registry: CommandRegistry): vo
   registry.register(voiceExperienceCommand);
 }
 
-const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
-  usage: '[matrix|review <kind>|approve <id> --yes|deny <id> --yes|cancel <id> --yes]',
-  help: 'Usage: /approval [matrix|review <kind>|approve <id> --yes|deny <id> --yes|cancel <id> --yes]',
-  hidden: true,
-  matrix: [
-    ['shell', COMMON_APPROVAL_SUMMARIES.shell],
-    ['file', COMMON_APPROVAL_SUMMARIES.file],
-    ['network', COMMON_APPROVAL_SUMMARIES.network],
-    ['delegate', 'Explicit GoodVibes TUI build delegation approval; Agent-owned job fanout is blocked.'],
-    ['mcp', COMMON_APPROVAL_SUMMARIES.mcp],
-    ['remote', COMMON_APPROVAL_SUMMARIES.remote],
-    ['hook', COMMON_APPROVAL_SUMMARIES.hook],
-    ['plugin', COMMON_APPROVAL_SUMMARIES.plugin],
-  ] as const,
-  related: '  Related workspaces: /security, /trust, /mcp',
-  open(ctx) {
-    ctx.print(
-      'Open Agent Workspace -> Work & Approvals -> Review approval class for the workspace view, or run /approval matrix for the compact command output.',
-    );
-    return;
+const approvalMatrixCommand = createApprovalCommand<CommandContext>({
+  openWaiting(ctx) {
+    if (!ctx.openAgentWorkspace) throw commandRefusal('The Agent workspace needs the interactive shell.', '/questions lists what waits on you.');
+    ctx.openAgentWorkspace('work');
   },
-  action: handleApprovalOperatorAction,
 });
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:

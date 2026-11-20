@@ -9,6 +9,7 @@ import { inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { done, failedOutcome, observe, refusal } from '@goodvibes-jev/engine/errors';
 import { effectKey, newOperationId, outcomeOfFailure, type OperationId } from '../../state/operation.js';
 import type { OperationLog } from '../../state/operation-log.js';
+import { isAdmissionRefusal } from '../../daemon/work-admission.js';
 
 /** An answer owed to an issue or pull request: accepted before GitHub is answered, so a restart reports or finishes it. */
 export interface GitHubReplyOwed {
@@ -20,9 +21,19 @@ export interface GitHubReplyPost {
   readonly target: GitHubReplyTarget;
   readonly body: string;
 }
-export type GitHubReplyOperation = GitHubReplyOwed | GitHubReplyPost;
+/**
+ * An event taken while the daemon took no new work (a self-update's restart):
+ * GitHub does not deliver it again, so it is accepted here and its agent is
+ * started after the restart, once.
+ */
+export interface GitHubStartOwed {
+  readonly prompt: string;
+  readonly reply?: GitHubReplyTarget | undefined;
+}
+export type GitHubReplyOperation = GitHubReplyOwed | GitHubReplyPost | GitHubStartOwed;
 const REPLY_KIND = 'github.reply';
 const POST_KIND = 'github.reply.post';
+const START_KIND = 'github.start';
 
 export async function handleGitHubAutomationWebhook(
   req: Request,
@@ -94,6 +105,12 @@ export async function handleGitHubAutomationWebhook(
     }),
     async () => {
       const spawnResult = await context.trySpawnAgent({ mode: 'spawn', task: decision.prompt }, 'handleGitHubAutomationWebhook');
+      // The daemon is restarting into an update: the event is saved as owed work and started after the restart.
+      if (spawnResult instanceof Response && isAdmissionRefusal(spawnResult) && context.operations) {
+        const payload: GitHubStartOwed = { prompt: decision.prompt, ...(decision.reply && context.awaitAgent ? { reply: decision.reply } : {}) };
+        await context.operations.accept({ op: newOperationId('github-start'), kind: START_KIND, payload });
+        return Response.json({ acknowledged: true, queued: true, outcome: 'waiting-for-restart', eventType: event.type, action: event.action }, { status: 202 });
+      }
       if (spawnResult instanceof Response) return spawnResult;
       if (decision.reply && context.awaitAgent) {
         // Save, then acknowledge: the owed answer is on disk before GitHub is told it will come.
@@ -202,7 +219,12 @@ async function postRecordedAnswer(deps: ReplyDeps, post: OperationId, target: Gi
  * the previous daemon cannot be produced, and is settled failed with that
  * reason and logged. Reads the open lines of the log once.
  */
-export async function recoverGitHubReplies(deps: ReplyDeps & { readonly operations: OperationLog<GitHubReplyOperation> }): Promise<void> {
+export async function recoverGitHubReplies(deps: ReplyDeps & {
+  readonly operations: OperationLog<GitHubReplyOperation>;
+  /** Starts the events taken while the daemon took no new work; absent, they wait for a start that has it. */
+  readonly trySpawnAgent?: TrySpawnAgentFn | undefined;
+}): Promise<void> {
+  if (deps.trySpawnAgent) await startOwedGitHubEvents({ ...deps, trySpawnAgent: deps.trySpawnAgent });
   for (const line of deps.operations.open(POST_KIND)) {
     const payload = line.payload as GitHubReplyPost | undefined;
     if (!payload?.target || typeof payload.body !== 'string') continue;
@@ -213,4 +235,36 @@ export async function recoverGitHubReplies(deps: ReplyDeps & { readonly operatio
     if (!payload?.target || typeof payload.agentId !== 'string') continue;
     void postAgentAnswer(deps, line.op, payload.agentId, payload.target);
   }
+}
+
+/**
+ * Starts each GitHub event that was taken while the daemon took no new work.
+ * Its answer is owed (accepted) before the start is settled, so a restart in
+ * between still posts it; an event refused again (admission closed once more)
+ * stays open for the next start. Reads the open lines of the log once.
+ */
+export async function startOwedGitHubEvents(deps: ReplyDeps & {
+  readonly operations: OperationLog<GitHubReplyOperation>;
+  readonly trySpawnAgent: TrySpawnAgentFn;
+}): Promise<number> {
+  let started = 0;
+  for (const line of deps.operations.open(START_KIND)) {
+    const payload = line.payload as GitHubStartOwed | undefined;
+    if (!payload || typeof payload.prompt !== 'string') continue;
+    const spawned = await deps.trySpawnAgent({ mode: 'spawn', task: payload.prompt }, 'handleGitHubAutomationWebhook.afterRestart');
+    if (spawned instanceof Response) {
+      if (isAdmissionRefusal(spawned)) return started;
+      logger.warn('handleGitHubAutomationWebhook: an event taken before the restart could not be started', { status: spawned.status });
+      deps.operations.settle(line.op, failedOutcome(refusal({ code: 'NOT_STARTED', state: 'no agent was started', reason: `the agent could not be started (HTTP ${spawned.status})`, next: ['Ask again on the issue or pull request'], retryable: false })));
+      continue;
+    }
+    if (payload.reply) {
+      const op = newOperationId('github-reply');
+      await deps.operations.accept({ op, kind: REPLY_KIND, payload: { target: payload.reply, agentId: spawned.id } });
+      void postAgentAnswer(deps, op, spawned.id, payload.reply);
+    }
+    deps.operations.settle(line.op, done((await observe('the agent for the event was started', () => spawned.id))!));
+    started += 1;
+  }
+  return started;
 }

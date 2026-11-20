@@ -421,11 +421,10 @@ export class DaemonHttpRouter {
         // here (API precedence) and flow to the normal auth-gated dispatch below.
         const asset = serving.serveBundle ? await serveWebuiBundle(req, serving) : null;
         // Reads still answer while admission is closed; anything that could start or change work waits for the restart.
-        // A channel's inbound message is the exception: it is taken and saved, and the broker holds it until after the restart
-        // (a provider that is refused may not deliver it again).
+        // A channel's inbound message and a GitHub event are the exception: they are taken and saved (the broker's held
+        // input, the operation log's owed start) and started after the restart (a refused provider may not deliver again).
         const closed = asset === null ? this.context.workAdmission?.refusalResponse() ?? null : null;
-        const refused = closed !== null && startsWork(req.method) && this.context.channelPlugins.getByPath(new URL(req.url).pathname) === null
-          ? closed : null;
+        const refused = closed !== null && startsWork(req.method) && !this.holdsInboundDelivery(new URL(req.url).pathname) ? closed : null;
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
         const response = asset ?? (refused ?? await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
@@ -1146,6 +1145,11 @@ export class DaemonHttpRouter {
       source: 'control-plane-router',
       trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
     });
+  }
+
+  /** Whether a delivery to this path is saved and held through a self-update's restart instead of refused. */
+  private holdsInboundDelivery(pathname: string): boolean {
+    return pathname === '/webhook/github' || this.context.channelPlugins.getByPath(pathname) !== null;
   }
 
   private async handleGitHubWebhook(req: Request): Promise<Response> {

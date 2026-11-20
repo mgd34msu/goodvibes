@@ -1,10 +1,10 @@
 import {
-  createApprovalMatrixCommand,
-  COMMON_APPROVAL_SUMMARIES,
+  createApprovalCommand,
   createVoiceExperienceCommand,
 } from '@goodvibes-jev/engine/terminal-shell/experience-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import {
   createVoiceProvisionGateway,
   renderVoiceProvision,
@@ -26,26 +26,10 @@ export function registerExperienceRuntimeCommands(registry: CommandRegistry): vo
   registry.register(voiceExperienceCommand);
 }
 
-const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
-  usage: '[matrix|review <kind>]',
-  help: 'Usage: /approval [open|matrix|review <kind>]',
-  hidden: false,
-  matrix: [
-    ['shell', COMMON_APPROVAL_SUMMARIES.shell],
-    ['file', COMMON_APPROVAL_SUMMARIES.file],
-    ['network', COMMON_APPROVAL_SUMMARIES.network],
-    ['delegate', 'Agent spawn/delegation approval with recursion ceilings.'],
-    ['mcp', COMMON_APPROVAL_SUMMARIES.mcp],
-    ['remote', COMMON_APPROVAL_SUMMARIES.remote],
-    ['hook', COMMON_APPROVAL_SUMMARIES.hook],
-    ['plugin', COMMON_APPROVAL_SUMMARIES.plugin],
-    ['sandbox', 'Sandbox isolation/policy change approval with WSL/VM review.'],
-  ] as const,
-  related: '  Related surfaces: /security, /policy preflight, /trust, /sandbox, /mcp',
-  open(ctx) {
+const approvalMatrixCommand = createApprovalCommand<CommandContext>({
+  openWaiting(ctx) {
     // Approvals waiting on you are rows in the Agents view (b jumps to them).
-    if (!ctx.openView?.('approval')) ctx.print('The Agents view is not available in this session.');
-    return;
+    if (!ctx.openView?.('approval')) throw commandRefusal('The Agents view is not available in this session.', '/questions lists what waits on you.');
   },
 });
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({

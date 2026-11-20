@@ -4,6 +4,9 @@ import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/pl
 import { localOwnerActor } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
+import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import type { CommandActionContext, FixedChoice } from './command-actions/types.js';
+import { choiceInput, doAction, readAction } from './described-command-kit.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, stripYesFlag } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
@@ -12,55 +15,59 @@ interface ExperienceContext {
   print(message: string): void;
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
 }
-export function createApprovalMatrixCommand<Context extends ExperienceContext>(policy: {
-  readonly hidden?: boolean | undefined;
-  readonly usage: string;
-  readonly help: string;
-  readonly matrix: readonly (readonly [string, string])[];
-  readonly related: string;
-  readonly open: (context: Context) => void;
-  readonly action?: ((args: string[], context: Context) => Promise<boolean>) | undefined;
-}): TerminalSlashCommand<Context> {
-  return {
+/** What each kind of approval asks about, the same words in both terminal apps. */
+const APPROVAL_KINDS: readonly FixedChoice[] = [
+  { value: 'shell', label: 'Running a command', help: 'What the command changes, and whether it reads a credential.' },
+  { value: 'file', label: 'Changing a file', help: 'Which file, and whether it is a settings file or a notebook.' },
+  { value: 'network', label: 'Reaching the network', help: 'Which host, and how much of it.' },
+  { value: 'delegate', label: 'Starting agents or handing work on', help: 'How many agents, and how deep they may start more.' },
+  { value: 'mcp', label: 'Trusting a connected tool server more', help: 'Which server, and which hosts and paths it may then reach.' },
+  { value: 'remote', label: 'Sending work to another machine', help: 'Which machine, how far it is trusted, and what comes back.' },
+  { value: 'hook', label: 'Running a hook', help: 'Whether the hook may refuse or change what it sees.' },
+  { value: 'plugin', label: 'Installing or switching on a plugin', help: 'Where it came from, and what it may do.' },
+  { value: 'sandbox', label: 'Changing how commands are contained', help: 'Which isolation, and what leaves it.' },
+];
+
+/**
+ * `/approval`, described once (command-actions/) for both terminal apps: what
+ * each kind of approval asks about, and where the approvals waiting on you
+ * are. An approval is answered with `/questions answer`; this command does not
+ * answer one a second way.
+ */
+export function createApprovalCommand<Context extends CommandActionContext>(host: {
+  /** Open where this app shows the approvals waiting on you; throws a refusal when it cannot. */
+  readonly openWaiting: (context: Context) => void;
+}): DescribedCommand<Context> {
+  return defineCommand<Context>({
     name: 'approval',
-    effect: 'connected-host-state',
-    aliases: ['approvals'],
-    description: 'Review action-specific approval classes and the specialized security UX matrix',
-    firstScreen: !policy.hidden,
-    usage: policy.usage,
-    async handler(args, ctx) {
-      const sub = (args[0] ?? 'matrix').toLowerCase();
-      if (await policy.action?.(args, ctx)) return;
-      if (sub === 'open' || sub === 'panel') {
-        policy.open(ctx);
-        return;
-      }
-      if (sub === 'matrix') {
-        ctx.print(['Approval Matrix', ...policy.matrix.map(([kind, summary]) => '  ' + kind.padEnd(10) + ' ' + summary)].join('\n'));
-        return;
-      }
-      if (sub === 'review') {
-        const kind = (args[1] ?? '').toLowerCase(),
-          entry = policy.matrix.find(([id]) => id === kind);
-        if (!entry) {
-          throw commandRefusal('Usage: /approval review <' + policy.matrix.map(([id]) => id).join('|') + '>');
-        }
-        ctx.print(['Approval Review: ' + entry[0], '  ' + entry[1], policy.related].join('\n'));
-        return;
-      }
-      ctx.print(policy.help);
-    },
-  };
+    title: 'Approvals',
+    summary: 'What each kind of approval asks about, and the approvals waiting on you',
+    group: 'Permissions',
+    report: 'kinds',
+    actions: [
+      readAction<Context>({
+        id: 'kinds', label: 'See the kinds of approval', word: 'kinds',
+        inputs: [choiceInput({ id: 'kind', label: 'Kind', help: 'One kind only', choices: APPROVAL_KINDS, typed: { position: 1 }, optional: { default: '', means: 'every kind' } })],
+        sentence: 'Shows what each kind of approval asks about {kind}, and what to check before you answer one.', example: { kind: 'shell' },
+        async run(values) {
+          const kinds = values.kind ? APPROVAL_KINDS.filter((kind) => kind.value === values.kind) : APPROVAL_KINDS;
+          return [
+            'Kinds of approval',
+            ...kinds.map((kind) => `  ${kind.label} (${kind.value}): ${kind.help ?? ''}`),
+            '',
+            'Answer one that waits on you: /questions answer. Rules that answer for you: /permissions.',
+          ].join('\n');
+        },
+      }),
+      doAction<Context>({
+        id: 'waiting', label: 'Open the approvals waiting on you', word: 'waiting', touches: 'reads',
+        sentence: 'Opens the list of approvals waiting on your answer.',
+        operator: { method: 'approvals.list', fields: {} },
+        async run(_values, ctx) { host.openWaiting(ctx); },
+      }),
+    ],
+  });
 }
-export const COMMON_APPROVAL_SUMMARIES = {
-  shell: 'Shell execution approval with side-effect and credential review.',
-  file: 'File mutation approval with config/notebook differentiation.',
-  network: 'Network access approval with host/scope review.',
-  mcp: 'MCP trust escalation approval with host/path review.',
-  remote: 'Remote dispatch approval with trust/artifact review.',
-  hook: 'Hook execution approval with deny/mutate authority review.',
-  plugin: 'Plugin lifecycle approval with provenance and capability review.',
-} as const;
 export function createVoiceExperienceCommand<Context extends ExperienceContext>(policy: {
   readonly description: string;
   readonly usage: string;

@@ -27,7 +27,7 @@ import { formatDeviceLine, shortTokenId } from '@goodvibes/engine/platform/platf
 /** The token-store capability this surface needs, satisfied by PairingTokenManager. */
 export interface DevicesModalPairingTokens {
   list(): PublicPairingToken[];
-  rename(id: string, name: string): boolean;
+  rename(id: string, name: string): Promise<boolean>;
   revoke(id: string): boolean;
   mintForMigration(input: { readonly name: string; readonly origin?: 'owner-pairing' | 'automation' | undefined }): MintedPairingToken;
   isLegacyRevoked(): boolean;

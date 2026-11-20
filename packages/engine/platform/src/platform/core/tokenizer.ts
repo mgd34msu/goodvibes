@@ -264,6 +264,16 @@ export class InputTokenizer {
           continue;
         }
 
+        // Alt+<letter or digit> as most terminals send it without the kitty
+        // protocol: ESC and the key in one read (xterm's metaSendsEscape). A
+        // lone Escape arrives in a read of its own, so it is never taken for this.
+        if (/^\x1b[a-z0-9]/.test(this.buffer)) {
+          const key = this.buffer[1]!;
+          tokens.push({ type: 'key', name: `\x1b${key}`, logicalName: key, ctrl: false, shift: false, meta: true });
+          this.buffer = this.buffer.slice(2);
+          continue;
+        }
+
         // Bare escape key (not followed by [)
         if (this.buffer.length === 1 || !this.buffer.startsWith('\x1b[')) {
           tokens.push({ type: 'key', name: '\x1b', logicalName: 'escape', ctrl: false, shift: false, meta: false });

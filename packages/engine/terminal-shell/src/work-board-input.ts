@@ -223,7 +223,7 @@ export class WorkBoardList {
   private serviceRows(): Array<{ label: string; state: string }> {
     return this.read().nodes
       .filter((node) => node.serves === 'system' && node.state !== 'stalled' && node.state !== 'failed' && node.state !== 'killed' && node.state !== 'interrupted')
-      .map((node) => ({ label: node.label, state: SERVICE_STATE_WORDS[node.state] ?? node.state }));
+      .map((node) => ({ label: node.label, state: node.state === 'idle' && node.kind !== 'watcher' ? 'idle' : SERVICE_STATE_WORDS[node.state] ?? node.state }));
   }
 
   /** Text typed while filtering. Returns true when it was taken. */

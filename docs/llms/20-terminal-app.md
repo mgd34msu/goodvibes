@@ -839,9 +839,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 `/bookmarks` (alias `/bm`) lists blocks bookmarked with `Ctrl+B`.
 `/next-error` (alias `/ne`) and `/prev-error` (alias `/pe`) scroll to the next or previous error line in the transcript.
 
-`/mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]` (alias `/hitl`) sets how much the app prints. It writes `behavior.hitlMode` (default `balanced`).
-`/mode show` prints the current mode and the per-domain verbosity.
-`/mode set-domain <domain> <minimal|normal|verbose>` sets one domain's verbosity; a wrong form prints `Usage: /mode set-domain <domain> <minimal|normal|verbose>`.
+`/verbosity` sets how much the app prints, the same in both apps: `/verbosity set quiet|balanced|operator` writes `behavior.hitlMode` (default `balanced`); `/verbosity show` (what `/verbosity` alone gives a model or script) prints the current level and the per-domain verbosity; `/verbosity set-domain <domain> <minimal|normal|verbose>` sets one domain's verbosity for this session.
 
 `/notifications` opens the notification history.
 `/conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]` (aliases `/transcript`, `/composer`) reviews the transcript's structure: event kinds, groups, the busiest regions, the composer's state, and jumps between events of one kind. A wrong form prints its usage.
@@ -1107,11 +1105,11 @@ An existing target is not overwritten without `--overwrite`.
 An untrusted workspace does not load its hooks file or its project MCP servers.
 `/sandbox [open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <disabled|contained>]` reviews the command sandbox; `/sandbox set-mcp contained` runs MCP servers inside it. The sandbox is described under "The exec sandbox" in the permissions part.
 
-`/permissions [rules | revoke <rule-id> | add never <command> | add <allow|deny|ask> <command|class|path|tool> <target>]` (alias `/perms`), `/plan [on|off|toggle]`, `/questions` (alias `/inbox`), `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security [review|attack-paths|tokens]` and `/policy <subcommand>` (alias `/pol`) belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
+`/permissions` (`show`, `rules`, `revoke <rule>`, `never <command>`, `add <allow|deny|ask> <command|class|path|tool> <target>`), `/plan [on|off|toggle]`, `/questions`, `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security [review|attack-paths|tokens]` and `/policy <subcommand>` (alias `/pol`) belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
 
 - `/plan on` prints `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).`; `/plan off` restores the previous mode.
 - `/questions` lists what waits on the owner; `/questions answer <id> <choice|text> [note]` answers one.
-- `/decisions` lists what was decided for the owner (`/decisions today`, `yesterday`, `<YYYY-MM-DD>` or `since <30m|2h|3d|1w|day>` for one period); `/decisions undo <id>` reverses one.
+- `/decisions` lists what was decided for the owner (`/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` or `"since <30m|2h|3d|1w|day>"` for one period); `/decisions undo <decision>` reverses one.
 - `/held` lists calls `just-vibes` held; `/held approve <id...|all>` runs them; `/held dismiss <id...|all>` sets them aside.
 - `/permissions` shows the mode in force and why it differs from the saved or chosen one; `/permissions rules` lists the permission rules; `/permissions revoke <rule-id>` removes one; `/permissions add` adds one directly (a never-run rule, or an allow, deny or ask rule).
 
@@ -2290,7 +2288,7 @@ How a `Pre:tool:*` result is used:
 
 ### Example: refuse every `git push` the model runs
 
-To make sure a command never runs, use a never-run rule instead of a hook: `/permissions add never git push`. The gate itself refuses it, in every mode, through every tool that can reach a shell, in the base64 form, through wrappers, `sh -c`, scripts and quoting (see "Never-run rules" in "Permissions and decisions"). The hook below is for a check of your own that a rule cannot express.
+To make sure a command never runs, use a never-run rule instead of a hook: `/permissions never git push`. The gate itself refuses it, in every mode, through every tool that can reach a shell, in the base64 form, through wrappers, `sh -c`, scripts and quoting (see "Never-run rules" in "Permissions and decisions"). The hook below is for a check of your own that a rule cannot express.
 
 A hook fires for the tool called, whether the model called it or another tool ran it. So it must be registered under every tool that runs a command, now or later. In the two programs' tool registries these are:
 

@@ -331,19 +331,19 @@ A record without `project` applies in every project. Rule types and fields are t
 ### Listing and revoking rules
 
 ```text
-/permissions            show the mode in force and every permission setting in effect and where each value came from
-/permissions rules      list remembered rules; in the terminal app a picker opens: Del revokes the selected rule
-/permissions revoke <rule-id>
-/permissions add never <command>                     never run commands matching, e.g. git push (every tool, every mode, every project)
+/permissions show       show the mode in force and every permission setting in effect and where each value came from
+/permissions rules      list the rules; in the terminal app a picker opens: Del revokes the selected rule
+/permissions revoke <rule>
+/permissions never <command>                         never run commands matching, e.g. git push (every tool, every mode, every project)
 /permissions add <allow|deny|ask> command <command>  this exact exec command, in this project
 /permissions add <allow|deny|ask> class <word>       every exec command starting with <word>, in this project
 /permissions add <allow|deny|ask> path <directory>   write and edit under a directory, in this project
 /permissions add <allow|deny|ask> tool <tool>        every call of a tool, in this project
 ```
 
-`/permissions add` writes the rule to the same store as a remembered answer, in both programs, into the one file every program reads (see "Where rules are kept"). It answers `Added rule owner-<kind>-<tool>-<time>-<random>: <description> (in <project>). Remove it with /permissions revoke <id>.`; without a working directory, `There is no working directory to scope the rule to; run this from a project. A never-run rule needs none.`; with words it cannot read, the usage above. `/permissions remove <id>` is the same as `revoke`.
+`/permissions add` writes the rule to the same store as a remembered answer, in both programs, into the one file every program reads (see "Where rules are kept"). It answers `Added rule owner-<kind>-<tool>-<time>-<random>: <description> (in <project>). Remove it with /permissions revoke <id>.`; without a working directory, `There is no working directory to scope the rule to; run this from a project. A never-run rule needs none.`; with words it cannot read, the usage above. `/permissions` alone opens these actions to choose from (a model or script running it alone gets `show`); `add allow ...` and `revoke` are the owner's only, and `add allow ...` asks first.
 
-`/perms` is an alias of `/permissions`. `/permissions forget <rule-id>` is the same as `revoke`. Each listed rule shows the tool (`any tool` for a never-run rule), what it covers, `allow`, `deny` or `ask`, `remembered <tier>` for an answer, `added <tier>` for a rule added with `/permissions add`, or `never run, every mode`, the project (or `every project`) and when it was made. The web UI lists and revokes the same rules under Settings, Permissions (operator methods `permissions.rules.list` and `permissions.rules.delete`, tier `never-run` for a never-run rule); it does not add one.
+Each listed rule shows the tool (`any tool` for a never-run rule), what it covers, `allow`, `deny` or `ask`, `remembered <tier>` for an answer, `added <tier>` for a rule added with `/permissions add`, or `never run, every mode`, the project (or `every project`) and when it was made. The web UI lists and revokes the same rules under Settings, Permissions (operator methods `permissions.rules.list` and `permissions.rules.delete`, tier `never-run` for a never-run rule); it does not add one.
 
 The shape of `/permissions rules` on a surface without a picker (rule ids are generated, `user-<tier>-<tool>-<time>-<random>`):
 
@@ -362,8 +362,8 @@ Outcomes: `Revoked remembered rule: <id>`; `No remembered rule with id: <id>`; `
 A never-run rule is a guarantee, not a hook: the gate itself refuses, in every permission mode including `yolo`, every call that would run a command the rule names, whatever tool carries it.
 
 ```text
-/permissions add never git push
-/permissions add never rm -rf /
+/permissions never git push
+/permissions never rm -rf /
 ```
 
 A rule is a program followed by the words it must carry, in that order (`git push` matches `git push`, `git -C repo push origin main`, not `git status` or `git commit -m "push fix"`). What the gate reads:
@@ -400,30 +400,30 @@ The refusal the model receives: `Your never-run rule "<rule>" refuses this call:
 Every call Jev decided at the gate (in `jev-decides` and `just-vibes`) is posted to the owner inbox as a `decision` item. `/decisions` lists them and lets the owner reverse each one.
 
 ```text
-/decisions                 list open decisions (newest first) and recently answered inbox items
-/decisions 50              list up to 50 of each
-/decisions today           only what was decided today (local time); also yesterday
-/decisions 2026-11-19      only what was decided on that day
-/decisions since 2h        only what was decided since then: 30m, 2h, 3d, 1w, or a day (2026-11-18)
-/decisions keep <id>       leave it as decided
-/decisions undo <id>       restore the files the call changed
-/decisions never <id>      save a deny rule for calls like it
-/decisions always <id>     save an allow rule for calls like it
-/decisions ask <id>        save an "always ask me" rule for calls like it
+/decisions list                       open decisions (newest first) and recently answered inbox items
+/decisions list --count 50            up to 50 of each
+/decisions list --when today          only what was decided today (local time); also yesterday
+/decisions list --when 2026-11-19     only what was decided on that day
+/decisions list --when "since 2h"     only what was decided since then: 30m, 2h, 3d, 1w, or a day (2026-11-18)
+/decisions keep <decision>            Leave a decision as Jev made it
+/decisions undo <decision>            Undo what a decision did (restores the files the call changed)
+/decisions never <decision>           Never allow calls like a decision's (saves a deny rule)
+/decisions always <decision>          Always allow calls like a decision's without asking (saves an allow rule; asks first)
+/decisions ask <decision>             Ask me about calls like a decision's (saves an "always ask me" rule)
 ```
 
 - An id may be given as a unique prefix.
 - `undo` works only for a call Jev allowed whose tool recorded every change for undo (`write`, `edit`). Otherwise it is refused with the reason, for example `Jev refused this call, so it never ran and there is nothing to undo.`
 - `never`, `always` and `ask` save the rule in the same rule store as a remembered answer. They are offered only when a rule can be made from that call.
 - A decision item stays open for 24 hours. The app keeps the last 200 decisions. When the session that made a decision ends, its open items are withdrawn with the note that a standing rule can be set with `/permissions`.
-- Only the owner typing at the terminal can choose. When the model runs the command, it is told `Only the owner changes what Jev decided.`
+- Only the owner typing at the terminal can choose. When the model runs the command, it is told `Only the owner changes what Jev decided.` `/decisions` alone opens these actions, with each open decision picked from a list.
 - The web UI shows the same list with the same choices.
 
 What you can see, and for which period:
 
 | What | Where | Period |
 | --- | --- | --- |
-| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions today`, `yesterday`, `<YYYY-MM-DD>` and `since <day or 30m/2h/3d/1w>` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the newest 500 of each list. |
+| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` and `"since <day or 30m/2h/3d/1w>"` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the newest 500 of each list. |
 | Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | `/decisions` (the "Decided" list), `/questions all` | As long as the inbox keeps them. |
 | Calls `just-vibes` held | `/held` | Until answered; at most 64. |
 
@@ -446,8 +446,8 @@ How to reverse a decision:
 ## Calls held by `just-vibes`: `/held`
 
 ```text
-/held                      list what is held (same as /held list)
-/held approve h3 h4        approve those held calls for this session
+/held list                 list what is held (what /held alone gives a model or script)
+/held approve h3 h4        approve those held calls for this session (asks first)
 /held approve all
 /held dismiss h2           set one aside; it is not run
 /held dismiss all
@@ -461,13 +461,13 @@ How to reverse a decision:
 
 ## The owner inbox: `/questions`
 
-`/questions` (alias `/inbox`) lists everything waiting on the owner: permission asks, questions agents left, channel owner claims, purchase windows and queued actions.
+`/questions` lists everything waiting on the owner: permission asks, questions agents left, channel owner claims, purchase windows and queued actions.
 
 ```text
-/questions                     open items
+/questions list                open items (what /questions alone gives a model or script)
 /questions all                 every item, newest first
-/questions show <id>
-/questions answer <id> <choice|text> [note]
+/questions show <item>
+/questions answer <item> <choice|text> [note]   asks first: an answer cannot be taken back
 ```
 
 For an item with options, the first word of the answer is the choice and the rest is its note. Only the owner can answer. A channel owner claim offers `accept` and `decline`: `/questions answer <id> accept`. A decision item offers `keep`, `undo`, `never`, `always` and `ask`; a held-call item `approve` and `dismiss`.

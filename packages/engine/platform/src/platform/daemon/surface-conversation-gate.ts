@@ -50,6 +50,7 @@ import {
 } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isAdmissionRefusal } from './work-admission.js';
 
 /**
  * The identity of the inbound message currently being handled.
@@ -115,6 +116,12 @@ export interface ConversationGateDeps {
    * and their message is answered as conversation.
    */
   readonly ownerConversations?: ((surface: string) => readonly OwnerConversation[]) | undefined;
+  /**
+   * Whether the daemon takes new work now (work-admission.ts). False during a
+   * self-update's hold: the message is kept, queued, and read and started after
+   * the restart, so nothing (not even a proposal) answers it before then.
+   */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 /**
@@ -148,6 +155,11 @@ export async function gateSurfaceSpawn(
 async function gateOwnedSurfaceSpawn(
   deps: ConversationGateDeps, origin: SurfaceIngressOrigin | null, input: SpawnInput, logLabel?: string, sessionId?: string,
 ): Promise<AgentRecord | Response> {
+  // Held for the restart before anything reads or answers it; it is read and started once, after the restart.
+  if (deps.workAdmitted?.() === false) {
+    const held = await holdForRestart(deps, origin, sessionId);
+    if (held) return held;
+  }
   const classic = isClassicOperation();
   const store = deps.workProposals;
   const spawn = (spawnInput: SpawnInput) => spawnOrSettle(deps, origin, spawnInput, logLabel, sessionId);
@@ -325,6 +337,26 @@ export async function settleUnstartedWork(
   await failFoldedInputs(deps, proposal, reason);
 }
 
+/** The outcome of a message kept for after the daemon's restart: saved and acknowledged, started by the broker after it. */
+export const WAITING_FOR_RESTART_OUTCOME = 'waiting-for-restart';
+
+/**
+ * Keep a message that arrived while the daemon takes no new work: its row stays
+ * queued with the broker's wait mark (it survives the restart), and the broker
+ * starts it after the restart or when admission reopens. No notice is sent: the
+ * answer after the restart is the one reply. Null when there is no row to keep.
+ */
+async function holdForRestart(
+  deps: Pick<ConversationGateDeps, 'sessionBroker'>,
+  origin: SurfaceIngressOrigin | null,
+  sessionId: string | undefined,
+): Promise<Response | null> {
+  const held = sessionId ? findHeldInput(deps, origin, sessionId) : undefined;
+  const waiting = held && sessionId ? await deps.sessionBroker.holdForCapacity?.(sessionId, held.id, origin?.intent) : null;
+  if (!held || !waiting) return null;
+  return Response.json({ ok: true, acknowledged: true, queued: true, outcome: WAITING_FOR_RESTART_OUTCOME, sessionId, inputId: held.id }, { status: 202 });
+}
+
 /** What the sender is told when the message waits for a free agent. */
 export const WAITING_FOR_CAPACITY_NOTICE = 'All agents are busy right now. Your message is queued and will be answered as soon as one is free.';
 
@@ -347,6 +379,10 @@ async function spawnOrSettle(
     ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(input, logLabel, sessionId), origin.userId)
     : deps.trySpawnAgent(input, logLabel, sessionId);
   if (!(spawned instanceof Response)) return spawned;
+  if (isAdmissionRefusal(spawned)) {
+    const kept = await holdForRestart(deps, origin, sessionId);
+    if (kept) return kept;
+  }
   const held = spawned.status === 429 && sessionId ? findHeldInput(deps, origin, sessionId) : undefined;
   // The arrival reading waits with the row, so starting it later reads nothing again.
   const waiting = held && sessionId ? await deps.sessionBroker.holdForCapacity?.(sessionId, held.id, origin?.intent) : null;
@@ -493,7 +529,7 @@ export async function startAgreedWork(
   deps: ConversationGateDeps,
   proposal: WorkProposalRecord,
   note?: string,
-): Promise<void> {
+): Promise<'started' | 'held' | 'not-started'> {
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
@@ -502,11 +538,13 @@ export async function startAgreedWork(
   const start = () => deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
   const spawned = proposal.answerFrom ? withGuestTurn(proposal.surfaceKind, start) : start();
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
+  // The daemon is restarting into an update: the proposal stays accepted and unstarted, and is started after the restart.
+  if (spawned instanceof Response && isAdmissionRefusal(spawned)) return 'held';
   if (spawned instanceof Response) {
     logger.warn('Agreed work could not be started', { proposalId: proposal.id, status: spawned.status });
     await deliverProposalNotice(deps, binding, `Could not start: ${proposal.summary}`);
     await settleUnstartedWork(deps, proposal, 'The agreed work could not be started. Send the message again.');
-    return;
+    return 'not-started';
   }
   if (proposal.sessionId) {
     // Earlier requests folded into this proposal are answered by the same agent and settle with it.
@@ -520,4 +558,5 @@ export async function startAgreedWork(
     ...(proposal.sessionId ? { sessionId: proposal.sessionId } : {}),
     ...(typeof spawned.contractId === 'string' && spawned.contractId.length > 0 ? { contractId: spawned.contractId } : {}),
   });
+  return 'started';
 }

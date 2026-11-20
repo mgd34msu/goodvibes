@@ -1,28 +1,31 @@
 /**
- * The settings dialog's section map (design doc "Navigation map", "Settings
- * dialog sections"). Pure data and search logic, no React.
+ * The settings dialog's pages and sections (design doc "Navigation map",
+ * "Settings dialog sections"). Pure data and search logic, no React.
  *
- * Seven pages in the nav (owner review 2026-09-30: the long nav felt cramped),
- * each holding one or more sections that render one under another: General
- * (appearance and behavior, network, about, advanced), Account (sign-in,
- * devices and pairing, people and channels), Models and providers (models,
- * credentials, usage), Voice, Notifications (with check-ins), Memory and
- * Permissions. A page's namesake section (the one sharing its id, always
- * first) renders under the page title with no heading of its own, since that
- * heading would only restate the page; every further section carries its own
- * heading. A `?settings=<section>` link opens the section's page and scrolls
- * to it, so every older section link still works.
+ * The pages, their sections, their names, their one-line descriptions and the
+ * config namespaces each section shows are the engine's one list of setting
+ * topics (platform/config/setting-topics.ts SETTING_TOPICS), which the terminal
+ * programs file every setting under too, so a setting is under the same topic
+ * everywhere. This file adds only what the browser needs on top: the order a
+ * page's sections render in (the topic's own order), the search words of each
+ * section and the names of the hand-built settings it shows, and the old
+ * section names a `?settings=` link may still carry.
  *
- * Every platform config namespace belongs to exactly one section: the section that
- * lists it in `namespaces`, else "All settings", which also holds namespaces
- * the daemon reports that this build has never heard of. So a schema key is
- * never unreachable, and moving a namespace between sections is a one-line
- * change here.
+ * A page's namesake section (the one sharing its id, always first) renders
+ * under the page title with no heading of its own; every further section
+ * carries its own heading. A `?settings=<section>` link opens the section's
+ * page and scrolls to it.
  *
- * Search matches a section on its label, its keywords, or the names of the
+ * Every config namespace belongs to exactly one section: the section that
+ * lists it, else "Advanced", which also holds namespaces the daemon reports
+ * that this build has never heard of. So a schema key is never unreachable.
+ *
+ * Search matches a section on its name, its search words or the names of the
  * hand-built settings it shows (`items`), and separately counts the schema
- * settings inside it that match (settings-model.ts's filterSettingsModel).
+ * settings inside it that match on their name, key or description
+ * (settings-model.ts's filterSettingsModel).
  */
+import { SETTING_TOPICS, UNCLAIMED_SETTINGS_SECTION, type SettingTopicId } from '@goodvibes-jev/engine/platform/platform/config/setting-topics';
 import type { SettingsGroupModel } from '../../../lib/settings-model';
 import { filterSettingsModel } from '../../../lib/settings-model';
 
@@ -43,8 +46,8 @@ export type SettingsSectionId =
   | 'about'
   | 'checkins';
 
-/** The seven pages the nav lists. Each page's id is also its first section's id. */
-export type SettingsPageId = 'general' | 'account' | 'models' | 'voice' | 'notifications' | 'memory' | 'permissions';
+/** The seven pages the nav lists: the setting topics. Each page's id is also its first section's id. */
+export type SettingsPageId = SettingTopicId;
 
 export interface SettingsPageDef {
   id: SettingsPageId;
@@ -53,15 +56,11 @@ export interface SettingsPageDef {
   description: string;
 }
 
-export const SETTINGS_PAGES: readonly SettingsPageDef[] = [
-  { id: 'general', label: 'General', description: 'How GoodVibes looks and behaves, how devices reach it, and every other setting.' },
-  { id: 'account', label: 'Account', description: 'How this browser signs in, your paired devices, and the people behind each channel.' },
-  { id: 'models', label: 'Models and providers', description: 'The model new chats use, the providers and credentials behind it, and what it costs.' },
-  { id: 'voice', label: 'Voice', description: 'Dictation, spoken replies and the wake word.' },
-  { id: 'notifications', label: 'Notifications', description: 'Push notifications, install, occasion reminders and check-ins.' },
-  { id: 'memory', label: 'Memory', description: 'What GoodVibes remembers, how it tidies it up, and the daemon\'s memory use.' },
-  { id: 'permissions', label: 'Permissions', description: 'Approval rules, the sandbox and tool policy.' },
-];
+export const SETTINGS_PAGES: readonly SettingsPageDef[] = SETTING_TOPICS.map((topic) => ({
+  id: topic.id,
+  label: topic.label,
+  description: topic.description,
+}));
 
 export interface SettingsSectionDef {
   id: SettingsSectionId;
@@ -79,157 +78,95 @@ export interface SettingsSectionDef {
   items: readonly string[];
 }
 
-export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
-  {
-    id: 'general',
-    label: 'Display',
-    page: 'general',
-    description: 'Appearance and how GoodVibes behaves on this browser.',
-    namespaces: ['display', 'ui', 'behavior', 'daemon', 'update', 'diagnostics'],
+/** What the browser adds to each section: its search words and the hand-built settings it shows. */
+const SECTION_SEARCH: Readonly<Record<SettingsSectionId, { keywords: readonly string[]; items: readonly string[] }>> = {
+  general: {
     keywords: ['appearance', 'theme', 'dark', 'light', 'neon', 'density', 'compact', 'timezone'],
     items: ['Theme', 'GoodVibes Neon', 'Density', 'Language', 'Line numbers in code blocks'],
   },
-  {
-    id: 'account',
-    label: 'Sign-in',
-    page: 'account',
-    description: 'How this browser signs in to your daemon, and what it knows about you.',
-    namespaces: ['profile', 'email', 'calendar', 'google'],
+  account: {
     keywords: ['sign in', 'login', 'password', 'token', 'auth', 'passkey', 'step-up', 'profile', 'mail', 'calendar', 'admin'],
-    items: ['Sign in', 'Operator token', 'Current sign-in', 'Step-up verification', 'Owner profile', 'Mail and calendar accounts'],
+    items: ['Sign in', 'Sign-in code', 'Current sign-in', 'Step-up verification', 'Owner profile', 'Mail and calendar accounts'],
   },
-  {
-    id: 'devices',
-    label: 'Devices and pairing',
-    page: 'account',
-    description: 'Paired devices, their tokens, and this computer\'s power.',
-    namespaces: ['device', 'surfaces', 'fleet', 'cluster', 'power'],
+  devices: {
     keywords: ['pair', 'pairing', 'phone', 'device', 'qr', 'revoke', 'keep awake', 'sleep', 'slack', 'discord', 'telegram'],
     items: ['Paired devices', 'Power', 'This browser as a phone node', 'Telegram delegated intake'],
   },
-  {
-    id: 'people',
-    label: 'People and channels',
-    page: 'account',
-    description: 'Who a channel message belongs to, and each channel\'s defaults.',
-    namespaces: [],
+  people: {
     keywords: ['principals', 'identity', 'channel', 'binding', 'profiles'],
     items: ['Principals', 'Channel profiles'],
   },
-  {
-    id: 'models',
-    label: 'Model',
-    page: 'models',
-    description: 'The model new chats use, and the providers that serve it.',
-    namespaces: ['provider', 'judgment', 'pricing', 'cache'],
-    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic', 'judgment', 'decision', 'failover', 'budget', 'volume'],
+  models: {
+    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic', 'judgment', 'decision', 'failover', 'fallback', 'backup', 'budget', 'volume'],
     items: ['Current model', 'Providers', 'Models', 'Sign-in routes', 'Browse models', 'Decision models', 'Decision call-volume alerts'],
   },
-  {
-    id: 'credentials',
-    label: 'Credentials',
-    page: 'models',
-    description: 'What the daemon\'s credential store holds, and the accounts behind each provider.',
-    namespaces: ['atRest'],
+  credentials: {
     keywords: ['secret', 'key', 'api key', 'subscription', 'accounts', 'store'],
     items: ['Credential status', 'Accounts and subscriptions'],
   },
-  {
-    id: 'usage',
-    label: 'Usage',
-    page: 'models',
-    description: 'What each provider has used, budgets, and payments.',
-    namespaces: ['payments', 'telemetry', 'batch'],
+  usage: {
     keywords: ['usage', 'cost', 'spend', 'budget', 'payment', 'card', 'tokens'],
     items: ['Provider usage'],
   },
-  {
-    id: 'voice',
-    label: 'Voice',
-    page: 'voice',
-    description: 'Dictation, spoken replies and the wake word.',
-    namespaces: ['voice', 'tts'],
+  voice: {
     keywords: ['speech', 'microphone', 'mic', 'dictation', 'wake', 'stt', 'tts'],
     items: ['Voice input', 'Wake word'],
   },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    page: 'notifications',
-    description: 'Push notifications, install and occasion reminders.',
-    namespaces: ['notifications', 'push', 'occasions'],
+  notifications: {
     keywords: ['push', 'install', 'alert', 'reminder'],
     items: ['Push notifications', 'Install'],
   },
-  {
-    id: 'checkins',
-    label: 'Check-ins',
-    page: 'notifications',
-    description: 'GoodVibes looks in on you on a schedule and tells you what is worth knowing.',
-    namespaces: ['checkin'],
+  checkins: {
     keywords: ['check-in', 'checkin', 'proactive', 'schedule', 'quiet hours', 'cadence'],
     items: ['Check-in settings', 'Run check-in now', 'Recent receipts'],
   },
-  {
-    id: 'memory',
-    label: 'Memory',
-    page: 'memory',
-    description: 'What GoodVibes remembers, how it tidies it up, and the daemon\'s memory use.',
-    namespaces: ['memory', 'learning'],
+  memory: {
     keywords: ['provenance', 'consolidation', 'remember', 'recall', 'diagnostics'],
     items: ['Memory provenance chips', 'Memory diagnostics'],
   },
-  {
-    id: 'permissions',
-    label: 'Permissions',
-    page: 'permissions',
-    description: 'Approval rules, MCP tool rules, the sandbox and tool policy.',
-    namespaces: ['permissions', 'sandbox', 'policy', 'security', 'danger', 'tools', 'conversationGate', 'fetch'],
-    keywords: ['approval', 'approve', 'allow', 'deny', 'sandbox', 'policy', 'safety', 'mcp', 'server'],
-    items: ['Approval rules', 'MCP tool rules'],
+  permissions: {
+    keywords: ['approval', 'approve', 'allow', 'deny', 'ask', 'mode', 'jev', 'yolo', 'sandbox', 'policy', 'safety', 'mcp', 'server'],
+    items: ['Ask me', 'Jev decides', 'Just vibes', 'YOLO', 'Approval rules', 'MCP tool rules'],
   },
-  {
-    id: 'network',
-    label: 'Network',
-    page: 'general',
-    description: 'How devices reach your daemon: Tailscale, Cloudflare, the relay and the listeners.',
-    namespaces: ['network', 'relay', 'httpListener', 'controlPlane', 'web', 'cloudflare', 'service'],
+  network: {
     keywords: ['tailscale', 'cloudflare', 'tunnel', 'worker', 'https', 'serve', 'lan', 'relay', 'port', 'listener'],
     items: ['Tailscale', 'Cloudflare'],
   },
-  {
-    id: 'all',
-    label: 'Advanced',
-    page: 'general',
-    description: 'Supervised triggers and every other daemon setting.',
-    namespaces: [],
+  all: {
     keywords: ['triggers', 'supervision', 'all settings', 'config', 'key', 'schema'],
     items: ['Supervised triggers'],
   },
-  {
-    id: 'about',
-    label: 'About',
-    page: 'general',
-    description: 'Your daemon, this browser\'s connection to it, and local sign-in.',
-    namespaces: [],
+  about: {
     keywords: ['version', 'status', 'daemon', 'origin', 'realtime', 'diagnostics'],
     items: ['Daemon status', 'Connection', 'Local sign-in'],
   },
-];
+};
+
+function isSectionId(id: string): id is SettingsSectionId {
+  return Object.hasOwn(SECTION_SEARCH, id);
+}
+
+export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = SETTING_TOPICS.flatMap((topic) => topic.sections.flatMap((section): SettingsSectionDef[] => {
+  // A section this build has no page code for is left out rather than drawn empty.
+  if (!isSectionId(section.id)) return [];
+  return [{
+    id: section.id,
+    label: section.label,
+    page: topic.id,
+    description: section.description,
+    namespaces: section.namespaces,
+    keywords: SECTION_SEARCH[section.id].keywords,
+    items: SECTION_SEARCH[section.id].items,
+  }];
+}));
 
 const SECTION_BY_ID = new Map(SETTINGS_SECTIONS.map((s) => [s.id, s]));
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
 
-/** The order sections render in on their page. */
-const PAGE_SECTION_ORDER: Readonly<Record<SettingsPageId, readonly SettingsSectionId[]>> = {
-  general: ['general', 'network', 'about', 'all'],
-  account: ['account', 'devices', 'people'],
-  models: ['models', 'credentials', 'usage'],
-  voice: ['voice'],
-  notifications: ['notifications', 'checkins'],
-  memory: ['memory'],
-  permissions: ['permissions'],
-};
+/** The order sections render in on their page: the topic's own order. */
+const PAGE_SECTION_ORDER: Readonly<Record<SettingsPageId, readonly SettingsSectionId[]>> = Object.fromEntries(
+  SETTING_TOPICS.map((topic) => [topic.id, topic.sections.map((section) => section.id).filter(isSectionId)]),
+) as Record<SettingsPageId, readonly SettingsSectionId[]>;
 
 export function settingsPage(id: SettingsPageId): SettingsPageDef {
   return PAGE_BY_ID.get(id) ?? SETTINGS_PAGES[0];
@@ -280,7 +217,7 @@ export function sectionForNamespace(namespace: string): SettingsSectionId {
 
 /** The config groups a section renders, in its declared order ("All settings": everything unclaimed). */
 export function groupsForSection(id: SettingsSectionId, groups: readonly SettingsGroupModel[]): SettingsGroupModel[] {
-  if (id === 'all') return groups.filter((g) => !NAMESPACE_OWNER.has(g.id));
+  if (id === UNCLAIMED_SETTINGS_SECTION) return groups.filter((g) => !NAMESPACE_OWNER.has(g.id));
   const order = settingsSection(id).namespaces;
   return order
     .map((ns) => groups.find((g) => g.id === ns))

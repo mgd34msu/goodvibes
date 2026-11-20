@@ -474,3 +474,81 @@ export async function nativeTurnStatus(daemon: Daemon, token: string, turn: Nati
   const status = await api(daemon, token, 'POST', '/api/work-ledger/turn/status', { projectId: turn.projectId, inputId: turn.inputId, sourceRevision: turn.sourceRevision });
   return status.body as Record<string, unknown>;
 }
+
+export interface GroupNode {
+  readonly name: string;
+  readonly home: Home;
+  daemon: Daemon;
+  readonly token: string;
+  /** This node's cluster node id (`cluster nodes`). */
+  readonly nodeId: string;
+  /** Restart this node's daemon; `crash` kills it (SIGKILL) first. */
+  restart(options?: { readonly crash?: boolean }): Promise<Daemon>;
+}
+
+export interface Group {
+  readonly base: string;
+  readonly nodes: readonly GroupNode[];
+  readonly model: import('./fake-model.ts').FakeModel;
+  close(): Promise<void>;
+}
+
+/**
+ * `names.length` daemons from the checkout in one group: each with its own
+ * isolated home, cluster on, unicast peers on loopback (no multicast needed),
+ * the first creating the group and the others joining with its join key.
+ * Resolves once every node lists all of them as members.
+ */
+export async function startGroup(names: readonly string[], options: Omit<HomeOptions, 'modelBaseURL'> = {}): Promise<Group> {
+  const { startFakeModel } = await import('./fake-model.ts');
+  const base = scratchBase();
+  const model = startFakeModel(MODEL_ID);
+  const udp = names.map(() => freePort());
+  const nodes: GroupNode[] = [];
+  for (const [index, name] of names.entries()) {
+    const home = makeHome(base, name, { ...options, modelBaseURL: model.baseURL });
+    const file = join(home.daemonHome, 'settings.json');
+    const current = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    writeFileSync(file, `${JSON.stringify(deepMerge(current, { cluster: {
+      enabled: true, port: udp[index], nodeName: name, beaconSeconds: 5, rosterGossipSeconds: 10,
+      peers: udp.filter((_, other) => other !== index).map((port) => `127.0.0.1:${port}`),
+    } }), null, 2)}\n`);
+    const daemon = await startDaemon(home);
+    const token = operatorToken(home);
+    const status = await api(daemon, token, 'GET', '/api/cluster/status');
+    const nodeId = String((status.body as { nodeId?: unknown }).nodeId ?? '');
+    const node: GroupNode = {
+      name, home, daemon, token, nodeId,
+      async restart(restartOptions) {
+        if (restartOptions?.crash) await node.daemon.kill(); else await node.daemon.stop();
+        node.daemon = await startDaemon(home);
+        return node.daemon;
+      },
+    };
+    nodes.push(node);
+  }
+  const [first, ...rest] = nodes;
+  if (!first) throw new Error('startGroup needs at least one node');
+  const created = await api(first.daemon, first.token, 'POST', '/api/cluster/create', { name: 'runthrough' });
+  const group = created.body as { groupId?: string; joinKey?: string };
+  if (!group.groupId || !group.joinKey) throw new Error(`cluster create failed: ${created.text.slice(0, 300)}`);
+  for (const node of rest) {
+    const joined = await api(node.daemon, node.token, 'POST', '/api/cluster/join', { groupId: group.groupId, joinKey: group.joinKey });
+    if (joined.status >= 300) throw new Error(`${node.name} could not join: ${joined.text.slice(0, 300)}`);
+  }
+  for (const node of nodes) {
+    const listed = await waitFor(async () => {
+      const result = await api(node.daemon, node.token, 'GET', '/api/cluster/nodes');
+      const members = (result.body as { members?: unknown[] }).members ?? [];
+      return members.length >= nodes.length ? members : undefined;
+    }, 60_000, 500);
+    if (!listed) throw new Error(`${node.name} does not list every member`);
+  }
+  return {
+    base, nodes, model,
+    async close() {
+      for (const node of nodes) await node.daemon.stop().catch(() => undefined);
+      model.stop();
+    },
+  };
+}

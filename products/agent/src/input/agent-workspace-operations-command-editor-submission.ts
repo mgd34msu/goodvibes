@@ -40,52 +40,6 @@ const OPERATIONS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceOper
   'automation-job-resume': (editor, readField) => automationAction(editor, readField),
   'automation-run-cancel': (editor, readField) => automationAction(editor, readField),
   'automation-run-retry': (editor, readField) => automationAction(editor, readField),
-  'schedule-run': (editor, readField) => automationAction(editor, readField),
-  'schedule-edit': (editor, readField) => {
-    if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Schedule edit not confirmed. Type yes, then press Enter.');
-    const scheduleKind = readField('scheduleKind').trim().toLowerCase();
-    if (scheduleKind && scheduleKind !== 'at' && scheduleKind !== 'every' && scheduleKind !== 'cron') {
-      return unconfirmed(editor, `Schedule type "${scheduleKind}" is not recognised. Use at, every or cron. Nothing was run.`);
-    }
-    const scheduleValue = readField('scheduleValue').trim();
-    if ((scheduleKind && !scheduleValue) || (!scheduleKind && scheduleValue)) {
-      return unconfirmed(editor, 'Schedule type and schedule value must be set together.');
-    }
-    const hasChange = Boolean(
-      scheduleKind
-      || readField('timezone').trim()
-      || readField('scheduleName').trim()
-      || readField('task').trim()
-      || readField('successCriteria').trim()
-      || readField('prompt').trim(),
-    );
-    if (!hasChange) return unconfirmed(editor, 'Schedule edit needs at least one changed field.');
-    const task = readField('task').trim();
-    const successCriteria = readField('successCriteria').trim();
-    if ((task && !successCriteria) || (!task && successCriteria)) {
-      return unconfirmed(editor, 'Task and success criteria must be set together.');
-    }
-    if (readField('prompt').trim() && task) {
-      return unconfirmed(editor, 'Use either Exact prompt or Task, not both.');
-    }
-    const command = [
-      '/schedule edit',
-      quoteSlashCommandArg(readField('scheduleId')),
-      scheduleKind && scheduleValue ? `--${scheduleKind} ${quoteSlashCommandArg(scheduleValue)}` : '',
-      optionalCommandArg('--timezone', readField('timezone')).trim(),
-      optionalCommandArg('--name', readField('scheduleName')).trim(),
-      optionalCommandArg('--task', readField('task')).trim(),
-      optionalCommandArg('--success-criteria', readField('successCriteria')).trim(),
-      optionalCommandArg('--prompt', readField('prompt')).trim(),
-      '--yes',
-    ].filter(Boolean).join(' ');
-    return dispatchCommandEditorSubmission(
-      command,
-      'Opening confirmed schedule edit',
-      'The workspace handed an explicit connected-host schedule edit to the shell-owned command router.',
-      'safe',
-    );
-  },
   'routine-receipt': (editor, readField) => receiptInspection(editor, readField),
   'schedule-receipt': (editor, readField) => receiptInspection(editor, readField),
   'health-repair': (editor, readField) => approvalHealthShow(editor, readField),
@@ -127,8 +81,9 @@ function automationAction(editor: AgentWorkspaceLocalEditor, readField: AgentWor
 }
 
 function receiptInspection(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
+  // A schedule receipt is the receipt of a promoted routine: /routines keeps both.
   const routine = editor.kind === 'routine-receipt';
-  const command = `/${routine ? 'routines' : 'schedule'} receipt ${quoteSlashCommandArg(readField('receiptId'))}`;
+  const command = `/routines receipt ${quoteSlashCommandArg(readField('receiptId'))}`;
   const title = routine ? 'Opening routine receipt' : 'Opening schedule receipt';
   return dispatchCommandEditorSubmission(
     command,

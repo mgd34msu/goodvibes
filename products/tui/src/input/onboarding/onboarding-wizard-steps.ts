@@ -16,62 +16,168 @@ import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';
 import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubscriptionPosture } from './onboarding-provider-key-fields.ts';
 import { getDaemonSource, pushDaemonAdoptionFields } from './onboarding-wizard-network-adopt.ts';
-import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
+import type { OnboardingWizardControllerLike, OnboardingWizardTopic } from './onboarding-wizard-types.ts';
+import type { OnboardingStep1CapabilityId } from '../../runtime/onboarding/index.ts';
+import { SETUP_TOPICS } from '@goodvibes-jev/engine/terminal-shell/setup-command';
 import type { OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardActionFieldDefinition, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
-export function buildOnboardingWizardSteps(controller: OnboardingWizardControllerLike): readonly OnboardingWizardStepDefinition[] {
-  if (controller.hydrationPending || controller.hydrationError !== null) return [buildLoadingStep(controller)];
+/** The capability a topic switches on, shown as that topic's first row. */
+const TOPIC_CAPABILITY: Partial<Record<OnboardingWizardTopic, string>> = {
+  'local-only': 'local-tui-only',
+  'browser': 'browser-access',
+  'other-devices': 'network-access',
+  'webhooks': 'webhook-events',
+  'chat-apps': 'external-integrations',
+  'cloudflare': 'cloudflare-batch',
+};
 
-  const capabilities = controller.getCapabilitySelectionState();
-  const hasServers = capabilities.some((item) => item.id !== 'local-tui-only' && item.selected);
-  const wantsExternalServices = capabilities.some((item) => item.id === 'external-integrations' && item.selected);
-  const steps: OnboardingWizardStepDefinition[] = [
-    buildCapabilitiesStep(controller),
-  ];
-  if (hasServers) {
-    steps.push(buildNetworkStep(controller));
-  }
-  if (hasServers || controller.hasExistingAccessState()) {
-    steps.push(buildAccessStep(controller));
-  }
-  if (wantsExternalServices) {
-    steps.push(buildExternalServicesStep(controller));
-    for (const surface of getSelectedExternalSurfaceSpecs(controller)) {
-      steps.push(buildExternalSurfaceStep(controller, surface));
-    }
-  }
-  if (shouldShowCloudflareStep(controller)) {
-    steps.push(buildCloudflareStep(controller));
-  }
-  steps.push(buildProviderAccessStep(controller), buildDefaultModelStep(controller), buildExperienceStep(controller));
-  // Guided feature coverage: every remaining feature flag is reachable here as a unit.
-  steps.push(...buildFeatureUnitSteps(controller));
-  steps.push(buildReviewStep(controller, steps));
-  return steps.map(addApplyAndContinueAction);
+/** The network rows each reach topic shows (the rest of the network page belongs to the others). */
+const TOPIC_NETWORK_FIELDS: Partial<Record<OnboardingWizardTopic, readonly string[]>> = {
+  'browser': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.browser-', 'network.daemon', 'network.adopt', 'network.tls-warn'],
+  'other-devices': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.daemon', 'network.adopt', 'network.tls-warn'],
+  'webhooks': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.webhook-', 'network.cors-note', 'network.tls-warn'],
+};
+
+const FEATURE_TOPIC_STEP: Partial<Record<OnboardingWizardTopic, OnboardingWizardStepDefinition['id']>> = {
+  'safety': 'features-safety',
+  'memory': 'features-context',
+  'telemetry': 'features-telemetry',
+  'automation': 'features-automation',
+  'devices-voice': 'features-devices',
+  'provider-behaviour': 'features-provider',
+  'advanced': 'features-advanced',
+};
+
+const KEY_FIELD_PREFIXES = ['providers.api-key.', 'providers.api-key-inventory'];
+const isKeyField = (id: string): boolean => KEY_FIELD_PREFIXES.some((prefix) => id.startsWith(prefix));
+const ACCOUNT_ADMIN_FIELDS = ['accounts.admin-username', 'accounts.admin-password', 'accounts.admin-password-confirm', 'accounts.auth', 'accounts.bootstrap', 'accounts.user-store'];
+
+function pick(step: OnboardingWizardStepDefinition, keep: (id: string) => boolean): OnboardingWizardFieldDefinition[] {
+  return step.fields.filter((field) => keep(field.id));
 }
 
-function buildApplyAndContinueAction(step: OnboardingWizardStepDefinition): OnboardingWizardActionFieldDefinition {
-    return {
-      kind: 'action',
-      id: `${step.id}.apply-and-continue`,
-      action: 'apply-and-continue',
-      label: 'Next section',
-      hint: 'Go to the next section. Selections are kept in this wizard session; nothing is saved until Apply on the Review step.',
-      defaultValue: 'Next',
-      spacerBeforeRows: 2,
-    };
+/** The rows of one topic's form, from the page builders that hold them. */
+function topicFields(controller: OnboardingWizardControllerLike, topic: OnboardingWizardTopic): { readonly id: OnboardingWizardStepDefinition['id']; readonly description: string; readonly fields: OnboardingWizardFieldDefinition[] } {
+  const capabilityId = TOPIC_CAPABILITY[topic];
+  const capabilityRow = capabilityId ? pick(buildCapabilitiesStep(controller), (id) => id === `capabilities.${capabilityId}` || (topic === 'local-only' && id === 'capabilities.clear')) : [];
+  const capabilityOn = capabilityId ? controller.isCapabilitySelected(capabilityId as OnboardingStep1CapabilityId) : false;
+  // A reach topic that opens the machine to the network asks for the account that signs in.
+  const adminRows = (): OnboardingWizardFieldDefinition[] => controller.requiresAuthBootstrap()
+    ? pick(buildAccessStep(controller), (id) => ACCOUNT_ADMIN_FIELDS.includes(id))
+    : [];
+  switch (topic) {
+    case 'model': {
+      const step = buildDefaultModelStep(controller);
+      return { id: step.id, description: step.description, fields: [...step.fields] };
+    }
+    case 'sign-in': {
+      const providers = buildProviderAccessStep(controller);
+      return {
+        id: providers.id,
+        description: 'Sign in to a provider with your browser, finish a sign-in, and confirm which providers GoodVibes may use.',
+        fields: [...pick(providers, (id) => !isKeyField(id)), ...pick(buildAccessStep(controller), (id) => id === 'accounts.subscriptions')],
+      };
+    }
+    case 'store-key': {
+      const providers = buildProviderAccessStep(controller);
+      return {
+        id: providers.id,
+        description: 'Paste a provider\'s API key, and choose how keys are stored. A key is kept in the secret store, never shown.',
+        fields: [...pick(providers, isKeyField), ...pick(buildExternalServicesStep(controller), (id) => id === 'external-services.secret-policy')],
+      };
+    }
+    case 'local-only':
+      return { id: 'capabilities', description: 'Use GoodVibes only in this terminal: no browser access, no network access, no webhooks. The background service on this computer still runs.', fields: capabilityRow };
+    case 'browser':
+    case 'other-devices':
+    case 'webhooks': {
+      const prefixes = TOPIC_NETWORK_FIELDS[topic] ?? [];
+      const network = capabilityOn ? pick(buildNetworkStep(controller), (id) => prefixes.some((prefix) => id.startsWith(prefix))) : [];
+      const description = topic === 'browser'
+        ? 'Turn on the web UI and choose where it listens.'
+        : topic === 'other-devices'
+          ? 'Let your other devices reach GoodVibes, and choose the addresses and ports. Someone must sign in from those devices.'
+          : 'Turn on the receiver for webhooks and events from other tools, and choose where it listens.';
+      return { id: 'network', description, fields: [...capabilityRow, ...network, ...(capabilityOn ? adminRows() : [])] };
+    }
+    case 'chat-apps': {
+      const services = capabilityOn ? pick(buildExternalServicesStep(controller), (id) => id !== 'external-services.secret-policy') : [];
+      const surfaces = capabilityOn ? getSelectedExternalSurfaceSpecs(controller).flatMap((surface) => {
+        const step = buildExternalSurfaceStep(controller, surface);
+        return [{ kind: 'status' as const, id: `${step.id}.heading`, label: step.title, hint: step.description, defaultValue: '', spacerBeforeRows: 1 }, ...step.fields];
+      }) : [];
+      return { id: 'external-services', description: 'Choose the chat apps and services GoodVibes connects to, and fill in each one.', fields: [...capabilityRow, ...services, ...surfaces, ...(capabilityOn ? adminRows() : [])] };
+    }
+    case 'cloudflare': {
+      const cloudflare = shouldShowCloudflareStep(controller) ? buildCloudflareStep(controller) : null;
+      return { id: 'cloudflare', description: cloudflare?.description ?? 'Use Cloudflare Workers and Queues for batch and remote work.', fields: [...capabilityRow, ...(cloudflare?.fields ?? [])] };
+    }
+    case 'who-signs-in': {
+      const access = buildAccessStep(controller);
+      return { id: access.id, description: 'The account that signs in to this GoodVibes from a browser or another device.', fields: pick(access, (id) => ACCOUNT_ADMIN_FIELDS.includes(id)) };
+    }
+    case 'how-it-works': {
+      const step = buildExperienceStep(controller);
+      return { id: step.id, description: step.description, fields: [...step.fields] };
+    }
+    default: {
+      const stepId = FEATURE_TOPIC_STEP[topic];
+      const step = buildFeatureUnitSteps(controller).find((candidate) => candidate.id === stepId);
+      return { id: stepId ?? 'features-advanced', description: step?.description ?? '', fields: [...(step?.fields ?? [])] };
+    }
   }
+}
 
-function addApplyAndContinueAction(step: OnboardingWizardStepDefinition): OnboardingWizardStepDefinition {
-    if (step.id === 'loading' || step.id === 'review') return step;
-    return {
-      ...step,
-      fields: [
-        ...step.fields,
-        buildApplyAndContinueAction(step),
-      ],
-    };
-  }
+/**
+ * One form for the topic `/setup` opened: its rows, any message from the last
+ * save at the top, and Save at the bottom. Save applies only what changed on
+ * this form (the apply drops every write equal to what was read).
+ */
+export function buildOnboardingWizardSteps(controller: OnboardingWizardControllerLike): readonly OnboardingWizardStepDefinition[] {
+  if (controller.hydrationPending || controller.hydrationError !== null) return [buildLoadingStep(controller)];
+  const topic = controller.topic;
+  const form = topicFields(controller, topic);
+  const blockers = getBlockingFieldLabels(controller, [{ id: form.id, title: '', shortLabel: '', description: '', summaryTitle: '', summaryLines: [], fields: form.fields }]);
+  const feedback = controller.applyFeedback;
+  const feedbackFields: OnboardingWizardFieldDefinition[] = feedback
+    ? [
+        {
+          kind: 'status',
+          id: 'save.feedback',
+          label: feedback.title,
+          hint: feedback.summary,
+          defaultValue: feedback.severity === 'error' ? 'Needs attention' : feedback.severity === 'warning' ? 'Warning' : 'Info',
+        },
+        ...feedback.messages.slice(0, 8).map((message, index): OnboardingWizardFieldDefinition => ({
+          kind: 'status',
+          id: `save.feedback.${index}`,
+          label: message,
+          hint: message,
+          defaultValue: feedback.severity === 'error' ? 'Error' : feedback.severity === 'warning' ? 'Warning' : 'Info',
+        })),
+      ]
+    : [];
+  const save: OnboardingWizardActionFieldDefinition = {
+    kind: 'action',
+    id: 'save',
+    action: 'apply',
+    label: 'Save',
+    hint: blockers.length > 0
+      ? `Finish these first: ${blockers.join(' · ')}`
+      : 'Save what changed on this form and check that it works. Nothing else is changed.',
+    defaultValue: blockers.length > 0 ? 'Blocked' : 'Ready',
+    spacerBeforeRows: 1,
+  };
+  return [{
+    id: form.id,
+    title: SETUP_TOPICS[topic].label,
+    shortLabel: SETUP_TOPICS[topic].label,
+    description: form.description,
+    summaryTitle: SETUP_TOPICS[topic].label,
+    summaryLines: [],
+    fields: [...feedbackFields, ...form.fields, save],
+  }];
+}
 
 export function buildLoadingStep(controller: OnboardingWizardControllerLike): OnboardingWizardStepDefinition {
     const failed = controller.hydrationError !== null;
@@ -753,109 +859,5 @@ export function buildAccountsStep(controller: OnboardingWizardControllerLike): O
           : controller.hasLocalAuthUser() ? 'Existing local auth will be kept' : 'Local auth is not required for this setup',
       ],
       fields,
-    };
-  }
-
-const REVIEW_CHANGE_ROWS = 40;
-
-function reviewValueText(value: unknown): string {
-  const text = typeof value === 'string' ? (value.length === 0 ? '(empty)' : value) : JSON.stringify(value) ?? String(value);
-  return text.length > 48 ? `${text.slice(0, 47)}…` : text;
-}
-
-/** What Apply will change, one row per setting with its old and new value; credentials are named, never shown. */
-function describeApplyChanges(controller: OnboardingWizardControllerLike): Array<{ readonly label: string; readonly detail: string; readonly badge: string }> {
-  const changes: Array<{ readonly label: string; readonly detail: string; readonly badge: string }> = [];
-  const lastByKey = new Map<string, unknown>();
-  for (const operation of controller.buildApplyRequest().operations) {
-    if (operation.kind === 'set-config') lastByKey.set(operation.key, operation.value);
-    else if (operation.kind === 'set-secret') changes.push({ label: `credential ${operation.key}`, detail: 'Stored in the secret store; the value is not shown.', badge: 'Credential' });
-    else if (operation.kind === 'ensure-auth-user') changes.push({ label: `local admin ${operation.username}`, detail: 'Created, or its password rotated (existing sessions are signed out).', badge: 'Account' });
-  }
-  for (const [key, value] of lastByKey) {
-    const baseline = onboardingConfigBaseline(controller, key);
-    const before = baseline.known ? reviewValueText(baseline.value) : 'not read';
-    changes.push({ label: `${key}: ${before} -> ${reviewValueText(value)}`, detail: `${key} changes from ${before} to ${reviewValueText(value)}.`, badge: 'Change' });
-  }
-  return changes;
-}
-
-export function buildReviewStep(
-  controller: OnboardingWizardControllerLike,
-  precedingSteps: readonly OnboardingWizardStepDefinition[],
-): OnboardingWizardStepDefinition {
-    const feedback = controller.applyFeedback;
-    const feedbackFields: OnboardingWizardFieldDefinition[] = feedback
-      ? [
-          {
-            kind: 'status',
-            id: 'review.feedback',
-            label: feedback.title,
-            hint: feedback.summary,
-            defaultValue: feedback.severity === 'error' ? 'Needs attention' : feedback.severity === 'warning' ? 'Warning' : 'Info',
-          },
-          ...feedback.messages.slice(0, 8).map((message, index): OnboardingWizardFieldDefinition => ({
-            kind: 'status',
-            id: `review.feedback.${index}`,
-            label: message,
-            hint: message,
-            defaultValue: feedback.severity === 'error' ? 'Error' : feedback.severity === 'warning' ? 'Warning' : 'Info',
-          })),
-        ]
-      : [];
-    const unsavedLabel = controller.dirtyStepCount === 1
-      ? '1 screen has unapplied changes'
-      : `${controller.dirtyStepCount} screens have unapplied changes`;
-    const changes = describeApplyChanges(controller);
-    // Apply refuses while any screen has a missing, invalid or unacknowledged
-    // field; the review says so instead of offering a Ready it cannot keep.
-    const blockers = getBlockingFieldLabels(controller, precedingSteps);
-    const changeFields = changes.slice(0, REVIEW_CHANGE_ROWS).map((change, index): OnboardingWizardFieldDefinition => ({
-      kind: 'status',
-      id: `review.change.${index}`,
-      label: change.label,
-      hint: change.detail,
-      defaultValue: change.badge,
-    }));
-    if (changes.length > REVIEW_CHANGE_ROWS) {
-      changeFields.push({
-        kind: 'status',
-        id: 'review.change.more',
-        label: `and ${changes.length - REVIEW_CHANGE_ROWS} more`,
-        hint: 'Every change listed is applied together.',
-        defaultValue: 'More',
-      });
-    }
-
-    return {
-      id: 'review',
-      title: 'Review and apply',
-      shortLabel: 'Review',
-      description: 'Review the selected settings and apply them directly from the wizard.',
-      summaryTitle: 'Review posture',
-      summaryLines: [
-        unsavedLabel,
-        changes.length === 0 ? 'Nothing differs from the saved settings' : `${changes.length} change(s) ready to apply, listed below`,
-        feedback ? `Last apply: ${feedback.title}` : 'No apply errors reported',
-        controller.isEditingTextField()
-          ? `Editing: ${controller.editingFieldId}`
-          : blockers.length > 0
-            ? `${blockers.length} item(s) to finish before applying`
-            : 'Ready to apply',
-      ],
-      fields: [
-        ...feedbackFields,
-        ...changeFields,
-        {
-          kind: 'action',
-          id: 'review.apply',
-          action: 'apply',
-          label: 'Apply settings and verify',
-          hint: blockers.length > 0
-            ? `Finish these first: ${blockers.join(' · ')}`
-            : 'Persist the wizard settings and verify the resulting runtime state. The global onboarding check marker is recorded when apply succeeds.',
-          defaultValue: blockers.length > 0 ? 'Blocked' : 'Ready',
-        },
-      ],
     };
   }

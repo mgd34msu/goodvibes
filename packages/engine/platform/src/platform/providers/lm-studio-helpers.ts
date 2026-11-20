@@ -37,7 +37,6 @@ export type NativeChatResult = {
 
 export type NativeChatContext = {
   input: string | Array<Record<string, unknown>>;
-  previousResponseId?: string | undefined;
 };
 
 export type LMStudioResponsesStream = AsyncIterable<unknown> & {
@@ -305,28 +304,6 @@ export async function buildHttpError(
     operation,
     phase,
   });
-}
-
-export function makeTranscriptKey(
-  model: string,
-  systemPrompt: string | undefined,
-  messages: ProviderMessage[],
-): string {
-  // Hashed: the transcript (image data included) grows every turn and would
-  // otherwise be held in full as a map key.
-  return createHash('sha256').update(stableStringify({
-    model,
-    ...(systemPrompt ? { systemPrompt } : {}),
-    messages,
-  })).digest('hex');
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
 }
 
 export function toRecord(value: unknown): Record<string, unknown> {

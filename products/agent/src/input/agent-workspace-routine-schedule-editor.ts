@@ -37,7 +37,7 @@ export function createRoutineScheduleEditor(
       { id: 'scheduleName', label: 'Schedule name', value: selectedRoutine?.name ?? '', required: false, multiline: false, hint: 'Optional display name for the connected schedule.' },
       { id: 'deliveryChannel', label: 'Delivery channel', value: '', required: false, multiline: false, hint: 'Optional channel target, for example slack, slack:ops-alerts:Ops, or telephony:+15551234567.' },
       { id: 'disabled', label: 'Create disabled', value: 'no', required: false, multiline: false, hint: 'yes/no. Default no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /schedule promote-routine with --yes.' },
+      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /routines promote with --yes.' },
     ],
   };
 }
@@ -85,8 +85,8 @@ export function buildAgentRoutineScheduleEditorSubmission(
   }
 
   const parts = [
-    '/schedule',
-    'promote-routine',
+    '/routines',
+    'promote',
     quoteSlashCommandArg(readField('routineId')),
     `--${scheduleKind}`,
     quoteSlashCommandArg(readField('scheduleValue')),

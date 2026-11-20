@@ -8,7 +8,6 @@ import { createAgentLocalModelBenchmarkEditor, createAgentModelCompareAnalyticsE
 import { createAgentResearchReportEditor } from './agent-workspace-research-report-editor.ts';
 import { createAgentResearchRunEditor } from './agent-workspace-research-run-editor.ts';
 import { createAgentResearchSourceEditor } from './agent-workspace-research-source-editor.ts';
-import { createReminderScheduleEditor } from './agent-workspace-reminder-schedule-editor.ts';
 import { createEmailConnectWizardEditor, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
 import { createCalendarConnectEditor } from './agent-workspace-calendar-connect-editor.ts';
 import { createCalendarSubscribeWizardEditor } from './agent-workspace-calendar-subscribe-editor.ts';
@@ -322,7 +321,6 @@ const EDITOR_CONSTRUCTORS: Partial<Record<AgentWorkspaceEditorKind, (o: AgentWor
   'model-compare-analytics': () => createAgentModelCompareAnalyticsEditor(),
   'knowledge-ask': () => createAgentKnowledgeQueryEditor('ask'),
   'knowledge-search': () => createAgentKnowledgeQueryEditor('search'),
-  'reminder-schedule': () => createReminderScheduleEditor(),
   'routine-schedule': (o) => createRoutineScheduleEditor(o.selectedRoutine ?? null),
 };
 

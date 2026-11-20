@@ -20,7 +20,6 @@ import { withRetry } from '../utils/retry.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
-import { currentTurn } from '../security/turn-boundary.js';
 import {
   buildHttpError,
   buildResponsesInput,
@@ -32,7 +31,6 @@ import {
   extractNativeMessageText,
   type LMStudioResponsesClient,
   type LMStudioResponsesStream,
-  makeTranscriptKey,
   mapNativeReasoningEffort,
   type NativeChatContext,
   type NativeChatResult,
@@ -47,20 +45,11 @@ import { mapLmStudioStopReason } from './stop-reason-maps.js';
 
 const DELEGATE_TO_COMPAT = Symbol('lm-studio-delegate-to-compat');
 
-/** Most conversations whose native-chat response ids are kept; the oldest are forgotten first. */
-const NATIVE_RESPONSE_ID_LIMIT = 256;
-
 export interface LMStudioProviderOptions extends OpenAICompatOptions {
   nativeFetch?: NativeFetch | undefined;
   responsesClient?: LMStudioResponsesClient | undefined;
   compatProvider?: LLMProvider | undefined;
   capabilities?: Partial<ProviderCapability> | undefined;
-}
-
-
-/** The key of one stored LM Studio continuation: the session it belongs to, then its transcript digest. */
-function continuationKey(sessionId: string, transcriptKey: string): string {
-  return `${sessionId}\u0000${transcriptKey}`;
 }
 
 export class LMStudioProvider implements LLMProvider {
@@ -75,7 +64,6 @@ export class LMStudioProvider implements LLMProvider {
   private readonly nativeHeaders: Record<string, string>;
   private readonly responsesClient: LMStudioResponsesClient;
   private readonly compatProvider: LLMProvider;
-  private readonly nativeResponseIds = new Map<string, string>();
 
   constructor(opts: LMStudioProviderOptions) {
     this.nativeHeaders = { ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}), ...opts.defaultHeaders };
@@ -101,7 +89,7 @@ export class LMStudioProvider implements LLMProvider {
     const outcome = (await instrumentedLlmCall(
       () => withRetry(async (): Promise<ChatResponse | typeof DELEGATE_TO_COMPAT> => {
         const model = params.model || this.defaultModel;
-        const nativeContext = this.getNativeChatContext(model, params.systemPrompt, params.messages, params.tools);
+        const nativeContext = this.getNativeChatContext(params.messages, params.tools);
         // Once this attempt has shown the caller any text, another API would
         // start the answer over and the stream would repeat it; the failure
         // surfaces instead.
@@ -194,66 +182,22 @@ export class LMStudioProvider implements LLMProvider {
     };
   }
 
+  /**
+   * The native chat endpoint (`/api/v1/chat`) runs tools only server-side
+   * (LM Studio integrations: plugins and MCP servers); it takes no client
+   * function definitions and returns no tool calls for the caller to run. So
+   * it carries only a single tool-less user message, never a continuation of
+   * an earlier turn: every other request goes by the responses or
+   * OpenAI-compatible path with the whole transcript.
+   */
   private getNativeChatContext(
-    model: string,
-    systemPrompt: string | undefined,
     messages: ProviderMessage[],
     tools: ToolDefinition[] | undefined,
   ): NativeChatContext | null {
     if ((tools?.length ?? 0) > 0) return null;
-    if (messages.length === 0) return null;
-    if (messages.some((message) => (
-      message.role === 'tool'
-      || (message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0)
-    ))) {
-      return null;
-    }
-
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || lastMessage.role !== 'user') return null;
-
-    const previousMessages = messages.slice(0, -1);
-    let previousResponseId: string | undefined;
-    if (previousMessages.length > 0) {
-      // A continuation belongs to the session that made it: two sessions with
-      // the same visible history never share LM Studio's stored state. With
-      // no session in scope the whole transcript is sent instead.
-      const session = currentTurn()?.sessionId ?? null;
-      if (session === null) return null;
-      const previousKey = continuationKey(session, makeTranscriptKey(model, systemPrompt, previousMessages));
-      previousResponseId = this.nativeResponseIds.get(previousKey);
-      if (!previousResponseId) return null;
-      // Mark as most recently used.
-      this.nativeResponseIds.delete(previousKey);
-      this.nativeResponseIds.set(previousKey, previousResponseId);
-    }
-
-    return {
-      input: toNativeChatInput(lastMessage.content),
-      ...(previousResponseId ? { previousResponseId } : {}),
-    };
-  }
-
-  private rememberNativeResponse(
-    model: string,
-    systemPrompt: string | undefined,
-    requestMessages: ProviderMessage[],
-    assistantContent: string,
-    responseId: string | undefined,
-  ): void {
-    const session = currentTurn()?.sessionId ?? null;
-    if (!responseId || session === null) return;
-    const key = continuationKey(session, makeTranscriptKey(model, systemPrompt, [
-      ...requestMessages,
-      { role: 'assistant', content: assistantContent },
-    ]));
-    this.nativeResponseIds.delete(key);
-    this.nativeResponseIds.set(key, responseId);
-    while (this.nativeResponseIds.size > NATIVE_RESPONSE_ID_LIMIT) {
-      const oldest = this.nativeResponseIds.keys().next().value;
-      if (oldest === undefined) break;
-      this.nativeResponseIds.delete(oldest);
-    }
+    const only = messages.length === 1 ? messages[0] : undefined;
+    if (!only || only.role !== 'user') return null;
+    return { input: toNativeChatInput(only.content) };
   }
 
   private async chatViaNativeChat(
@@ -265,11 +209,11 @@ export class LMStudioProvider implements LLMProvider {
       model,
       input: context.input,
       stream: true,
-      store: true,
+      // Nothing continues from this response, so LM Studio keeps no copy of the chat.
+      store: false,
       ...(params.systemPrompt ? { system_prompt: params.systemPrompt } : {}),
       ...(params.maxTokens ? { max_output_tokens: params.maxTokens } : {}),
       ...(mapNativeReasoningEffort(params.reasoningEffort) ? { reasoning: mapNativeReasoningEffort(params.reasoningEffort) } : {}),
-      ...(context.previousResponseId ? { previous_response_id: context.previousResponseId } : {}),
     };
 
     if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
@@ -371,8 +315,6 @@ export class LMStudioProvider implements LLMProvider {
     if (!text) {
       text = extractNativeMessageText(finalResult.output);
     }
-
-    this.rememberNativeResponse(model, params.systemPrompt, params.messages, text, finalResult.response_id);
 
     return {
       content: text,

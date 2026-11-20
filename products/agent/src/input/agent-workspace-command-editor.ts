@@ -2,7 +2,6 @@ import type { AgentWorkspaceBasicCommandEditorKind } from './agent-workspace-bas
 import { buildAgentWorkspaceBasicCommandEditorSubmission, isAgentWorkspaceBasicCommandEditorKind } from './agent-workspace-basic-command-editors.ts';
 import { buildAgentKnowledgeUrlEditorSubmission } from './agent-workspace-knowledge-url-editor.ts';
 import { buildAgentKnowledgeQueryEditorSubmission } from './agent-workspace-knowledge-query-editor.ts';
-import { buildAgentReminderScheduleEditorSubmission } from './agent-workspace-reminder-schedule-editor.ts';
 import { buildAgentWorkspaceCalendarConnectEditorSubmission } from './agent-workspace-calendar-connect-editor.ts';
 import { buildAgentRoutineScheduleEditorSubmission } from './agent-workspace-routine-schedule-editor.ts';
 import { buildAgentWorkspaceWebResearchSubmission } from './agent-workspace-web-research-editor.ts';
@@ -31,7 +30,6 @@ type AgentWorkspaceCommandEditorKind = AgentWorkspaceBasicCommandEditorKind | Ex
   | 'secret-test'
   | 'secret-delete'
   | 'routine-schedule'
-  | 'reminder-schedule'
   | 'calendar-connect'
   | 'knowledge-bookmarks'
   | 'tts-prompt'
@@ -89,7 +87,6 @@ export function isAgentWorkspaceCommandEditorKind(kind: AgentWorkspaceEditorKind
     || kind === 'knowledge-search'
     || kind === 'knowledge-ask'
     || kind === 'routine-schedule'
-    || kind === 'reminder-schedule'
     || kind === 'calendar-connect'
     || isAgentWorkspaceBasicCommandEditorKind(kind);
 }
@@ -113,7 +110,6 @@ export function buildAgentWorkspaceCommandEditorSubmission(
   if (isAgentWorkspaceBasicCommandEditorKind(editor.kind)) {
     return buildAgentWorkspaceBasicCommandEditorSubmission(editor, readField, commandDispatchAvailable);
   }
-  if (editor.kind === 'reminder-schedule') return buildAgentReminderScheduleEditorSubmission(editor, readField, commandDispatchAvailable);
   if (editor.kind === 'calendar-connect') return buildAgentWorkspaceCalendarConnectEditorSubmission(editor, readField, commandDispatchAvailable);
   return buildAgentRoutineScheduleEditorSubmission(editor, readField, commandDispatchAvailable);
 }

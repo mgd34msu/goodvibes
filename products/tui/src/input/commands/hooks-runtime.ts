@@ -17,7 +17,7 @@ const MANAGED_HOOKS = defineList<CommandContext>({
   async read(ctx) {
     const workbench = requireHookApi(ctx).workbench;
     return [
-      ...workbench.listManagedHooks().map((hook): ListRow => ({ value: hook.name, label: hook.name, detail: `${hook.match} (${hook.type})`, state: hook.enabled === false ? 'off' : 'on' })),
+      ...workbench.listManagedHooks().flatMap(({ pattern, hook }): ListRow[] => hook.name ? [{ value: hook.name, label: hook.name, detail: `${pattern} (${hook.type})`, state: hook.enabled === false ? 'off' : 'on' }] : []),
       ...workbench.listManagedChains().map((chain): ListRow => ({ value: chain.name, label: chain.name, detail: `chain of ${chain.steps.length} step(s)` })),
     ];
   },
@@ -82,7 +82,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           textInput({ id: 'match', label: 'When it runs', help: 'The hook point it runs at, as /hooks contracts shows it (Pre:tool:exec)', why: 'a hook point pattern from /hooks contracts', typed: { position: 2 } }),
           { id: 'type', label: 'What it does', help: 'What the hook runs', kind: 'choice', choices: HOOK_TYPES, required: true, typed: { flag: '--type' } },
         ],
-        sentence: 'A managed hook {name} that runs at {match} is added to the hooks file, switched on, until you change it.', done: '',
+        sentence: 'A managed hook {name} of kind {type} that runs at {match} is added to the hooks file, switched on, until you change it.', done: '',
         touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove',
         operator: { terminalOnly: TERMINAL_ONLY }, example: { name: 'lint-before-commit', match: 'Pre:tool:exec', type: 'command' },
         async run(values, ctx) {

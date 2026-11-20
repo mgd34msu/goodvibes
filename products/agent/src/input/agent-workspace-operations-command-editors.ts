@@ -14,8 +14,6 @@ export type AgentWorkspaceOperationsCommandEditorKind = Extract<
   | 'automation-job-resume'
   | 'automation-run-cancel'
   | 'automation-run-retry'
-  | 'schedule-run'
-  | 'schedule-edit'
   | 'routine-receipt'
   | 'schedule-receipt'
 >;
@@ -31,8 +29,6 @@ export function isAgentWorkspaceOperationsCommandEditorKind(kind: AgentWorkspace
     || kind === 'automation-job-resume'
     || kind === 'automation-run-cancel'
     || kind === 'automation-run-retry'
-    || kind === 'schedule-run'
-    || kind === 'schedule-edit'
     || kind === 'routine-receipt'
     || kind === 'schedule-receipt';
 }
@@ -123,24 +119,6 @@ const OPERATIONS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceOperationsC
   'automation-job-resume': automationActionSpec,
   'automation-run-cancel': automationActionSpec,
   'automation-run-retry': automationActionSpec,
-  'schedule-run': automationActionSpec,
-  'schedule-edit': {
-    mode: 'update',
-    title: 'Edit Schedule',
-    selectedFieldIndex: 0,
-    message: 'Edit one connected-host schedule name, cadence, or prompt. This requires typed confirmation and never creates a hidden local job.',
-    fields: [
-      { id: 'scheduleId', label: 'Schedule id', value: '', required: true, multiline: false, hint: 'Schedule id from List schedules or the autonomy queue.' },
-      { id: 'scheduleKind', label: 'Schedule type', value: '', required: false, multiline: false, hint: 'Optional. at, every, or cron. Leave blank to keep cadence.' },
-      { id: 'scheduleValue', label: 'Schedule value', value: '', required: false, multiline: false, hint: 'Required with Schedule type. Examples: 0 9 * * *, 7d, or an ISO timestamp.' },
-      { id: 'timezone', label: 'Timezone', value: '', required: false, multiline: false, hint: 'Optional IANA timezone for cron schedules, for example America/Chicago.' },
-      { id: 'scheduleName', label: 'Schedule name', value: '', required: false, multiline: false, hint: 'Optional replacement display name.' },
-      { id: 'task', label: 'Task', value: '', required: false, multiline: true, hint: 'Optional replacement autonomous task. Ctrl-J inserts a new line.' },
-      { id: 'successCriteria', label: 'Success criteria', value: '', required: false, multiline: true, hint: 'Required with Task so scheduled runs know what success means.' },
-      { id: 'prompt', label: 'Exact prompt', value: '', required: false, multiline: true, hint: 'Optional exact prompt replacement. Do not combine with Task.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /schedule edit with --yes.' },
-    ],
-  },
   'routine-receipt': receiptSpec,
   'schedule-receipt': receiptSpec,
 };

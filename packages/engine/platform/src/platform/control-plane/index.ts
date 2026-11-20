@@ -105,6 +105,8 @@ export type {
   ApprovalActionInput,
 } from './approval-broker.js';
 export { ApprovalBroker, LOCAL_APPROVAL_NODE } from './approval-broker.js';
+export type { ApprovalRelayPort } from './approval-broker.js';
+export { ApprovalRelay, APPROVAL_RELAY_TYPES, type ApprovalSummary, type RelayPrincipal } from './approval-relay.js';
 export {
   approvalLifecycle,
   readApproval,

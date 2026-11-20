@@ -308,8 +308,6 @@ function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
     case 'automation-job-resume': return 'Resume automation job';
     case 'automation-run-cancel': return 'Cancel automation run';
     case 'automation-run-retry': return 'Retry automation run';
-    case 'schedule-run': return 'Run schedule';
-    case 'schedule-edit': return 'Edit schedule';
     case 'routine-receipt': return 'View routine receipt';
     case 'schedule-receipt': return 'View schedule receipt';
     case 'mode-preset': return 'Set mode preset';
@@ -323,7 +321,6 @@ function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
     case 'workplan-delete': return 'Delete work item';
     case 'workplan-clear-completed': return 'Clear completed items';
     case 'routine-schedule': return 'Schedule routine';
-    case 'reminder-schedule': return 'Schedule reminder';
     case 'skill-bundle': return 'Edit skill bundle';
     case 'skill-bundle-search': return 'Search skill bundles';
     case 'skill-bundle-show': return 'Show skill bundle';

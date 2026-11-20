@@ -8,7 +8,7 @@ import { createNativeConversationIntakeHost, createNativeRequirementProposer, ty
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { ApprovalRelay, GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { describeModeInForceWords } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
@@ -245,6 +245,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager,
       authorityRecord: graph.authorityRecord, setAuthorityPeers: graph.setAuthorityPeers });
     disposalScope.registry.add('cluster group', () => clusterGroup.stop());
+    // In a group, the members' approvals are read and decided through each other: the home node decides
+    // (approval-relay.ts). Outside a group nothing is sent and only this daemon's approvals are listed.
+    const approvalRelay = new ApprovalRelay(clusterGroup.runtime.tenantHost(), approvalBroker);
+    approvalBroker.useRelay(approvalRelay);
+    disposalScope.registry.add('approval relay', () => { approvalBroker.useRelay(null); approvalRelay.close(); });
     disposalScope.registry.add('cluster coordinator', () => clusterCoordinator.stop('runtime closing'));
     // Browser composition fills this shared holder before async host registration.
     const browserCheckoutSeam = createBrowserCheckoutSeamHolder();

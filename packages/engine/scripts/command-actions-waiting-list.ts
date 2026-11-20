@@ -128,7 +128,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'sandbox',
   'save',
   'scan',
-  'schedule',
   'search',
   'security',
   'services',

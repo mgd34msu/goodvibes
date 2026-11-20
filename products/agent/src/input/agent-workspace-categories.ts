@@ -40,7 +40,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'subscription-login-finish', label: 'Finish provider sign-in', detail: 'Exchange a code or redirect URL and save the provider subscription session.', editorKind: 'subscription-login-finish', kind: 'editor', safety: 'safe' },
       { id: 'subscription-logout', label: 'Sign out of a provider', detail: 'Remove one stored or pending provider subscription session after confirmation.', editorKind: 'subscription-logout', kind: 'editor', safety: 'safe' },
       { id: 'subscription-inspect', label: 'See a sign-in', detail: 'Show one provider subscription session: whether it is active or pending, its token type and expiry, and whether it overrides API keys. Never prints a token.', editorKind: 'subscription-inspect', kind: 'editor', safety: 'read-only' },
-      { id: 'provider-add', label: 'Add a custom provider', detail: 'Add one OpenAI-compatible provider for Agent model routing.', editorKind: 'provider-add', kind: 'editor', safety: 'safe' },
       { id: 'secret-set-provider', label: 'Store a credential', detail: 'Store a provider or channel credential through the Agent secret manager.', editorKind: 'secret-set', kind: 'editor', safety: 'safe' },
       settingAction({ id: 'setup-secret-policy', label: 'Secret storage policy', detail: 'Choose how strongly Agent prefers secure secret storage.', key: 'storage.secretPolicy' }),
       settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
@@ -602,7 +601,6 @@ function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
 export const AGENT_SETUP_TOPIC_ROWS = {
   'model': ['use-local-model', 'setup-provider-model', 'setup-reasoning-effort'],
   'sign-in': ['subscription-login-start', 'subscription-login-finish', 'subscription-logout', 'subscription-inspect'],
-  'add-provider': ['provider-add'],
   'store-key': ['secret-set-provider', 'setup-secret-policy'],
   'history': ['setup-save-history'],
   'import-settings': ['import-goodvibes-tui-settings'],

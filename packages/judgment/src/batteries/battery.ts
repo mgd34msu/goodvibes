@@ -141,18 +141,16 @@ export interface PartialBatteryRun<Items extends BatteryItems> extends Omit<Batt
   readonly readings: { readonly [K in keyof Items]?: ReadingFor<Items[K]> };
 }
 
-export interface RunOptions<Items extends BatteryItems> extends CallOptions {
-  /** Ask only these questions; the rest are left out of the request. */
-  readonly only?: readonly (keyof Items & string)[];
+export interface RunOptions extends CallOptions {
   /** The pattern running this battery, recorded in the decision log. */
   readonly pattern?: PatternName;
 }
 
 export interface Battery<Items extends BatteryItems> extends BatteryDefinition<Items>, NamedDecision {
-  /** Asks every question (or the `only` subset) about one state in a single request. */
-  run(port: JudgmentPort, state: EntryType, options?: RunOptions<Items>): Promise<BatteryRun<Items>>;
-  /** Asks only the named questions; the readings are typed as present for those alone. */
-  runSome(port: JudgmentPort, state: EntryType, only: readonly (keyof Items & string)[], options?: Omit<RunOptions<Items>, 'only'>): Promise<PartialBatteryRun<Items>>;
+  /** Asks every question about one state in a single request. */
+  run(port: JudgmentPort, state: EntryType, options?: RunOptions): Promise<BatteryRun<Items>>;
+  /** Asks only the named questions; a reading is present for those alone. */
+  runSome(port: JudgmentPort, state: EntryType, only: readonly (keyof Items & string)[], options?: RunOptions): Promise<PartialBatteryRun<Items>>;
 }
 
 export type AnyReading = YesNoReading | ChoiceReading | ScoreReading;
@@ -247,27 +245,27 @@ export function defineBattery<const Items extends BatteryItems>(definition: Batt
   for (const [itemName, item] of Object.entries(items)) assertItemBands(name, itemName, item);
   assertFixturesCover(name, items, fixtures);
 
+  const ask = async (port: JudgmentPort, state: EntryType, asked: readonly string[], options: RunOptions) => {
+    const { answers, ...result } = await askAs(port, definition, options.pattern ?? 'battery', state, questionsFor(name, items, asked), options);
+    const readings = Object.fromEntries(asked.map((itemName) => [itemName, readItem(items[itemName]!, answers[itemName])]));
+    recordReadings(port, result, readings);
+    return { readings, result, recordAction: (action: string) => recordAction(port, result.decisionId, action) };
+  };
   const battery: Battery<Items> = {
     ...definition,
     ...header,
     async run(port, state, options = {}) {
-      const asked = options.only ?? Object.keys(items);
-      const { answers, ...result } = await askAs(port, definition, options.pattern ?? 'battery', state, questionsFor(name, items, asked), options);
-      const readings = Object.fromEntries(asked.map((itemName) => [itemName, readItem(items[itemName]!, answers[itemName])]));
-      recordReadings(port, result, readings);
-      return {
-        readings: readings as BatteryRun<Items>['readings'],
-        result,
-        recordAction: (action) => recordAction(port, result.decisionId, action),
-      };
+      const run = await ask(port, state, Object.keys(items), options);
+      return { ...run, readings: run.readings as BatteryRun<Items>['readings'] };
     },
-    runSome(port, state, only, options = {}) {
-      return battery.run(port, state, { ...options, only });
+    async runSome(port, state, only, options = {}) {
+      const run = await ask(port, state, only, options);
+      return { ...run, readings: run.readings as PartialBatteryRun<Items>['readings'] };
     },
     checkFixtures: (port, options = {}) =>
       checkEachFixture(fixtures, options, async (fixture, run) => {
         const asked = Object.keys(fixture.expect) as (keyof Items & string)[];
-        const { readings } = await battery.run(port, fixture.state, { ...run, only: asked });
+        const { readings } = await battery.runSome(port, fixture.state, asked, run);
         return asked.map((itemName) => checkReading(fixture.name, itemName, String(fixture.expect[itemName]), readings[itemName] as AnyReading));
       }),
   };

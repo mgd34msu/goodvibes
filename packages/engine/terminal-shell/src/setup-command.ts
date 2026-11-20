@@ -59,8 +59,8 @@ export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
   'how-it-works': { label: 'How GoodVibes works with you', word: 'how-it-works', sentence: 'Opens the form for how much GoodVibes tells you, how much guidance it gives, and when it asks.' },
   'safety': { label: 'Safety and sandboxing', word: 'safety', sentence: 'Opens the form for the sandbox and the other safety features.' },
   'memory': { label: 'Memory and context', word: 'memory', sentence: 'Opens the form for memory and how a long conversation is kept in context.' },
-  'telemetry': { label: 'Telemetry', word: 'telemetry', sentence: 'Opens the form for tracing what GoodVibes does.' },
-  'automation': { label: 'Automation', word: 'automation', sentence: 'Opens the form for scheduled routines, watchers and triggers.' },
+  'telemetry': { label: 'Record traces of what GoodVibes does', word: 'telemetry', sentence: 'Opens the form for tracing what GoodVibes does.' },
+  'automation': { label: 'Scheduled routines, watchers and triggers', word: 'automation', sentence: 'Opens the form for scheduled routines, watchers and triggers.' },
   'devices-voice': { label: 'Paired devices and voice', word: 'devices-voice', sentence: 'Opens the form for paired phones and voice.' },
   'provider-behaviour': { label: 'Provider behaviour', word: 'provider-behaviour', sentence: 'Opens the form for how GoodVibes chooses and talks to providers.' },
   'advanced': { label: 'Advanced switches', word: 'advanced', sentence: 'Opens the form for the advanced runtime switches.' },
@@ -72,85 +72,84 @@ export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
 /** The topics gathered under one row of the first screen, so the list stays short. */
 const REACH_GROUP: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'webhooks', 'cloudflare'];
 const FEATURE_GROUP: readonly SetupTopicId[] = ['safety', 'memory', 'telemetry', 'automation', 'devices-voice', 'provider-behaviour', 'advanced'];
-/** Topics listed on their own row, in order (the two groups sit after `store-key` and `how-it-works`). */
-const SINGLE_ROWS: readonly SetupTopicId[] = ['model', 'sign-in', 'add-provider', 'store-key', 'chat-apps', 'who-signs-in', 'how-it-works', 'history', 'import-settings'];
 
-/** A topic whose form is the guided form itself: its blanks, its sentence and what Save does. */
-export interface SetupTopicForm<Ctx> {
-  readonly inputs: readonly InputDescription[];
-  /** What saving does, with the blanks in braces. */
-  readonly sentence: string;
-  readonly example: ActionValues;
-  readonly run: (values: ActionValues, ctx: Ctx) => Promise<string | void>;
-}
+/** What a program does when one of `/setup`'s actions is chosen; it returns the line to print, if any. */
+export type SetupRun<Ctx> = (values: ActionValues, ctx: Ctx) => Promise<string | void>;
+
+/** The actions `/setup` has besides the topics: pairing the Agent with a GoodVibes host. */
+export type SetupExtraId = 'pair' | 'unpair';
 
 export interface SetupCommandOptions<Ctx> {
   /**
-   * The topics this program opens. A topic left out is not listed. A function
-   * opens the program's own form and returns the line to print (nothing when
-   * the form it opened says what happened); a form object is asked here.
+   * What this program does for each topic and action. Both programs list the
+   * same topics (one description for both); an id this program does not serve
+   * runs `elsewhere`, which says where that topic is set up.
    */
-  readonly topics: Partial<Record<SetupTopicId, ((ctx: Ctx) => Promise<string | void>) | SetupTopicForm<Ctx>>>;
-  /** A right-hand dim note for a topic's row (`Agent only`), read when the list opens. */
-  readonly topicNotes?: Partial<Record<SetupTopicId, string>> | undefined;
-  /** Actions only this program has, after the topics. */
-  readonly extraActions?: readonly ActionDescription<Ctx>[] | undefined;
-  /** First-screen rows for the extra actions (an action id, or a group of them). */
-  readonly extraRows?: readonly (string | FirstScreenGroup)[] | undefined;
+  readonly runs: Partial<Record<SetupTopicId | SetupExtraId, SetupRun<Ctx>>>;
+  /** The line for a topic this program does not serve. */
+  readonly elsewhere: (id: SetupTopicId | SetupExtraId, label: string) => string;
+  /** A right-hand dim note for a row (`Agent only`), read when the list opens. */
+  readonly notes?: Partial<Record<SetupTopicId | SetupExtraId, string>> | undefined;
 }
 
-function topicAction<Ctx>(id: SetupTopicId, open: ((ctx: Ctx) => Promise<string | void>) | SetupTopicForm<Ctx>, note: string | undefined): ActionDescription<Ctx> {
-  const words = SETUP_TOPICS[id];
-  if (typeof open !== 'function') {
-    return {
-      id,
-      label: words.label,
-      word: words.word,
-      inputs: open.inputs,
-      sentence: open.sentence,
-      done: '',
-      touches: 'this-machine',
-      lasts: 'kept',
-      risk: 'none',
-      example: open.example,
-      run: open.run,
-      ...(note !== undefined ? { rowValue: async () => note } : {}),
-    };
-  }
-  return doAction<Ctx>({
-    id,
-    label: words.label,
-    word: words.word,
-    sentence: words.sentence,
-    run: (_values, ctx) => open(ctx),
-    ...(note !== undefined ? { rowValue: async () => note } : {}),
-  });
-}
+const PAIR_INPUTS: readonly InputDescription[] = [
+  {
+    id: 'name', label: 'Name', help: 'What the host calls this Agent', kind: 'text', freeTextReason: 'A name you choose.',
+    required: { default: 'GoodVibes Agent', defaultMeans: 'GoodVibes Agent' }, typed: { flag: '--name' },
+  },
+  {
+    id: 'apply', label: 'Pair now', help: 'Pair now, or only see what pairing would do', kind: 'choice',
+    choices: [{ value: 'preview', label: 'Only show what it would do' }, { value: 'apply', label: 'Pair now', risk: 'loosens-a-protection' }],
+    required: { default: 'preview', defaultMeans: 'only show what it would do' }, typed: { flag: '--apply', switchOn: 'apply' },
+  },
+];
 
-/** `/setup`'s description: the topics this program opens, then its own actions. */
+const ADD_PROVIDER_INPUTS: readonly InputDescription[] = [
+  { id: 'name', label: 'Name', help: 'A short name for the provider: letters, numbers, - and _', kind: 'text', freeTextReason: 'A name you choose.', required: true, typed: { position: 1 } },
+  { id: 'url', label: 'Address', help: 'Its OpenAI-compatible address, ending in /v1', kind: 'text', freeTextReason: 'The address of a server you run or use.', required: true, typed: { position: 2 } },
+];
+
+/** `/setup`'s description, the same in both programs; only what each action runs differs. */
 export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>): CommandDescription<Ctx> {
-  const has = (id: SetupTopicId): boolean => options.topics[id] !== undefined;
+  const runOf = (id: SetupTopicId | SetupExtraId, label: string): SetupRun<Ctx> =>
+    options.runs[id] ?? (async () => options.elsewhere(id, label));
+  const rowValue = (id: SetupTopicId | SetupExtraId) => async (): Promise<string> => options.notes?.[id] ?? '';
   const actions: ActionDescription<Ctx>[] = [];
   for (const id of Object.keys(SETUP_TOPICS) as SetupTopicId[]) {
-    const open = options.topics[id];
-    if (open) actions.push(topicAction(id, open, options.topicNotes?.[id]));
+    const words = SETUP_TOPICS[id];
+    if (id === 'add-provider') {
+      actions.push({
+        id, label: words.label, word: words.word, inputs: ADD_PROVIDER_INPUTS,
+        sentence: 'The provider {name} at {url} is added {lasts}.', done: 'Added the provider {name} {lasts}.',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', example: { name: 'my-server', url: 'http://192.168.0.85:8001/v1' },
+        run: runOf(id, words.label), rowValue: rowValue(id),
+      });
+      continue;
+    }
+    actions.push(doAction<Ctx>({ id, label: words.label, word: words.word, sentence: words.sentence, run: runOf(id, words.label), rowValue: rowValue(id) }));
   }
-  actions.push(...(options.extraActions ?? []));
-
-  const rows: (string | FirstScreenGroup)[] = [];
-  const group = (label: string, ids: readonly SetupTopicId[]): void => {
-    const present = ids.filter(has);
-    if (present.length > 1) rows.push({ label, actions: present });
-    else if (present.length === 1) rows.push(present[0]!);
-  };
-  for (const id of SINGLE_ROWS) {
-    if (has(id)) rows.push(id);
-    if (id === 'store-key') group('Reach GoodVibes from elsewhere…', REACH_GROUP);
-    if (id === 'how-it-works') group('Features and switches…', FEATURE_GROUP);
-  }
-  rows.push(...(options.extraRows ?? []));
-  if (has('first-run')) rows.push('first-run');
-
+  actions.push(
+    doAction<Ctx>({
+      id: 'pair', label: 'Pair the Agent with a GoodVibes host', word: 'pair', touches: 'another-machine', inputs: PAIR_INPUTS,
+      sentence: 'This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.', example: {},
+      run: runOf('pair', 'Pair the Agent with a GoodVibes host'), rowValue: rowValue('pair'),
+    }),
+    doAction<Ctx>({
+      id: 'unpair', label: 'Unpair the Agent from the GoodVibes host', word: 'unpair', touches: 'credential',
+      sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.',
+      ownerOnly: { reason: 'It takes this Agent\'s access to your GoodVibes host away.', instead: 'The owner types /setup unpair in the live Agent terminal.' },
+      run: runOf('unpair', 'Unpair the Agent from the GoodVibes host'), rowValue: rowValue('unpair'),
+    }),
+  );
+  const rows: (string | FirstScreenGroup)[] = [
+    'model', 'sign-in', 'add-provider', 'store-key',
+    { label: 'Reach GoodVibes from elsewhere…', actions: REACH_GROUP },
+    'chat-apps', 'who-signs-in', 'how-it-works',
+    { label: 'Features and switches…', actions: FEATURE_GROUP },
+    'history', 'import-settings',
+    { label: 'Pair the Agent with a GoodVibes host…', actions: ['pair', 'unpair'] },
+    'first-run',
+  ];
   return {
     name: 'setup',
     title: 'Set up GoodVibes',

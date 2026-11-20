@@ -280,19 +280,20 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
+    /**
+     * A turn's failure and its retry line are rows of the transcript under the
+     * turn (turn-failure-actions.ts); they are not published as notices, so no
+     * toast is drawn over the conversation for them.
+     */
     public override addTurnFailure(failure: Parameters<PlatformConversationManager['addTurnFailure']>[0]): void {
-        const nextIndex = this.getMessageCount();
-        this.messageKindRegistry.delete(nextIndex);
+        this.messageKindRegistry.delete(this.getMessageCount());
         super.addTurnFailure(failure);
         this.markDirty();
-        this.publishSystemNotice(nextIndex, false);
     }
     public override addTurnRetry(content: string): void {
-        const nextIndex = this.getMessageCount();
-        this.messageKindRegistry.delete(nextIndex);
+        this.messageKindRegistry.delete(this.getMessageCount());
         super.addTurnRetry(content);
         this.markDirty();
-        this.publishSystemNotice(nextIndex, false);
     }
     public override addInputNotice(content: string, level?: Parameters<PlatformConversationManager['addInputNotice']>[1]): void {
         const nextIndex = this.getMessageCount();

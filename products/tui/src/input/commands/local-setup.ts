@@ -2,8 +2,8 @@ import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../command-registry.ts';
-import type { ActionDescription, ActionValues, FirstScreenGroup, InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
@@ -41,9 +41,9 @@ function setupTransferReplacedFiles(bundle: SetupTransferBundle): string[] {
 }
 
 /**
- * The setup checks and transfers: actions of `/setup` (terminal-shell/setup-command.ts)
- * under "Check, export or move your setup…". Each runs one branch of
- * `runStartupTool` with the words it was given.
+ * `/startup`: the setup checks and transfers. Each action runs one branch of
+ * `runStartupTool` with the words it was given. (`/setup` holds the setup
+ * topics, terminal-shell/setup-command.ts.)
  */
 const OVERWRITE: InputDescription = {
   id: 'overwrite', label: 'If it is already there', help: 'What happens when something is already at that place', kind: 'choice',
@@ -140,7 +140,7 @@ export const STARTUP_TOOL_ACTIONS: readonly ActionDescription<CommandContext>[] 
   readAction<CommandContext>({
     id: 'link', label: 'Make a link to a view', word: 'link',
     inputs: [
-      choiceInput({ id: 'surface', label: 'View', help: 'The view the link opens', choices: DEEP_LINK_SURFACES.map((surface) => ({ value: surface, label: surface })), typed: { position: 1 } }),
+      textInput({ id: 'surface', label: 'View', help: `The view the link opens: ${DEEP_LINK_SURFACES.join(', ')}`, why: 'A view name, as /deeplink review lists them.', typed: { position: 1 } }),
       textInput({ id: 'target', label: 'Item', help: 'One item in that view, by its id', why: 'An id inside the view, typed as it is shown there.', typed: { position: 2 }, optional: { default: '', means: 'the view itself' } }),
     ],
     sentence: 'Shows a goodvibes:// link that opens {surface}.',
@@ -156,10 +156,21 @@ export const STARTUP_TOOL_ACTIONS: readonly ActionDescription<CommandContext>[] 
   }),
 ];
 
-/** Where the setup checks and transfers sit on `/setup`'s first screen. */
-export const STARTUP_TOOL_ROWS: readonly FirstScreenGroup[] = [
-  { label: 'Check, export or move your setup…', actions: STARTUP_TOOL_ACTIONS.map((action) => action.id) },
-];
+/** `/startup`: check, export or move this setup. */
+export const STARTUP_COMMAND = defineCommand<CommandContext>({
+  name: 'startup',
+  title: 'Check, export or move your setup',
+  summary: 'Check this setup, or save and bring in a setup',
+  group: 'Settings',
+  report: 'review',
+  firstScreenRows: [
+    { label: 'See what this setup has…', actions: ['review', 'doctor', 'services', 'hooks', 'remote', 'sandbox'] },
+    { label: 'Save or read a support bundle…', actions: ['support-bundle', 'support-bundle-inspect', 'export'] },
+    { label: 'Move this setup to another computer…', actions: ['transfer-export', 'transfer-inspect', 'transfer-import'] },
+    { label: 'Links to views…', actions: ['link', 'open-link'] },
+  ],
+  actions: STARTUP_TOOL_ACTIONS,
+});
 
 /** One setup check or transfer, by its words (`review`, `transfer import <path>`, …). */
 async function runStartupTool(args: readonly string[], ctx: CommandContext, reviewed?: unknown): Promise<void> {
@@ -259,13 +270,13 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
 
     if (sub === 'support-bundle' && args[1] === 'inspect') {
       // Reads a bundle back: the install, storage, helper and sandbox facts it carries.
-      if (!args[2]) throw commandRefusal('Usage: /setup support-bundle-inspect <dir>', 'Save one first with /setup support-bundle <dir>');
+      if (!args[2]) throw commandRefusal('Usage: /startup support-bundle-inspect <dir>', 'Save one first with /startup support-bundle <dir>');
       const bundleDir = getShellPaths().resolveWorkspacePath(args[2]);
       let text: string;
       try {
         text = inspectSetupSupportBundle(bundleDir);
       } catch (error) {
-        throw commandRefusal(`Could not read the support bundle in ${bundleDir}: ${summarizeError(error)}`, 'Save one with /setup support-bundle <dir>', 'BUNDLE_UNREADABLE');
+        throw commandRefusal(`Could not read the support bundle in ${bundleDir}: ${summarizeError(error)}`, 'Save one with /startup support-bundle <dir>', 'BUNDLE_UNREADABLE');
       }
       ctx.print(text);
       return;
@@ -275,7 +286,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       const snapshot = await getSnapshot();
       const dirArg = args[1];
       if (!dirArg) {
-        ctx.print('Usage: /setup support-bundle <dir>');
+        ctx.print('Usage: /startup support-bundle <dir>');
         return;
       }
       const plannedDir = getShellPaths().resolveWorkspacePath(dirArg);
@@ -301,7 +312,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       const snapshot = await getSnapshot();
       const pathArg = args[1];
       if (!pathArg) {
-        ctx.print('Usage: /setup export <path>');
+        ctx.print('Usage: /startup export <path>');
         return;
       }
       const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
@@ -319,7 +330,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       const mode = args[1]?.toLowerCase();
       const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
       if (!mode || !pathArg) {
-        ctx.print('Usage: /setup transfer-export|transfer-inspect|transfer-import <path>');
+        ctx.print('Usage: /startup transfer-export|transfer-inspect|transfer-import <path>');
         return;
       }
       const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
@@ -350,7 +361,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
         try {
           const parsed: unknown = JSON.parse(readFileSync(targetPath, 'utf-8'));
           const shown = reviewed as TargetRef<'setup-import'> | undefined;
-          if (shown) assertTarget(shown, setupImportRef(shown.id, parsed), `/setup transfer import ${shown.id}`);
+          if (shown) assertTarget(shown, setupImportRef(shown.id, parsed), `/startup transfer-import ${shown.id}`);
           const plan = planSetupTransferImport(ctx.platform.configManager, parsed);
           if (!plan.ok) {
             ctx.print(`Setup transfer bundle not imported: ${plan.reason}`);
@@ -404,7 +415,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
         }
         return;
       }
-      ctx.print('Usage: /setup transfer-export|transfer-inspect|transfer-import <path>');
+      ctx.print('Usage: /startup transfer-export|transfer-inspect|transfer-import <path>');
       return;
     }
 
@@ -412,7 +423,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       const surface = args[1];
       const target = args[2];
       if (!surface) {
-        ctx.print(`Usage: /setup link <${DEEP_LINK_SURFACES.join('|')}> [target]`);
+        ctx.print(`Usage: /startup link <${DEEP_LINK_SURFACES.join('|')}> [target]`);
         return;
       }
       ctx.print(buildDeepLink(surface, target));
@@ -422,7 +433,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
     if (sub === 'open-link') {
       const link = args[1];
       if (!link) {
-        ctx.print('Usage: /setup open-link <goodvibes://open/...>');
+        ctx.print('Usage: /startup open-link <goodvibes://open/...>');
         return;
       }
       const parsed = parseDeepLink(link);
@@ -434,5 +445,5 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       return;
     }
 
-    ctx.print('Usage: /setup, then Check, export or move your setup…');
+    ctx.print('Usage: /startup');
 }

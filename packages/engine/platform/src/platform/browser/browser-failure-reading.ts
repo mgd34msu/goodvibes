@@ -125,12 +125,12 @@ async function readDecisionCategory(command: string, phase: string, outcome: Com
     const state = evidence(command, phase, outcome);
     if (estimateTokens(state) > LIMITS.maxStateWithQuestionTokens - 1500) throw new BrowserProvisionReadingError();
     const owner = readingOwner(lifetime);
-    const run = await executePolicyCheck(() => browserProvisionFailure.run(owner.port, toJson(state) as EntryType, {
-      only: ['category'], signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
+    const run = await executePolicyCheck(() => browserProvisionFailure.runSome(owner.port, toJson(state) as EntryType, ['category'], {
+      signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
     }), owner.signal);
     assertProvisionCurrent(lifetime);
     const reading = run.readings.category;
-    if (reading.outcome !== 'act' || !['missing-library', 'program-not-installed', 'network-blocked', 'other'].includes(reading.choice)
+    if (reading === undefined || reading.outcome !== 'act' || !['missing-library', 'program-not-installed', 'network-blocked', 'other'].includes(reading.choice)
       || Object.keys(reading.probabilities).length !== 4
       || !['missing-library', 'program-not-installed', 'network-blocked', 'other'].every(key => Object.hasOwn(reading.probabilities, key))) throw new BrowserProvisionReadingError();
     run.recordAction(`browser provisioning classified ${reading.choice}`);
@@ -194,12 +194,12 @@ export async function missingLibrary(command: string, outcome: CommandOutcome, l
     assertProvisionCurrent(lifetime);
     try {
       const owner = readingOwner(lifetime);
-      const run = await executePolicyCheck(() => browserProvisionFailure.run(owner.port, toJson({ ...state, candidate }) as EntryType, {
-        only: ['candidate_missing'], signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
+      const run = await executePolicyCheck(() => browserProvisionFailure.runSome(owner.port, toJson({ ...state, candidate }) as EntryType, ['candidate_missing'], {
+        signal: owner.signal, beforeAttempt: () => assertProvisionCurrent(lifetime),
       }), owner.signal);
       assertProvisionCurrent(lifetime);
       const reading = run.readings.candidate_missing;
-      if (reading.outcome !== 'act' || !Number.isFinite(reading.probability) || reading.probability < 0 || reading.probability > 1) return null;
+      if (reading === undefined || reading.outcome !== 'act' || !Number.isFinite(reading.probability) || reading.probability < 0 || reading.probability > 1) return null;
       if (reading.verdict === 'yes') { run.recordAction('report exact missing library candidate'); return candidate; }
     } catch { assertProvisionCurrent(lifetime); return null; }
   }

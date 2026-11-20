@@ -64,6 +64,9 @@ interface CardState {
   readonly typing?: string | undefined;
 }
 
+/** How long the answered line stays: long enough to be read, then it goes. */
+const ANSWERED_MS = 1500;
+
 const KEY_UP = '\x1b[A';
 const KEY_DOWN = '\x1b[B';
 
@@ -78,8 +81,9 @@ export class OwnerQuestionCard {
   #state: CardState | null = null;
   /** Questions left for later with Esc in this run: they stay in the inbox. */
   readonly #later = new Set<string>();
-  /** The answer just given, shown for one render. */
+  /** The answer just given, shown briefly ("Answered: Hello"), and until when. */
   #answered: string | null = null;
+  #answeredUntil = 0;
   #stop: (() => void) | null = null;
   /** Whether the last frame drew the card: only a card on screen takes keys. */
   #drawn = false;
@@ -151,6 +155,10 @@ export class OwnerQuestionCard {
     if (!state) return;
     this.#state = null;
     this.#answered = shown;
+    this.#answeredUntil = Date.now() + ANSWERED_MS;
+    // One timer per answer takes the line down; it never keeps the process alive.
+    const timer = setTimeout(() => this.#deps.render(), ANSWERED_MS + 50);
+    (timer as { unref?: (() => void) | undefined }).unref?.();
     const id = state.item.id;
     void this.#deps.inbox.answer(id, answer).then((outcome) => {
       if (!outcome.applied) this.#deps.notify(`Your answer was not recorded: ${outcome.refusal?.reason ?? 'the inbox refused it'}`);
@@ -225,7 +233,7 @@ export class OwnerQuestionCard {
     if (!state) {
       const answered = this.#answered;
       if (answered === null) return null;
-      this.#answered = null;
+      if (Date.now() > this.#answeredUntil) { this.#answered = null; return null; }
       const f = beginModal(screenWidth, screenHeight, { title: `Answered: ${answered}`, titleGlyph: { char: '✓', fg: t.success }, width, height: 3, escKey: false, dim: false });
       const layer = finishModal(f);
       return { ...layer, y: Math.max(0, screenHeight - footerRows - layer.lines.length) };

@@ -1,21 +1,18 @@
 import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
-import { doAction, textInput, choiceInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
-import { setupCommandDescription, type SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
+import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
 import { previewAgentHostPairing, unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
 import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { AGENT_SETUP_TOPIC_ROWS } from '../agent-workspace-categories.ts';
 
 /** A topic opens the Agent's own forms for it: the setup rows of that topic, and nothing else. */
-function openRows(topic: SetupTopicId): (ctx: CommandContext) => Promise<string | void> {
-  return async (ctx) => {
+function openRows(topic: SetupTopicId): SetupRun<CommandContext> {
+  return async (_values, ctx) => {
     const rows = (AGENT_SETUP_TOPIC_ROWS as Readonly<Partial<Record<SetupTopicId, readonly string[]>>>)[topic];
     if (!rows || !ctx.openAgentSetupRows) return 'The Agent workspace is not available here.';
     ctx.openAgentSetupRows(rows);
   };
 }
-
-const OWNER_TYPED = { reason: 'It gives or takes this Agent\'s access to your GoodVibes host.', instead: 'The owner types it in the live Agent terminal.' };
 
 async function pair(values: Readonly<Record<string, string>>, ctx: CommandContext): Promise<void> {
   const apply = values.apply === 'apply';
@@ -45,42 +42,40 @@ async function unpair(_values: Readonly<Record<string, string>>, ctx: CommandCon
   ctx.print(formatSetupPairing(await unpairAgentHost({ configManager: ctx.platform.configManager, homeDirectory })));
 }
 
-/** `/setup` in the Agent: the topics its Start rows lived under, then pairing with a GoodVibes host. */
+/** Topics the Agent sets up in one of its workspace areas. */
+const AGENT_TOPIC_AREAS: Partial<Record<SetupTopicId, string>> = {
+  'chat-apps': 'onboarding-channels',
+  'how-it-works': 'assistant-behavior',
+  'safety': 'tools-permissions',
+  'memory': 'onboarding-context',
+  'devices-voice': 'onboarding-voice-media',
+  'automation': 'onboarding-automation',
+};
+
+function openArea(categoryId: string): SetupRun<CommandContext> {
+  return async (_values, ctx) => {
+    if (!ctx.openAgentWorkspace) return 'The Agent workspace is not available here.';
+    ctx.openAgentWorkspace(categoryId);
+  };
+}
+
+/** `/setup` in the Agent: the same topics as the terminal app, each opening the Agent's own rows for it. */
 export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescription<CommandContext>({
-  topics: {
+  runs: {
     ...Object.fromEntries((Object.keys(AGENT_SETUP_TOPIC_ROWS) as SetupTopicId[]).map((topic) => [topic, openRows(topic)])),
-    'chat-apps': async (ctx) => {
-      if (!ctx.openAgentWorkspace) return 'The Agent workspace is not available here.';
-      ctx.openAgentWorkspace('onboarding-channels');
-    },
-    'first-run': async (ctx) => {
+    ...Object.fromEntries(Object.entries(AGENT_TOPIC_AREAS).map(([topic, area]) => [topic, openArea(area!)])),
+    'add-provider': async (values, ctx) => { await ctx.executeCommand?.('provider', ['add', values.name!, values.url!]); },
+    'first-run': async (_values, ctx) => {
       if (!ctx.openFirstRun) return 'First run is not available here.';
       ctx.openFirstRun();
     },
+    'pair': async (values, ctx) => { await pair(values, ctx); },
+    'unpair': async (values, ctx) => { await unpair(values, ctx); },
   },
-  extraActions: [
-    doAction<CommandContext>({
-      id: 'pair', label: 'Pair with a GoodVibes host', word: 'pair', touches: 'another-machine',
-      inputs: [
-        textInput({ id: 'name', label: 'Name', help: 'What the host calls this Agent', why: 'A name you choose.', typed: { flag: '--name' }, optional: { default: 'GoodVibes Agent', means: 'GoodVibes Agent' } }),
-        choiceInput({
-          id: 'apply', label: 'Pair now', help: 'Pair now, or only see what pairing would do',
-          choices: [{ value: 'preview', label: 'Only show what it would do' }, { value: 'apply', label: 'Pair now', risk: 'loosens-a-protection' }],
-          typed: { flag: '--apply', switchOn: 'apply' }, optional: { default: 'preview', means: 'only show what it would do' },
-        }),
-      ],
-      sentence: 'This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.',
-      example: {},
-      run: async (values, ctx) => { await pair(values, ctx); },
-    }),
-    doAction<CommandContext>({
-      id: 'unpair', label: 'Unpair from the GoodVibes host', word: 'unpair', touches: 'credential',
-      sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.',
-      ownerOnly: OWNER_TYPED,
-      run: async (values, ctx) => { await unpair(values, ctx); },
-    }),
-  ],
-  extraRows: [{ label: 'Pair with a GoodVibes host…', actions: ['pair', 'unpair'] }],
+  // Network access, sign-in accounts and the runtime switches belong to the daemon the Agent connects to.
+  elsewhere: (id, label) => `${label} is set where the daemon runs: run goodvibes setup there and choose it (/setup ${id}).`,
+  notes: { 'local-only': 'on the daemon', 'browser': 'on the daemon', 'other-devices': 'on the daemon', 'webhooks': 'on the daemon',
+    'cloudflare': 'on the daemon', 'who-signs-in': 'on the daemon', 'telemetry': 'on the daemon', 'provider-behaviour': 'on the daemon', 'advanced': 'on the daemon' },
 }));
 
 export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {

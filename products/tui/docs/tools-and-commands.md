@@ -833,7 +833,7 @@ The TUI calls platform daemon routes only. It does not call Cloudflare APIs dire
 
 Some command families are especially important when you are running GoodVibes as an operational console rather than just a chat surface:
 
-- `/teamwork` for the packaged task modes and orchestration recipes that produce WRFC and related execution chains
+- `/agents` (`team`, `start`, `recipe`) for the packaged task modes and orchestration recipes that produce WRFC and related execution chains
 - `/schedule` for cron-like and interval-based automation
 - `/hooks` for managed hook inspection and simulation
 - `/remote` for dispatching and recovering distributed work

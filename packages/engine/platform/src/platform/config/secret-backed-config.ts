@@ -57,6 +57,14 @@ export function getSecretWriteMedium(policy: unknown): SecretStorageMedium {
         return 'plaintext';
     return 'secure';
 }
+/**
+ * A password is stored exactly as typed: it may begin or end with a space.
+ * Every other credential (a token, a key) is stored trimmed, so a value pasted
+ * with a trailing newline is not stored with it.
+ */
+function storesSecretVerbatim(configKey: string): boolean {
+    return /password$/i.test(configKey);
+}
 export function buildSecretBackedConfigUpdate(configKey: ConfigKey, rawValue: string): SecretBackedConfigUpdate {
     const value = rawValue.trim();
     const secretKey = buildGoodVibesSecretKey(configKey);
@@ -72,9 +80,9 @@ export function buildSecretBackedConfigUpdate(configKey: ConfigKey, rawValue: st
     return {
         configValue: buildGoodVibesSecretRef(secretKey),
         secretKey,
-        // The trimmed text, the same one that was tested for emptiness and for a
-        // reference: a token pasted with a trailing newline must not be stored with it.
-        secretValue: value,
+        // A token or key: the trimmed text, the same one that was tested for
+        // emptiness and for a reference. A password: the text as typed.
+        secretValue: storesSecretVerbatim(configKey) ? rawValue : value,
     };
 }
 /**
@@ -119,7 +127,8 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
         readonly daemonWriter?: DaemonCredentialWriter | null | undefined;
     } = {}): Promise<string> {
         const update = buildSecretBackedConfigUpdate(configKey, rawValue);
-        const trimmedValue = rawValue.trim();
+        // The value that is stored: as typed for a password, trimmed otherwise.
+        const trimmedValue = update.secretValue ?? rawValue.trim();
         if (route && options.scope === undefined && await route(configKey, trimmedValue, update))
             return update.configValue;
         const scope = options.scope ?? defaultSecretBackedScope(configKey);

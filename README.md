@@ -149,7 +149,7 @@ tests and helper agents. [More](products/tui/README.md)
 
 **`goodvibes-agent`**, the personal assistant in the terminal. Use it for chat,
 research, mail and calendar, reminders, notes and memory; it hands coding work
-to `goodvibes` with `/delegate`. [More](products/agent/README.md)
+to `goodvibes` with `/agents hand-off`. [More](products/agent/README.md)
 
 **`goodvibes-daemon`**, the background service. It holds schedules, channels,
 knowledge and web sessions, and lets your other devices connect. The installer

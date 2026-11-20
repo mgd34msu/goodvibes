@@ -31,8 +31,8 @@ High-signal TUI routes:
 | `/health`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
 | `/model`, `/provider`, `/effort` | Inspect or change provider/model/reasoning routes. |
 | `/knowledge` | Use isolated Agent Knowledge. |
-| `/vibe`, `/memory`, `/notes`, `/personas`, `/skills`, `/routines` | Manage VIBE.md personality and Agent-local behavior libraries. |
-| `/approval`, `/automation`, `/schedule` | Read posture and run exact confirmed operator actions. |
+| `/memory`, `/notes`, `/personas` (VIBE.md too), `/my-skills`, `/routines` | Manage VIBE.md personality and Agent-local behavior libraries. |
+| `/approval`, `/questions`, `/schedule` | What each approval asks about, answer one, and run, pause, stop or retry schedules and their runs. |
 | `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
@@ -390,10 +390,10 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/accounts` | Review provider auth routes, subscription windows, and billing-path safety. |
 | `/activity` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). Routine system and tool lines stay here; a notice you must see or act on (an error, an offer, a setting ignored or read under a new name, an update result) also shows on the main screen once. Setting `ui.systemMessages` or `ui.operationalMessages` to `panel` yourself keeps those here too, except errors, warnings and anything waiting for your answer. |
 | `/agent` | Open the GoodVibes Agent operator workspace. |
-| `/agent-profile` | Manage isolated Agent profiles and starter templates, including opt-in VIBE.md starter export/import with `--include-vibe`. |
-| `/approval` | Review approval classes and run exact confirmed approval actions. |
+| `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
+| `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
+| `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |
 | `/auth` | Review provider auth posture and export redacted auth review bundles. |
-| `/automation` | Run confirmed connected-host automation actions from the Agent TUI. |
 | `/bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
 | `/bundle` | Save this Agent's settings and setup to a redacted file, check one, or load settings back from one. |
@@ -406,7 +406,6 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/compact` | Summarize the conversation to free context window. |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
-| `/delegate` | Explicitly delegate build/fix/review work to GoodVibes TUI with reason, success criteria, workspace hint, priority, and explicit review intent. |
 | `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which asks first), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (asks first). |
 | `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
@@ -431,9 +430,9 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/notifications` | Show every notice and notification in full, newest first (each notice also shows briefly as a toast). |
 | `/notify` | Manage and send configured Agent webhook notifications. |
 | `/paste` | Insert clipboard text or image into the prompt. |
-| `/owner-profile` | Your profile: read what GoodVibes knows about you, show one field, look one person up by name, trace where a fact came from, correct one, add a note, undo the last change to a field, or forget one. Here the People section is counted rather than listed, because this output lands in the transcript; the same command at a shell prints the full list on a terminal and counts it when stdout is captured (a pipe, or a shell tool a model drives). |
+| `/about-me` | Your profile: read what GoodVibes knows about you, show one field, look one person up by name, trace where a fact came from, correct one, add a note, undo the last change to a field, or forget one. Here the People section is counted rather than listed, because this output lands in the transcript; the same command at a shell prints the full list on a terminal and counts it when stdout is captured (a pipe, or a shell tool a model drives). |
 | `/payments` | Opens its list of actions: See your cards (`/payments cards`), See what is waiting for your answer (`/payments pending`), Approve one purchase ahead of time (`/payments approve <shop> --most <amount> <item>`), Allow a repeat purchase (`/payments repeat --shop <shop> --item <item> --each <amount> --per-period <amount> [--days <n>] [--until <date>]`), See repeat purchases you have allowed (`/payments repeats`), Stop a repeat purchase (`/payments stop-repeat <repeat purchase>`), Add a card (`/payments add-card`, each field hidden), Remove a card (`/payments remove-card <card>`), Set your billing or shipping address (`/payments address <billing\|shipping>`). Card material is stored at daemon scope and never shown back; budgets, windows and security-code handling live in Settings > Payments. |
-| `/personas` | Manage Agent-local personas. |
+| `/personas` | Manage Agent-local personas and VIBE.md personality files. |
 | `/pin` | Pin a model to the favorites list. |
 | `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `/plugin disable <name>`, `/plugin reload`, `/plugin quarantine <name> [add\|lift]`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
 | `/prev-error` | Jump to the previous error message in the conversation. |
@@ -453,13 +452,12 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/shortcuts` | Show keyboard shortcuts. |
 | `/skills` | Manage Agent-local skills and skill bundles. |
 | `/status` | Shows the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
-| `/tasks` | Inspect connected-host tasks without starting or mutating local background work. |
+| `/tasks` | Read runtime tasks here and on the connected host; changes are refused with the reason. |
 | `/title` | Show or set the conversation title. |
 | `/tts` | Submit a normal prompt and play the assistant response through live TTS. |
 | `/undo` | Undo the last conversation turn; `/undo file` reverts every file the last write/edit call changed. |
 | `/unpin` | Unpin a model from the favorites list. |
 | `/update` | Opens its list: see whether a newer release is out (`check`), install it (`apply`), go back to the version before (`rollback`), see the daemon's updates (`daemon [--check]`). |
-| `/vibe` | Inspect, create, show, or import VIBE.md personality files. |
 | `/voice` | Review voice posture, provision the managed local-voice runtime and the wake-word models (`/voice wake status`, `/voice wake setup --yes`), and export portable voice metadata. |
 
 ## Related docs

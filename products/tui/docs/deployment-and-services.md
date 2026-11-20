@@ -252,8 +252,7 @@ Key commands:
 | Command | Does |
 | --- | --- |
 | `/services list\|show\|check\|test\|check-auth\|trust\|export\|import\|open` | See, check and move your API services, and use one a project defines |
-| `/profiles` | Browse and load config profiles |
-| `/profile-sync` (alias `/profilesync`) | Export, import, and inspect profile sync bundles |
+| `/presets` | Pick, load and save presets (display, model and behaviour settings), and export, inspect or import them as a file |
 | `/setup transfer export\|inspect\|import` | Move setup-transfer bundles between environments |
 
 Service entries can use an existing `tokenKey` field, a SecretRef in the key field, or explicit `tokenRef` / `passwordRef` / `webhookUrlRef` / `signingSecretRef` / `publicKeyRef` / `appTokenRef` fields:

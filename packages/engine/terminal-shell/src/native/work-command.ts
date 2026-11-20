@@ -62,7 +62,7 @@ function requestsOf() {
   if ('unavailable' in requests) throw commandRefusal(requests.unavailable);
   return requests;
 }
-const clean = (lines: readonly string[]): string => lines.map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, ' ')).join('\n');
+const clean = (lines: readonly string[]): string => lines.map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ')).join('\n');
 
 async function execute(ctx: CommandActionContext, act: NativeWorkExecutionAction, workId: string): Promise<string> {
   const view = hostOf().view(ctx);

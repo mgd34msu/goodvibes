@@ -16,7 +16,6 @@ import {
   formatOnboardingApplyCompletionMessage,
   isLoopbackHostValue,
 } from './onboarding/onboarding-verification-helpers.ts';
-import { focusFirstOffendingField, getStepValidationErrors } from './onboarding/onboarding-wizard-validation.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import { captureOnboardingWizardSnapshot, restoreOnboardingWizardSnapshot } from './handler-ui-state.ts';
 import type { InputHandlerLike as InputHandler, OnboardingRuntimePosture } from './handler-types.ts';
@@ -119,32 +118,6 @@ function buildEndpointVerificationItems(
 
 function showOnboardingApplyFeedbackForHandler(handler: InputHandler, feedback: OnboardingWizardApplyFeedback): void {
     handler.onboardingWizard.setApplyFeedback(feedback);
-    const reviewIndex = handler.onboardingWizard.steps.findIndex((step) => step.id === 'review');
-    if (reviewIndex >= 0) handler.onboardingWizard.setStep(reviewIndex);
-    handler.requestRender();
-  }
-
-function continueOnboardingSection(handler: InputHandler): void {
-    handler.onboardingWizard.commitEdit();
-
-    const step = handler.onboardingWizard.currentStep;
-    const { errors, firstOffendingFieldId } = getStepValidationErrors(handler.onboardingWizard, step);
-    if (errors.length > 0) {
-      handler.onboardingWizard.setApplyFeedback({
-        severity: 'error',
-        title: 'Required fields missing',
-        summary: 'Fill in the required fields below before continuing.',
-        messages: errors,
-      });
-      if (firstOffendingFieldId !== null) {
-        focusFirstOffendingField(handler.onboardingWizard, firstOffendingFieldId);
-      }
-      handler.requestRender();
-      return;
-    }
-
-    handler.onboardingWizard.clearApplyFeedback();
-    handler.onboardingWizard.nextStep();
     handler.requestRender();
   }
 
@@ -247,14 +220,6 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
     }
     if (action === 'finish-openai-subscription') {
       await handler.handleOpenAiSubscriptionFinish();
-      return;
-    }
-    if (action === 'apply-and-continue') {
-      if (handler.onboardingOperation !== null) {
-        if (beginOnboardingOperation(handler, 'Continue')) endOnboardingOperation(handler);
-        return;
-      }
-      continueOnboardingSection(handler);
       return;
     }
     if (action.startsWith('cloudflare-')) {

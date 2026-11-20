@@ -69,7 +69,7 @@ export interface SpineInboundInputsClient {
   deliverInput(
     sessionId: string,
     inputId: string,
-    options?: { readonly consumed?: boolean },
+    options?: { readonly consumed?: boolean; readonly claimEpoch?: number },
   ): Promise<unknown>;
 }
 
@@ -84,10 +84,24 @@ export interface InboundSteer {
   readonly displayName: string | undefined;
 }
 
-/** A steer and the session (and daemon client) it was listed for. */
+/** A steer and the session (and daemon client) it was listed for, with the claim token the daemon granted. */
 interface BoundSteer {
   readonly steer: InboundSteer;
   readonly binding: SessionBinding;
+  readonly claimEpoch?: number | undefined;
+}
+
+/** How long a claimed input with no agent stays its claimant's before another may claim it (the daemon's SURFACE_CLAIM_LEASE_MS). */
+const CLAIM_LEASE_MS = 2 * 60_000;
+/** How often claimed-but-unanswered inputs are looked for: once per lease half is enough to find one when it becomes claimable. */
+const DELIVERED_SWEEP_MS = 60_000;
+
+/** The claim epoch a granted claim returned (`{ input }` with `metadata.claimEpoch`), when it has one. */
+function grantedEpoch(reply: unknown): number | undefined {
+  const input = reply && typeof reply === 'object' && 'input' in reply ? (reply as { readonly input?: unknown }).input : reply;
+  const metadata = input && typeof input === 'object' ? (input as { readonly metadata?: unknown }).metadata : undefined;
+  const epoch = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>)['claimEpoch'] : undefined;
+  return typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch > 0 ? epoch : undefined;
 }
 
 type InboundLogger = Pick<typeof logger, 'debug' | 'info'>;
@@ -137,6 +151,14 @@ export class SessionInboundInputPoller {
    * injected on a later pass only while its own session is current again.
    */
   private readonly claimedNotInjected = new Map<string, BoundSteer>();
+  /**
+   * Inputs injected here whose completion report (`consumed: true` with the
+   * claim token) has not reached the daemon yet: retried every pass, so an
+   * injected steer is never left claimable for another claim after the lease.
+   */
+  private readonly toComplete = new Map<string, { readonly sessionId: string; readonly claimEpoch?: number | undefined }>();
+  /** When claimed inputs nobody answered were last looked for. */
+  private lastDeliveredSweep = 0;
   /** The session (and daemon client, by activation) each pass is for. */
   private readonly bindings = new SessionBindingOwner();
   /** Moves on every activate: a new client may be another daemon. */
@@ -216,8 +238,9 @@ export class SessionInboundInputPoller {
     try {
       for (const [inputId, held] of this.claimedNotInjected) {
         if (!this.bindings.isSameSession(held.binding)) continue;
-        if (this.inject(held.steer)) this.claimedNotInjected.delete(inputId);
+        if (this.inject(held.steer)) { this.claimedNotInjected.delete(inputId); this.toComplete.set(inputId, { sessionId: held.steer.sessionId, claimEpoch: held.claimEpoch }); }
       }
+      await this.reportCompleted(client);
       // The cursor advances across a contiguous prefix of inputs that are done
       // (acknowledged, or not ours to deliver). After the first failure it holds,
       // so the failed input is listed again on the next tick.
@@ -255,8 +278,9 @@ export class SessionInboundInputPoller {
           };
           if (!stillHere()) { cursorHeld = true; break; }
           if (client.claimInput) {
+            let claimEpoch: number | undefined;
             try {
-              await client.claimInput(sessionId, input.id);
+              claimEpoch = grantedEpoch(await client.claimInput(sessionId, input.id));
             } catch (error) {
               // Refused: another surface claimed it and runs it; it is no longer
               // queued, so it is not listed again. Unreachable: still queued, and
@@ -270,7 +294,8 @@ export class SessionInboundInputPoller {
             delivered += 1;
             settle(input.createdAt);
             // The terminal moved to another session while the claim was in flight: keep it for its own.
-            if (!stillHere() || !this.inject(steer)) this.claimedNotInjected.set(input.id, { steer, binding });
+            if (!stillHere() || !this.inject(steer)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch });
+            else this.toComplete.set(input.id, { sessionId, claimEpoch });
             continue;
           }
           if (!this.injected.has(input.id)) {
@@ -298,6 +323,11 @@ export class SessionInboundInputPoller {
         }
         if (!result?.more || cursorHeld || this.cursor === cursorBefore || !stillHere()) break;
       }
+      if (client.claimInput && stillHere() && this.now() - this.lastDeliveredSweep >= DELIVERED_SWEEP_MS) {
+        this.lastDeliveredSweep = this.now();
+        delivered += await this.reclaimUnanswered(client, sessionId, binding, stillHere);
+      }
+      await this.reportCompleted(client);
     } catch (error) {
       // Poll failed entirely (daemon gone, transient): keep the cursor, retry next tick.
       this.log.debug('session inbound-input poll failed: retry next tick', {
@@ -307,6 +337,53 @@ export class SessionInboundInputPoller {
       this.polling = false;
     }
     return delivered;
+  }
+
+  /**
+   * A steer claimed for this session that no surface answered (its claimant's
+   * reply was lost, or the claimant stopped before injecting it) stays
+   * `delivered` with no agent. Once its lease has passed the daemon grants it
+   * again, so it is claimed and injected here instead of being lost. One read
+   * per sweep interval, not per poll.
+   */
+  private async reclaimUnanswered(client: SpineInboundInputsClient, sessionId: string, binding: SessionBinding, stillHere: () => boolean): Promise<number> {
+    let reclaimed = 0;
+    const page = await client.listInputs(sessionId, { state: 'delivered' });
+    for (const input of page?.items ?? []) {
+      if (input.state !== 'delivered' || input.activeAgentId || input.surfaceId === this.ownSurfaceId) continue;
+      if (input.intent !== 'steer' && input.intent !== 'follow-up') continue;
+      if (this.toComplete.has(input.id) || this.claimedNotInjected.has(input.id)) continue;
+      if (this.now() - input.updatedAt < CLAIM_LEASE_MS) continue;
+      if (!stillHere()) break;
+      let claimEpoch: number | undefined;
+      try {
+        claimEpoch = grantedEpoch(await client.claimInput!(sessionId, input.id));
+      } catch {
+        continue; // Another surface took it, or the daemon is away: not ours to inject.
+      }
+      const steer: InboundSteer = {
+        inputId: input.id, sessionId, intent: input.intent, body: input.body,
+        surfaceKind: input.surfaceKind, surfaceId: input.surfaceId, displayName: input.displayName,
+      };
+      reclaimed += 1;
+      if (!stillHere() || !this.inject(steer)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch });
+      else this.toComplete.set(input.id, { sessionId, claimEpoch });
+    }
+    return reclaimed;
+  }
+
+  /** Tells the daemon each injected steer is done (with its claim token); a failed report is retried next pass. */
+  private async reportCompleted(client: SpineInboundInputsClient): Promise<void> {
+    if (!client.claimInput) return;
+    for (const [inputId, done] of [...this.toComplete]) {
+      try {
+        await client.deliverInput(done.sessionId, inputId, { consumed: true, ...(done.claimEpoch === undefined ? {} : { claimEpoch: done.claimEpoch }) });
+        this.toComplete.delete(inputId);
+      } catch (error) {
+        // A superseded claim is the other claimant's now; anything else is retried.
+        if (/INPUT_NOT_CLAIMABLE|409/.test(error instanceof Error ? error.message : String(error))) this.toComplete.delete(inputId);
+      }
+    }
   }
 
   /** Hand one steer to the turn machinery; false when that threw (logged, retried by the caller). */

@@ -80,7 +80,7 @@ export interface AgentsModalDeps {
   readonly configManager?: ConfigManager | null;
   readonly hosted?: HostedSessionFeed;
   /**
-   * Send a line to the hosted session (/hosted say). A returned promise is
+   * Send a line to the hosted session (/hosted send). A returned promise is
    * awaited: `{ ok: false }` or a rejection keeps the draft and shows the
    * error; a plain return (nothing to await) counts as sent.
    */
@@ -633,7 +633,7 @@ export class AgentsModal implements SurfaceModal {
       if (token.ctrl && name === 'x') {
         const tab = activeFleetTab(this.tabs);
         if (tab) this.stopSelected(tab.nodeId);
-        else this.say('The hosted session ends with /hosted kill; detaching keeps or ends it by its policy.', 'faint');
+        else this.say('The hosted session ends with /hosted end; /hosted leave keeps or ends it, as its setting says.', 'faint');
       }
       return;
     }

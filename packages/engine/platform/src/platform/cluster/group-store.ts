@@ -355,7 +355,7 @@ export interface ClusterSecretsSource {
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
   /** The daemon tier's own entry; throws when that store exists but cannot be read. */
-  getWriteScopeEntry(key: string, scope: 'daemon'): Promise<string | null>;
+  getWriteScopeEntry(key: string, scope: 'daemon'): Promise<Secret | null>;
   onDidChange?(listener: (key: string) => void): () => void;
 }
 

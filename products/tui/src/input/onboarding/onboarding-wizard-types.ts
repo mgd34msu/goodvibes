@@ -10,8 +10,12 @@ import {
   type OnboardingStepDerivationState,
 } from '../../runtime/onboarding/index.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { SetupTopicId } from '@goodvibes-jev/engine/terminal-shell/setup-command';
 
 export type OnboardingWizardMode = OnboardingMode;
+
+/** The `/setup` topics the terminal app opens as one form each (the rest open another screen). */
+export type OnboardingWizardTopic = Exclude<SetupTopicId, 'add-provider' | 'history' | 'import-settings' | 'first-run'>;
 
 export type OnboardingWizardExternalSurfaceStepId = `external-surface:${string}`;
 
@@ -32,8 +36,7 @@ export type OnboardingWizardStepId =
   | 'features-automation'
   | 'features-devices'
   | 'features-provider'
-  | 'features-advanced'
-  | 'review';
+  | 'features-advanced';
 
 export type OnboardingWizardFieldKind =
   | 'status'
@@ -47,7 +50,6 @@ export type OnboardingWizardFieldKind =
 
 export type OnboardingWizardAction =
   | 'apply'
-  | 'apply-and-continue'
   | 'select-all-capabilities'
   | 'clear-capabilities'
   | 'select-all-external-surfaces'
@@ -247,6 +249,8 @@ export interface OnboardingWizardControllerLike {
   // State fields
   active: boolean;
   mode: OnboardingWizardMode;
+  /** The `/setup` topic whose form is open. */
+  topic: OnboardingWizardTopic;
   stepIndex: number;
   hydrationPending: boolean;
   hydrationError: string | null;

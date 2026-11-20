@@ -213,6 +213,11 @@ interface InternalSession {
    * next written for another reason, when the chat leaves memory, or at close.
    */
   countBehind?: boolean;
+  /**
+   * The user message whose turn-start mark was written with the message itself
+   * (one batch sync for both), so the turn does not write it again.
+   */
+  turnStartMarked?: string;
   /** Why the last of those saves failed. */
   saveError?: unknown;
 }
@@ -921,10 +926,17 @@ export class CompanionChatManager {
     }
     try {
       this.saveForRequest(session, [userMsg], undefined, clientKey !== undefined ? new Map([[messageId, clientKey]]) : undefined);
+      // A message whose turn starts at once gets its turn-start mark in the same
+      // batch, so the one sync the acknowledgement waits for covers both, and the
+      // turn does not write (and sync) it again a moment later.
+      const startsNow = !queuedBehindActiveTurn && !session.activeTurn && !session.preparingTurns && !(session.pendingTurns?.length);
+      if (startsNow) { this.markTurn(session, messageId, 'started'); session.turnStartMarked = messageId; }
       try { await this.persistence?.durable(sessionId, messageId); }
       catch (error) { throw this.saveFailed(error); }
       if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw this.chatClosed('The chat was closed while this message was being saved.');
     } catch (error) {
+      // A refused message's turn never starts: its mark is closed, so a restart does not read it as a reply cut off.
+      if (session.turnStartMarked === messageId) { delete session.turnStartMarked; this.markTurn(session, messageId, 'ended'); }
       saving?.reject(error);
       if (clientKey !== undefined && session.clientMessagesSaving?.get(clientKey) === saving?.promise) session.clientMessagesSaving?.delete(clientKey);
       throw error;
@@ -1349,7 +1361,8 @@ export class CompanionChatManager {
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
       session.activeTurn = scope.activeTurn;
-      this.markTurn(session, userMessageId, 'started');
+      if (session.turnStartMarked === userMessageId) delete session.turnStartMarked;
+      else this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const conversation = await prepareConversation();
       const toolRegistry = this.toolRegistry;

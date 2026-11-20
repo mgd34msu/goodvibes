@@ -550,7 +550,8 @@ export class SubscriptionManager {
     if (read?.state === 'unsupported') return this.tokenSecrets.get(provider) ?? null;
     if (read?.state !== 'resolved') { this.tokenSecrets.delete(provider); return null; }
     try {
-      const parsed = JSON.parse(read.value) as Record<string, unknown>;
+      // The token set is parsed here to sign in to the provider it is for.
+      const parsed = JSON.parse(read.value.reveal('dispatch')) as Record<string, unknown>;
       const current = parseTokenEntry(parsed);
       if (!current) return null;
       const previous = parseTokenEntry(parsed.previous);

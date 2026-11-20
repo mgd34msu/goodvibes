@@ -1,11 +1,14 @@
 export { handleOverlayToken, handleHistorySearchToken, handleSearchModeToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
 
 import type { OnboardingWizardController, OnboardingWizardMode, OnboardingWizardSnapshot } from './onboarding/onboarding-wizard.ts';
+import type { OnboardingWizardTopic } from './onboarding/onboarding-wizard-types.ts';
 export type { OnboardingWizardSnapshot } from './onboarding/onboarding-wizard.ts';
 
 export interface OpenOnboardingWizardOptions {
   readonly mode?: OnboardingWizardMode;
   readonly reset?: boolean;
+  /** The `/setup` topic whose form opens. */
+  readonly topic?: OnboardingWizardTopic;
   readonly preload?: OnboardingWizardSnapshot | ((wizard: OnboardingWizardController) => void);
 }
 
@@ -32,9 +35,10 @@ export function openOnboardingWizardState(
   const shouldReset = options.reset ?? !wizard.active;
 
   if (shouldReset) {
-    wizard.open(nextMode);
+    wizard.open(nextMode, options.topic);
   } else {
     wizard.reopen();
+    if (options.topic !== undefined) wizard.topic = options.topic;
     if (options.mode !== undefined) wizard.setMode(options.mode);
   }
 

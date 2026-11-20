@@ -48,7 +48,10 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     ): void => {
       operations.push({ kind: 'set-config', key, value });
     };
+    // Only a form that shows an acknowledgement records it: another topic's Save leaves it as it is.
+    const shownFieldIds = new Set(controller.steps.flatMap((step) => step.fields.map((field) => field.id)));
     const acknowledge = (target: OnboardingAcknowledgementTarget, fieldId: string): void => {
+      if (!shownFieldIds.has(fieldId)) return;
       operations.push({
         kind: 'acknowledge',
         target,
@@ -93,7 +96,9 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     };
 
     const requestedAdminPassword = controller.getStringFieldValue('accounts.admin-password', '');
-    const shouldEnsureAuthUser = controller.requiresAuthBootstrap() || requestedAdminPassword.length > 0;
+    // The sign-in account is written only by a form that shows it.
+    const shouldEnsureAuthUser = shownFieldIds.has('accounts.admin-username')
+      && (controller.requiresAuthBootstrap() || requestedAdminPassword.length > 0);
     if (shouldEnsureAuthUser) {
       operations.push({
         kind: 'ensure-auth-user',

@@ -88,7 +88,7 @@ export interface CredentialWriteSecrets {
   get(key: string): Promise<Secret | null>;
   delete(key: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
   /** The raw entry the scope's own stores hold: no environment, other tier or followed reference. */
-  getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null>;
+  getWriteScopeEntry(key: string, scope: SecretScope): Promise<Secret | null>;
   /** Remove the entry from the scope's own stores only. */
   deleteWriteScopeEntry(key: string, scope: SecretScope): Promise<void>;
   /** The scope's own entries per medium, as stored: what an undo puts back. */
@@ -256,7 +256,8 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
 
     let readBack: string | null;
     try {
-      readBack = await deps.secrets.getWriteScopeEntry(secretKey, scope);
+      // A read-back compares the stored bytes with what was written.
+      readBack = (await deps.secrets.getWriteScopeEntry(secretKey, scope))?.reveal('store-write') ?? null;
     } catch {
       readBack = null;
     }

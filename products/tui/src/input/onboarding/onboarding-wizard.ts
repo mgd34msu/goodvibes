@@ -34,7 +34,7 @@ import {
   toggleCapability as toggleCapabilityForController,
 } from './onboarding-wizard-rules.ts';
 import { ensureSelectionVisible as ensureSelectionVisibleForController, getBlockingFieldLabels as getBlockingFieldLabelsForController, getCapabilitySelectionState as getCapabilitySelectionStateForController, getCompletedFieldCount as getCompletedFieldCountForController, getCompletedToggleCount as getCompletedToggleCountForController, getCurrentCapabilities as getCurrentCapabilitiesForController, getFieldById as getFieldByIdForController, getFieldValidationError as getFieldValidationErrorForController, getStepFieldCount as getStepFieldCountForController, getToggleFieldCount as getToggleFieldCountForController, hasExistingAccessState as hasExistingAccessStateForController, isFieldDirty as isFieldDirtyForController, isFieldDirtyByDefinition as isFieldDirtyByDefinitionForController, isFieldSatisfied as isFieldSatisfiedForController, isStepDirty as isStepDirtyForController, recalculateDirtyState as recalculateDirtyStateForController, reconcileStateWithCurrentDefinitions as reconcileStateWithCurrentDefinitionsForController, reconcileStepCursor as reconcileStepCursorForController, resetValuesFromCurrentDefinitions as resetValuesFromCurrentDefinitionsForController } from './onboarding-wizard-state.ts';
-import type { OnboardingWizardControllerLike, MutableModelSelectionMap, OnboardingWizardAction, OnboardingWizardApplyFeedback, OnboardingWizardFieldDefinition, OnboardingWizardFieldWindow, OnboardingWizardMode, OnboardingWizardModelSelection, OnboardingWizardRuntimeHydration, OnboardingWizardSnapshot, OnboardingWizardStepDefinition, OnboardingWizardStepId } from './onboarding-wizard-types.ts';
+import type { OnboardingWizardTopic, OnboardingWizardControllerLike, MutableModelSelectionMap, OnboardingWizardAction, OnboardingWizardApplyFeedback, OnboardingWizardFieldDefinition, OnboardingWizardFieldWindow, OnboardingWizardMode, OnboardingWizardModelSelection, OnboardingWizardRuntimeHydration, OnboardingWizardSnapshot, OnboardingWizardStepDefinition, OnboardingWizardStepId } from './onboarding-wizard-types.ts';
 
 export type { OnboardingWizardControllerLike, OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardAction, OnboardingWizardActionFieldDefinition, OnboardingWizardApplyFeedback, OnboardingWizardApplyFeedbackSeverity, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardFieldKind, OnboardingWizardFieldWindow, OnboardingWizardMaskedFieldDefinition, OnboardingWizardMode, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardModelSelection, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardRuntimeHydration, OnboardingWizardSnapshot, OnboardingWizardStatusFieldDefinition, OnboardingWizardStepDefinition, OnboardingWizardStepId, OnboardingWizardTextFieldDefinition } from './onboarding-wizard-types.ts';
 export { getOnboardingWizardBodyRows, getOnboardingWizardVisibleFieldCount } from './onboarding-wizard-helpers.ts';
@@ -100,6 +100,7 @@ export class WizardTextState extends Map<string, string> {
 export class OnboardingWizardController implements OnboardingWizardControllerLike {
   public active = false;
   public mode: OnboardingWizardMode = 'new';
+  public topic: OnboardingWizardTopic = 'model';
   public stepIndex = 0;
   public hydrationPending = false;
   public readonly scrollOffsets = Array.from({ length: STEP_ORDER.length }, () => 0);
@@ -156,8 +157,9 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
     while (this.selectedFieldIndices.length < stepCount) this.selectedFieldIndices.push(0);
   }
 
-  public open(mode: OnboardingWizardMode = 'new'): void {
+  public open(mode: OnboardingWizardMode = 'new', topic: OnboardingWizardTopic = this.topic): void {
     this.mode = mode;
+    this.topic = topic;
     this.active = true;
     this.hydrationPending = false;
     this.hydrationError = null;

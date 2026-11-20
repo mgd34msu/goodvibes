@@ -1103,7 +1103,7 @@ export class SecretsManager {
    * References and unreadable tiers cannot be treated as missing material.
    * This does not authorize replacing an existing key or changing its scope.
    */
-  async getOrCreateDaemonSecret(key: string, create: () => string, assertCurrent?: () => void): Promise<string> {
+  async getOrCreateDaemonSecret(key: string, create: () => string, assertCurrent?: () => void): Promise<Secret> {
     const guard = () => {
       assertSynchronousJudgmentGuard(assertCurrent, () => new Error('Daemon key ownership must be checked synchronously.'));
     };
@@ -1121,7 +1121,7 @@ export class SecretsManager {
       this.credentialMutationGeneration++;
       try { this.setOwned(key, value, { scope: 'daemon', medium: 'secure' }, assertCurrent ? { beforeWrite: guard, committed: () => {} } : undefined); }
       finally { this.credentialMutationGeneration++; }
-      return value;
+      return Secret.of(value, key);
     }, paths.slice(1), guard);
   }
 
@@ -1132,13 +1132,13 @@ export class SecretsManager {
    * ownership; it is not an identity or provenance snapshot.
    */
   resolveLocalSecretSync(key: string):
-    | { readonly state: 'resolved'; readonly value: string }
+    | { readonly state: 'resolved'; readonly value: Secret }
     | { readonly state: 'absent' | 'unsupported' } {
     const capture = (value: unknown): ReturnType<SecretsManager['resolveLocalSecretSync']> => {
       if (typeof value !== 'string') return { state: 'unsupported' };
       const literal = decodeLiteralSecret(value);
-      if (literal !== null) return { state: 'resolved', value: literal };
-      return isSecretRefInput(value) ? { state: 'unsupported' } : { state: 'resolved', value };
+      if (literal !== null) return { state: 'resolved', value: Secret.of(literal, key) };
+      return isSecretRefInput(value) ? { state: 'unsupported' } : { state: 'resolved', value: Secret.of(value, key) };
     };
     const envValue = ownEnvValue(key);
     if (envValue !== undefined) return capture(envValue);
@@ -1232,14 +1232,17 @@ export class SecretsManager {
    * value `get()` would resolve. An unreadable store throws rather than
    * reading as "no entry", so an undo never deletes what it could not see.
    */
-  async getWriteScopeEntry(key: string, scope: SecretScope): Promise<string | null> {
+  async getWriteScopeEntry(key: string, scope: SecretScope): Promise<Secret | null> {
     for (const medium of ['secure', 'plaintext'] as const) {
       const target = this.resolveWriteTarget(scope, medium);
       const result = target.secure ? this.readEncryptedStore(target.path) : this.readPlaintextStore(target.path);
       if (result.status === 'unreadable') {
         throw new SecretStoreUnreadableError(`The secrets store at ${target.path} exists but cannot be read (${result.reason}).`);
       }
-      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) return result.secrets[key] ?? null;
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) {
+        const stored = result.secrets[key];
+        return stored === undefined ? null : Secret.of(stored, key);
+      }
     }
     return null;
   }

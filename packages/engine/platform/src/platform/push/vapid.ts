@@ -17,6 +17,7 @@
  *    `push.vapid.get` verb and the `k=` parameter of the Authorization header.
  */
 
+import type { Secret } from '../security/secret.js';
 import { createPrivateKey, generateKeyPairSync, sign as cryptoSign, type JsonWebKey } from 'node:crypto';
 import { DEFAULT_VAPID_SUBJECT, VAPID_SUBJECT_HINT, isValidVapidSubject } from './vapid-subject.js';
 
@@ -27,7 +28,7 @@ import { DEFAULT_VAPID_SUBJECT, VAPID_SUBJECT_HINT, isValidVapidSubject } from '
  * mint a new pair and orphan every browser subscription.
  */
 export interface VapidSecretStore {
-  getOrCreateDaemonSecret(key: string, create: () => string): Promise<string>;
+  getOrCreateDaemonSecret(key: string, create: () => string): Promise<Secret>;
 }
 
 interface StoredVapidKeypair {
@@ -189,6 +190,7 @@ export class VapidManager {
       };
       return JSON.stringify(keypair);
     });
-    return readStoredKeypair(raw);
+    // The keypair signs push messages to the services it is for.
+    return readStoredKeypair(raw.reveal('dispatch'));
   }
 }

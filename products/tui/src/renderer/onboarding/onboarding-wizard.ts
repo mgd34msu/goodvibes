@@ -1,18 +1,11 @@
 /**
- * renderOnboardingWizard, the onboarding wizard on the modal surface kit.
+ * renderOnboardingWizard, one `/setup` topic's form on the modal surface kit.
  *
- * The wizard owns the screen (the shell hides its header and footer), so the
- * surface takes the full width minus 1 column per side and the full height:
- * the gradient ▄ cap on the first row, the surface ▀ cap on the last, 4
- * columns of inner padding, the ✦ title row with the mode, the step position
- * and the changed-screen count, and keycap hints on the second-to-last row.
- * No box-drawing frames.
- *
- * Wide screens: the steps as a kit list on the left (the current step is the
- * gradient row; ✓ complete, ◈ changed, • untouched, completion right-aligned)
- * with the step summary under it, and on the right the step title, its
- * description, the field rows and a focus box that wraps the selected
- * field's hint in full. Narrow screens drop the step list and keep the rest.
+ * The form owns the screen (the shell hides its header and footer): the ✦
+ * title row with `/setup` and the topic, the topic's sentence, its rows (a
+ * value right-aligned on each, ◇ on a changed one), Save as the last row, and a
+ * focus box that says in full what the selected row does. There is no list of
+ * other screens and no count: another topic is another `/setup` choice.
  */
 
 import { activeTokens, activeUiTones } from '../theme.ts';
@@ -30,36 +23,6 @@ import type {
   OnboardingWizardController,
   OnboardingWizardFieldDefinition,
 } from '../../input/onboarding/onboarding-wizard.ts';
-
-function modeLabel(mode: OnboardingWizardController['mode']): string {
-  if (mode === 'edit') return 'edit existing';
-  if (mode === 'reopen') return 'reopen review';
-  return 'new setup';
-}
-
-function changedScreensLabel(wizard: OnboardingWizardController): string {
-  if (wizard.dirtyStepCount === 0) return 'no changes';
-  if (wizard.dirtyStepCount === 1) return '1 changed screen';
-  return `${wizard.dirtyStepCount} changed screens`;
-}
-
-function stepRows(wizard: OnboardingWizardController): KitRow[] {
-  const tones = activeUiTones();
-  return wizard.steps.map((step, index): KitRow => {
-    const total = wizard.getStepFieldCount(index);
-    const completed = wizard.getCompletedFieldCount(index);
-    const dirty = wizard.isStepDirty(index);
-    const complete = total > 0 && completed === total;
-    return {
-      label: `${index + 1}. ${step.shortLabel}`,
-      mark: dirty ? '◈' : complete ? '✓' : '•',
-      markFg: dirty ? tones.state.warn : complete ? tones.state.good : tones.fg.muted,
-      right: `${completed}/${total}`,
-      rightFg: dirty ? tones.state.warn : undefined,
-      selected: index === wizard.stepIndex,
-    };
-  });
-}
 
 function fieldBadgeTone(wizard: OnboardingWizardController, field: OnboardingWizardFieldDefinition): string {
   const tones = activeUiTones();
@@ -99,7 +62,7 @@ function fieldRows(wizard: OnboardingWizardController): { rows: KitRow[]; scroll
       label: field.label,
       mark: fieldMark(wizard, field),
       markFg: wizard.isFieldDirty(field.id) ? t.warning : t.brand,
-      right: `[${wizard.getFieldValueLabel(field)}]`,
+      right: wizard.getFieldValueLabel(field),
       rightFg: fieldBadgeTone(wizard, field),
       selected: index === selectedIndex,
     });
@@ -133,7 +96,7 @@ function focusLines(wizard: OnboardingWizardController): TextLine[] {
   // port) is said at the field, not only at apply.
   const problem = wizard.getFieldValidationError(wizard.currentStep, field);
   return [
-    { text: `Focus: ${field.label} [${wizard.getFieldValueLabel(field)}]`, style: { fg: t.text, bold: true } },
+    { text: `${field.label} · ${wizard.getFieldValueLabel(field)}`, style: { fg: t.text, bold: true } },
     ...(problem !== null ? [{ text: problem, style: { fg: t.error, bold: true } }] : []),
     { text: hint, style: { fg: t.textMuted } },
   ];
@@ -143,15 +106,12 @@ function hintsFor(wizard: OnboardingWizardController): KitHint[] {
   if (wizard.isEditingTextField()) {
     return [['⏎', 'save'], ['esc', 'cancel edit'], ['bksp', 'delete char'], ['del', 'clear']];
   }
-  return [['↑↓', 'move'], ['⏎', 'change'], ['tab', 'next screen'], ['shift+tab', 'back'], ['del', 'clear']];
+  return [['↑↓', 'move'], ['⏎', 'change'], ['del', 'clear'], ['esc', 'close']];
 }
 
-/** Text width at which the step list sits beside the step body. */
-const WIDE_WIDTH = 90;
-
 /**
- * Render the wizard as a SurfaceLayer covering the screen (x 1, y 0).
- * `width` and `viewportHeight` are the screen size the wizard owns.
+ * Render the form as a SurfaceLayer covering the screen (x 1, y 0).
+ * `width` and `viewportHeight` are the screen size the form owns.
  */
 export function renderOnboardingWizard(
   wizard: OnboardingWizardController,
@@ -161,42 +121,24 @@ export function renderOnboardingWizard(
   const t = activeTokens();
   const step = wizard.currentStep;
   const hints = hintsFor(wizard);
-  // The wizard owns the screen: full width minus 1 per side, full height.
+  // The form owns the screen: full width minus 1 per side, full height.
   // beginModal sizes against a screen tall enough that the requested height
   // is never clamped; the layer is then placed at the top row.
   const height = Math.max(5, viewportHeight - 2);
   const f = beginModal(width, Math.max(viewportHeight * 2, 12), {
-    title: 'Onboarding',
-    sub: `${modeLabel(wizard.mode)} · step ${wizard.stepIndex + 1} of ${wizard.steps.length} · ${changedScreensLabel(wizard)}`,
+    title: '/setup',
+    sub: step.title,
     hints,
     width: width - 2,
     height,
     dim: false,
   });
-  const inner = f.r - f.l + 1;
-  const wide = inner >= WIDE_WIDTH;
-
-  let x0 = f.l;
-  if (wide) {
-    const railW = inner >= 140 ? 32 : 28;
-    const railX1 = f.l + railW - 1;
-    const steps = stepRows(wizard);
-    const res = drawList(f.canvas, { rows: steps, top: f.top, bottom: f.bottom, x0: f.l, x1: railX1 });
-    const summary: TextLine[] = [
-      { text: step.summaryTitle, style: { fg: t.info, bold: true } },
-      ...step.summaryLines.slice(0, 2).map((text) => ({ text, style: { fg: t.textMuted } })),
-      { text: `Fields ${wizard.getCompletedFieldCount(wizard.stepIndex)}/${wizard.getStepFieldCount(wizard.stepIndex)} complete`, style: { fg: t.textMuted } },
-    ];
-    const summaryTop = res.endY + 1;
-    if (summaryTop + textBlockHeight(summary, railW) - 1 <= f.bottom) drawTextBlock(f.canvas, f.l, summaryTop, railW, summary, f.bottom);
-    x0 = railX1 + 6;
-  }
+  const x0 = f.l;
   const x1 = f.r;
   const textW = x1 - x0 + 1;
 
-  // Step title and its description, in full.
+  // The topic's sentence, in full.
   let y = drawTextBlock(f.canvas, x0, f.top, textW, [
-    { text: step.title, style: { fg: t.text, bold: true } },
     { text: step.description, style: { fg: t.textMuted } },
   ], f.bottom) + 1;
 
@@ -214,7 +156,7 @@ export function renderOnboardingWizard(
   if (y > listBottom) y = listBottom;
   const fields = fieldRows(wizard);
   if (fields.rows.length === 0) {
-    drawTextBlock(f.canvas, x0, y, textW, [{ text: 'This screen has no fields.', style: { fg: t.textMuted } }], listBottom);
+    drawTextBlock(f.canvas, x0, y, textW, [{ text: 'Nothing to set here.', style: { fg: t.textMuted } }], listBottom);
   } else {
     const res = drawList(f.canvas, { rows: fields.rows, top: y, bottom: listBottom, x0, x1, scrollStart: fields.scrollStart });
     f.hintRight = scrollCountText(res.above, res.below);

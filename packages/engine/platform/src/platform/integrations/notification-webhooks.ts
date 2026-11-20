@@ -77,7 +77,7 @@ export function resolveNotificationWebhookLocally(entry: string, secrets: Pick<S
   const ref = normalizeSecretRef(entry.trim());
   if (!secrets || ref?.source !== 'goodvibes') return null;
   const stored = secrets.resolveLocalSecretSync(ref.id);
-  return stored.state === 'resolved' ? stored.value : null;
+  return stored.state === 'resolved' ? stored.value.reveal('dispatch') : null;
 }
 
 /** What a screen shows of a notification webhook URL: its scheme and host, never the path or query that carry its key. */

@@ -109,7 +109,7 @@ export class HostedSessionFeed {
    * How to close the live subscription feeding this session, when one is open.
    *
    * Held here rather than in whichever module opened it because two unrelated
-   * callers have to be able to close it: the `/hosted detach` command, and the
+   * callers have to be able to close it: the `/hosted leave` command, and the
    * app's own exit path, which must leave the session cleanly before the
    * process goes away.
    */

@@ -94,10 +94,6 @@ type VectorRow = {
   distance: number;
 };
 
-type CountRow = {
-  count: number;
-};
-
 type RecordIdRow = {
   rowid: number;
 };
@@ -245,6 +241,8 @@ export class SqliteVecMemoryIndex {
 
   stats(): MemoryVectorStats {
     const provider = this.embeddingRegistry.getDefaultProviderOrNull();
+    const space = this.space();
+    const counts = this.countIndexedRecords(space);
     const error = this.error
       ?? (!provider && !this.platformLimitReason ? `Active memory embedding provider '${this.embeddingRegistry.getDefaultProviderId()}' is not registered.` : undefined);
     return {
@@ -253,11 +251,11 @@ export class SqliteVecMemoryIndex {
       available: this.available,
       path: this.dbPath,
       dimensions: this.dimensions,
-      indexedRecords: this.countIndexedRecords(),
+      indexedRecords: counts.indexed,
       embeddingProviderId: provider?.id ?? this.embeddingRegistry.getDefaultProviderId(),
       embeddingProviderLabel: provider?.label ?? `Unregistered (${this.embeddingRegistry.getDefaultProviderId()})`,
-      embeddingSpace: this.space(),
-      awaitingReembed: this.countOutsideSpace(),
+      embeddingSpace: space,
+      awaitingReembed: counts.outside,
       ...(this.platformLimitReason ? { platformLimitReason: this.platformLimitReason } : {}),
       ...(error ? { error } : {}),
     };
@@ -530,12 +528,13 @@ export class SqliteVecMemoryIndex {
     `);
   }
 
-  private countIndexedRecords(): number {
-    if (!this.db || !this.enabled) return 0;
-    const row = this.db.query<CountRow, []>(
-      'SELECT count(*) AS count FROM memory_vector_ids',
-    ).get();
-    return Number(row?.count ?? 0);
+  /** Indexed rows, and how many of them another space made, in one statement. */
+  private countIndexedRecords(space: string): { readonly indexed: number; readonly outside: number } {
+    if (!this.db || !this.enabled) return { indexed: 0, outside: 0 };
+    const row = this.db.query<{ count: number; outside: number | null }, [string]>(
+      'SELECT count(*) AS count, sum(space_id != ?) AS outside FROM memory_vector_ids',
+    ).get(space);
+    return { indexed: Number(row?.count ?? 0), outside: Number(row?.outside ?? 0) };
   }
 
   /** What the index holds, in one query: revision and space per record. */
@@ -549,12 +548,6 @@ export class SqliteVecMemoryIndex {
     return this.embeddingRegistry.currentSpace(this.dimensions).id;
   }
 
-  /** Rows embedded in another space than the current one. */
-  private countOutsideSpace(): number {
-    if (!this.db || !this.enabled) return 0;
-    const row = this.db.query<CountRow, [string]>('SELECT count(*) AS count FROM memory_vector_ids WHERE space_id != ?').get(this.space());
-    return Number(row?.count ?? 0);
-  }
 
   private revisionOf(recordId: string): string | undefined {
     return this.currentRevision?.(recordId);

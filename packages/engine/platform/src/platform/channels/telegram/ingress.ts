@@ -23,6 +23,7 @@
  * mode never starts a loop. Exactly one path is armed per start(), and which
  * one, with the reason, is logged.
  */
+import { Secret } from '../../security/secret.js';
 import { randomBytes } from 'node:crypto';
 import { statSync } from 'node:fs';
 import type { ConfigManager } from '../../config/manager.js';
@@ -1403,7 +1404,7 @@ export class TelegramIngressSupervisor {
     const literal = (value: unknown): Resolution => {
       if (value === undefined || value === null || value === '') return { state: 'absent' };
       return typeof value !== 'string' || isSecretRefInput(value) || looksLikeSecretRef(value)
-        ? { state: 'unsupported' } : { state: 'resolved', value };
+        ? { state: 'unsupported' } : { state: 'resolved', value: Secret.of(value, 'telegram bot token') };
     };
     const local = (key: string): Resolution => typeof this.deps.secretsManager.resolveLocalSecretSync === 'function'
       ? this.deps.secretsManager.resolveLocalSecretSync(key) : { state: 'unsupported' };
@@ -1419,15 +1420,15 @@ export class TelegramIngressSupervisor {
         const candidate = registry.tokenRef ?? (isSecretRefInput(registry.tokenKey) ? registry.tokenKey : undefined);
         const fromRegistry = candidate ? reference(candidate) : registry.tokenKey ? local(registry.tokenKey) : { state: 'absent' } as const;
         if (fromRegistry.state === 'unsupported') return null;
-        if (fromRegistry.state === 'resolved' && fromRegistry.value) return fromRegistry.value;
+        if (fromRegistry.state === 'resolved' && !fromRegistry.value.empty) return fromRegistry.value.reveal('dispatch');
       }
       const configured = this.deps.configManager.get('surfaces.telegram.botToken');
       const configuredLiteral = typeof configured === 'string' ? configured.trim() : configured;
       const fromConfig = isSecretRefInput(configured) ? reference(configured) : literal(configuredLiteral);
       if (fromConfig.state === 'unsupported') return null;
-      if (fromConfig.state === 'resolved' && fromConfig.value) return fromConfig.value;
+      if (fromConfig.state === 'resolved' && !fromConfig.value.empty) return fromConfig.value.reveal('dispatch');
       const environment = literal(process.env.TELEGRAM_BOT_TOKEN);
-      return environment.state === 'resolved' ? environment.value : null;
+      return environment.state === 'resolved' ? environment.value.reveal('dispatch') : null;
     } catch { return null; }
   }
 

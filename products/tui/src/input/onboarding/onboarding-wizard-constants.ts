@@ -11,7 +11,6 @@ export const STEP_ORDER: readonly OnboardingWizardStepId[] = [
   'provider-access',
   'default-model',
   'experience',
-  'review',
 ];
 
 export const DEFAULT_CAPABILITIES: readonly OnboardingStep1CapabilityItem[] = [

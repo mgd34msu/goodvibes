@@ -306,7 +306,7 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
         { id: 'prompt', label: 'First message', help: 'What it should start on, the way you would ask in the chat', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'nothing yet' }, typed: { tail: true } },
         { id: 'leave', label: 'When everyone leaves', help: 'Whether it keeps running once no terminal or browser has it open', kind: 'choice', choices: [
           { value: 'keep', label: 'Keep running', help: 'It waits, idle, to be joined again.' },
-          { value: 'end', label: 'End it', help: 'It ends when the last one leaves.' },
+          { value: 'stop', label: 'Stop it', help: 'It ends when the last one leaves.' },
         ], required: { default: '', defaultMeans: 'as hostedSessions.detachPolicy says' }, typed: { flag: '--on-leave' } },
       ],
       sentence: 'A conversation will start in the daemon for this project and this terminal joins it; it lasts until you change it (ending it, or as "When everyone leaves" says).',
@@ -318,7 +318,7 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
         const feed = getSharedHostedSessionFeed();
         const workspaceRoot = requireShellPaths(ctx).workingDirectory;
         const prompt = (values.prompt ?? '').trim();
-        const policy: HostedDetachPolicy | undefined = values.leave === 'keep' ? 'survive' : values.leave === 'end' ? 'kill' : undefined;
+        const policy: HostedDetachPolicy | undefined = values.leave === 'keep' ? 'survive' : values.leave === 'stop' ? 'kill' : undefined;
         await daemonCall(() => attachSession(seams, async () => {
           const record = await seams.client.create({
             workspaceRoot,
@@ -419,14 +419,16 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
       },
     },
     {
-      id: 'end', label: 'End a hosted session', word: 'end', inputs: [SESSION_PICK],
+      // An id, never a list number: the question names exactly the session that ends, and a later list cannot change what it means.
+      id: 'end', label: 'End a hosted session', word: 'end', inputs: [{ ...SESSION_PICK, choices: { list: HOSTED_SESSIONS, allowOther: { reason: 'a session id' } } }],
       sentence: 'Hosted session {session} and the turn it is running will end, whatever its setting says.',
       done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
       operator: { method: 'sessions.hosted.kill', fields: { sessionId: 'session' } }, example: { session: 'hs-1' },
       async run(values, ctx) {
         const feed = getSharedHostedSessionFeed();
-        const target = resolveIdArgument(values.session!);
+        const target = values.session!;
+        if (/^\d+$/.test(target)) throw commandRefusal(`${target} is a list number; ending a session takes its id, so the question names exactly the one that ends.`, '/hosted list shows the ids.');
         const seams = resolveSeams(ctx)!;
         const elsewhere = target === feed.getState().record?.id ? attachmentElsewhere(feed, target, seams) : null;
         if (elsewhere) throw commandRefusal(`Not ended: ${elsewhere}`);

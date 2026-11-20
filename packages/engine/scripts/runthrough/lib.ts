@@ -475,6 +475,12 @@ export async function nativeTurnStatus(daemon: Daemon, token: string, turn: Nati
   return status.body as Record<string, unknown>;
 }
 
+/** The cluster routes answer `{ ok, data }`. */
+function clusterData<T>(body: unknown): T {
+  const wrapped = body as { data?: unknown } | null;
+  return (wrapped && typeof wrapped === 'object' && 'data' in wrapped ? wrapped.data : body) as T;
+}
+
 export interface GroupNode {
   readonly name: string;
   readonly home: Home;
@@ -516,7 +522,7 @@ export async function startGroup(names: readonly string[], options: Omit<HomeOpt
     const daemon = await startDaemon(home);
     const token = operatorToken(home);
     const status = await api(daemon, token, 'GET', '/api/cluster/status');
-    const nodeId = String((status.body as { nodeId?: unknown }).nodeId ?? '');
+    const nodeId = String(clusterData<{ nodeId?: unknown }>(status.body).nodeId ?? '');
     const node: GroupNode = {
       name, home, daemon, token, nodeId,
       async restart(restartOptions) {
@@ -530,7 +536,7 @@ export async function startGroup(names: readonly string[], options: Omit<HomeOpt
   const [first, ...rest] = nodes;
   if (!first) throw new Error('startGroup needs at least one node');
   const created = await api(first.daemon, first.token, 'POST', '/api/cluster/create', { name: 'runthrough' });
-  const group = created.body as { groupId?: string; joinKey?: string };
+  const group = clusterData<{ groupId?: string; joinKey?: string }>(created.body);
   if (!group.groupId || !group.joinKey) throw new Error(`cluster create failed: ${created.text.slice(0, 300)}`);
   for (const node of rest) {
     const joined = await api(node.daemon, node.token, 'POST', '/api/cluster/join', { groupId: group.groupId, joinKey: group.joinKey });
@@ -539,7 +545,7 @@ export async function startGroup(names: readonly string[], options: Omit<HomeOpt
   for (const node of nodes) {
     const listed = await waitFor(async () => {
       const result = await api(node.daemon, node.token, 'GET', '/api/cluster/nodes');
-      const members = (result.body as { members?: unknown[] }).members ?? [];
+      const members = clusterData<{ members?: unknown[] }>(result.body).members ?? [];
       return members.length >= nodes.length ? members : undefined;
     }, 60_000, 500);
     if (!listed) throw new Error(`${node.name} does not list every member`);

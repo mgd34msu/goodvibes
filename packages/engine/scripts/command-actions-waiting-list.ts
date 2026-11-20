@@ -64,7 +64,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'helpers',
   'hooks',
   'host',
-  'hosted',
   'image',
   'imagine',
   'incident',

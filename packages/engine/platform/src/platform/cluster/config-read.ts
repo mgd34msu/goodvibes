@@ -41,7 +41,7 @@ function resolveClusterSecret(value: string, secrets: ClusterSecretSource | unde
   let reason = 'cluster.secret names a stored secret that is not a goodvibes:// reference this machine can read';
   if (secrets && ref?.source === 'goodvibes') {
     const stored = secrets.resolveLocalSecretSync(ref.id);
-    if (stored.state === 'resolved' && stored.value.length > 0) return { state: 'set', value: stored.value };
+    if (stored.state === 'resolved' && !stored.value.empty) return { state: 'set', value: stored.value.reveal('dispatch') };
     reason = `the stored secret cluster.secret names could not be read (${stored.state})`;
   } else if (!secrets) {
     reason = 'the secret store is not available to read cluster.secret from';

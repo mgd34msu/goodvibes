@@ -49,7 +49,7 @@ export interface DaemonCredentialStore {
   ): Promise<void>;
   has(secretKey: string): Promise<boolean>;
   /** Atomic namespace owner, required before creating new persistent cipher material. */
-  getOrCreateDaemonSecret?(secretKey: string, create: () => string, assertCurrent?: () => void): Promise<string>;
+  getOrCreateDaemonSecret?(secretKey: string, create: () => string, assertCurrent?: () => void): Promise<Secret>;
   /** Local literal presence only; no reference resolution or nullable failure conflation. */
   inspectConfigSecret?(configKey: string): 'absent' | 'present' | 'unavailable';
 }
@@ -71,7 +71,7 @@ export function createDaemonCredentialStore(secrets: Pick<SecretsManager, 'get' 
       inspectConfigSecret(configKey: string): 'absent' | 'present' | 'unavailable' {
         const current = secrets.resolveLocalSecretSync!(daemonSecretKeyFor(configKey));
         return current.state === 'absent' ? 'absent'
-          : current.state === 'resolved' ? (current.value.trim() ? 'present' : 'absent') : 'unavailable';
+          : current.state === 'resolved' ? (current.value.reveal('owner-screen').trim() ? 'present' : 'absent') : 'unavailable';
       },
     } : {}),
     ...(secrets.getOrCreateDaemonSecret ? {
@@ -132,7 +132,8 @@ async function loadOrCreateKey(
   }
   if (!allowCreate) throw new Error('Draft encryption key is missing; no replacement was created.');
   if (!store.getOrCreateDaemonSecret) throw new Error('Draft encryption key creation requires an atomic namespace owner.');
-  const selected = await store.getOrCreateDaemonSecret(keyName, () => randomBytes(AES_KEY_BYTES).toString('base64'));
+  // The key material is revealed for the draft cipher it keys.
+  const selected = (await store.getOrCreateDaemonSecret(keyName, () => randomBytes(AES_KEY_BYTES).toString('base64'))).reveal('dispatch');
   const key = Buffer.from(selected, 'base64');
   if (key.length !== AES_KEY_BYTES || key.toString('base64') !== selected) throw new Error('Draft encryption key is invalid; existing material was preserved.');
   return key;
@@ -170,7 +171,7 @@ export function createAtRestCipher(
         if (!store.getOrCreateDaemonSecret || !store.resolveDaemonCredentialSnapshot || !retainCurrent) throw new Error('Admitted draft encryption requires the native key owner.');
         // The native owner checks the restriction after lock acquisition and at
         // its actual write. A prior cipher cache cannot select current material.
-        const selected = await store.getOrCreateDaemonSecret(keyName, () => randomBytes(AES_KEY_BYTES).toString('base64'), assertCurrent);
+        const selected = (await store.getOrCreateDaemonSecret(keyName, () => randomBytes(AES_KEY_BYTES).toString('base64'), assertCurrent)).reveal('dispatch');
         assertCurrent(); key = Buffer.from(selected, 'base64');
         if (key.length !== AES_KEY_BYTES || key.toString('base64') !== selected) throw new Error('Draft encryption key is invalid; existing material was preserved.');
         const before = store.resolveDaemonCredentialSnapshot(keyName);

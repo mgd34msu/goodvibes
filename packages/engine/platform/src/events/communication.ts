@@ -22,6 +22,13 @@ export type CommunicationKind =
 export type CommunicationScope = 'direct' | 'broadcast';
 
 export type CommunicationEvent =
+  /**
+   * An agent sent a message to another agent (`scope: 'direct'`, `toId` the
+   * recipient) or to every agent (`scope: 'broadcast'`, `toId` `*`). `kind`
+   * says what it is (a directive, a question, a finding, a handoff...), and
+   * `content` is its text. Role, cohort, contract and parent fields carry the
+   * routing the message was sent under.
+   */
   | {
       type: 'COMMUNICATION_SENT';
       messageId: string;
@@ -36,6 +43,10 @@ export type CommunicationEvent =
       contractId?: string | undefined;
       parentAgentId?: string | undefined;
     }
+  /**
+   * The recipient took a sent message into one of its turns. A message
+   * waiting for a long turn to end has been sent, not yet delivered.
+   */
   | {
       type: 'COMMUNICATION_DELIVERED';
       messageId: string;
@@ -44,6 +55,11 @@ export type CommunicationEvent =
       scope: CommunicationScope;
       kind: CommunicationKind;
     }
+  /**
+   * A message was not sent: the sender is not a registered agent, the
+   * recipient is unknown, or the communication policy refused it (an agent
+   * may only talk along its communication lane). `reason` says which.
+   */
   | {
       type: 'COMMUNICATION_BLOCKED';
       messageId: string;
@@ -60,12 +76,9 @@ export type CommunicationEvent =
     }
   | {
       /**
-       * Honest "the agent actually consumed this at its turn boundary" signal,
-       * distinct from COMMUNICATION_DELIVERED, which fires eagerly at send()
-       * time and therefore cannot mean "seen by the agent" (see
-       * AgentMessageBus.send / orchestrator-runner's per-turn inbox drain).
-       * Emitted once, at the drain site, the turn a queued message is
-       * actually injected into the target agent's conversation.
+       * The agent `agentId` took a queued message into its conversation at
+       * turn `turn`. Emitted once, where the agent's inbox is drained at a turn
+       * boundary (orchestrator-runner's per-turn inbox drain).
        */
       type: 'COMMUNICATION_CONSUMED';
       messageId: string;

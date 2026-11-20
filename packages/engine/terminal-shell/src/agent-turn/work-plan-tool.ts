@@ -198,7 +198,7 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: [...ACTIONS] },
+          action: { type: 'string', enum: [...ACTIONS], description: 'list the items; get one; create one; update its title, status, owner, source or notes; set_status; remove one; clear_completed removes done and cancelled items.' },
           id: { type: 'string', description: 'Work plan item id or unique id prefix for get/update/set_status/remove.' },
           title: { type: 'string', description: 'Work plan item title for create/update.' },
           status: { type: 'string', enum: [...WORK_PLAN_STATUSES], description: 'Work plan item status; with action:list it shows only items in that status.' },

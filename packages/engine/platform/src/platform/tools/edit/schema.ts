@@ -5,6 +5,7 @@ export const editSchema = {
     edits: {
       type: 'array',
       minItems: 1,
+      description: 'The text replacements to make, each a path with a find and a replace; give either edits or notebook_operations.',
       items: {
         type: 'object',
         // find/replace may each be sent as plain text or base64; the executor checks that one is present and non-empty.
@@ -58,6 +59,7 @@ export const editSchema = {
           },
           hints: {
             type: 'object',
+            description: 'Narrow which occurrence of find is meant.',
             properties: {
               near_line: {
                 type: 'integer',
@@ -89,6 +91,7 @@ export const editSchema = {
     },
     match: {
       type: 'object',
+      description: 'How find is matched, for every edit of the call.',
       properties: {
         mode: {
           type: 'string',
@@ -122,6 +125,7 @@ export const editSchema = {
     },
     transaction: {
       type: 'object',
+      description: 'Whether the edits of the call succeed or fail together.',
       properties: {
         mode: {
           type: 'string',
@@ -137,6 +141,7 @@ export const editSchema = {
     },
     output: {
       type: 'object',
+      description: 'How much the result reports.',
       properties: {
         format: {
           type: 'string',
@@ -199,6 +204,7 @@ export const editSchema = {
         operations: {
           type: 'array',
           minItems: 1,
+          description: 'The cell operations, applied in order.',
           items: {
             type: 'object',
             required: ['op'],

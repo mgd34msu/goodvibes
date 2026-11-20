@@ -166,7 +166,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
       'Scan to pair a device; the QR opens the web app already signed in:',
       '',
       `  ${link}`,
-      `  Token name: ${result.token.name}  (rename or revoke later in /settings → security → devices)`,
+      `  Token name: ${result.token.name}  (rename or revoke later with /devices in the terminal app, or in the web UI under Settings, Devices and pairing)`,
     ];
     if (result.offers.length > 0) {
       lines.push(

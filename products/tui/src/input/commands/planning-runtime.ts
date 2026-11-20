@@ -167,7 +167,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
     name: 'plan',
     description: 'Enter or exit plan mode, a read-only planning posture where writes, commands, and network calls are blocked',
     usage: '[on | off | toggle]',
-    argsHint: '[on|off]',
+    argsHint: '[on|off|toggle]',
     handler(args, ctx) {
       const configManager = ctx.platform.configManager;
       const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;

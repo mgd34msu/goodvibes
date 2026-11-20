@@ -493,8 +493,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       'Enforces delivery service-level objectives for the enabled channel surfaces '
       + '(Slack, Discord, webhooks): failures are classified as retryable or terminal, '
       + 'retried with exponential backoff, and dead-letter events are logged at error '
-      + 'level and surfaced in integration diagnostics. Dead-letter entries are exposed '
-      + 'via /notify dlq and replayable via /notify replay. Enabled by default alongside '
+      + 'level and surfaced in integration diagnostics. Failed webhook notifications are listed '
+      + 'with /notify failed and sent again with /notify resend <id|all>. Enabled by default alongside '
       + 'the channel family it belongs to; disable to keep warn-level logging without '
       + 'DLQ tracking.',
     defaultState: 'enabled',

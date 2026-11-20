@@ -51,7 +51,12 @@ const BACKGROUND_PROCESS_ACTION_VALUES = [
 
 const KEY_COMBO_PARAMETER_SCHEMA = {
   type: 'object',
-  properties: { key: { type: 'string' }, ctrl: { type: 'boolean' }, shift: { type: 'boolean' }, alt: { type: 'boolean' } },
+  properties: {
+    key: { type: 'string', description: 'The key, such as g, enter, tab or up.' },
+    ctrl: { type: 'boolean', description: 'Ctrl is held.' },
+    shift: { type: 'boolean', description: 'Shift is held.' },
+    alt: { type: 'boolean', description: 'Alt is held.' },
+  },
   required: ['key'],
   additionalProperties: false,
 } as const;

@@ -30,7 +30,7 @@ export const TRIGGER_TOOL_DEFINITION: ToolDefinition = {
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: [...TRIGGER_TOOL_ACTIONS] },
+      action: { type: 'string', enum: [...TRIGGER_TOOL_ACTIONS], description: 'create (with definition), list, history (id), cancel (id), or reset (id, after its breaker opened).' },
       id: { type: 'string', description: 'The trigger id, for history, cancel and reset.' },
       definition: {
         type: 'object',

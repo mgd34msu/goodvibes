@@ -587,7 +587,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -630,7 +630,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -657,7 +657,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -843,7 +843,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'approvals.raise',
     title: 'Raise Approval',
-    description: 'Raise a permission ask INTO the shared broker from a surface that is not in the daemon\'s process, the write counterpart to approvals.list/claim/approve/deny/cancel, which could only ever act on asks the daemon\'s own in-process callers had created. The ask becomes a record every surface can see and decide, and the daemon\'s attention machinery (web push, blocked-on-user) fans it out. Returns the PENDING record immediately and does NOT block waiting for an answer: the decision arrives on the control.approval_update event (SSE/WS, `permissions` domain), which is the channel to watch using the returned id. An identical ask already in flight (same session, tool and args) coalesces onto the existing record, one prompt, one decision, `coalesced: true`, and the returned record is that earlier one. Optional timeoutMs expires the ask if nobody answers (clamped to 12h); optional waitMs waits inline for a decision for callers that want one round trip (clamped to 60s) and reports `decided: false` with the record still pending when it runs out, never a decision that was not made. ws-only invoke verb; no REST binding.',
+    description: 'Raise a permission ask INTO the shared broker from a surface that is not in the daemon\'s process, the write counterpart to approvals.list/claim/approve/deny/cancel, which could only ever act on asks the daemon\'s own in-process callers had created. The ask becomes a record every surface can see and decide, and the daemon\'s attention machinery (web push, blocked-on-user) fans it out. Returns the PENDING record immediately and does NOT block waiting for an answer: the decision arrives on the control.approval_update event (SSE/WS, `gate` domain), which is the channel to watch using the returned id. An identical ask already in flight (same session, tool and args) coalesces onto the existing record, one prompt, one decision, `coalesced: true`, and the returned record is that earlier one. Optional timeoutMs expires the ask if nobody answers (clamped to 12h); optional waitMs waits inline for a decision for callers that want one round trip (clamped to 60s) and reports `decided: false` with the record still pending when it runs out, never a decision that was not made. ws-only invoke verb; no REST binding.',
     category: 'approvals',
     scopes: ['write:approvals'],
     transport: ['ws'],

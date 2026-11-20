@@ -3,11 +3,16 @@
  *
  * Resolves and manages the daemon's identity home directory (`daemon.homeDir`).
  *
- * The daemon home holds immutable-after-startup identity state:
- *   - auth-users.json
- *   - auth-bootstrap.txt
- *   - daemon-settings.json
+ * The daemon home holds the daemon's own identity and settings:
+ *   - settings.json (the daemon-owned settings, config/daemon-config-tier.ts)
+ *   - secrets.enc / secrets.json (the daemon secret tier)
  *   - operator-tokens.json
+ *   - owner-profile.md
+ *   - daemon-settings.json
+ * Local users (auth-users.json, auth-bootstrap.txt), device tokens
+ * (control-plane/pairing-tokens.json) and the daemon's stores are NOT here: they
+ * stay under `<tree root>/.goodvibes/tui/`, so moving the daemon home alone does
+ * not move them.
  *
  * Resolution order (first match wins):
  *   1. --daemon-home=<path> CLI arg (passed as daemonHomeArg)
@@ -19,8 +24,7 @@
  * header now records. `GOODVIBES_HOME` relocates the tree root for every other
  * part of the platform (settings, workspace state, every secret tier, see
  * config/goodvibes-home.ts), so a daemon started under a redirected root kept
- * its identity files, auth users, operator tokens, daemon settings, in the
- * REAL `~/.goodvibes/daemon`. A relocation one resolver ignores is not a
+ * its operator tokens and daemon settings in the REAL `~/.goodvibes/daemon`. A relocation one resolver ignores is not a
  * relocation; the tree root is resolved in exactly one place now and this
  * module derives from it rather than recomputing a home of its own.
  *

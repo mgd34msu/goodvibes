@@ -175,8 +175,8 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
     strictArgs: true,
     aliases: ['sched'],
     description: 'Inspect schedules, create confirmed reminders, and explicitly promote Agent-local routines to connected schedules',
-    usage: 'list | edit <id> --cron <expr> --yes | remind --at <iso> --message <text> --yes | receipts | reconcile | receipt <id> | promote-routine <routine-id> --cron <expr> --yes',
-    argsHint: 'list | edit <id> --cron <expr> --yes | remind --at <iso> --message <text> --yes | receipts | reconcile | receipt <id> | promote-routine <routine-id> --cron <expr> --yes',
+    usage: 'list | edit <id> --cron <expr> --yes | run <id> --yes | enable <id> --yes | disable <id> --yes | delete <id> --yes | remind --at <iso> --message <text> --yes | receipts | reconcile | receipt <id> | promote-routine <routine-id> --cron <expr> --yes',
+    argsHint: 'list | edit <id> --cron <expr> --yes | run|enable|disable|delete <id> --yes | remind --at <iso> --message <text> --yes | receipts | reconcile | receipt <id> | promote-routine <routine-id> --cron <expr> --yes',
     async handler(args, ctx) {
       const sub = args[0];
 

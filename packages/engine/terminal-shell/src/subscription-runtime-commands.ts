@@ -142,7 +142,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       aliases: ['subs'],
       description: 'Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers',
       usage:
-        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|login <provider> finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
       // The sign-in code (or the redirect address that carries it) is never kept in the input history.
       secretArgs: {
         select: (args) => (args[0]?.toLowerCase() === 'login' && args[2]?.toLowerCase() === 'finish' ? [3] : []),

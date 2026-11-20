@@ -131,6 +131,6 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
     return;
   }
   const skippedNote = skipped ? `${permissionModeLabel(skipped)} skipped. ` : '';
-  context.print(`[Permissions] ${skippedNote}Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /permissions or Settings)`);
+  context.print(`[Permissions] ${skippedNote}Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /settings; /permissions shows it)`);
   state.requestRender();
 }

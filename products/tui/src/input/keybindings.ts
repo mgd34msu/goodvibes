@@ -54,7 +54,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   // state, there is no release event to watch, so this is two discrete presses,
   // and the description says so instead of implying a hold that cannot exist.
   'voice-input':           'Voice input: press to start recording, press again to stop and transcribe into the composer',
-  'cycle-permission-mode': 'Cycle this session\'s permission mode (asks before the mode with no approvals; the saved default is set in /permissions)',
+  'cycle-permission-mode': 'Cycle this session\'s permission mode (asks before the mode with no approvals; the saved default is set in /settings)',
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([

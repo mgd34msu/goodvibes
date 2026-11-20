@@ -7,12 +7,14 @@ export const WATCHER_SOURCE_KINDS = ['poll', 'webhook', 'tail', 'file', 'api', '
 export type WatcherSourceKind = (typeof WATCHER_SOURCE_KINDS)[number];
 
 export type WatcherEvent =
+  /** A watcher began watching its source; `sourceKind` is how it reads it (poll, webhook, tail, file, api, stream) and `name` is its display name. */
   | {
       type: 'WATCHER_STARTED';
       watcherId: string;
       sourceKind: WatcherSourceKind;
       name: string;
     }
+  /** A watcher ran and saw its source at `seenAt`; `checkpoint` is how far it has read. Published after every run. */
   | {
       type: 'WATCHER_HEARTBEAT';
       watcherId: string;
@@ -27,6 +29,7 @@ export type WatcherEvent =
       sourceKind: WatcherSourceKind;
       checkpoint: string;
     }
+  /** A watcher run failed; `retryable` says whether it will try again. */
   | {
       type: 'WATCHER_FAILED';
       watcherId: string;
@@ -34,6 +37,7 @@ export type WatcherEvent =
       error: string;
       retryable: boolean;
     }
+  /** A watcher stopped watching; `reason` says why (`stopped` by default, `removed` when it was deleted). */
   | {
       type: 'WATCHER_STOPPED';
       watcherId: string;

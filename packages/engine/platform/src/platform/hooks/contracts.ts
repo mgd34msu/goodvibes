@@ -20,7 +20,7 @@ export interface HookPointContract {
 const CONTRACTS: HookPointContract[] = [
   {
     pattern: 'Pre:tool:*',
-    description: 'Intercept a tool call before admission: deny it, rewrite its arguments, or add a note the model reads with its result. A hook that fails (error, timeout, non-zero exit) refuses the call.',
+    description: 'Intercept a tool call before admission: deny it (`decision: "deny"`), rewrite its arguments (`updatedInput`), or add a note the model reads with its result (`additionalContext`). `decision: "allow"` and `"ask"` have no effect on the call. A hook that fails (error, timeout, non-zero exit) refuses the call.',
     authority: 'intercept',
     executionMode: 'blocking',
     canDeny: true,
@@ -75,7 +75,7 @@ const CONTRACTS: HookPointContract[] = [
   },
   {
     pattern: 'Pre:git:*',
-    description: 'Intercept a git commit, push, pull, merge, checkout, stash or worktree change before it runs.',
+    description: 'Intercept a git commit, push, pull, merge, checkout, stash or worktree change that GoodVibes itself makes (its own git service), before it runs. A git command the model runs through the exec tool raises Pre:tool:exec instead.',
     authority: 'intercept',
     executionMode: 'blocking',
     canDeny: true,

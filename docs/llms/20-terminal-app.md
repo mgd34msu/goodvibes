@@ -1,0 +1,2698 @@
+# The terminal app (`goodvibes`)
+
+This part describes the terminal app, `goodvibes`, from launch to every command it offers. It covers the command line, the interface, every slash command, sessions, models and providers, tools, helper agents and worktrees, contracts and workstreams, checkpoints and undo, memory and knowledge, MCP servers, plugins, skills, hooks, headless runs and the Agent Client Protocol. The Agent (`goodvibes-agent`) shares most of this; the next part lists what it does differently.
+
+## What the terminal app is
+
+The terminal app is an interactive coding and operations assistant that runs in a terminal window.
+It holds a conversation with a model, and the model works through tools: it reads and edits files, runs commands, searches, fetches web pages, starts helper agents and more.
+Each tool call passes the permission gate, which allows it, refuses it, asks the owner, or lets the decision model decide, according to the permission mode.
+The conversation loop runs inside the terminal app process.
+Daemon-owned features (schedules, channels, the owner inbox, devices, hosted sessions, clusters, mail, calendar, CI watches) are reached through the daemon's operator API; when no daemon answers, those commands say so and change nothing.
+The terminal app keeps its own state under `~/.goodvibes/tui/` (user scope) and `<project>/.goodvibes/tui/` (project scope), where `<project>` is the working directory.
+State shared by every GoodVibes program on the machine lives under `~/.goodvibes/shared/`.
+
+Terms used in this part:
+
+| Term | Meaning |
+| --- | --- |
+| working directory | The directory the terminal app treats as the project. It is the current directory unless `--cd` or `tui <path>` names another. |
+| session | One saved conversation. Sessions are stored per project in `<project>/.goodvibes/tui/sessions/`. |
+| turn | One prompt from the owner and everything the model does until it answers. |
+| slash command | A line typed in the composer that starts with `/`, such as `/model`. Slash commands run in the terminal app; they are not sent to the model. |
+| composer | The text input box at the bottom of the screen. |
+| registry key | A model's full name in the form `<provider>:<model-id>`, for example `openai:gpt-5.4`. |
+| helper agent | A subagent the model starts with the `agent` tool. It has its own conversation and a narrower tool set. |
+| contract | A tracked unit of delegated work with acceptance criteria that are checked before it counts as done. |
+| workstream | A contract started from an owner request, planned into units and run by helper agents. |
+| checkpoint | A snapshot of the workspace files that `/rewind` can return to (see "Restoring a checkpoint"). |
+| view | A full-screen modal over the conversation, such as Agents, Usage or Changes. `Esc` closes it. |
+
+## Launching the terminal app
+
+### Launch forms
+
+```sh
+goodvibes                          # open the terminal app in the current directory
+goodvibes tui ~/work/project       # open it with ~/work/project as the working directory
+goodvibes "review this repo"       # open it with that prompt already sent as the first turn
+goodvibes --cd ~/work/project      # same as tui <path>; --working-dir and -C are aliases
+goodvibes --no-alt-screen          # keep output in the terminal's normal scrollback
+goodvibes open goodvibes://open/agents   # open the app on one view
+```
+
+`goodvibes app` is an alias of `goodvibes tui`.
+A first launch for a new user opens the onboarding wizard; `goodvibes onboarding` (alias `goodvibes setup`) opens it on demand.
+The onboarding screens are described under "First run and onboarding" in the install part.
+
+`goodvibes open <link>` takes exactly one link of the form `goodvibes://open/<view>[?target=<id>[:<kind>]]`.
+In a process view (agents, tasks, orchestration) the target selects that process; in another view the app opens the view and says the target was not used.
+A link that is missing or not of that form is refused:
+
+```text
+$ goodvibes open notalink
+goodvibes open takes one link: goodvibes://open/<view>[?target=<id>[:<kind>]] ("notalink" is not one).
+```
+
+The exit code is `2`.
+`/deeplink review` inside the app lists every view link.
+
+### Global options
+
+The complete help of every command, as the program prints it, is under "Command line: `goodvibes`" in the reference part.
+
+How each option behaves:
+
+| Option | Behavior |
+| --- | --- |
+| `-m, --model <registryKey>` | Uses this model for this launch. The text before the first colon names the provider only when it is exactly (case-sensitive) a built-in provider id (`openai:gpt-5.4`) or one of `ollama`, `lmstudio`, `lm-studio`, `llamacpp`, `llama-cpp`, `litellm`, `vllm`, `copilot-proxy`; that provider is then selected unless `--provider` is also given. Otherwise the whole value is the model id under the configured provider: with the default `openrouter`, `-m Ollama:llama3:8b` silently becomes `openrouter:Ollama:llama3:8b`. A provider of any other id (a server found by `/scan`, such as `Ollama`, or a custom provider) is named with `--provider`: `goodvibes --provider Ollama -m llama3:8b` (see "Local model servers" for where that works). |
+| `--provider <id>` | Uses this provider for this launch. |
+| `-C, --cd <dir>`, `--working-dir <dir>` | Sets the working directory for this launch. Sessions and project settings are read from that directory. |
+| `--daemon-home <dir>` | Uses this daemon home (default `~/.goodvibes/daemon`) for every command that reads the operator token or daemon settings. It wins over the `GOODVIBES_DAEMON_HOME` environment variable. |
+| `-c, --config <key=value>` | Overrides one setting for this launch only. It may be repeated. Nothing is saved. |
+| `--enable <feature>`, `--disable <feature>` | Turns one feature flag on or off for this launch. The value is a feature id, not a setting key. An unknown id is refused and the error lists the known ids. |
+| `-p, --prompt <text>` | Runs one prompt without the interface (the same as `run`). |
+| `--print` | Selects non-interactive run mode (the same as `run`) when no command is given. |
+| `-o, --output <format>` | Output format for `run` and for commands that print data: `text`, `json` or `stream-json`. Another value is refused with `-o must be one of: text, json, stream-json.` and exit `2`. `--json` means `--output json`. `--output-format <format>` is accepted as the same option and prints `[goodvibes] warning: --output-format is deprecated; use --output (or -o) instead.` on standard error; standard output is unchanged. When two of these are given, the last one wins. |
+| `--just-vibes` | Sets the permission mode to `just-vibes` for this launch only: work continues without asking, and anything that needs the owner is held and listed at the end. It is the same as `--config permissions.mode=just-vibes`. |
+| `--yolo` | Sets the permission mode to `yolo` for this launch only: every action runs without safety denials, and `Pre:tool:*` hooks do not run. Containment, secret storage and payment limits still apply. `--no-worries-just-vibes` is an unlisted spelling of the same option. It may come before or after the command word (`goodvibes --yolo run ...` or `goodvibes run --yolo ...`). |
+| `--no-alt-screen` | Keeps the interface in the normal scrollback instead of the alternate screen. |
+| `--port <port>`, `--hostname <host>` (`--host`) | Port and bind address for `web` and `surfaces enable`. The port must be 1 to 65535. |
+| `--open` | Opens a browser where the command supports it (`web`, `subscription login <provider> start`). |
+| `-r, --resume [id\|latest]` | Opens a saved session. Without an id it opens the last session of this working directory. |
+| `-s, --session <id>` | `run` only: continue that saved session. Every other command refuses it. |
+| `--continue` | Opens the last session of this working directory. |
+| `--fork [id]` | Bare `--fork` forks the session that is active when the app starts. `--fork <id>` opens that session, then forks it. `run` refuses `--fork`. |
+| `--timeout <duration>` | `run` only: cancel after this long. A bare number is seconds; `ms`, `s`, `m` and `h` suffixes are accepted. Exit code `124`. |
+| `--max-turns <n>` | `run` only: stop after `n` model answers that still ask for tools. Exit code `1`. |
+| `--omit-accumulated` | `run` with `stream-json` only: leave `accumulated` out of `STREAM_DELTA` frames. |
+| `--answer-permissions` | `run` with `stream-json` only: read owner answers to permission prompts from standard input. |
+| `-y, --yes` | Confirms a command that would otherwise only preview (for example `plugin bundles install`, `support-bundle import`). |
+| `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
+| `--strict` | `doctor` only: also fail on advisory findings. |
+| `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
+| `-v, --version` | Prints `goodvibes 3.3.1`. |
+
+Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
+
+### Rules of the command-line parser
+
+- A flag that takes a value refuses a value that begins with `-`. Use the equals form: `--prompt='- item'`.
+- `--` ends option parsing. Every word after it is a positional argument: `goodvibes run -- --literal-text`.
+- An unquoted word in a prompt that equals a command name or alias (`doctor`, `auth`, `task`) is read as that command. Quote the whole prompt.
+- After a command word, an option that command does not take is refused with exit code `2`, and the error lists the options it accepts.
+- A run-only flag (`--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`) on any other command is refused with exit code `2`:
+
+```text
+$ goodvibes status --timeout 5
+--timeout, --max-turns, --omit-accumulated and --answer-permissions apply only to the run command.
+```
+
+- A lone first word of five or more letters that is one letter away from a command is refused as a typo, with exit code `2`:
+
+```text
+$ goodvibes staus
+Unknown command: staus. Did you mean `goodvibes status`? To start with "staus" as the first prompt instead, run: goodvibes -- staus
+```
+
+- A shorter word, or a word two letters away, starts the app with that word as the first prompt and prints a warning naming the near command.
+
+### Environment variables the terminal app reads
+
+The complete list of environment variables is under "Environment variables" in the reference part. The ones that change how the terminal app starts:
+
+| Variable | Effect |
+| --- | --- |
+| `GOODVIBES_DAEMON_HOME` | Daemon home directory used to find the operator token and daemon settings. `--daemon-home` overrides it. |
+| `GOODVIBES_HOME` | Home directory used by `goodvibes acp` for its embedded sessions. |
+| `ACP_AGENT_CMD` | Replaces the command `/remote dispatch` and `/remote dispatch-pool` start as an ACP subagent (by default this program's own `acp` command). Give it as a JSON array of program and arguments, for example `["/path/to/agent","acp"]`; a value that is not an array is used as one path when such a file exists, otherwise split on spaces. A value that starts with `[` but is not a JSON array of non-empty strings is refused with the reason. |
+| `EDITOR`, `VISUAL` | The editor `/editor` and `/template edit` open. |
+| Provider key variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and the others in the provider list) | Sign a provider in with an API key. An environment variable wins over a key stored with `/secrets`. |
+
+## Command-line commands
+
+Every command below prints text by default. Commands that print data accept `--json` (or `--output json`) and then print one JSON value.
+A command that refuses prints the reason on standard error and exits non-zero; the refusal names what to run next.
+Exit codes shared by all programs are under "Exit codes" in the reference part; the codes each command uses are given with the command.
+
+### `goodvibes run` (alias `exec`, `e`)
+
+`run` sends one prompt to the model without the interface, prints the result and exits.
+It is described in full under the heading "Headless runs" below.
+
+```sh
+goodvibes run "summarize the current project"
+goodvibes run --output json "list risks"
+goodvibes exec --output stream-json --omit-accumulated --timeout 10m "fix lint"
+goodvibes run --continue "and now write the tests"
+```
+
+A run with no prompt is refused:
+
+```text
+$ goodvibes run
+A prompt is required.
+```
+
+The exit code is `2`.
+
+### `goodvibes status`
+
+`status` prints the configuration posture: working directory, home directory, provider and model, reasoning effort, sign-in, decision model, permission mode, local auth files, daemon service, surfaces, onboarding, crashes, workspace trust and the exec sandbox.
+It always exits `0`.
+
+```text
+$ goodvibes status
+GoodVibes status
+  workingDir: /home/me/work/project
+  homeDir: /home/me
+
+Provider:
+  provider: openrouter
+  model: openrouter:openrouter/free
+  reasoning: medium
+  sign-in: none found in the subscription store or the environment (a key stored with /secrets is read by the app, not by this report)
+  ...
+Decision model:
+  policy: Hybrid (default) (judgment.policy)
+  No decision model is in use: none is set, so decisions take their fallbacks. Next: to use one, set judgment.model, judgment.endpoint or TYPESAFE_API_KEY.
+
+Auth:
+  permissions: Jev decides (jev-decides)
+  ...
+Surfaces:
+  controlPlane: yes (local 127.0.0.1:3421)
+  httpListener: no (local 127.0.0.1:3422)
+  web: yes (local 127.0.0.1:3423)
+...
+Workspace:
+  trust: undecided
+  registration: not registered (never asked)
+```
+
+With no model configured the terminal app selects `openrouter:openrouter/free`.
+`goodvibes status --json` prints the same facts as one JSON object.
+
+### `goodvibes doctor`
+
+`doctor` prints `status` plus setup warnings, each with its cause and next step.
+It exits `0` when the install is usable and non-zero only for a must-fix finding; `--strict` also fails on advisory findings.
+Its three sub-reports explain one decision each:
+
+| Command | What it prints |
+| --- | --- |
+| `goodvibes doctor explain <tool\|command>` | How the permission gate would decide one tool call or shell command under the current permission mode, without running it. |
+| `goodvibes doctor routing` | Which provider and model serve each role (main chat, helper, tool model, TTS model, embeddings). |
+| `goodvibes doctor hooks [--json]` | Every registered hook, where it came from and whether it validates. |
+
+Worked example:
+
+```text
+$ goodvibes doctor explain "rm -rf build"
+GoodVibes doctor: explain permission decision
+  subject     : rm -rf build
+  resolved as : shell command run through the "exec" tool: rm -rf build
+  tool        : exec  (category: execute)
+...
+Analysis (from the platform analyzer):
+  risk        : HIGH (shell)
+...
+Decision: ASK
+  decided by : user_prompt (user_denied)
+  because    : This reaches a Human-in-the-Loop approval prompt; the outcome depends on your response at the prompt.
+```
+
+A file write is explained with the tool name and path: `goodvibes doctor explain write ./src/app.ts`.
+Every `doctor` finding is described under "Checking an installation with doctor and status" in the install part.
+
+### `goodvibes onboarding` (alias `setup`)
+
+`goodvibes onboarding` opens the terminal app on the onboarding wizard.
+`goodvibes onboarding status` prints whether onboarding has been shown for this user and exits:
+
+```text
+$ goodvibes onboarding status
+GoodVibes onboarding status
+  checked: no
+  scope: none
+  source: n/a
+  mode: n/a
+  updatedAt: n/a
+  workingDir: /home/me/work/project
+```
+
+### `goodvibes models` (alias `model`)
+
+`models` lists, selects and pins models.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes models` | Lists selectable models, the current one marked `*`. Text output shows at most a fixed number of rows and says `showing N of M`; JSON output lists every match. |
+| `goodvibes models <provider-or-text>` or `models list <text>` | Lists models whose provider equals the word or whose registry key contains it. |
+| `goodvibes models current` | Prints the current model, provider, sign-in kind, whether the provider is configured and the context window. |
+| `goodvibes models use <registryKey>` (alias `set`) | Saves this model as the main chat model (`provider.model`). |
+| `goodvibes models pin <registryKey>` / `unpin <registryKey>` | Adds the model to, or removes it from, the pinned favorites. |
+| `goodvibes models pinned` | Lists pinned models. |
+| `goodvibes models recent` | Lists the 25 most recently used models. |
+| `goodvibes models chain [filter]` (alias `chains`) | Lists the backend order of every `synthetic` model (see "Synthetic failover" below). This form is not in the program's help. |
+
+Worked examples:
+
+```text
+$ goodvibes models use openai:gpt-5.4
+Model selected: openai:gpt-5.4
+
+$ goodvibes models current
+GoodVibes current model
+  model: openai:gpt-5.4
+  provider: openai
+  setup: Unknown
+  provider configured: no
+  context: 1,050,000
+```
+
+Failure cases:
+
+```text
+$ goodvibes models use nosuchmodel
+Unknown model: nosuchmodel. Nothing was changed. Name the provider to save a model that is not in the local catalog: goodvibes models use <provider>:nosuchmodel
+```
+
+The exit code is `1`.
+A model that the local catalog does not know is saved when it is named with its provider (`goodvibes models use openai:new-model`); the provider's own answer decides later whether it exists.
+`models pin` refuses a registry key that is not selectable: `Unknown model: <key>. Nothing was pinned.`
+
+### `goodvibes providers` (alias `provider`)
+
+`providers` shows each provider's setup class, whether it is configured, how it signs in, how many models it lists and its sign-in routes.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes providers` or `providers list` | One line per provider; the current one is marked `*`. |
+| `goodvibes providers current` | The current provider, model and sign-in routes. |
+| `goodvibes providers inspect <provider>` | Every sign-in route of one provider with its state and a detail line saying what to do. |
+| `goodvibes providers use <provider> [registryKey]` | Switches the main chat route to the provider and, when given, the model. |
+
+Worked example:
+
+```text
+$ goodvibes providers inspect openai
+Provider openai
+  active: yes
+  setup: Unknown
+  configured: no
+  via: api-key
+  models: 53
+  auth routes: 1/4 configured, 0/4 usable
+    Ambient API key [api-key; not configured, not usable, unconfigured] - No direct API key is configured.
+    SecretRef-backed API key [secret-ref; not configured, not usable, unconfigured] - No SecretRef-backed credential is configured.
+    Service OAuth [service-oauth; not configured, not usable, unconfigured] - Service OAuth metadata exists, but the credential path is incomplete.
+    Subscription OAuth [subscription-oauth; configured, not usable, unconfigured] - A built-in subscription OAuth adapter is available, but no session is stored yet.
+  detail: Not signed in: sign in with a ChatGPT subscription (/subscription login openai start) or set OPENAI_API_KEY.
+```
+
+A line of `goodvibes providers` reads like this:
+
+```text
+  * openai             setup=unknown configured=no via=api-key models=53 routes=1/4 configured, 0/4 usable Not signed in: sign in with a ChatGPT subscription (/subscription login openai start) or set OPENAI_API_KEY.
+```
+
+### `goodvibes subscription` (alias `subscriptions`)
+
+`subscription` signs a provider in with a subscription account instead of an API key. OpenAI (a ChatGPT subscription) is the built-in subscription provider.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes subscription list` | Active and pending subscription sign-ins. |
+| `goodvibes subscription providers` | Providers that offer subscription sign-in, with their redirect address. |
+| `goodvibes subscription inspect <provider>` | One provider's stored sign-in: whether it is active or pending, token type and expiry. Never prints a token. |
+| `goodvibes subscription login <provider> start [--open]` | Starts the sign-in, saves a pending record and prints the authorization address. `--open` opens it in a browser. `goodvibes subscription start <provider>` is a shorter form. |
+| `goodvibes subscription login <provider> finish <code-or-url>` | Finishes the sign-in with the code, or the whole redirect address the browser landed on. `goodvibes subscription finish <provider> <code-or-url>` is a shorter form. |
+| `goodvibes subscription refresh <provider>` | Refreshes the stored token. This form is not in the program's help. |
+| `goodvibes subscription logout <provider>` | Removes the stored or pending sign-in. |
+
+The full sign-in, in order:
+
+1. Run `goodvibes subscription login openai start --open`. It prints the authorization address and opens it:
+
+```text
+Subscription OAuth started: openai
+  source: builtin
+  state: <state>
+  redirectUri: http://localhost:1455/auth/callback
+  next: goodvibes subscription login openai finish <code-or-url>
+  authorizationUrl:
+  https://auth.openai.com/oauth/authorize?response_type=code&...
+```
+
+2. Sign in in the browser. The browser is sent to `http://localhost:1455/auth/callback?code=...`. The page may fail to load; that does not matter.
+3. Copy the whole address from the browser's address bar and run `goodvibes subscription login openai finish '<the address>'`. It prints `Stored subscription session for openai.` with the token type and expiry.
+4. Run `goodvibes providers inspect openai` to confirm that the `Subscription OAuth` route is usable.
+
+Inside the terminal app, `/subscription login openai start` does the same and waits for the browser to return to the local callback address; when the browser returns there the sign-in finishes without step 3.
+
+Failure cases:
+
+- `goodvibes subscription inspect nosuch` prints `No stored or available subscription provider named nosuch.` and exits `1`.
+- A code that the provider refuses prints the provider's error (for example `OAuth token exchange failed (401)`) and exits `1`; start again with `login <provider> start`.
+- `goodvibes subscription logout <provider>` with nothing stored prints `No stored subscription session existed for <provider>.` and exits `1`.
+
+When OpenAI has both a subscription sign-in and an API key, requests use the subscription; a request the subscription fails is sent again to the same model with the API key, and the turn says so once.
+
+### `goodvibes secrets` (alias `secret`)
+
+`secrets` stores credentials in the GoodVibes secret store and links names to external secret references.
+A secret reference has the form `goodvibes://secrets/<source>/<path>` and never contains the value.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes secrets list` | The storage policy, whether secure storage is available, and the stored key names with their scope. Never prints values. |
+| `goodvibes secrets providers` | The reference sources: `env`, `goodvibes`, `file`, `exec`, `1password`, `bitwarden`, `vaultwarden`, `bitwarden-secrets-manager`. |
+| `goodvibes secrets test <ref>` | Checks that a reference resolves, without printing the value. |
+| `goodvibes secrets set <KEY> <value> [--user\|--project] [--secure\|--plaintext]` | Stores a value. `--plaintext` stores it unencrypted. |
+| `goodvibes secrets set <KEY> --stdin` | Reads the value from standard input. Use it for a value that starts with `--`, and to keep the value out of shell history. |
+| `goodvibes secrets link <KEY> <ref> [--user\|--project] [--secure\|--plaintext]` | Makes `<KEY>` resolve through the reference. |
+| `goodvibes secrets delete <KEY> [--user\|--project] [--secure\|--plaintext]` | Deletes a stored key. |
+
+Put flags after the positional words: the `secrets` helper reads the word after a flag as that flag's value.
+
+Worked example:
+
+```text
+$ printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user
+[secrets] Stored: OPENAI_API_KEY
+
+$ goodvibes secrets list
+GoodVibes secrets
+  policy: preferred_secure
+  secure available: yes
+  stored keys: 1
+    OPENAI_API_KEY (user-secure)
+
+$ goodvibes secrets link GITHUB_TOKEN goodvibes://secrets/env/GH_TOKEN --user
+$ goodvibes secrets test goodvibes://secrets/env/GH_TOKEN
+```
+
+A key stored with `--plaintext` is listed with `-plaintext` in its scope and `secrets list` adds `warning: plaintext fallback secrets are present`.
+A provider reads its key from the environment first, then from the secret store.
+
+### `goodvibes sessions` (alias `session`)
+
+`sessions` lists and opens saved sessions of the working directory.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes sessions list` | One line per session: id, message count, last save time, title. |
+| `goodvibes sessions show <id\|name>` | One session's details. |
+| `goodvibes sessions export <id\|name> [path]` | Writes the session to a JSON file (or prints it when no path is given). |
+| `goodvibes sessions resume <id\|name>` | Opens the terminal app on that session. |
+
+```text
+$ goodvibes sessions list
+GoodVibes sessions (3)
+  user-0008b454  messages=34  2026-11-18T16:43:26.464Z  hello
+  user-51cf10f8  messages=11  2026-11-18T04:56:35.305Z  find all of the implicit state machines in this
+  user-7d4c6370  messages=8  2026-11-18T04:52:01.662Z  (untitled)
+
+$ goodvibes sessions show nope
+Session not found: nope
+```
+
+`sessions show` of a missing session exits `1`.
+
+### `goodvibes tasks` (alias `task`)
+
+`tasks` reads runtime tasks from the daemon.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes tasks list` | Tasks the daemon holds. |
+| `goodvibes tasks show <taskId>` | One task. |
+| `goodvibes tasks submit <prompt>` | Submits a non-interactive task to the daemon. |
+
+When no daemon answers, `tasks list` says so and exits `0`:
+
+```text
+GoodVibes tasks
+  None listed: no daemon could be asked (Authentication failed · Token is invalid or has expired · Verify your credentials and token store configuration.); tasks exist only in the daemon or inside a running session.
+```
+
+### `goodvibes auth`
+
+`auth` manages the local user store of the daemon and listener (usernames, passwords, sessions, the bootstrap credential).
+Changes are written to the user store; a running daemon reads the user file again at its next sign-in check.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes auth` or `auth status` | Auth posture. |
+| `goodvibes auth users` | Local users. |
+| `goodvibes auth sessions` | Sessions held by this process (normally none). |
+| `goodvibes auth add-user <username> [--password <value>\|--password-stdin] [--role <role>]` | Adds a user. Without a password flag it reads `GOODVIBES_AUTH_PASSWORD`. `--role` may be repeated; the default role is `user`. |
+| `goodvibes auth delete-user <username>` | Deletes a user. A running daemon (or terminal app) re-reads the user file at its next sign-in or session check, within a few seconds, and ends that user's sessions then; no restart is needed. Prints `Auth user deleted: <username>` and that note; an unknown user prints `No auth user found: <username>` (exit `1`). |
+| `goodvibes auth rotate-password <username> [--password <value>\|--password-stdin]` | Sets a new password. A running daemon ends that user's sessions at its next sign-in or session check, within a few seconds, without a restart. Prints `Auth password rotated: <username>` and that note. |
+| `goodvibes auth revoke-session <session-id-or-token>` | Ends one session held by this short-lived process, which normally holds none, so it prints `No auth session found in this process. Sessions are held in memory by the running host and this command cannot reach them. Restart the host to end all of its sessions.` (exit `1`). To end a session on a running daemon, restart it, or use `delete-user` / `rotate-password` to end every session of one user. |
+| `goodvibes auth revoke-sessions <username>` | The same for every session of one user: normally `No auth sessions revoked for <username> in this process.` followed by the same restart sentence (exit `1`). |
+| `goodvibes auth clear-bootstrap` | Deletes the bootstrap credential file. |
+
+```sh
+printf '%s\n' '<new-password>' | goodvibes auth add-user admin --password-stdin --role admin
+```
+
+Sessions live in the memory of the running daemon; this command cannot end them. Restart the daemon to end them all.
+Local accounts are described under "Sign-in users" in the daemon part.
+
+### `goodvibes acp`
+
+`acp` runs the terminal app as an Agent Client Protocol agent on standard input and output. It is described under the heading "Editors: the Agent Client Protocol" below.
+
+### `goodvibes host pair` and `goodvibes host unpair`
+
+`host pair` reviews and creates the credential this terminal app uses to call its host daemon.
+
+```sh
+goodvibes host pair                         # review only: prints what pairing would do
+goodvibes host pair --bootstrap-shared      # review using the daemon's shared bootstrap credential
+goodvibes host pair --apply                 # create the credential; asks for fresh confirmation
+goodvibes host unpair                       # forget the stored credential here
+```
+
+`--url <exact-origin>` names the host and `--name <device-name>` names the credential.
+`--apply` needs a fresh confirmation typed in an owner terminal; `--yes` is not accepted for it.
+`unpair` forgets the credential here only; it stays valid on the host until it is revoked there.
+Host pairing is described under "Host pairing: giving the terminal app its own credential" in the daemon part.
+
+### `goodvibes pair` (aliases `qrcode`, `qr`)
+
+`pair` mints a named, revocable device token on the connected daemon and prints its pairing link and a QR code for a phone or browser.
+
+```sh
+goodvibes pair --name "my phone"
+```
+
+Device pairing is described under "Pairing a phone or another browser" in the daemon part.
+
+### `goodvibes web`, `surfaces`, `listener`, `control-plane`, `service`, `remote`
+
+These commands report and change the daemon's network surfaces and service. They are described in full under "Network exposure", "Serving the web UI" and "Service commands" in the daemon part, and under "The daemon's background service" in the install part; their usage is:
+
+| Command | Usage | Effect |
+| --- | --- | --- |
+| `web` | `goodvibes web [--open] [--hostname <h>] [--port <p>]` | Prints the web settings: `web.enabled`, the declared web endpoint `web.host:web.port`, and a URL (`web.publicBaseUrl` when set, else that endpoint); `--open` opens the URL. It does not check that anything answers there (see below). |
+| `surfaces` (alias `surface`) | `surfaces [list]`, `surfaces check [<web\|listener\|control-plane\|surfaceId>]`, `surfaces show <...>`, `surfaces enable <...>`, `surfaces disable <...>` | Inspects and turns on or off the web UI, the control plane, the HTTP listener and each channel surface (for example `slack`). |
+| `listener test [--json]` (aliases `http-listener`, `webhook`) | | Checks HTTP listener and webhook readiness. |
+| `control-plane status [--json]` (aliases `controlplane`, `cp`) | | Daemon bind posture, reachability, local auth, bootstrap credential and operator tokens. |
+| `service` (alias `services`) | `service status`, `service check [--json]`, `service install\|start\|stop\|restart\|uninstall` | The daemon's background service. |
+| `remote` (alias `bridge`) | | Remote runner pools, runner contracts, review artifacts and private-host fetch posture. |
+
+```text
+$ goodvibes web
+GoodVibes web
+  enabled: yes
+  bind: local 127.0.0.1:3423
+  url: http://127.0.0.1:3423
+
+$ goodvibes remote
+GoodVibes remote status
+  runner pools: 0
+  contracts: 0
+  review artifacts: 0
+  private-host remote fetch: no
+```
+
+`goodvibes web` prints `http://127.0.0.1:3423` on a fresh install (`web.enabled` defaults to on, `web.publicBaseUrl` to empty), but nothing listens on port 3423: `web.port` is only a declared endpoint used for links. The daemon serves the web UI from its control-plane listener, on the same address as its API, by default `http://127.0.0.1:3421`, and only after `goodvibes-daemon webui enable` (see "Serving the web UI" in the daemon part). Open that address, not the one `goodvibes web` prints. `goodvibes web --open` opens the printed URL, so it opens a page that does not load unless `web.publicBaseUrl` is set to the address that answers.
+
+### `goodvibes support-bundle` (aliases `bundle`, `bundles`)
+
+A support bundle is a redacted snapshot of configuration, diagnostics and posture, for a support request or for moving settings to another machine.
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes support-bundle export [path]` | Writes the bundle. |
+| `goodvibes support-bundle inspect <path>` | Prints what a bundle holds. |
+| `goodvibes support-bundle import <path> [--include-security] [--yes]` | Applies the bundle's setting values. |
+
+`import` refuses a bundle from another product or format version.
+It imports only values that differ from the current settings.
+It holds back permission, sandbox, listener, service and storage settings unless `--include-security` is given.
+It applies all values or none.
+Without `--yes` it lists each change as `current -> new`, changes nothing and exits `2`.
+
+```sh
+goodvibes support-bundle export goodvibes-bundle.json
+goodvibes support-bundle inspect goodvibes-bundle.json
+goodvibes support-bundle import goodvibes-bundle.json          # preview, exit 2
+goodvibes support-bundle import goodvibes-bundle.json --yes    # apply
+```
+
+`plugin bundles` is a different command (capability bundles; see "Plugins" below).
+
+### `goodvibes hooks validate`
+
+`hooks validate` checks the hooks file (`hooks.json` in the working directory, or the file `tools.hooksFile` names) against the hook loader's rules, and prints one line per hook.
+It exits `1` when any hook is invalid.
+
+```text
+$ goodvibes hooks validate
+GoodVibes hooks validation
+  file: /home/me/work/project/hooks.json
+  hooks: 2 total, 1 pass, 1 fail
+  FAIL  pre:tool:exec #0 (unnamed): "pre:tool:exec" is not a recognized hook event point: no registered hook point matches it (phases are Pre, Post, Fail, Change and Lifecycle, and case matters); /hooks contracts lists them
+  PASS  Post:tool:write #0 (unnamed) (contract: observe/non_blocking)
+  result: 1 problem(s) found.
+```
+
+With no hooks file it prints `no hooks file present: nothing to validate.` and exits `0`.
+
+### `goodvibes plugin` (alias `plugins`)
+
+| Form | Effect |
+| --- | --- |
+| `goodvibes plugin init <name> [directory]` | Writes a minimal plugin (`manifest.json` and `index.js`) and validates it. |
+| `goodvibes plugin validate <path>` | Runs the plugin loader's checks on a plugin directory. |
+| `goodvibes plugin trust <name> <untrusted\|limited\|trusted> [note]` | Sets the plugin's trust tier for every GoodVibes program on this machine. Marking a plugin `trusted` whose signature does not verify needs `--yes`. |
+| `goodvibes plugin verify <name>` | Checks the plugin's signature against its saved publisher key. |
+| `goodvibes plugin capabilities <name>` | Prints what the plugin declares and what its tier grants. |
+| `goodvibes plugin bundles browse <index-url-or-file>` | Lists the capability bundles in a marketplace index. |
+| `goodvibes plugin bundles install <ref> --sha256 <pin> [--ref <git-ref>] [--yes]` | Verifies and, with `--yes`, installs a capability bundle. |
+| `goodvibes plugin bundles uninstall <id>` | Removes an installed bundle. |
+| `goodvibes plugin bundles list` | Lists installed bundles. |
+
+Worked example:
+
+```text
+$ goodvibes plugin init my-plugin
+Scaffolded plugin "my-plugin" at /home/me/work/project/.goodvibes/plugins/my-plugin
+  created: manifest.json, index.js
+  validation: PASS; the plugin loader accepts this directory.
+  next: run "goodvibes plugin validate /home/me/work/project/.goodvibes/plugins/my-plugin" or restart the TUI to load it.
+```
+
+Without a directory, `plugin init <name>` writes `<project>/.goodvibes/plugins/<name>/`, where the loader looks. With a directory it writes there. The `validation: PASS` line checks only that the files are a valid plugin; it does not check that the directory is one the loader searches. A plugin written anywhere other than `<project>/.goodvibes/plugins/<name>/` or `~/.goodvibes/plugins/<name>/` is never loaded, even after a restart.
+A scaffolded plugin is not running yet: it must also be enabled (`/plugin enable my-plugin`), as described under "Plugins".
+Refusals: `A plugin already exists at <dir> (manifest.json present). Choose another name or directory.` (exit `1`); `Cannot create the plugin: manifest.name must be lowercase letters, digits and hyphens, starting with a letter or digit (got 'Bad Name'); for example 'my-plugin'.` (exit `2`).
+
+The heading "Plugins" below explains manifests, trust tiers and capability bundles.
+
+### `goodvibes completion` (alias `completions`)
+
+`completion <bash|zsh|fish>` prints a shell completion script generated from the command catalog.
+
+```sh
+goodvibes completion bash > ~/.local/share/bash-completion/completions/goodvibes
+goodvibes completion zsh > "${fpath[1]}/_goodvibes"
+goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
+```
+
+### `goodvibes help` and `goodvibes version`
+
+`goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
+`goodvibes version` prints `goodvibes 3.3.1`.
+`goodvibes help version` has no detailed help and prints the overview.
+
+## The interface
+
+### Screen layout
+
+The screen has four regions, top to bottom.
+
+1. The header names the session and the current view. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color.
+2. The transcript shows the conversation: owner prompts, model answers, tool calls with their results, notices in square brackets (`[Permissions]`, `[Context]`, `[Failover]`), and the work tree of helper agents and background processes started in the turn.
+3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
+4. The footer shows the model, the permission mode pill, context use, cost, status chips (for example the "sleep disabled" chip and the "used N memories" chip) and a hint saying what the next `Esc` does.
+
+While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Tab` and `Shift+Tab` switch between sessions when the composer is empty.
+
+### What the composer does with typed text
+
+| Typed text | What happens on Enter |
+| --- | --- |
+| Plain text | It is sent to the model as a prompt. |
+| A line that starts with `/` | It runs as a slash command. Typing `/` opens command autocomplete. |
+| A line that starts with `!` | The rest runs as a shell command in the working directory, beside the composer. Its output is shown and is placed in front of the next prompt as context. `Esc` stops a command that is still running. Spoken input is never run as a shell command. |
+| `!# <text>` | `<text>` is pinned to session memory and also sent as the prompt. `[Memory] Pinned: "<text>" (<id>)` confirms it. |
+| A single line `# <text>` (hash and space) | `<text>` is saved as a session-memory note and nothing is sent. `✓ Note saved → session memory: "<text>" (<id>)` confirms it. `#482 is failing`, `## heading` and text of more than one line are sent as prompts. |
+| `@model:<id>` as the first or last word | The model switches exactly as `/model <id>` would, then the rest is sent. Only a whole word at either end counts. When the switch does not happen, the text stays in the composer. |
+| `!@<path>` | The file's text replaces the reference before sending. A file that cannot be read stops the send with the reason. |
+
+Text that was not typed into the composer (a skill body, `/retry`, a template, `/image`, a form, speech) is sent as written and never read for these markers.
+In the terminal app, `@<path>` is plain text that names the file; the model reads it with its tools. (The Agent expands `@<path>` itself; see "Composer differences" in the Agent part.)
+A paste of more than 8 lines folds into a marker `[TEXT: pN, M lines]`; `/pastes` shows what each fold holds before sending.
+
+Images in the terminal app:
+
+- An image pasted from the clipboard (`Ctrl+V`, or `/paste`) becomes a marker `[IMAGE: img1, clipboard, <size>KB]` in the composer and is sent with the message as an image.
+- Pasting the path of an image file (ending in `.png`, `.jpg`, `.jpeg`, `.webp` or `.gif`) that exists and is at most 20 MB attaches the file the same way: `[IMAGE: img2, photo.png, <size>]`. A larger file stays a plain pasted path.
+- `/image <path> [prompt text]` sends the image with the prompt at once. A file over 20 MB is refused with its size. When the current model does not accept images, it prints `Warning: <model> does not support image input. The image will be stripped when sending.` and the image is not sent to that model.
+- Deleting a marker with `Backspace` removes that image.
+- `@photo.png` typed in the composer is plain text, and `!@photo.png` reads the file as UTF-8 text, so neither sends an image.
+
+### Fixed keys
+
+These keys are not in the rebindable table.
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Send the composer, or run the selected row in a list. |
+| `Shift+Enter` | Insert a newline. |
+| `Tab` | Complete a path or command; with an empty composer while session chips show, switch to the next session; otherwise toggle the nearest block's collapse. |
+| `Esc` | Close the top view (one level), then clear the composer, then interrupt the running turn. Inside Agents it backs out one level and never stops work. |
+| `PageUp`, `PageDown` | Scroll the transcript by a page. |
+| `Up`, `Down` | Scroll the transcript, or recall input history when the composer is focused. |
+| `F2` | Open or close the Agents view. |
+| `?` on an empty composer | Open the help list of every command. |
+| `@` at the start or after a space | Open the file picker; the chosen path is inserted. `!@` opens it to insert a file whose text will be embedded. |
+| `r` or `m` after a turn error | Retry the turn, or open the model picker. Any other key dismisses the choice. |
+| `n`, `N` in locked search | Next or previous match; the search wraps and shows `(wrap)`. |
+| Mouse wheel, drag, middle click | Scroll, select text, paste. |
+
+### Rebindable keys
+
+The default table of the terminal app:
+
+| Action | Default key | What it does |
+| --- | --- | --- |
+| `copy-selection` | `Ctrl+Shift+C` | Copy selected text to the clipboard. |
+| `clear-cancel` | `Ctrl+C` | Clear the composer; on an empty composer cancel generation; pressed twice within one second, exit. The footer shows `Press Ctrl+C again to exit`. |
+| `screen-clear` | `Ctrl+L` | Repaint the screen. |
+| `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette: every command, view and setting. |
+| `open-agents` | `Ctrl+O` | Open the Agents view (the same as `F2`). |
+| `history-search` | `Ctrl+R` | Reverse search of input history. |
+| `search` | `Ctrl+F` | Search this conversation's transcript. |
+| `block-copy` | `Ctrl+Y` | Copy the nearest block. |
+| `bookmark` | `Ctrl+B` | Bookmark or unbookmark the nearest block (`/bookmarks` lists them). |
+| `block-save` | `Ctrl+S` | Save the nearest block to a file. |
+| `delete-word` | `Ctrl+W` | Delete the word before the cursor (whitespace-delimited) into the kill ring. |
+| `line-start` | `Ctrl+A` | Move to the start of the line. |
+| `next-error-line-end` | `Ctrl+E` | Move to the end of the line; on an empty composer, jump to the next error in the transcript. |
+| `kill-line` | `Alt+K` | Kill from the cursor to the end of the line into the kill ring. |
+| `clear-prompt` | `Alt+U` | Clear the whole composer without using the kill ring. |
+| `undo` | `Ctrl+Z` | Undo the last composer edit. |
+| `redo` | `Ctrl+Shift+Z` | Redo the last undone composer edit. |
+| `paste` | `Ctrl+V` | Paste from the clipboard; an image takes priority over text. |
+| `word-back` | `Alt+B` | Move to the start of the previous word. |
+| `word-forward` | `Alt+F` | Move to the end of the next word. |
+| `kill-to-start` | `Ctrl+U` | Kill from the cursor to the start of the line into the kill ring. |
+| `kill-word-forward` | `Alt+D` | Kill the next word into the kill ring. |
+| `yank` | `Ctrl+Shift+Y` | Paste the newest kill-ring entry. |
+| `yank-pop` | `Alt+Y` | Right after a yank, replace it with the previous kill-ring entry. |
+| `cancel-tool-call` | `Alt+C` | Cancel the running tool call; the turn continues. |
+| `toggle-keep-awake` | `Alt+A` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
+| `toggle-memory-provenance` | `Alt+M` | List or hide the memories the last turn used. |
+| `voice-input` | `Alt+V` | First press starts recording; the second press stops it and puts the transcription in the composer. |
+| `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
+| `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode (see below). |
+
+`Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
+Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
+The change lasts for the session only. The saved default is changed in `/settings` (or `/config set permissions.mode <mode>`); `/permissions` shows it but does not change it.
+Plan mode is outside the cycle; `/plan` turns it on and off.
+The line `[Permissions] Mode for this session: just-vibes (the saved default is set in /settings; /permissions shows it)` confirms each change; when `yolo` was declined it begins `[Permissions] yolo skipped. Mode for this session: ask-me ...`.
+A managed lock on `permissions.mode` stops the change: `[Permissions] Mode stays <mode>: <reason>`.
+
+### Changing a key
+
+Key overrides are kept in `~/.goodvibes/tui/keybindings.json`.
+The file is a JSON object from action name to one key combination or a list of them.
+A key combination is an object with `key` (a single character or a key name such as `tab`, `up`, `pageup`, `f2`) and the optional booleans `ctrl`, `alt` and `shift`.
+
+```json
+{
+  "command-palette": [{ "key": "p", "ctrl": true }],
+  "kill-line": { "key": "k", "ctrl": true, "alt": true },
+  "voice-input": [{ "key": "v", "alt": true }, { "key": "space", "ctrl": true }]
+}
+```
+
+`/keybindings` lists the current bindings and the file path.
+An unknown action is ignored with the notice `keybindings: unknown action "<name>" ignored`.
+An invalid combination keeps the default: `keybindings: invalid key combination for "<name>" ignored; the default stays`.
+Two actions on one key are reported: `keybindings: <key> is bound to <a> and <b>; only <b> responds to it`.
+A file that cannot be parsed is ignored as a whole and the defaults apply.
+The old action name `apply-diff-line-start` is read as `line-start`.
+
+### Views
+
+Every view opens as a modal over the dimmed conversation; `Esc` closes one level at a time.
+
+| View | How to open | What it holds |
+| --- | --- | --- |
+| Command palette | `Ctrl+P`, `Ctrl+K`, `/palette` | Every command, view and setting, searchable. Old pane names (fleet, tokens, git) are search words. |
+| Agents | `F2`, `Ctrl+O`, `/agents`, `/cockpit` | Everything running and finished: helper agents, review chains, workflows, contracts, tasks, worktrees, hosted sessions. `s` steers the selected agent, `Ctrl+X` stops it (first press asks, second stops), `Enter` opens an agent or background process full screen. |
+| Usage | `/usage`, `/cost` | Context bar with the compaction threshold, session tokens and cost, per-turn bars, per-agent cost and the budget alert. |
+| Changes | `/changes`, `/diff`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
+| Notifications | `/notifications` | Every notice, newest first; `Enter` goes to its subject. |
+| Sessions | `/sessions`, `/resume` | Saved sessions, with hosted sessions in a Hosted group. |
+| Settings | `/settings`, `/config` | Every setting by category, searchable. |
+| Model picker | `/model`, `/provider` | Providers and models for each route. |
+
+An opened helper agent shows its work as the spine of the transcript; the composer then steers that agent while the main conversation keeps running.
+An opened background process shows live output with timestamps, errors in red and follow mode on; it takes no input; `/` searches its output and `y` copies it.
+`Esc` returns one level (a child agent to its parent, then main) and never stops anything.
+
+### Keys inside lists and forms
+
+Pickers (session picker, profile picker, selection lists, the recovery offer) share these keys:
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Run the selected row's main action. |
+| `Space` | Toggle the selected row when it has a toggle. |
+| `Left`, `Right` | Decrease or increase an adjustable row. |
+| `Shift+Left`, `Shift+Right` | The same adjustment times ten. |
+| `/`, or any key no row claims | Start filtering. |
+| `Backspace` | Delete one character of the filter. |
+| `Esc` | Close the list in one press. |
+
+Configuration workspaces (`/recall`, `/work-plan`, `/marketplace`, `/plugin`, `/services`, `/subscription` and others) keep a search row that always takes typed characters.
+An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`).
+An action that deletes, uninstalls or clears asks for the same key a second time; `Esc` cancels.
+
+### Turn errors
+
+When a turn fails, the transcript shows `[Error]` with what happened and what to do, and the composer offers `r` (retry the turn) and `m` (open the model picker).
+A provider failure may move to another sign-in, another backend of a `synthetic` model, or the next model of your fallback order, as described under "Failover".
+`/retry [modified text]` sends the last prompt again, optionally changed.
+
+## Slash commands
+
+### How slash commands work
+
+A slash command is typed in the composer and run with Enter: `/model openai:gpt-5.4`.
+Typing `/` opens autocomplete; `Tab` completes the selected command.
+Every command has a primary name and may have aliases; `/m` is `/model`.
+Arguments are separated by spaces; quote an argument that contains spaces with `"` or `'` at the start of the word (`/title "Release prep"`).
+A quote character inside a word is an ordinary character, so `["a","b"]` is one word.
+A backslash outside quotes is an ordinary character (`C:\dir`).
+An unclosed quote refuses the whole line instead of being guessed.
+A command marked hidden runs when typed but is left out of `/commands`.
+A command that would change or delete something important asks for confirmation in a dialog; some take `--yes` instead.
+A command that needs the daemon says `[<command>] <reason>` and changes nothing when no daemon answers.
+A command the model runs on the owner's behalf passes the permission gate like any tool call; a few commands (`/host`, `/remote dispatch`, `/project-plan <goal>`, `/workstream start`) refuse unless the owner typed them.
+
+The complete list of the terminal app's slash commands, with usage, aliases and descriptions, is under "Slash commands: terminal app" in the reference part.
+
+The sections below explain the commands grouped by task. Each entry gives the purpose, the forms, a worked example with its result, and the failure cases.
+
+### Help, navigation and display
+
+`/help` (aliases `/h`, `/?`) opens a list of every command with its description; picking a row runs that command. Pressing `?` on an empty composer does the same.
+`/commands` (alias `/cmds`) opens a scrollable list of every visible command.
+`/palette` (alias `/k`) opens the command palette, the same as `Ctrl+P`. Without an interface it prints `The command palette is unavailable in this context.`
+`/shortcuts` (aliases `/keys`, `/keybinds`) shows the keyboard reference. `/keybindings` (alias `/kb`) lists the current bindings and the path of `keybindings.json`.
+`/find` (alias `/findtext`) searches this conversation's transcript, the same as `Ctrl+F`. `/search` searches the web instead.
+
+`/expand [all|thinking|tool|code]` and `/collapse [all|thinking|tool|code]` open or fold every transcript block of that type. Without an argument they act on all blocks.
+`/bookmarks` (alias `/bm`) lists blocks bookmarked with `Ctrl+B`.
+`/next-error` (alias `/ne`) and `/prev-error` (alias `/pe`) scroll to the next or previous error line in the transcript.
+
+`/mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]` (alias `/hitl`) sets how much the app prints. It writes `behavior.hitlMode` (default `balanced`).
+`/mode show` prints the current mode and the per-domain verbosity.
+`/mode set-domain <domain> <minimal|normal|verbose>` sets one domain's verbosity; a wrong form prints `Usage: /mode set-domain <domain> <minimal|normal|verbose>`.
+
+`/notifications` opens the notification history.
+`/conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]` (aliases `/transcript`, `/composer`) reviews the transcript's structure: event kinds, groups, the busiest regions, the composer's state, and jumps between events of one kind. A wrong form prints its usage.
+
+`/welcome [open|print]` (alias `/guide`) opens the entry page with links to onboarding, security, the marketplace, remote work and operator workflows; `print` writes it into the transcript.
+`/guidance [review|dismiss <id>|reset [id]]` lists contextual guidance items, dismisses one for its current occurrence, or resets dismissals.
+`/guidance dismiss g1` on an item that is not showing prints `Guidance item g1 is not showing now, so there is nothing to dismiss. /guidance lists the items that are.`
+
+`/panel [<name> | open <name> [--target <id>[:<kind>]] | list]` (alias `/panels`) opens a view by an old pane name (fleet, tokens, git and others). `/panel list` shows where each old name goes. An unknown name prints `Nothing holds "<name>". /panel list shows where the old names go.`
+`/deeplink [review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]` (alias `/link`) lists, opens and exports `goodvibes://open/<view>` links. `/deeplink open agents` opens Agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
+
+`/debug` toggles debug mode and prints `Debug mode: ON` or `Debug mode: OFF`.
+`/state [domain...]` prints what the app's runtime store holds now (session, conversation, agents, tasks, permissions and more), for debugging.
+
+`/health` (alias `/doctor`) is the in-app health review.
+Bare `/health` and `/health report` print a report across every domain.
+`/health <domain>` reviews one domain: `setup`, `services`, `sandbox`, `provider` (opens the providers view), `accounts`, `auth`, `settings`, `intelligence`, `remote`, `mcp`, `memory`, `metrics`, `continuity` (last-session pointer and recovery files), `worktrees`, `maintenance` (context use and session upkeep), `term` (terminal capabilities such as color depth).
+`/health review` and `/health open` open the health view; `/health next [domain]` names the next thing to fix.
+Any other words are a symptom, and the matching runbook's checks run against the app's live state without a model request: `/doctor stuck turn`. `/health diagnose <symptom>` is the explicit form; `/health diagnose` with no symptom prints `Usage: /doctor <symptom>, for example /doctor stuck turn`.
+`/quit` (aliases `/:q`, `/:wq`, `/exit`) saves the session and exits.
+
+### The conversation
+
+`/clear` (aliases `/cls`, `/reset`) saves the current conversation as its own session and starts a fresh one.
+While a turn runs it refuses: `A turn is still running. Stop it with Esc or let it finish, then /clear.`
+When the save fails nothing is cleared: `Could not save the current conversation, so nothing was cleared: <reason>`.
+
+`/compact` summarizes older messages to free the context window. The transcript shows a before and after notice.
+When the model's context window is too small to summarize, the oldest messages are dropped without a summary and the notice says so: `[Context] Dropped the N oldest message(s) without a summary and kept the last M ...`.
+When there is nothing to compact: `[Context] Nothing was compacted: <reason>.`
+The app also compacts on its own when context use reaches `behavior.autoCompactThreshold` percent (default `80`, range 10 to 100).
+`/compact-history` (alias `/compaction-history`) lists this session's compactions.
+
+`/keep <text>` pins text to session memory; pinned text survives compaction. `/keep` with no text prints its usage. Blank text prints `[Pin] Nothing pinned: text was blank.`
+`/note [list|add <text>|remove <id>]` manages session notes, which are also kept across compaction. `/note add Ask about the staging DNS` prints `Note added: [<id>] Ask about the staging DNS`; `/note remove <id>` prints `Note removed: [<id>]` or `Note not found: <id>`.
+`/title [text]` shows or sets the conversation title.
+
+`/retry [modified text]` (alias `/r`) sends the last request again, keeping the work already done; with text it sends that text instead.
+`/queue [list | edit <n> <text> | delete <n>]` (alias `/q`) manages messages typed while a turn is streaming; they wait in a queue until the turn ends. With an empty queue: `No queued messages. (Messages typed while a turn is streaming queue here until it finishes.)`
+
+`/paste` (alias `/clip`) inserts the clipboard's text or image into the composer. Use it when the terminal's own paste does not carry images. With nothing usable: `Clipboard does not contain supported text or image data.`
+`/pastes [pN]` (alias `/pending-pastes`) shows the text behind each `[TEXT: pN, M lines]` fold. With no folds: `[Pastes] No folded pastes are currently in the composer (pastes over 8 lines fold to [TEXT: pN, M lines]).`
+`/image <path> [prompt text]` (alias `/img`) attaches an image file (PNG, JPEG, WebP, GIF) to the next message, optionally with the prompt. Without a path it refuses with `Usage: /image <path> [prompt text]`.
+`/editor` (alias `/ed`) opens the composer draft in `$VISUAL` or `$EDITOR`, suspends the interface while the editor runs, and puts the saved text back in the composer. Set `export EDITOR=nvim` first.
+
+`/template save <name> | use <name> [args] | list | show <name> | edit <name> | delete <name> [--global]` (alias `/tmpl`) manages prompt templates.
+Project templates live in `<project>/.goodvibes/templates/`; global templates live in `~/.goodvibes/templates/`.
+`/template save review` saves the composer draft as `review`; `/template use review src/api.ts` sends it with arguments filled in.
+A missing template prints `Template not found: <name>. Run /template list to see the templates, or /template save <name> to create it.`
+
+### Sessions
+
+`/sessions [resume <id|name>]` opens the session picker or resumes one session.
+`/resume [session-id-or-name]` opens the picker, or resumes the named session. With no saved sessions: `No previous sessions to resume yet. /session save [name] stores the current one explicitly.`
+`/save [name] [--replace] [--switch]` saves the current session to `<project>/.goodvibes/tui/sessions/`. `--replace` overwrites a different session saved under that name; `--switch` continues in the saved copy.
+`/load <name>` loads a saved session. Without a name: `Usage: /load <session-name>`, then `Run /sessions to list available sessions.`
+A session another running terminal has open is refused by `/load`, `/resume`, `/sessions` and the picker asks before resuming it.
+
+`/session <subcommand>` (alias `/sess`) is the full session front door:
+
+| Subcommand | Effect |
+| --- | --- |
+| `list` | List saved sessions. |
+| `rename <name>` | Rename the current session. |
+| `resume <id\|name> [--force]` | Resume a saved session. |
+| `fork [name]` | Fork the current session into a new one. |
+| `save [name] [--yes]` | Save the current session; `--yes` replaces a different session that already uses the name. |
+| `info [id]` | Show session details. With no subcommand, `/session` shows the current session's info. |
+| `export <id\|.> [markdown\|text] [--out <path>] [--print]` | Write the redacted transcript to a file, or print it. `.` is the current session. |
+| `search <keyword>` | Search session content. |
+| `delete <id> --yes` | Delete a saved session. |
+| `events [kind] [start-row] [--last N]` | Transcript events, newest 16 by default. |
+| `groups [kind] [start-row] [--last N]` | Transcript events grouped, 12 per page. |
+| `hotspots [kind]` | Per-kind event counts and the busiest groups. |
+| `link-task <taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]` | Register a task in the cross-session task graph. |
+| `handoff <taskId> --to <sid> [--session <sid>] [--reason <reason>]` | Hand a task to another session. |
+| `handoff list`, `handoff accept <handoffId>`, `handoff reject <handoffId>` | Review waiting handoffs. |
+| `graph [--session <sid>] [--format text\|json]` | Show the cross-session task graph. |
+| `cancel <taskId> [--scope task\|subtree\|session] [--session <sid>] [--reason <reason>]` | Cancel tasks. |
+
+Worked example:
+
+```text
+/session export . markdown --out notes/session.md
+Exported session user-0008b454 (34 messages, redacted) to notes/session.md
+```
+
+Failure cases: `/session rename` without a name prints `Usage: /session rename <new-name>`; `/session delete <id>` without `--yes` prints `Usage: /session delete <session-id> --yes`; `/session link-task a:b` prints `Error: taskId cannot contain ":"; it conflicts with the composite key format.`; an unknown handoff prints `[session] Unknown handoff: <id>. Nothing was changed. /session handoff list shows the waiting ones.`
+
+`/export [format] [path]` writes the conversation to a Markdown file (`markdown` or `md`, the default) or a text file (`text` or `txt`), named `conversation-<timestamp>.md` (or `.txt`) in the working directory when no path is given.
+The path is resolved against the working directory and must lie inside it; another path is refused with `Error: Export path must be within the current directory.` and nothing is written. The file is redacted (API keys, tokens and similar values are masked) before it is written; if redaction fails nothing is written. Replacing an existing file asks first; `--yes` answers in advance. The Agent's `/export` is the same, and its refusal reads `Error` followed by `message Export path must be within the current directory.`
+
+`/share <html|json|md> [path] [--redact] [--upload] [--no-redact] [--copy] [--open]` exports the session in a shareable format.
+
+- The file is written to `[path]` (resolved against the working directory), or to `~/goodvibes-exports/session-<timestamp>.<html|json|md>` when no path is given.
+- `--redact` removes API keys, tokens, and this account's home path and login name from the export (other users' paths are not matched). A local export without `--redact` is not redacted.
+- `--upload` also uploads the export to GitHub as a secret Gist (unlisted, not private: anyone with the link can read it). The upload is always redacted unless `--no-redact` is given; `--no-redact` is valid only with `--upload` and asks for confirmation first, because copies made from the link cannot be recalled.
+- `--copy` copies the export file's path to the clipboard.
+- `--open` opens an HTML export in the default browser; for `json` and `md` it is ignored and the result line says `(--open ignored: only applies to html)`.
+
+The GitHub credential for `--upload` is found in this order:
+
+1. the `github` entry of the named API services (`~/.goodvibes/tui/services.json`, see "Named API services"), when its auth headers contain `Authorization: Bearer <token>` or `Authorization: token <token>`; no other header is taken as the token;
+2. the environment variable `GITHUB_TOKEN`.
+
+The token needs the `gist` scope. It is sent only to `https://api.github.com/gists` in one `POST` whose body holds the description (`GoodVibes session: <title>`, or `GoodVibes session export` for an untitled session), `"public": false`, and the file under its file name.
+
+A successful export prints one line with hints:
+
+```text
+/share html --upload
+Exported HTML session to /home/me/goodvibes-exports/session-2026-11-18T17-40-02.html  (redacted before upload)  Share link: https://gist.github.com/<user>/<id>  Upload receipt: /home/me/goodvibes-exports/session-2026-11-18T17-40-02.html.gist-<uuid>.json
+```
+
+The hint is `(sensitive data redacted)` or `(not redacted)` for a local export, and `(redacted before upload)` or `(uploaded unredacted, as stored)` for an upload.
+Every upload attempt writes a receipt file `<export path>.gist-<uuid>.json` (mode 600) with `version`, `sessionId`, `exportedPath`, `recordedAt` and either `status: "accepted"` with `url`, or `status: "unconfirmed"`. When the receipt cannot be written, a notice in `/notifications` records the outcome instead.
+
+Failure cases:
+
+| Situation | What is printed | Next step |
+| --- | --- | --- |
+| `--redact` with `--no-redact` | `Choose one of --redact and --no-redact. Nothing was exported or uploaded.` | Pick one. |
+| `--no-redact` without `--upload` | `--no-redact applies only to --upload; a local export is unredacted unless --redact is given. Nothing was exported.` | Drop it. |
+| An unknown option | `Unknown option: --x. Nothing was exported or uploaded. Valid options: --redact, --upload, --no-redact, --copy, --open. For a path that starts with "--", write it as ./<path>.` | Fix the option. |
+| Two paths | `Expected at most one output path but got 2: ... Nothing was exported or uploaded.` | Give one path. |
+| Empty conversation | `Nothing to export: conversation is empty.` | |
+| No token | `No GitHub token found for --upload.` followed by how to add a `github` service entry or set `GITHUB_TOKEN` (a PAT with the `gist` scope). The local export is kept. | Add the token, run `/share` again. |
+| The `github` service entry cannot be read and no `GITHUB_TOKEN` | `Upload not attempted: the github service entry could not be read (<reason>) and GITHUB_TOKEN is not set. Local export saved at <path>.` | Fix `services.json` or set `GITHUB_TOKEN`. |
+| GitHub answered with an error, or a network error | `Upload unconfirmed: GitHub API error <status>: <body>. GitHub may have received it; check before retrying.` (or `Network error: ...`) | Check your Gists before retrying. |
+| The upload threw | `Upload failed: the Gist upload did not complete (<reason>). Local export saved at <path>.` | Retry. |
+
+`/fork [name]` (alias `/branch-save`) saves a named snapshot of the conversation as a branch. `/fork try-redis` prints `Forked conversation as "try-redis" (N messages).`; an existing name is refused: `Branch "try-redis" already exists; it was not replaced.`
+`/branch [name]` (alias `/br`) lists branches, or switches to one. `/branch` with none: `No branches. Use /fork [name] to create one.` An unknown name: `Branch "<name>" not found. Use /fork [name] to create one, or /branch to list.`
+`/merge <name>` appends the branch's messages after the fork point. When both changed after the fork it refuses: `Branch "<name>" and the current conversation both changed after the fork, so it was not merged.`
+`/branch` and `/merge` refuse while a turn is running.
+
+`/hosted [new|list|attach|say|later|cancel|detach|kill <id>] [args]` works with daemon-hosted sessions, whose conversation loop runs in the daemon so it continues without a terminal.
+`/hosted new` starts one; `/hosted list` lists them; `/hosted attach <id or list number>` joins one; `/hosted say <text>` sends a prompt; `/hosted later <text>` queues text for after the current turn; `/hosted cancel [callId]` cancels the running tool call; `/hosted detach` leaves without ending it; `/hosted kill <id>` ends it.
+With nothing attached: `[hosted] no hosted session is attached; /hosted attach <id> first.` Hosted sessions are described under "Hosted sessions" in the daemon part.
+
+`/teleport <export|inspect|import> <path> [--yes]` exports, inspects or imports a remote session bundle (runner pools, contracts, artifacts); it is the same as `/remote session`. `import` replaces what is held here only with `--yes`.
+
+`/replay [load [runId] | step [n] | seek <rev> | diff <runId> | export <path>]` (alias `/rep`) loads a recorded run, steps or seeks through its revisions, compares two runs and exports one.
+
+### Undo, rewind and checkpoints
+
+The terminal app records a checkpoint of the workspace files at each turn and each helper-agent run, in any workspace.
+`/checkpoint [label]` creates a manual checkpoint kept for forensic retention: `Checkpoint created: <id> "<label>" (forensic retention).` With no file changes since the last one: `No changes since the last checkpoint; nothing to save.`
+`/checkpoints` (alias `/ckpts`) lists checkpoints, newest first. With none: `No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.`
+
+`/rewind` with no argument lists the turns completed in this run of the app (a resumed session restores its turn list: `Rewind: restored N turn anchor(s)`).
+`/rewind <n|turnId> [files|conversation|both]` rewinds to the end of that turn. `files` restores workspace files, `conversation` removes the later messages, `both` (the default) does both.
+The rewind is previewed in the Changes view: `Previewing rewind of turn "<label>" (<scope>: ...). Enter or y rewinds, n or Esc cancels.`
+Cancelling prints `Rewind cancelled: nothing changed.`
+A wrong scope prints `Unknown scope "<word>". Use one of: files | conversation | both.`
+`/rewind` refuses while a turn is running.
+`/undo rewind` reverses the last `/rewind`; `/redo rewind` applies it again.
+
+### Restoring a checkpoint
+
+A checkpoint is restored with `/rewind` only when no turn has completed in this run of the app. Then `/rewind` lists the workspace checkpoints instead of turns:
+
+```text
+/rewind
+No completed turns recorded this run yet; falling back to workspace checkpoints (FILES ONLY, no conversation state):
+   1. 3f2a9c1b     turn      after: add rate limiting  (12 min ago)
+   2. 8e01d4aa     manual    before refactor  (1 h ago)
+Restore one: /rewind <n|id>; files only; conversation history is untouched.
+```
+
+The kind column is `turn`, `agent-run` or `manual`; the ids and labels above are examples.
+`/rewind 2`, or `/rewind 8e01d4aa` (an id or an unambiguous id prefix), previews the files the restore would change in Changes; `Enter` or `y` restores, `n` or `Esc` cancels (`Restore cancelled: nothing changed.`). Only files are restored.
+Refusals: `No checkpoint #9. Run /rewind to list checkpoints (1–N).`, `Checkpoint ref "8e" is ambiguous (2 matches). Use the list number instead.`, `Unknown checkpoint ref "x". Run /rewind to list checkpoints.`; a partial restore names the paths that failed.
+
+Once a turn has completed in this run, `/rewind` works on turns and no slash command restores a checkpoint by id. To restore one then, in order:
+
+1. Quit (`/quit`) and start the app again in the same directory with a new conversation (`goodvibes`, not `--continue` or `--resume`, which bring their turn list back).
+2. Before sending any prompt, run `/rewind` to list the checkpoints and `/rewind <n|id>` to restore one.
+
+(The daemon's operator API also has `checkpoints.restorePreview` and `checkpoints.restore`; the API part describes them.)
+
+### Undoing file changes and turns
+
+`/undo [rewind|file]` and `/redo [rewind|file]`:
+
+| Form | Effect | Output |
+| --- | --- | --- |
+| `/undo` | Remove the last conversation turn. Refused while a turn runs: `A turn is still running. Stop it with Esc or let it finish, then /undo.` | `Last turn undone. Use /redo to restore. Tip: /undo file to revert a file write/edit.`, or `Nothing to undo. Tip: use /undo file to revert the last file write/edit.` |
+| `/undo file` | Revert every file the most recent not-yet-undone `write` or `edit` call changed. | `File reverted (last edit call):` or `N files reverted (last write call):` with the paths, then `Use /redo file to re-apply.`; with nothing recorded: `Nothing to undo. No file operations recorded.` |
+| `/undo rewind` | Reverse the last `/rewind`. | The rewind's result. |
+| `/redo` | Restore the last undone turn. Refused while a turn runs. | `Turn restored. Tip: /redo file to re-apply a reverted file.`, or `Nothing to redo. ...` |
+| `/redo file` | Re-apply the most recently reverted file change. | `File re-applied (<tool> call):` with the paths, or `Nothing to redo.` |
+| `/redo rewind` | Re-apply the last undone `/rewind`. | |
+
+`/undo file` and `/redo file` work on a stack of tool calls kept in memory for this run of the app (up to 50 entries; changes from earlier runs cannot be undone this way, and changes made by `exec` commands are not recorded).
+Each `/undo file` steps one call further back: to undo the last three edit calls, run `/undo file` three times.
+When a file was changed after that call (by you, another tool or another program), nothing is changed, that entry is dropped, and the next `/undo file` acts on the call before it: `File undo failed: Cannot undo the change to <path>: the file was changed after that operation (by you, another tool or another program). No file was changed and that history entry was dropped; the next undo acts on the one before it.`
+`/undo file`, `/redo file`, `/undo rewind` and `/redo rewind` do not wait for a running turn; use them between turns.
+
+### Models, providers and sign-in
+
+`/model [model-id]` (alias `/m`) without an argument opens the model picker; with an id it switches the main chat model and saves it in `provider.model`.
+`/model openai:gpt-5.4` prints the model selected and, when the requested reasoning level does not exist on that model, which level is used instead.
+When the provider is not signed in, the app asks for its API key inline before switching.
+An unknown id prints the provider registry's error.
+The picker's left rail selects the route the choice is for: Main Chat, Helper Model, Tool LLM, TTS LLM or Embeddings (see "Routing roles" below).
+
+`/effort [level]` (alias `/e`) shows or sets the reasoning effort.
+Without an argument it opens a list of the levels the current model offers.
+With a level it saves `provider.reasoningEffort` and prints the level in effect.
+A level the model does not offer is refused: `<Model> does not offer reasoning effort 'xhigh'.` followed by `Levels it offers: ...`.
+A model with no configurable reasoning prints that it has none.
+
+`/context [window [<size>|clear]]` (alias `/ctx`) shows context use with a token breakdown per message.
+`/context window 200000` sets a custom context window for the current model; `/context window clear` removes it.
+
+`/provider [add <name> <baseURL> | remove <name> | <provider-name>]` (alias `/p`) without an argument opens the picker on providers; with a name it switches provider.
+`/provider add lmstudio http://192.168.1.20:1234/v1` probes the address's `/models` endpoint and saves an OpenAI-compatible provider; `/provider remove lmstudio` removes it.
+`/provider-opt <subcommand>` (alias `/prov-opt`) manages the routing optimizer: `optimizer on|off`, `route auto|manual`, `explain` (alias `explain-route`), `pin <provider:model>`, `fallback test`.
+`/scan` probes localhost and the local network for model servers and registers each one it finds (see "Local model servers").
+`/refresh-models` reads every provider's model list, the benchmarks and the token limits again.
+`/pin <model-id>` and `/unpin <model-id>` add a model to, or remove it from, the pinned favorites.
+
+`/subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|login <provider> finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]` (alias `/subs`) manages subscription sign-ins.
+`/subscription login openai start` opens the browser and listens on the local callback address; when the browser returns there, it prints `Subscription OAuth Complete: openai`.
+`--no-browser` prints the address without opening it; `--manual` skips the local listener so the sign-in is finished by pasting the code or address with `/subscription login openai finish <code-or-url>`.
+When the browser opened somewhere else (another machine over SSH), open the printed address there and finish with the `finish` form.
+A provider without subscription sign-in is refused: `OAuth is not configured for <provider>.`, followed by the shape of an `oauth` block to add to `~/.goodvibes/tui/services.json`.
+`/subscription bundle export <path> --yes` writes the sign-ins to a file and warns `This file contains active sign-in tokens. Keep it private and delete it after use.`; `bundle import <path>` without `--yes` only lists what it would do.
+`/subscription logout openai` prints `Logged out of openai. Ambient API key resolution will apply again if configured.`
+
+`/login [provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]` and `/logout [provider <name>|service <daemon|listener> <baseUrl> [secretKey]]` are front doors: `provider` forms point to `/subscription`, `service` forms point to `/auth login` and `/auth logout`.
+
+`/accounts [review|panel|show <provider>|routes <provider>|repair <provider>]` (alias `/account`) reviews each provider's sign-in routes, subscription windows and billing path.
+`/accounts show openai` lists the routes; `/accounts repair openai` says what to fix.
+
+`/auth [review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]` reviews provider auth and signs in to or out of a daemon or listener.
+`/auth login daemon https://host.example:3421 admin` asks for the password with masked input.
+A password typed on the command line works but prints a warning that it stays visible.
+`http://` to another machine is refused because the credential would travel unencrypted: `... Use https://<host>. Nothing was sent.`
+A refused sign-in prints `Auth login failed (HTTP <status>). Check the base URL, username and password, then retry.`
+
+`/local-auth [review|panel|add-user <username> <password> [roles]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]` (alias `/auth-local`) manages the local daemon and listener users from inside the app. `/local-auth add-user alice` without a password opens a masked prompt; roles default to `user`.
+
+`/secrets <subcommand>` manages persistent secrets with the same forms as the `goodvibes secrets` command, plus `get <KEY>` (shows whether it resolves) and `trust <KEY>`.
+`/secret <NAME>` asks for a value with masked input and keeps it as an environment variable for this session only: `[Secret] Stored NAME (N characters, value hidden). Available to shell/tool runs as $NAME.`
+`/storage [review|list|delete <key>]` reviews secure storage posture and lists stored key names; deletion is done with `/secrets delete <key>`.
+
+`/usage [turns|agents]` opens the Usage view on a tab.
+`/cost [panel|budget <usd>|attribution [24h|7d] [--json]]` opens Usage, sets the session budget alert (`/cost budget 5` prints `Cost budget alert set to $5.00.`; `0` disables it), or prints cost attributed per agent over the last 24 hours or 7 days from the daemon.
+`/status` prints the session status: model, tools, token totals and cost, context use, surfaces and safety states.
+
+### Settings and configuration
+
+`/settings [category|key]` (alias `/cfg-ui`) opens the full-screen configuration workspace, at a category or a setting when one is named. A name that matches nothing prints which names exist.
+`/config [category|key] | set <key> <value>` (alias `/cfg`) opens the same workspace, or sets one key directly:
+
+```text
+/config set display.themeMode light
+Set display.themeMode: "auto" → "light"
+Theme applied: light.
+```
+
+`/config set` with a missing value prints `Usage: /config set <key> <value>; e.g. /config set display.themeMode light`.
+A value the daemon refuses for a daemon-owned key prints `Not set: the daemon refused <key>, and nothing was changed: <reason>`.
+An invalid value prints `Could not set <key>: <reason>`.
+
+`/profiles` opens the config profile picker; press `s` there to save the current settings as a profile. Without the interface it lists saved profiles or prints `No profiles saved.`
+`/profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]` (alias `/profilesync`) moves config profiles between machines. `import` refuses a file that is not a profile bundle and changes nothing.
+`/settings-sync [panel|report|review|show <key>|staged|conflicts|resolve <key> <local|synced>|failures|rollback-history|export <path>|inspect <path>|pull <path>|push <path>|lock <key> <source> <reason...>|unlock <key>]` (alias `/settingssync`) opens the settings sync view or works with sync bundles; `resolve <key> local` keeps the local value of a conflict.
+`/managed [review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]` applies a managed settings bundle (settings an administrator sets for a machine). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A locked key cannot be changed from Settings or `/config` until `/managed unlock <key>`.
+
+`/setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]` (alias `/startup`) reviews startup readiness.
+`/setup support-bundle ./bundle` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential.
+`/setup transfer export ./setup.json` writes a setup transfer bundle; `/setup transfer import ./setup.json` applies it on another machine and reports `N setting(s) changed, M file(s) replaced`.
+An existing target is not overwritten without `--overwrite`.
+`/onboarding` opens the onboarding wizard with current settings loaded.
+`/install [review]` prints install posture.
+`/update [check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]` (alias `/upgrade`) checks for a newer release and, for binary installs, downloads, verifies and applies it or rolls back. Updates are described under "Updating" in the install part.
+`/power [status|on|off|toggle]` shows or sets the daemon-held keep-awake (the same as `Alt+A`).
+
+`/trust [review|workspace [trusted|restricted]|bundle export <path>|bundle inspect <path>]` reviews trust and sets this workspace's trust.
+`/trust workspace trusted` prints `This workspace is now TRUSTED; all tools may run, subject to your permission settings.` and loads the workspace's hooks and MCP servers.
+An untrusted workspace does not load its hooks file or its project MCP servers.
+`/sandbox [open|review|recommend|profiles|presets|preset <id>|apply-preset <id>|probe|doctor|session ...|set-mcp <disabled|contained>]` reviews the command sandbox; `/sandbox set-mcp contained` runs MCP servers inside it. The sandbox is described under "The exec sandbox" in the permissions part.
+
+`/permissions [rules | revoke <rule-id>]` (alias `/perms`), `/plan [on|off|toggle]`, `/questions` (alias `/inbox`), `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security [review|attack-paths|tokens]` and `/policy <subcommand>` (alias `/pol`) belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
+
+- `/plan on` prints `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).`; `/plan off` restores the previous mode.
+- `/questions` lists what waits on the owner; `/questions answer <id> <choice|text> [note]` answers one.
+- `/decisions` lists what was decided for the owner; `/decisions undo <id>` reverses one.
+- `/held` lists calls `just-vibes` held; `/held approve <id...|all>` runs them; `/held dismiss <id...|all>` sets them aside.
+- `/permissions rules` lists remembered approval rules; `/permissions revoke <rule-id>` removes one.
+
+### Code work
+
+`/git [status|log|diff|init]` (alias `/g`) shows the working tree status (the default), recent commits, a summary of unstaged changes, or creates a repository.
+Outside a repository: `Not a git repository: <dir>. Nothing was changed. Run /git init to create one.`
+`/git init` inside one: `<dir> is already inside a git repository; nothing was changed.`
+
+`/diff [session|head|working|staged]` (alias `/d`) opens Changes on this session's file changes (the default), everything against `HEAD`, the working tree or the staged set.
+`/changes [session|working|staged|head]` opens the same view.
+`/review` opens this session's diff hunk by hunk to comment for the model or revert a hunk.
+
+`/commit-all [--yes]` without `--yes` shows the repository root and file counts; with `--yes` it commits the whole working tree (a set already staged by hand is committed as it is).
+A clean tree prints `[commit-all] <root>: nothing to commit, the working tree is clean.`; a commit prints `[commit-all] Committed N files in <root>: <hash> <message>`.
+
+`/test [pattern]` runs the project's test command (the configured test gate, else the `package.json` `test` script) and shows pass and fail results; `Esc` stops it.
+It prints `Running: <command> (<source>, limit Ns; Esc stops it)` first.
+A run past the limit is killed: `Test run timed out after Ns and was killed. Raise contract.gateTimeoutMs (0 for no limit) or pass a pattern to run fewer tests.` (`contract.gateTimeoutMs` defaults to 900000 ms.)
+A second `/test` while one runs prints `A test run is already going; Esc stops it, then run /test again.`
+
+`/codebase build | status | search <query...> [--limit n]` builds and searches the source-tree code index. `build` schedules the build (`Build scheduled: track progress with /codebase status or Agents (F2, the code-index row).`); `search` prints matching symbols and files.
+`/intelligence [review|panel|diagnostics [file]|symbols <file>|outline <file>|definition <file> <line> <column>|references <file> <line> <column>|hover <file> <line> <column>|install <file|language>|repair]` (alias `/intel`) uses language servers: `/intelligence definition src/app.ts 42 10` prints the definition location; `/intelligence install typescript` installs the language server for that language. A missing position prints `Usage: /intelligence definition <file> <line> <column>`.
+
+`/tools [review|panel]` (alias `/t`) lists the model's tools; `/tool verify <name> | verify-all | contract show <name>` checks a tool's contract. An unknown tool prints `[tool verify] Tool '<name>' is not registered.`
+
+`/search <query> [--limit <n>]` runs a web search and prints ranked results with source labels. A failed search prints `Search failed: <detail>`.
+`/imagine [--out <path>] <prompt>` generates an image with the first configured image provider, writes it to `generated/<prompt words>-<time>.<ext>` (or `--out`), and opens it where a desktop exists. A file already at the path is never replaced. A job the provider has not finished is reported with the command that collects it: `/imagine --collect <provider> <task-id> [key=value ...]`. With no image provider configured it lists each generation provider's status and the key it needs.
+
+`/eval <subcommand>` evaluates the product on real tasks:
+
+| Subcommand | Effect |
+| --- | --- |
+| `list` (alias `ls`) | List the tasks of the suite. |
+| `run [suite-dir]` (alias `tasks`) | Run each task through `goodvibes run`, then the task's `verify.sh`. |
+| `compare [suite-dir]` (alias `cmp`) | Compare the last results with the baseline. |
+| `gate [suite-dir]` | Run the suite and fail on a failed or regressed task; it creates the baseline when none exists. |
+
+A suite is a directory (default `.goodvibes/eval/tasks`) with one directory per task holding `task.json` (the instruction) and `verify.sh` (exits `0` on pass).
+`/eval compare` without a baseline prints `[eval] Baseline file not found: <file>` and `[eval] Tip: run /eval gate [suite-dir] to create a baseline.`
+
+`/forensics [latest | show <id> | export <id> [path] [--overwrite]]` (alias `/foren`) lists automatically classified failure reports. `/forensics show <id>` prints one; an unknown id prints `[Forensics] No report found with id "<id>". Use /forensics latest to see the most recent.`
+`/incident [open | latest | show <id|latest> | export <id|latest> <path> [--overwrite] | capture <id|latest>]` builds incident review bundles; `capture` stores the incident in durable memory. `/incident-review` is the same as `/incident open`.
+
+### Helper agents, tasks and orchestration
+
+`/agents [--target <id>[:<kind>]] | list | host <agentId> [directory]` (alias `/acp`) opens the Agents view.
+`/agents list` lists third-party coding agents found on `PATH` that can be hosted over ACP (Claude Code, Codex, opencode).
+`/agents host <agentId> [directory]` starts one as a row in Agents that can be steered and stopped like any agent. With none installed: `[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.`
+`/cockpit` opens Agents. `/communication` (alias `/comms`) shows agent communication routes and recent activity.
+`/orchestration [show [contractId] | cancel graph <graphId> | cancel subtree <agentId>]` (alias `/orch`) shows contracts and cancels agent graphs or subtrees. An unknown contract prints `Unknown contract: <id>`.
+`/ops view | task <cancel|pause|resume|retry> <id> [note] | agent cancel <id> [note]` controls tasks and agents and opens the audit view. `/ops task pause t1 waiting on review` prints `[Ops] Task t1: pause done.`
+
+`/tasks [list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]` (alias `/task`) inspects and controls runtime tasks. Bare `/tasks` opens Agents on the task list.
+
+`/teamwork [review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id> [title...]|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]` (alias `/teammates`) starts packaged task modes and recipes.
+
+- Modes: `local-engineer`, `local-shell`, `remote-engineer`, `teammate`, `research`, `dream`, `review`, `verifier`, `integration`.
+- Recipes: `research-implement-review`, `remote-certification`, `triage-delegate-integrate`, `dream-then-certify`.
+- `/teamwork create-mode research "map the auth flow"` starts a research agent with that title.
+- `/teamwork recipe research-implement-review "add rate limiting"` runs the recipe's steps in order and prints a line per step: `[Teamwork research-implement-review] step 1/3 research: agent <id> (researcher) started.`; a step whose agent fails stops the recipe and lists the steps not started.
+- `/teamwork create-archetype <name> <title...>` starts an agent from a custom archetype; `/teamwork validate` lists archetype problems.
+
+`/worktree [review|panel|inspect <path>|setup <path>|attach <path> <session|task> <id>|session <id>|task <id>|recover <session|task> <id>|pause <path>|resume <path>|keep <path>|discard <path>|cleanup <path>]` (alias `/worktrees`) manages the git worktrees helper agents work in (see "Helper agents and worktrees").
+
+`/workstream`, `/graph`, `/work-plan` and `/project-plan` are described under "Contracts, workstreams and work plans" below.
+
+`/remote [list | show [agentId] | supervisor [runnerId] | capabilities [runnerId] | recover [runnerId] | setup [export <path>] | env [export <path>] | tunnel [review|export <path>] | bootstrap [export <path>|inspect <path>] | session <export|inspect|import> <path> | pool <list|show|create|assign|unassign> ... | dispatch [template] <description> | dispatch-pool <pool> [template] <description> | contract [agentId] | cancel <agentId> | export <agentId> [path] | artifact list | artifact show <id> | artifact export <id> [path] | review <id> | rerun-local <id> | import <path>]` works with self-hosted remote runners.
+
+- `/remote dispatch engineer "port the parser to Rust"` starts an ACP subagent (the command `goodvibes acp`, or `ACP_AGENT_CMD`) as a remote runner.
+- `/remote dispatch-pool <pool> ...` dispatches into a pool; a full pool is refused with what to remove.
+- `/remote review <artifactId>` reviews the runner's result; `/remote rerun-local <artifactId>` shows its task and tools and asks before running it locally.
+- `/remote dispatch`, `dispatch-pool` and `rerun-local` refuse unless the owner typed them in the terminal.
+
+`/bridge [status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]` operates self-hosted bridge runners the same way.
+`/runner-pool [list|show <id>|create <id> <label...>|assign <pool> <runner>|unassign <pool> <runner>]` (alias `/pool`), `/remote-setup [review|export <path>]`, `/remote-env [review|export <path>]`, `/tunnel [review|export <path>]` and `/bootstrap [export <path>|inspect <path>]` are front doors to the matching `/remote` subcommands. `/remote env` prints the shell lines (including `ACP_AGENT_CMD`) a remote machine needs.
+`/release [review|checklist|bundle export <path>|bundle inspect <path>]` prints release readiness and a checklist.
+`/helpers [review]` (alias `/integration-api`) lists the local helper APIs remote clients can use.
+
+### Memory and knowledge
+
+`/recall`, `/knowledge`, `/project-memory`, `/memory-review`, `/memory-sync`, `/handoff`, `/session-memory` and `/team-memory` are described under "Memory and knowledge" below.
+
+### Extensions
+
+`/mcp`, `/plugin`, `/skills`, `/marketplace`, `/hooks` and `/services` are described under "MCP servers", "Plugins", "Skills", "The marketplace", "Hooks" and "Named API services" below.
+
+### Daemon-owned features
+
+These commands work through the daemon. The features are described in the automation part ("Scheduled routines", "Supervised triggers", "Notifications", "Mail", "Calendar", "Chat channels", "Voice", "Purchases and payments", "CI watch") and the daemon part ("Credentials and pairing", "The relay", "Hosted sessions", clusters); this list gives each command's forms and an example.
+
+`/schedule add <cron|every|at|when> <value> <prompt...> [options] | list | remove <id> | enable <id> | disable <id> | run <id>` (alias `/sched`) manages scheduled routines kept by the daemon.
+
+```text
+/schedule add cron "0 9 * * 1-5" "summarize yesterday's commits" --tz America/Chicago
+/schedule add every 30m "check the deploy"
+/schedule add at 2026-12-01T09:00 "renew the certificate"
+/schedule add when "every weekday at 9am" "triage the inbox"
+```
+
+Options: `--name <name> --model <model> --provider <provider> --template <tmpl> --target main|current|isolated|pinned|background|session:<id> --reasoning <level> --thinking <mode> --wake now|next-heartbeat --fallback <a,b> --tool <name> --external-source <kind> --allow-unsafe-external-content --light-context`, and `--tz <zone> --stagger <ms>` for cron.
+`when` sends the phrase to the decision model, prints `Interpreted "<phrase>" as: <schedule>` and saves it.
+A time already passed is refused: `<time> has already passed.`
+With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs once with or without a terminal open; it cannot be reached: <reason> Nothing was scheduled or changed.`
+`/schedule run <id>` prints `Running routine <id> (<name>) now`.
+
+`/triggers [status|list|history <id> [count]|create <json>|cancel <id>|reset <id>|grants|grant <id> <command> [args...]]` manages the daemon's supervised triggers.
+
+```text
+/triggers create {"id":"build","label":"Build finished","spec":{"kind":"on-exit","command":"npm","args":["run","build"]}}
+/triggers grant build npm run test
+```
+
+`/notify add <url> | remove <n|url> | list [--show] | clear | test` manages webhook notification addresses in ntfy.sh format (`/notify add https://ntfy.sh/my-topic`). `/notify failed` lists failed deliveries and `/notify resend <id|all>` sends them again.
+
+`/channel [pair [surface]|telegram-cursor|status|routes|delivery|policy [surface]|policy set <surface> [flags]|profiles [list|get|set|delete]] [--json]` (alias `/channels`) pairs chat surfaces and inspects routes, deliveries, ingress policies and per-channel profiles. `/channel pair slack` asks for each required value with masked input, then enables the surface; `/channel pair slack verify` sends a real test message. An unknown surface prints `Unknown channel "<name>". Available: ...`.
+`/telegram [list] | configure <chatId>[/<threadId>] <bot> | approve|deny|status|read|cancel <id> | revoke <configurationId> | release <chatId|configurationId>` handles delegated Telegram intake.
+
+`/mail [status|list|read|draft|send] …` (alias `/email`) reads and sends mail through the daemon: `/mail list`, `/mail read <uid>`, `/mail draft <to | subject | body>`, `/mail send <to | subject | body>`. A repeated identical send is refused unless `--again` precedes the recipient.
+`/calendar [status|list|get|create|update|delete] …` (alias `/cal`) works with the calendar: `/calendar create Standup | 2026-12-01T09:00 | 2026-12-01T09:15`, `/calendar get <id>`, `/calendar delete <id>`.
+`/ci status <repo-or-pr> | watch <repo-or-pr> <deliveryChannel> [--fix-session] | watches | unwatch <id>` checks CI per job and manages standing watches: `/ci status my-org/my-repo#42`, `/ci watch my-org/my-repo@main slack:C123`.
+`/checkin [run]` shows the proactive check-in configuration and recent receipts, or runs one now.
+`/principals [list|get <id>|create <name> <kind> [channel:value...]|update <id> [--name x] [--kind x] [--identities c:v,c:v|none]|delete <id>|resolve <channel> <value>]` maps channel identities to named people: `/principals create "Mike Davis" user slack:U123 email:mike@example.com`.
+`/profile [show|where <field>|set <field> <value>|note [--section <name>] <text>|forget <field>|forget --section <name> <text>|undo <field>|status]` reads and corrects the owner profile: `/profile where location.timezone` says where a fact came from.
+`/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]` sets up payment cards and purchase approvals.
+`/devices [list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|nodes|grants|revoke-grant <grant-id>|captures|delete-capture <capture-id>]` (alias `/device`) manages paired devices.
+`/qrcode [regenerate]` (aliases `/qr`, `/pair`) opens the device-pairing view; `r` there mints a new device token.
+`/host` inspects, pairs or unpairs this terminal with its host; only the owner typing it can pair or unpair (`Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair`).
+`/relay [status|pair]` shows outbound relay status or mints a relay pairing payload; with `relay.enabled` off: `Relay is disabled: turn on relay.enabled in /config relay first.`
+`/cluster [status|create|join|key|nodes|forget|rotate|leave|rename|groups|publish|accept]` shares inbound channel work with other machines; add `--host`, `--port`, `--token` to reach another machine's daemon.
+`/cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]` (alias `/cf`) manages the optional Cloudflare integration: `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]`.
+`/voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]` manages always-speak mode and installs the managed local voice runtime and wake-word models.
+`/tts <prompt>|stop|on|off` sends one prompt whose answer is also spoken, stops playback, or turns always-speak on or off. Live local playback needs `mpv` or `ffplay` on `PATH`.
+
+## Sessions
+
+A session is one saved conversation.
+Saved sessions of the terminal app live in `<project>/.goodvibes/tui/sessions/`, one file per session; the first line of the file carries the title, model and message count.
+A session file names the program, the project and the session id, so a terminal-app session and an Agent session with the same name are different sessions.
+
+### When a session is saved
+
+- After every completed turn the whole conversation is written (one temporary file, one rename).
+- `/save [name]`, `/session save [name]`, `/clear` and `/quit` also save it.
+- `behavior.saveHistory` (default on) controls whether conversations are kept at all.
+- Saved sessions are kept until they are deleted (`/session delete <id> --yes`); the retention sweep never removes them.
+
+### Crash snapshots
+
+A crash snapshot is a second copy written only while the conversation holds something the saved session does not:
+
+- when a prompt is accepted;
+- after a batch of tool calls, at most once every five seconds;
+- when the save at the end of a turn fails;
+- for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute;
+- on a signal, a crash or a quit, before the final save.
+
+The snapshot is deleted when a later save succeeds.
+On the next start the terminal app offers the newest snapshot that is newer than its saved session, unless another running terminal has that session open.
+Opening a session by any route (`--continue`, `--resume`, `goodvibes sessions resume`, `/session resume`, `/load`, `/sessions`) offers its snapshot on top of the saved copy when the snapshot is newer.
+Choosing Remove deletes that snapshot.
+A restored snapshot that ends inside a turn keeps that turn's prompt marked cancelled, keeps the tool results it had, keeps a cut-off reply with a line saying it was cut off, and records each tool call whose result never reached disk as interrupted with an unknown effect. The interrupted turn is never run again on its own.
+Crash snapshots nobody resumes are removed after `atRest.retentionMaxAgeDays` days (default 30).
+
+### Which session is open where
+
+A terminal that has a session open holds that session's lock under `~/.goodvibes/shared/owner-askers/`.
+The operating system releases the lock when the process ends, however it ends.
+`/session resume`, `/load` and `/sessions` refuse a session another running terminal has open, and the session picker asks first.
+A headless `run` on a session another terminal has open is refused (see "Headless runs").
+
+### Starting on a session
+
+| Want | Command |
+| --- | --- |
+| Continue the last session of this project | `goodvibes --continue` |
+| Open a session by id | `goodvibes --resume user-0008b454` or `goodvibes -r user-0008b454` |
+| Open the last session | `goodvibes --resume` |
+| Fork the active session at start | `goodvibes --fork` |
+| Open a session, then fork it | `goodvibes --fork user-0008b454` |
+| Pick from a list inside the app | `/sessions` or `/resume` |
+
+When no last-session pointer exists, `--continue` prints `No previous conversation to continue. This is a new one; /session list shows saved ones.` and starts a new conversation.
+A resumed session prints `Resumed session: <id>` with its message count and model.
+A forked session prints `Session forked:` with the new id, the fork name, the source title and the message count.
+
+### Branches
+
+`/fork <name>` saves the conversation as a named branch inside the session; `/branch <name>` switches to it; `/merge <name>` appends a branch's messages after the fork point.
+A saved branch that this version cannot read is left out of a resume, and the transcript names it.
+
+## Models and providers
+
+A provider is a model service. A sign-in is one way of authenticating to a provider.
+A model is named by its registry key `<provider>:<model-id>`.
+The main chat model is saved in `provider.model`; the reasoning effort in `provider.reasoningEffort` (default `medium`).
+With nothing configured the terminal app uses `openrouter:openrouter/free`.
+
+### Where a provider's model list comes from
+
+No provider keeps a fixed list of models in the program.
+A provider's list is what its own endpoint answers (for example OpenAI's `/v1/models`, and with a subscription sign-in the plan's own list), else its last answer saved on disk, else the pinned model catalog's rows for it.
+A model the provider lists that the catalog does not know is selectable at once, marked unclassified.
+A model typed by name that no list contains is still sent; the provider's refusal, if any, is shown as it is.
+Lists are read again in the background, never on a request's path: at start-up (a list on disk younger than a day is used without a request), after a sign-in, when the model picker opens (again from disk while younger than a day), on `/refresh-models` (always read), and when a provider refuses a model as unknown (at most once a minute per provider).
+`goodvibes status` and `goodvibes doctor` show where the current list came from and how old it is.
+A provider whose endpoint did not answer the start-up discovery shows `Health: unreachable: <the failure>` in the picker's detail area.
+
+### Providers
+
+The complete list of built-in providers, with how each signs in, is under "Providers" in the reference part.
+
+Native providers speak the vendor's own API: `openai`, `anthropic`, `gemini`, `amazon-bedrock`, `amazon-bedrock-mantle`, `anthropic-vertex`, `github-copilot`.
+Compatible and gateway providers share one OpenAI- or Anthropic-compatible adapter with a fixed base URL and become usable when their API key is present.
+`synthetic` groups one model across every provider that serves it (see "Synthetic failover").
+`decision-router` is a provider whose answer comes from the configured decision model routes; it needs a General answer provider and model before it can be selected.
+`goodvibes providers` shows each provider's setup class: `api-key`, `cloud-account`, `self-hosted`, or `unknown`.
+
+### Signing a provider in with an API key
+
+1. Get the API key from the provider.
+2. Store it in one of three ways:
+   - set the environment variable before launching: `export OPENAI_API_KEY='<your-api-key>'`;
+   - store it in the secret store: `printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user`;
+   - inside the app, select a model of that provider with `/model` and type the key when the app asks for it.
+3. Select a model: `goodvibes models use openai:gpt-5.4` or `/model openai:gpt-5.4`.
+4. Check it: `goodvibes providers inspect openai` shows the API-key route as configured and usable.
+
+An environment variable wins over a stored key.
+Cloud-account providers need their platform credentials: Amazon Bedrock reads `AWS_BEARER_TOKEN_BEDROCK`, an `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` pair, or `AWS_PROFILE`; Anthropic on Vertex reads a project id plus `GOOGLE_APPLICATION_CREDENTIALS`, `gcloud auth application-default login` or metadata-based auth; GitHub Copilot reads `COPILOT_GITHUB_TOKEN` or a stored GitHub token for `github-copilot`.
+`cloudflare-ai-gateway` also needs `cloudflare.accountId` and `cloudflare.aiGatewayId` (or `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_GATEWAY_ID`).
+
+### Signing a provider in with a subscription
+
+A subscription sign-in uses the provider's own account sign-in in a browser instead of an API key.
+OpenAI (a ChatGPT subscription) is built in. The procedure is under "`goodvibes subscription` (alias `subscriptions`)" above; inside the app use `/subscription login openai start`.
+Another provider can offer subscription sign-in when an `oauth` block for it is added to `~/.goodvibes/tui/services.json`:
+
+```json
+{
+  "name": "exampleai",
+  "authType": "oauth",
+  "tokenKey": "EXAMPLEAI_API_KEY",
+  "providerId": "exampleai",
+  "oauth": {
+    "authUrl": "https://auth.example.com/authorize",
+    "tokenUrl": "https://auth.example.com/token",
+    "clientId": "<client-id>",
+    "redirectUri": "http://127.0.0.1/callback",
+    "scopes": ["openid"]
+  }
+}
+```
+
+A project's `services.json` cannot carry an `oauth` block.
+
+### Local model servers
+
+`/scan` probes localhost and the local network for model servers that answer an OpenAI-compatible `/v1/models` request, and registers each one as a provider.
+Discovery does not run on its own at start-up; start-up restores the providers found earlier from a cache without probing them.
+The scan checks well-known ports (11434 Ollama, 1234 LM Studio, 8080 llama.cpp, 1337 Jan, 4891 GPT4All, 5001 KoboldCpp, 2242 Aphrodite, and 5000, 7860, 8000 and 8001, common ports of other OpenAI-compatible servers) and identifies a server by its port or its response headers.
+
+| Server | Identified by | Adapter |
+| --- | --- | --- |
+| Ollama | Port 11434 | Dedicated |
+| LM Studio | Port 1234, or `lmstudio` in headers or model ids | Dedicated |
+| vLLM | `x-vllm-*` response headers | Dedicated |
+| llama.cpp | `llama` in the `server` header | Dedicated |
+| Text Generation Inference | `text-generation-inference` in headers | Dedicated |
+| LocalAI | `localai` in the `server` header | Generic |
+| Jan | Port 1337 | Generic |
+| GPT4All | Port 4891 | Generic |
+| KoboldCpp | Port 5001 | Generic |
+| Aphrodite | Port 2242 | Generic |
+
+Each server found becomes a provider whose id is the server's name: `Ollama`, `LM Studio`, `vLLM`, `llama.cpp`, `LocalAI`, `TGI`, `Jan`, `GPT4All`, `KoboldCPP` or `Aphrodite` for a server on this machine (`127.0.0.1` or `localhost`), the same name followed by ` (<host>)` for one elsewhere on the network (for example `Ollama (192.168.1.50)`), and `local-<host>:<port>` for an unidentified server. Its models are `<provider id>:<model id>`, for example `Ollama:llama3:8b`. A name a configured provider already uses is skipped.
+To use a scanned model, in the interactive app only:
+
+- for one launch, `goodvibes --provider Ollama -m llama3:8b` (interactive start loads the servers the last `/scan` found, without probing; it scans only when you run `/scan`). This leaves the saved default alone; or
+- `/model` and pick it. This also saves it as the default (`provider.model`), with the fault below.
+
+Known fault (a product defect): a scanned model saved as the default breaks the command-line model commands. `goodvibes models use Ollama:llama3:8b` saves it (printing `Model selected: Ollama:llama3:8b` and a warning that the catalog entry was not available locally), and so does picking it with `/model` or `/provider`. The command-line commands do not load the scan cache, so afterwards `goodvibes models`, `models current`, `providers` and even `models use <other>` all exit `1` with `Current model 'Ollama:llama3:8b' not in registry.` (`goodvibes --provider Ollama -m llama3:8b models current` fails the same way). The interactive app still starts and restores the selection. The way back is to override the setting for the command that changes it:
+
+```sh
+goodvibes -c provider.model=openrouter:openrouter/free models use openrouter:openrouter/free
+```
+
+`-c provider.model=<key>` also works for one command at a time, for example `goodvibes -c provider.model=openai:gpt-5.4 models current`. `-m ollama:llama3:8b` names the provider id `ollama`, which is not the scanned `Ollama` provider (ids are case-sensitive).
+A dedicated adapter knows the server's tool calling and streaming; Ollama, LM Studio and llama.cpp also get the `instant`, `low`, `medium`, `high` reasoning levels.
+An Ollama server that answers only `/api/tags` and not `/v1/models` cannot be used as an OpenAI-compatible provider and is reported as skipped.
+To add one server by hand, run `/provider add <name> <baseURL>`, for example `/provider add box http://192.168.1.50:11434/v1`; it probes `<baseURL>/models`.
+`sglang` (port 30000), `litellm` (port 4000) and `copilot-proxy` (port 3000) are built-in self-hosted providers that need no scan.
+
+### Custom providers
+
+Any OpenAI-compatible API can be added as a JSON file in `~/.goodvibes/tui/providers/`:
+
+```json
+{
+  "name": "myrouter",
+  "displayName": "My Router",
+  "type": "openai-compat",
+  "baseURL": "https://router.example.com/v1",
+  "apiKeyEnv": "MYROUTER_API_KEY",
+  "models": [
+    {
+      "id": "big-model",
+      "displayName": "Big Model",
+      "contextWindow": 200000,
+      "capabilities": { "toolCalling": true, "codeEditing": true, "reasoning": true, "multimodal": false }
+    }
+  ]
+}
+```
+
+Files in that directory are read again when they change; no restart is needed.
+`contextWindow` is optional. Without it the window shows as unknown (`context 29.9k / unknown`) and no compaction is driven by a guess.
+
+### Routing roles
+
+`/model` chooses a model for one of five roles. Each role writes its own settings, so a choice for one never changes another.
+
+| Role | Picker label | Settings | Behavior |
+| --- | --- | --- | --- |
+| Main chat | Main Chat | `provider.provider`, `provider.model` | Normal turns. |
+| Helper | Helper Model | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries; empty values use the main model. |
+| Tool model | Tool LLM | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | Model calls made inside tools; selecting a model turns it on. |
+| TTS model | TTS LLM | `tts.llmProvider`, `tts.llmModel` | The model that answers `/tts` prompts; empty uses the main model. |
+| Embeddings | Embeddings | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. |
+
+`goodvibes doctor routing` prints which provider and model serve each role.
+
+### Reasoning effort
+
+The levels a model accepts are resolved per model: the live catalog entry first, then a declaration (a plugin, a custom provider file, a local server's traits), then a per-family table, then a labelled best guess.
+For models whose only control is a thinking-token budget, each level maps to a budget:
+
+| Level | Token budget |
+| --- | --- |
+| `none` | 0, offered only when the model can switch reasoning off |
+| `instant` | 0 |
+| `minimal` | 1024 |
+| `low` | 2048 |
+| `medium` | 8192 |
+| `high` | 32768 |
+| `xhigh` | 49152 |
+| `max` | 63999 |
+
+A model with an on/off toggle treats any level above `none` as on. A model with no reasoning control offers no levels.
+`/effort` shows the levels the current model offers; the saved preference is kept when a model that caps lower is selected, and the level in effect is shown.
+
+### Making a model and reasoning effort the default
+
+Each program keeps its own default model and reasoning effort, in its own user settings file:
+
+| Program | File | Keys |
+| --- | --- | --- |
+| Terminal app | `~/.goodvibes/tui/settings.json` | `provider.model`, `provider.reasoningEffort` |
+| Agent | `~/.goodvibes/agent/settings.json` | the same keys |
+
+The shared file `~/.goodvibes/shared/settings.json` does not hold them: of the settings, only `tts.provider`, `tts.voice`, `tts.speed`, `tts.llmProvider` and `tts.llmModel` are read from it, and a `provider.model` written there is ignored. A project settings file cannot set `provider.*` either. So changing the default for both programs means changing it in each.
+
+What writes the default:
+
+| Action | Writes |
+| --- | --- |
+| `/model <id>`, picking a model in `/model`, `@model:<id>` in a prompt | `provider.model` in the running program's own file. |
+| `/effort <level>` or picking a level in `/effort` | `provider.reasoningEffort` in the running program's own file. |
+| `goodvibes models use <id>` / `goodvibes-agent models use <id>` | `provider.model` in that program's own file. |
+| `/config set provider.reasoningEffort high` (terminal app), `/settings set provider.reasoningEffort high` (Agent) | That key in that program's own file. |
+| `-m <id>`, `--provider`, `-c provider.reasoningEffort=high` on the command line | Nothing: this launch only. |
+
+Procedure for the terminal app:
+
+1. `goodvibes models use openai:gpt-5.4` (or `/model openai:gpt-5.4` inside the app).
+2. Inside the app, `/effort high`. Without opening the app, add `"reasoningEffort": "high"` inside the `"provider"` object of `~/.goodvibes/tui/settings.json`, or run the app once with `/config set provider.reasoningEffort high`.
+3. Check: `goodvibes models current` and `goodvibes status` (the `provider`, `model` and `reasoning` lines).
+
+Procedure for the Agent: the same with `goodvibes-agent models use openai:gpt-5.4`, then `/effort high` or `/settings set provider.reasoningEffort high` inside the Agent; check with `goodvibes-agent models current` and `goodvibes-agent status`.
+
+The level saved is a preference: on a model that does not offer it, a level that model offers is used instead (`/model` and `/effort` print which), and the saved preference stays for the next model.
+
+### Failover
+
+A failed request never moves to a model the owner did not choose. Three kinds of retry exist, and they do not all work everywhere:
+
+| Retry | Terminal app, interactive | `goodvibes run` | Agent, interactive and `run` |
+| --- | --- | --- | --- |
+| Same model, another sign-in of the same provider | Yes | Yes | Yes |
+| Another backend of the same `synthetic` model | Yes | Yes | Yes |
+| The next model of `provider.fallbackModels` | Yes | No | No |
+
+1. **Another sign-in.** Inside the request, a provider with two sign-ins tries the second when the first fails. Only `openai` has two built in: a request the ChatGPT subscription fails is sent again to the same model with the API key, and the turn says once which sign-in answered and why (in a headless run, one line on standard error and `signIn.movedFrom` in `USAGE`).
+2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover"). When all are exhausted the turn ends with `provider_exhausted`.
+3. **The fallback order.** Only the terminal app's interactive session reads `provider.fallbackModels`, a list of registry keys such as `["anthropic:claude-sonnet-5"]`. When every sign-in of the provider has failed, it switches to the first entry not yet tried this turn whose provider is signed in, and sends the turn again. With no order set, or every entry tried, the turn stops with `[Failover] Stopped:` and the reason and next step; the model selection returns to the configured one for the next turn.
+
+In `goodvibes run` and in the Agent, a failed provider ends the turn (`provider_error`) and nothing switches. In every program, when `behavior.suggestAlternativeOnProviderFail` is on (default off) and the failure is not transient, the session's conversation gets a suggestion and nothing more: `[Provider] <model> failed on <provider>. Next in your fallback order: <model> (<provider>). Use /model to switch.` (a headless run does not print it). To get a fallback in a script, run again with `-m <registry key>` when the exit code is `1` and `stopReason` is `provider_error`.
+
+In the terminal app's interactive session, a turn that failed for another reason (for example a hook refused a call), or in which a tool had already started, is not sent again, because a second run would repeat the tool's side effects.
+A switch prints a notice naming both models, the position in the fallback order and the error, with the price difference when both prices are known:
+
+```text
+[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]
+```
+
+When prices are unknown the notice says `[cost data unavailable]`.
+A second line names the billing class left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`.
+
+Set a fallback order for the terminal app:
+
+```text
+/config set provider.fallbackModels ["anthropic:claude-sonnet-5","groq:llama-3.3-70b-versatile"]
+```
+
+### Synthetic failover
+
+The `synthetic` provider groups one model across every backend that serves it, under one entry; the picker shows each entry with its number of providers and an S, A, B or C tier badge, split into Top Models and All Synthetic.
+Backends are tried in order of context window, then maximum output tokens, skipping backends whose provider has no key.
+Each backend gets one attempt; a failed backend goes on cooldown and the next is tried at once:
+
+| Failure | Cooldown | Next |
+| --- | --- | --- |
+| 429 rate limit, or out of credit | The provider's retry-after, else 60 s | Next backend at once. |
+| Other 4xx (401, 403, 404) | 60 s | Next backend at once. |
+| 500 or network error | 5 s | Next backend at once. |
+| 400 | None | No failover: the request itself is malformed. |
+
+When every backend is cooling down and the shortest cooldown is 120 s or less, the turn waits it out and retries once; a longer cooldown ends the turn with the error.
+Each rotation and wait is reported as a retry naming the provider and the reason.
+For a free synthetic model only, when every backend is exhausted the turn moves to the next-best free model by benchmark score and says so; free, paid and subscription models never mix.
+A paid or subscription synthetic model that is exhausted stops the turn with recovery options instead.
+A provider can move a model from free to paid; a session running longer than 24 hours without a model refresh cannot know. Run `/refresh-models` daily in long sessions.
+`goodvibes models chain [filter] [--json]` prints each synthetic model's backend order.
+
+To make failover possible, give keys for several free providers, for example `GROQ_API_KEY`, `HF_API_KEY`, `NVIDIA_API_KEY`, `OLLAMA_CLOUD_API_KEY`, `OPENROUTER_API_KEY`, `AIHUBMIX_API_KEY`, then pick a model from the `synthetic` provider.
+
+### Settings for providers and routing
+
+<!-- generated: settings:provider -->
+
+<!-- generated: settings:helper -->
+
+## Tools
+
+The model works only through tools. Every tool call passes the permission gate before it runs.
+`/tools` lists the tools available in this session; `goodvibes doctor explain <tool> <args>` shows how one call would be decided.
+
+The complete list of model tools with their inputs is under "Model tools" in the reference part.
+
+The terminal app registers 28 tools (the same 28 run in the daemon's hosted sessions and in helper agents). `repl` is registered only where the command sandbox is available. Each, in one line:
+
+| Tool | What it does |
+| --- | --- |
+| `read` | Read files with extract modes (`content`, `outline`, `symbols`, `lines`, `ast`), caching, token-budget pagination and batches. |
+| `write` | Write files, in batches, with modes `fail_if_exists` (default), `overwrite`, `backup` and `restore`. |
+| `edit` | Find-and-replace edits (exact, fuzzy, regex, AST) in one atomic or partial transaction. A file must be read before it is edited. |
+| `find` | Search files (glob), content (regex) and symbols, several queries per call. |
+| `repo_map` | A map of the repository: per-directory counts and the most-imported files with their exports, within about 25000 tokens. |
+| `exec` | Run shell commands: batches, parallel, background, retry, timeout, expectations, until-pattern, file operations before the command. |
+| `analyze` | Code analysis: impact, dependencies, dead code, security, coverage, public surface, and more. |
+| `inspect` | Project inspection: structure, API routes and OpenAPI specs, database schema, React components, frontend layout checks, scaffolding. |
+| `fetch` | HTTP requests with extraction modes and named API services. |
+| `web_search` | Ranked web search through a search provider. |
+| `agent` | Start and manage helper agents (see "Helper agents and worktrees"). |
+| `task` | Durable cross-session task references, dependencies, cancellations and handoffs shared by every session of the project. |
+| `work_plan` | The project work plan the owner sees in `/work-plan`. |
+| `workflow` | Hook actions, recurring background commands and workflow state; work itself is run with `agent`. |
+| `trigger` | Watch for something (for example a command exiting) and start an agent turn when it happens; the daemon supervises the watch. |
+| `state` | Session key-value state, memory by key, hooks, the print level, budget and context, tool-call analytics. |
+| `registry` | Find skills, agents and tools by keyword or task; read a skill's dependencies and full text. |
+| `control` | List this app's slash commands and views, subscription providers and sandbox presets. |
+| `channel` | Inspect and operate channel surfaces: accounts, directories, targets, capabilities, channel tools and actions. |
+| `remote` | Remote runner pools, contracts and portable artifacts. |
+| `mcp` | Call MCP server tools (`mode: "call"`) and inspect servers, tools, schemas and trust. |
+| `query` | Leave the owner a question in the owner inbox and continue working. |
+| `profile` | Record and read what the owner says about themselves: dated plans, birthdays and anniversaries, profile fields, facts. |
+| `goodvibes_context` | Read the current GoodVibes runtime: settings, integrations, surfaces, providers, models, tools. |
+| `goodvibes_settings` | Apply a GoodVibes setting the owner gave a concrete value for. |
+| `context_accounting` | Report what was added to the model's context this turn (memory records and why) and the recall outcome. |
+| `contract_self_check` | Inside a contract unit: read how the unit's acceptance criteria read at the last check, without ending the turn. |
+| `repl` | Evaluate one JavaScript, TypeScript, Python, SQL or GraphQL snippet inside the command sandbox. |
+
+Facts about individual tools that change how the owner works with them:
+
+- `write` modes are `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/`, keeping the newest 5 per file) and `restore` (puts the newest backup back). With `tools.autoHeal` on (default off), a written file with syntax errors is run through the formatter, the linter and a model repair.
+- `write` and `edit` take `validate.after` (`typecheck`, `lint`, `test`, `build`), which runs the project's own script for each; a check the project does not declare is refused before anything is written.
+- `edit` results carry a `status`: `applied`, `not_found`, `ambiguous`, `conflict` or `failed`.
+- `exec` runs background processes: `bg_output <id>` shows the newest 256 KB of a process's output; a finished process's record is kept for 30 minutes.
+- `fetch` uses named services from `~/.goodvibes/tui/services.json` (see "Named API services").
+- `repl` exists only where the command sandbox is on (`sandbox.enabled` and the `exec-sandbox` feature) and bubblewrap is installed.
+- `query` posts a question to the owner inbox and returns at once; the owner answers with `/questions answer <id> <answer>`, in the web UI or from a phone, and the answer reaches the asking session on its next model request, or when that session is next opened.
+- MCP tools are named `mcp:<server>:<tool>`; the model calls them through the `mcp` tool with `mode: "call"`.
+
+## Helper agents and worktrees
+
+A helper agent is a subagent the model starts with the `agent` tool, or the owner starts with `/teamwork`, `/remote dispatch` or `/agents host`.
+It has its own conversation and a tool set narrowed by its archetype; an agent that runs a contract unit in worktree mode also has its own git worktree (see "Worktrees").
+Helper agents run beside the main conversation and report back through the agent message bus.
+Ask for one in plain words (`spawn an engineer agent to refactor src/utils.ts`) or let the model decide.
+
+### The `agent` tool
+
+Its modes: `spawn`, `batch-spawn`, `status`, `list`, `templates` (the archetypes with their tool sets), `get` (details with recent messages), `wait` (returns at once when the agent has ended, else waits up to `timeoutMs`, at most `contract.heartbeatTimeoutMs`, default 10 minutes), `cancel`, `message` (send it a message), `budget` (token use), `plan` (task, template and tools), `contracts` and `contract-history` (the session's contracts and one contract's decisions, checks and escalations), `cohort-status` and `cohort-report` (a team started under one `cohort` name).
+Work given to `spawn` or `batch-spawn` runs as a contract unless `outsideContract` is set: a planner splits it into units and each unit is checked against its acceptance criteria. With `outsideContract`, the agent runs on its own task, and only then are `model`, `provider`, `fallbackModels`, `reasoningEffort`, `tools` and `executionIntent` applied.
+A team is a cohort: members spawned with the same `cohort` name, each with its archetype as its role, a `communicationLane`, `context` and `successCriteria`.
+
+### Archetypes
+
+An archetype is a named agent template: description, tool list, optional model and system prompt.
+
+| Archetype | Tools | Purpose |
+| --- | --- | --- |
+| `orchestrator` | read, find, analyze, inspect, registry | Coordinates and decomposes work. |
+| `planner` | read, find, analyze, inspect | Read-only goal decomposition; no write, edit, exec or delegation. |
+| `engineer` | read, write, edit, find, exec, analyze, inspect, fetch, registry | Implementation. |
+| `reviewer` | read, find, analyze, inspect, fetch, registry | Code review. |
+| `tester` | read, write, find, exec, analyze, inspect | Writes and runs tests. |
+| `researcher` | read, find, analyze, inspect, fetch, registry | Explores a codebase. |
+| `integrator` | read, write, edit, find, exec, analyze, inspect, fetch, registry | Integrates deliverables. |
+| `general` | read, write, edit, find, exec, analyze, inspect, fetch, registry | General purpose. |
+
+A custom archetype is a Markdown file in `<project>/.goodvibes/agents/`; the file's body is the system prompt, and a file with a built-in name replaces the built-in:
+
+```markdown
+---
+name: documenter
+description: API documentation writer
+tools: [read, find, write]
+model: anthropic:claude-haiku-4-5
+family: general
+---
+
+You are a technical documentation specialist. Focus on clarity and completeness.
+```
+
+Optional front matter keys: `model`, `provider`, `family` (`implement`, `review`, `test`, `research`, `general`).
+`/teamwork archetypes` lists archetypes; `/teamwork validate` lists problems; `/teamwork create-archetype documenter "document the billing API"` starts one.
+
+### Watching and steering helper agents
+
+- The transcript's work tree shows each helper agent as a lane; `Alt+Up` moves onto it and `Enter` opens it full screen.
+- In the opened agent, the composer steers that agent while the main conversation keeps running.
+- `F2` or `Ctrl+O` opens Agents: `s` steers, `Ctrl+X` twice stops, `Enter` opens.
+- `/ops agent cancel <agent-id> [note]` stops one from the composer.
+
+### Worktrees
+
+Only contract work runs in git worktrees. A helper agent started outside a contract (`outsideContract: true`, `/teamwork`, `/agents host`, `/remote dispatch`) works in the main working tree; no tool input or command gives it a worktree.
+
+Who gets a worktree:
+
+- Work handed to the `agent` tool (`spawn` or `batch-spawn` without `outsideContract`) and `/workstream start`/`launch` becomes a contract. A planner splits it into units; each unit is run by its own helper agent.
+- The setting `contract.isolation` decides where units run: `auto` (default) uses worktrees when the project is a git repository with at least one commit, else the shared working tree; `worktree` always uses worktrees; `shared` never does (units then run one at a time).
+- In worktree mode each unit gets its own worktree on a private branch named `ws-owned/<id>`, under `<repository root>/.goodvibes/.worktrees/`. Up to `contract.maxParallelUnits` (default 64) units of one group (see "Contracts") run at once.
+- New worktrees run the cold-start setup in `worktree.setup.commands` and copy the files matched by `worktree.setup.carryOverGlobs`.
+
+How to ask for parallel work in worktrees:
+
+1. Make sure the project is a git repository with a commit (`/git init`, then commit once), or set `/config set contract.isolation worktree`.
+2. Ask in plain words for the work and name its parts, for example: `Add rate limiting to the API, a health endpoint, and retry logic in the client, as three independent pieces of work.` The model starts a contract; the planner decides how many units there are. The owner cannot force exactly N units or N worktrees; naming independent parts is what leads the planner to separate units.
+3. Or plan first: `/workstream propose <goal>`, check the units with `/workstream show <draft>`, edit them, then `/workstream approve <draft>` and `/workstream launch <draft>` (see "Workstreams").
+
+How to watch:
+
+- `F2` or `Ctrl+O` opens Agents, with each unit's agent; `Enter` opens one, `s` steers it, `Ctrl+X` twice stops it.
+- `/orchestration show [contractId]` and `/workstream status <id>` show units and their states; `/graph <workstreamId>` draws the task graph.
+- `/worktree` lists each worktree with its age, size and why it is kept.
+- In a headless run, the `AGENT_*` and `CONTRACT_*` frames report progress.
+
+How results come back:
+
+1. When a unit passes, its branch joins one integration lane and is merged into the contract's branch, one unit at a time, in the order units finish.
+2. A unit whose branch conflicts during that merge is not merged; its worktree and `ws-owned/<id>` branch are kept, the lane continues with the next unit, and the conflict is never resolved automatically.
+3. When every unit has passed and the contract's checks pass, the contract's result is published to the project's branch. With `contract.autoCommit` on (default) it is merged with `git merge --no-ff` and the commit message names the contract; `contract.commitScope` `off` leaves it as uncommitted changes.
+4. If the project's files changed after the contract started, the result is applied as uncommitted changes on top of those edits, and the automatic commit is deferred.
+5. If the publication merge conflicts, the merge is aborted, the project's tree is put back as it was, and the contract records `not applied: ...; the work stays on branch <branch>`. The owner is asked to clear the obstacle and reply `retry` or `cancel`. To take the work by hand, run `git merge <branch>` and resolve the conflicts.
+
+What is left behind:
+
+- A unit that passed and merged: its worktree is removed.
+- A unit that failed or was cancelled: its worktree is removed only when it holds nothing unique (no uncommitted changes, no unmerged commits); otherwise it is kept, and the oldest kept worktrees are removed first when too many are kept.
+- A unit whose merge conflicted: worktree and branch kept.
+- On restart, a passed unit whose branch had not been merged is put back on the integration lane, and worktrees on disk that belong to known units are adopted or reported, never deleted.
+- `/worktree discard <path>` removes a kept worktree (refused with the reason when it holds unique work); `/worktree keep <path>` marks one to keep.
+
+`/worktree` subcommands:
+
+| Form | Effect |
+| --- | --- |
+| `/worktree` or `review` | Every tracked worktree with its age, size and why it is kept. |
+| `panel` | Open Agents on the worktree list. |
+| `inspect <path>` | One worktree's metadata. Unknown: `Worktree inspect: no tracked worktree metadata for <path>.` |
+| `setup <path>` | Run the cold-start setup again. When both settings are empty: `[worktree setup] skipped: ...`. |
+| `attach <path> <session\|task> <id>` | Tie a worktree to a session or task. |
+| `session <id>`, `task <id>` | Worktrees of one session or task. |
+| `recover <session\|task> <id>` | Recover the worktrees of a session or task. |
+| `pause <path>`, `resume <path>`, `keep <path>` | Change a worktree's state (`Updated <path> to state <state>.`). |
+| `discard <path>` | Ask the daemon to remove it; a worktree with unique work is refused with the reason. |
+| `cleanup <path>` | Remove a worktree's tracking after it is gone (`Cleaned up worktree <path>.`). |
+
+<!-- generated: settings:worktree -->
+
+<!-- generated: settings:agents -->
+
+<!-- generated: settings:orchestration -->
+
+## Contracts, workstreams and work plans
+
+### Contracts
+
+A contract is a tracked piece of delegated work: a goal, units of work, acceptance criteria checked when the work ends, a budget, and an owner who answers its questions.
+The planner arranges a contract's units in groups. A group is a set of units that may run at the same time; a group starts once every group it depends on has passed, its units run side by side (up to `contract.maxParallelUnits` in worktree mode, one at a time in shared mode), and when all of them have passed the group as a whole is checked before the groups that depend on it start. The contract passes when its last group and the whole deliverable pass their checks.
+Contracts show in Agents and in `/orchestration`.
+A contract that needs the owner raises a question (an escalation) in `/questions`; the work continues after the answer.
+`contract.*` settings control gates, budgets and limits; `contract.gateTimeoutMs` (default 900000) bounds the test gate.
+
+<!-- generated: settings:contract -->
+
+### Workstreams
+
+A workstream is a contract started from an owner's request.
+The owner either starts one at once or plans it as a draft first.
+
+Start at once (the request must be typed by the owner):
+
+```text
+/workstream start add rate limiting to the public API
+```
+
+Plan first, review, then launch:
+
+1. `/workstream propose add rate limiting to the public API` plans a draft and prints it. Nothing runs until launch.
+2. `/workstream drafts` lists drafts; `/workstream show <draft>` prints one.
+3. Change the plan: `/workstream edit <draft> <item> <brief>`, `/workstream drop <draft> <item>`, `/workstream move <draft> <item> <position>`, or re-plan from a new goal with `/workstream retask <draft> <goal>`.
+4. `/workstream approve <draft>` approves it.
+5. `/workstream launch <draft>` starts it. An unapproved draft is refused: `Draft <id> is not approved. Approve it with /workstream approve <id>, then launch it.`
+6. `/workstream discard <draft>` drops a draft instead.
+
+Running workstreams:
+
+| Form | Effect |
+| --- | --- |
+| `/workstream list` | Workstreams of this session with status and request. |
+| `/workstream status <id>` | Units, states, budget and open questions. |
+| `/workstream cancel <id>` | Stop it: `Stopped workstream <id>.` |
+| `/workstream reply <id> <question-id> <answer>` | Answer an owner question. A closed question prints `That owner question is no longer open. Inspect /workstream status before answering.` |
+| `/workstream retry <id> <unit>` | Give one unit a fresh agent. Without a unit it lists the units and their states. |
+| `/workstream budget <id> <dollars>` | Raise the budget of a workstream waiting on it: `Workstream <id> budget is now $<n>.` |
+
+An id may be any unambiguous prefix. An unknown id prints `Choose one exact or unambiguous workstream ID from /workstream list.`
+`/graph <workstreamId>` draws the workstream's task graph: nodes, edges, states and pool posture.
+
+### The work plan
+
+The work plan is a persistent, workspace-scoped checklist; it records work and does not run it.
+The model edits it with the `work_plan` tool; helper agents share it; its open items reach the model once per turn.
+
+| Form | Effect |
+| --- | --- |
+| `/work-plan` or `panel` | Open the work plan view. |
+| `list`, `show` | Print the items. |
+| `export` | Write the plan as Markdown. |
+| `add <title> [--owner name] [--source label] [--notes text]` | Add an item: `Added work plan item <id>.` |
+| `edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Change an item. |
+| `start <id>`, `in_progress <id>`, `done <id>`, `block <id>`, `fail <id>`, `cancel <id>`, `pending <id>` | Set its status. |
+| `cycle <id>` | Move it to the next status. |
+| `remove <id>` | Delete it. |
+| `clear-done` | Remove completed and cancelled items: `Cleared N completed/cancelled work plan items.` |
+
+Aliases: `/wp`, `/todo`, `/workplan`.
+
+### Project planning
+
+`/project-plan` (alias `/planning`) opens native work and its recovery.
+`/project-plan <goal>` submits the exact request, as the owner typed it, through native conversation intake on the daemon. When intake is unavailable it says so and starts nothing.
+`/project-plan -- <goal>` submits a goal whose first word is a subcommand name.
+`/project-plan history` opens saved historical planning records, read only.
+`/project-plan list` and `show <id>` print the work plan; `dismiss`, `mode`, `explain`, `override <strategy>`, `status` and `clear` report on historical planning state and change nothing.
+`/project-plan` is different from `/plan`, which only toggles plan mode.
+
+## Memory and knowledge
+
+### Session memory
+
+Session memory is text pinned to this session; it survives compaction.
+Add to it with `/keep <text>`, `/note add <text>`, `!# <text>` (pins and sends) or `# <text>` (saves and sends nothing).
+`/session-memory [queue [limit] | export <path> | add <class> <summary...>]` works with session-scoped durable records.
+
+### Durable memory
+
+Durable memory is a store of records shared by every GoodVibes program on the machine, in `~/.goodvibes/shared/memory.sqlite` (read and written through the daemon while it serves memory).
+Each record has a class, a scope, a summary, optional detail and tags, a confidence, a review state and its provenance (where it came from).
+
+| Field | Values |
+| --- | --- |
+| class | `decision`, `constraint`, `incident`, `pattern`, `fact`, `risk`, `runbook`, `architecture`, `ownership` |
+| scope | `session`, `project`, `team` |
+| review state | `fresh`, `reviewed`, `stale`, `contradicted` |
+
+Records that match a turn can be added to the model's context; `/recall explain <task>` shows which would be, and `Alt+M` lists the memories the last turn used.
+
+`/recall` (aliases `/rc`, `/memory`, `/mem`) with no argument opens the Memory view. Its subcommands:
+
+| Form | Effect |
+| --- | --- |
+| `add <class> <summary> [--scope <scope>] [--detail <text>] [--tags <t,t>] [--session <id>] [--task <id>] [--file <path>]` | Add a record: `[recall] Added decision: <id>`. |
+| `capture incident <id\|latest>`, `capture policy`, `capture mcp <server>`, `capture plugin <name>` | Store a forensics incident, the latest policy review, or an MCP server's or plugin's trust posture as a record. |
+| `search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]` | Full-text search, or vector search with `--semantic`. |
+| `vector [status\|doctor\|rebuild]` | Inspect or rebuild the vector index. |
+| `get <id>` | One record with provenance and links. |
+| `link <fromId> <toId> <relation>` | Link two records. |
+| `queue [limit]` | The review queue. |
+| `review <id> <fresh\|reviewed\|stale\|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]` | Review a record. |
+| `stale <id> [reason...]`, `contradict <id> [reason...]` | Mark a record stale or contradicted. |
+| `promote <id> <session\|project\|team>` | Move a record to a wider scope. |
+| `explain <task...> [--scope <path> ...]` | The records that would be injected for a task. |
+| `injections [agentId]` | Records injected per turn for the main session or one helper agent. |
+| `files sync [--dir <path>]` | Write project and team records as Markdown files. |
+| `files review [--dir <path>]` | Compare the files with the store and list proposals; applies nothing. |
+| `files apply <id> [<id> ...] \| --all [--dir <path>]` | Apply chosen proposals. |
+| `export <path> [--scope <scope>] [--cls <class>]`, `import <path>` | Move records as a bundle. |
+| `handoff-export <path> [--scope <scope>]`, `handoff-inspect <path>`, `handoff-import <path>` | Reviewable handoff bundles for a team. |
+| `list [class] [--scope <scope>]` | All records by class. |
+| `remove <id>` | Delete a record (asks first). |
+| `snapshots` | Point-in-time copies of memory (daily, before a migration, before a restore). |
+| `restore <name\|latest\|date>` | Replace all memory with a copy; the current records are copied first (asks first). |
+| `report` | Print this usage. |
+
+Worked example:
+
+```text
+/recall add decision "Use Postgres advisory locks for the job queue" --scope project --tags queue,db
+[recall] Added decision: <record-id>
+  Scope:   project
+  Summary: Use Postgres advisory locks for the job queue
+  Tags: queue, db
+```
+
+Front doors for parts of `/recall`: `/memory-sync [export <path> [scope] | import <path>]`, `/handoff [export <path> [scope] | inspect <path> | import <path>]`, `/team-memory [queue [limit] | export <path> | import <path> | capture policy]` (team scope), `/memory-review [queue [limit]|explain <task...>]` (alias `/knowledge-review`), and `/project-memory [open | queue [limit] | explain <task...> [--scope <path> ...]]` (alias `/pmem`).
+
+### Knowledge
+
+Knowledge is a source-backed graph of ingested pages, bookmarks and notes, kept by the daemon.
+`/knowledge <subcommand>` (alias `/know`):
+
+| Form | Effect |
+| --- | --- |
+| `status` | Store status. |
+| `ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise\|standard\|detailed>]` | A source-backed answer with sources, facts, gaps and confidence. |
+| `ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]` | Ingest one page. |
+| `import-bookmarks <path> [--allow-private-hosts]`, `import-urls <path> [--allow-private-hosts]` | Ingest a browser bookmarks export, or a file with one URL per line. |
+| `list [--kind <sources\|nodes\|issues>] [--limit <n>]`, `search <query> [--limit <n>]`, `get <id>` | Read the store. |
+| `queue [limit]`, `review-issue <issueId> <accept\|reject\|resolve\|reopen\|edit\|forget> [--reviewer <name>] [--value <json-object>]` | Review issues the store raised. |
+| `candidates [limit]`, `reports [limit]`, `schedules`, `lint` | Consolidation candidates, reports, schedules and a consistency check. |
+| `packet <task...> [--scope <path> ...]`, `explain <task...> [--scope <path> ...]` | A compact prompt packet for a task, and why each item is in it. |
+| `reindex`, `consolidate [light\|deep]`, `cancel-run [runId]` | Rebuild the index, run consolidation, cancel a run. |
+
+A private-network URL is refused unless `--allow-private-hosts` is given.
+
+<!-- generated: settings:memory -->
+
+<!-- generated: settings:learning -->
+
+## MCP servers
+
+The terminal app connects to MCP (Model Context Protocol) servers and gives their tools to the model as `mcp:<server>:<tool>`.
+
+### Where servers are configured
+
+| File | Scope | Written by `/mcp add` |
+| --- | --- | --- |
+| `<project>/.goodvibes/mcp.json` | Project | Yes, with `--scope project` (the default) |
+| `~/.config/mcp/mcp.json` | Global | Yes, with `--scope global` |
+| `<project>/.mcp/mcp.json` | Project, read only | No |
+| `~/.mcp/mcp.json` | User, read only | No |
+| `~/.config/claude/claude_desktop_config.json` | Claude Desktop's servers, read only | No |
+
+Project files start no server until the workspace is trusted (`/trust workspace trusted`); an undecided workspace counts as untrusted.
+A file that cannot be read is skipped with one warning.
+
+```json
+{
+  "servers": [
+    { "name": "filesystem", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] },
+    { "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "<your-token>" } },
+    { "name": "remote-docs", "url": "https://mcp.example.com/mcp", "headers": { "Authorization": "Bearer <your-token>" }, "toolTimeoutMs": 300000 }
+  ]
+}
+```
+
+Every one of these files may instead use the format other MCP clients use, an object keyed by server name. Both forms are read. When GoodVibes rewrites one of its own two files (`/mcp add`, `/mcp remove`, a kept per-tool rule), it writes the `servers` list form shown above, keeping the entries it could not read:
+
+```json
+{
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "<your-token>" } }
+  }
+}
+```
+
+A server has a `command` (a local process speaking over standard input and output) or a `url` (a remote HTTP server).
+A server name may not contain `:` or `/`.
+A tool call waits up to 120 seconds; `toolTimeoutMs` changes it (`0` for no limit).
+
+Fields of a server entry that control what it may do:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `trustMode` | `constrained`, `ask-on-risk` (default), `allow-all`, `blocked` | How calls are enforced (below). `allow-all` is read only from `~/.config/mcp/mcp.json`; in a project file it is ignored with a warning and the default applies. |
+| `allowedPaths` | array of string | Directories the server's path arguments must stay inside. Empty or absent: paths are not checked. `/mcp add --path <dir>` adds one (repeatable). |
+| `allowedHosts` | array of string | Hosts the server's URL arguments must use. Empty or absent: hosts are not checked. `/mcp add --host <host>` adds one (repeatable). |
+| `role` | `general` (default), `docs`, `filesystem`, `git`, `database`, `browser`, `automation`, `ops`, `remote` | A label shown in `/mcp review` and the posture report. It changes no enforcement. |
+| `deniedTools` | array of string | Tools refused every time, whatever the trust mode. Any MCP file may carry it. |
+| `allowedTools` | array of string | Tools let past `allowedPaths` and `allowedHosts`. Read only from your own files; one in a project file is ignored with a warning. |
+
+### What the trust modes enforce
+
+Every MCP call first passes the permission gate like any other tool call: the permission mode and `permissions.tools.mcp` (`allow`, `prompt` (default) or `deny`) decide whether it may run and whether the owner is asked. Then the server's own rules decide, in this order, with no further question to anyone:
+
+1. A quarantined server's tools, or a server with `trustMode` `blocked`, are refused.
+2. A tool in the session denials or in `deniedTools` is refused; a tool in `allowedTools` is allowed.
+3. With `allow-all`, every other call is allowed.
+4. With `constrained` or `ask-on-risk`, a call whose path arguments are inside `allowedPaths` and whose URL arguments use `allowedHosts` is allowed, and one outside them is refused: `request exceeds configured scope for server '<name>': ... Call it with values inside the scope, or ask the owner to widen the server's scope.`
+
+`constrained` and `ask-on-risk` enforce the same way; `ask-on-risk` does not ask. They differ only in the risk level `/mcp review` reports for the server: `constrained` is `low` (`medium` when either scope list is empty), `ask-on-risk` is `medium` (`high`), `allow-all` is `high` (`critical`), and `blocked` or a quarantined server is `critical`.
+
+There is no allow-list of tools. `allowedTools` does not limit a server to those tools: it only lets them past the path and host scope. To let the model use only some of a server's tools, deny each of the others:
+
+```text
+/mcp tools github
+/mcp deny github delete_repository --keep
+/mcp deny github create_or_update_file --keep
+/mcp deny github push_files --keep
+```
+
+The same rules written by hand in the server's entry:
+
+```json
+{ "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "trustMode": "ask-on-risk", "deniedTools": ["delete_repository", "create_or_update_file", "push_files"] }
+```
+
+A tool the server adds later is allowed until it is denied. To refuse every tool of a server, set `trustMode` to `blocked`.
+
+### Where each rule is kept
+
+- `/mcp trust` and `/mcp role` change the running session only; on restart the file's value applies again. To keep a trust mode, write `trustMode` in the server's entry, or add the server with `/mcp add --trust <mode>`. In the terminal app `/mcp add ... --trust allow-all --scope global` keeps `allow-all`; with `--scope project` it is written but ignored when the file is read. The Agent's `/mcp add` refuses `allow-all` (`Use /settings -> MCP to explicitly enable allow-all.`). `allow-all` cannot be given to `/mcp trust` in either program: in Settings → MCP, type `allow-all` on the server's row, then type exactly `ALLOW ALL <server>` to confirm; it too lasts for the session, and to keep it write `"trustMode": "allow-all"` in `~/.config/mcp/mcp.json`.
+- `/mcp deny <server> <tool>` lasts for the session. With `--keep` it is written as `deniedTools` into the file that holds the server's entry (`<project>/.goodvibes/mcp.json` or `~/.config/mcp/mcp.json`).
+- `/mcp allow` writes `allowedTools` into `~/.config/mcp/mcp.json` only; for a project server it is refused.
+- A server that comes only from a read-only file (`.mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's file) cannot keep per-tool rules: `Add <server> to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp deny for this session.`
+- A rule written while a server runs applies at once.
+- `deniedTools`, `trustMode` `blocked`, the path and host scope and quarantine are enforced by the MCP registry itself, so they apply in every permission mode, `yolo` included.
+
+### `/mcp`
+
+| Form | Effect |
+| --- | --- |
+| `/mcp` | Open the MCP workspace. |
+| `/mcp servers` | Each server's phase (`starting`, `negotiating`, `ready`, `restart-wait`, `gave-up`, `closed`), last error, reconnect attempts, and per-tool rules. |
+| `/mcp tools [<server>]` | Tools of all servers or one. |
+| `/mcp config` | The config files in use. |
+| `/mcp add <name> <command\|https-url> [args...] [--scope project\|global] [--role <role>] [--trust constrained\|ask-on-risk\|allow-all\|blocked] [--env KEY=VALUE] [--header Name=Value] [--path <path>] [--host <host>] [-- <server args...>]` | Add a server to the file and reload without restarting (see "Adding a server with `/mcp add`"). |
+| `/mcp remove <server> [--scope project\|global]` | Remove a server. |
+| `/mcp reload` | Reconnect every server. |
+| `/mcp review`, `/mcp auth-review` | Trust, quarantine and auth posture. |
+| `/mcp repair [server]` | Suggested repairs. |
+| `/mcp trust <server> <constrained\|ask-on-risk\|blocked\|config>` | Set a server's trust mode for this session (`config` returns to the file's value). |
+| `/mcp role <server> <general\|docs\|filesystem\|git\|database\|browser\|automation\|ops\|remote\|config>` | Set a server's role label for this session. |
+| `/mcp deny <server> <tool> [--keep]` | Refuse one tool for this session; `--keep` stores the denial in the server's entry as `deniedTools`. |
+| `/mcp allow <server> <tool>` | Let one tool past the server's path and host scope; stored as `allowedTools` in the global file; asks once; refused when the model runs it. |
+| `/mcp clear <server> <tool>` | Remove the tool's session denial and stored rule; asks once. |
+| `/mcp quarantine <server> [detail]`, `/mcp quarantine <server> approve [operatorId]` | Quarantine a server, or approve it again. |
+
+### Adding a server with `/mcp add`
+
+`/mcp add <name> <command-or-https-url> [words...]` writes the server to `<project>/.goodvibes/mcp.json` (`--scope project`, the default) or `~/.config/mcp/mcp.json` (`--scope global`) and reloads.
+Words after the target that are not GoodVibes options become the server's `args`. To pass words that look like GoodVibes options (`--path`, `--host`, `--env`, `--scope`) to the server, put `--` first: every word after `--` goes to the server unchanged.
+
+```text
+/mcp add data /usr/local/bin/my-mcp-server --scope global -- --path /srv/data --verbose
+```
+
+The entry gets `"args": ["--path", "/srv/data", "--verbose"]`; without `--`, `--path /srv/data` would set the server's `allowedPaths` instead.
+
+Refusals (nothing is written):
+
+| Input | Message |
+| --- | --- |
+| A url server with launch words or `--env` | `A url MCP server takes no launch arguments or --env; send credentials with --header Name=Value.` |
+| A command server with `--header` | `--header is sent only to a url (HTTP) MCP server; this server has a command. Use --env for a command server.` |
+| `--env` without `=` | `MCP env entries must use KEY=VALUE.` |
+| `--header` without `=` | `MCP headers must use Name=Value, for example --header "Authorization=Bearer <token>".` |
+| An unknown `--role`, `--scope` or `--trust` value | `Invalid MCP role "<value>". Expected one of ...` (or scope, or trust mode) |
+| `--trust allow-all` in the Agent | `Use /settings -> MCP to explicitly enable allow-all.` |
+
+`--env` values are written into the file as given; the file is the server's own configuration, so keep it private.
+
+Worked example:
+
+```text
+/mcp add github npx -y @modelcontextprotocol/server-github --env GITHUB_PERSONAL_ACCESS_TOKEN=<your-token> --scope global
+/mcp tools github
+/mcp deny github delete_repository --keep
+```
+
+A server that fails to connect is retried after 1, 2, 4, 8 and 16 seconds while `runtime.mcpLifecycle` is on (the default); after five failures it stays disconnected until `/mcp reload`.
+A server that never completes its handshake is given up after 30 seconds.
+`/sandbox set-mcp contained` runs MCP servers inside the command sandbox.
+
+## Plugins
+
+A plugin is code loaded into the app process that registers commands, tools, providers, hooks, views and more.
+
+### Where plugins live
+
+The loader searches exactly these directories, in this order; a project plugin overrides a global one with the same manifest name:
+
+1. `<project>/.goodvibes/plugins/<name>/`
+2. `~/.goodvibes/plugins/<name>/`
+
+`/plugin dirs` prints them. Each plugin directory holds `manifest.json` and an entry file (`index.js` unless `main` names another):
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "My custom plugin",
+  "main": "index.js",
+  "capabilities": ["register.tool", "register.hook"]
+}
+```
+
+`name` is lowercase letters, digits and hyphens. `capabilities` declares what the plugin needs: `register.tool`, `register.provider`, `register.hook`, `register.panel`, `filesystem.read`, and the high-risk `filesystem.write`, `network.outbound`, `shell.exec`.
+A tool, provider or event-hook registration the manifest does not declare is refused and the plugin does not start.
+
+### Plugins are off until enabled
+
+A plugin that is found is not loaded until it is enabled. `/plugin enable <name>` loads and starts it at once and records the choice (with the directory it was enabled from) in `~/.goodvibes/tui/plugins.json`; from then on it starts with the app. `/plugin disable <name>` stops it and records that. A newly written plugin therefore needs `/plugin enable`, not only a restart.
+
+### The entry file
+
+The entry file is an ES module. It must export `init(api)`, called once after the plugin is loaded; it may also export `activate()` (called after `init`) and `deactivate()` (called before the plugin is unloaded). Each may be `async`.
+
+The `api` object has exactly these members:
+
+| Member | What it does | Needs |
+| --- | --- | --- |
+| `registerCommand(name, description, handler)` | Adds the slash command `/<name>`. `handler(args, context)` receives the typed words and `context.print(text)`, which shows text in the session that typed the command; an error it throws is shown there. | Any tier. |
+| `registerTool(name, schema, handler)` | Adds a tool the model can call. `schema` is a JSON Schema object for the tool's arguments; `handler(args)` returns `{ success, output?, error? }`. Registering a name twice fails the plugin's start. | `register.tool`, tier `limited`. |
+| `registerProvider(name, { baseURL, apiKey?, models, displayName?, embeddingModel? })` | Adds an OpenAI-compatible provider. Returns a promise. | `register.provider`, tier `limited`. |
+| `registerProviderInstance({ provider, models?, suppressCatalogModelRegistryKeys?, replace? })` | Adds a fully custom provider implementation. | `register.provider`, tier `limited`. |
+| `onEvent(eventName, handler)` | Subscribes to one runtime event type (the events part lists them); returns an unsubscribe function. | `register.hook`, tier `limited`. |
+| `registerGatewayMethod(descriptor, handler)` | Adds a daemon operator API method. | Tier `limited`. |
+| `registerChannelPlugin(plugin)`, `registerDeliveryStrategy(strategy, { replace? })` | Adds a channel surface or an outbound delivery strategy. | Tier `limited`. |
+| `registerMemoryEmbeddingProvider(provider, { replace?, makeDefault? })` | Adds a memory embedding provider. | |
+| `registerVoiceProvider(provider, { replace? })`, `registerMediaProvider(provider, { replace? })`, `registerWebSearchProvider(provider, { replace? })` | Adds a voice, media or web-search provider. | |
+| `getConfig(key)` | Reads one value of this plugin's stored config. | |
+| `log(level, message)` | Writes to the app's log; `level` is `info`, `warn`, `error` or `debug`. | |
+
+A complete plugin that adds a command and a tool (its manifest declares `"capabilities": ["register.tool"]` and its tier is `limited`):
+
+```js
+// <project>/.goodvibes/plugins/word-count/index.js
+export function init(api) {
+  api.registerCommand('wc', 'Count the words of the typed text', (args, context) => {
+    context.print(`${args.length} words`);
+  });
+  api.registerTool('word_count', {
+    type: 'object',
+    properties: { text: { type: 'string', description: 'Text to count' } },
+    required: ['text'],
+  }, async (args) => ({ success: true, output: String(String(args.text).split(/\s+/).filter(Boolean).length) }));
+  api.log('info', 'word-count loaded');
+}
+```
+
+### Adding a plugin and confirming it is loaded
+
+1. `goodvibes plugin init word-count` (writes `<project>/.goodvibes/plugins/word-count/`), then edit `index.js` and `manifest.json`.
+2. `goodvibes plugin validate .goodvibes/plugins/word-count` must print `PASS`.
+3. If it registers tools, providers or event hooks: `goodvibes plugin trust word-count limited`.
+4. In the app: `/plugin enable word-count`. It prints `Plugin 'word-count' enabled and activated.`, or the reason it did not start (an undeclared capability, a tier too low, an error thrown by `init`).
+5. Confirm: `/plugin list` shows `[active]` before the plugin's name (`[loading]` while it starts, `[disabled]` when it is not enabled); `/plugin inspect word-count` shows `state: active`, its trust tier and the capabilities its tier withheld; `/wc a b c` prints `3 words`; `/tools` lists `word_count`.
+6. After editing the plugin, `/plugin reload` loads it again and names each plugin that did not start, with the reason.
+
+### Trust tiers
+
+| Tier | The plugin gets |
+| --- | --- |
+| `untrusted` (default) | Views, commands and reading files. |
+| `limited` | Also the tools, providers and hooks it declares, gateway methods, channels and delivery strategies. |
+| `trusted` | Also the high-risk capabilities it declares. |
+
+A plugin that declares a high-risk capability does not start below `trusted`.
+The tier is one decision per plugin for every GoodVibes program on the machine, kept in `~/.goodvibes/plugin-trust.json`.
+`trusted` is set by a verified signature against the publisher's Ed25519 key (saved once with `/plugin trust-key <name> <key.pem>`), or by the owner's confirmation when it does not verify.
+
+### `/plugin`
+
+| Form | Effect |
+| --- | --- |
+| `list`, `dirs`, `inspect <name>`, `review` | Plugins, search directories, one plugin's trust, quarantine and capabilities. |
+| `enable <name>`, `disable <name>` | Turn a plugin on (`Plugin '<name>' enabled and activated.`) or off. |
+| `reload` | Reload plugins and report each that did not start and why. |
+| `trust <name> <untrusted\|limited\|trusted> [note]`, `trust-key <name> <key.pem>`, `verify <name>`, `capabilities <name>` | Set and check trust. |
+| `quarantine <name> [add\|lift] [reason]` | Stop a plugin and keep it from loading, or lift that. |
+| `installed`, `catalog-review <id>`, `publish-local <id> <path> <summary...>`, `unpublish <id>`, `install <id> [project\|user]`, `update <id> [project\|user]`, `uninstall <id> [project\|user]` | Curated catalog flows (see "The marketplace"). |
+
+### Capability bundles
+
+A capability bundle is a tar archive whose top-level `goodvibes-bundle.json` is its manifest; its other files are installed beside it.
+The pin is the SHA-256 of the archive bytes (for a git source, of `git archive --format=tar` of the ref).
+`goodvibes plugin bundles install <ref> --sha256 <pin>` verifies and prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with `--yes` it installs into `.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs` with an install receipt.
+A reference is a file path, an `https` URL or a git remote with `--ref`.
+A missing or wrong `--sha256` is refused; so are links, absolute paths and `..` inside the archive, URLs that are not `https` or that name this machine or a private address, archives over 64 MiB, and fetches over 60 seconds.
+
+## Skills
+
+A skill is a Markdown document of instructions with front matter; its body is sent to the model when the skill is used.
+Skills are found in, first match of a name wins:
+
+1. `<project>/.goodvibes/skills/`
+2. `<project>/.goodvibes/tui/skills/`
+3. `~/.goodvibes/skills/`
+4. `~/.goodvibes/tui/skills/`
+
+A skill is a file `<name>.md` or a folder `<name>/SKILL.md` (the folder may hold supporting files).
+
+```markdown
+---
+name: release-notes
+description: Draft release notes from the commits since the last tag
+triggers: [/notes-draft]
+---
+
+Read the git log since the last tag, group the changes by area, and write release notes in plain product terms.
+```
+
+Typing `/<skill-name>` (here `/release-notes`), or one of its `triggers`, in the composer sends the skill's body as the prompt.
+The skill directories are read each time a `/<name>` is typed, so a new or edited skill file works at once, without a restart.
+The model also finds skills with the `registry` tool.
+`/skills [open|list|show <name>|origins|browse [query]|installed|catalog-review <id>|publish-local <id> <path> <summary...>|unpublish <id>|install-hint <catalog-id>|install <id> [project|user]|update <id> [project|user]|uninstall <id> [project|user]]` (alias `/skill`) lists and installs skills. `/skills show <name>` of an unknown skill prints `Unknown skill: <name>`.
+
+## The marketplace
+
+The marketplace is a local-first curated catalog of plugins, skills, hook packs and policy packs, kept in `.goodvibes/ecosystem/*.json` (global under `~/.goodvibes/ecosystem/`, project under `<project>/.goodvibes/ecosystem/`).
+`/marketplace` (alias `/catalog`) forms, where `<kind>` is `plugin`, `skill`, `hook-pack` or `policy-pack`:
+
+| Form | Effect |
+| --- | --- |
+| `open`, `overview`, `recommend`, `browse [query]`, `installed` | Browse. |
+| `review <kind> <id>`, `provenance <kind> <id>`, `install-hint <kind> <id>` | Inspect one entry. |
+| `install <kind> <id> [project\|user]` | Install: `Installed curated <kind> <id> into <path>`. |
+| `update <kind> <id> [project\|user]`, `rollback <kind> <id> [project\|user] [backupId]`, `history <kind> <id> [project\|user]`, `receipt <kind> <id> [project\|user]`, `uninstall <kind> <id> [project\|user]` | Manage an installed entry. |
+| `bundle export <path> [project\|user]`, `bundle inspect <path>`, `bundle import <path> [project\|user]` | Move a set of entries. |
+
+The scope defaults to `project`; another word is refused: `Unknown scope "<word>": nothing was changed. The scope is project (the default) or user.`
+
+## Hooks
+
+A hook runs an action when an event happens: before or after a tool call, a file write, a model call, an agent lifecycle step and more.
+
+### The hooks file
+
+Hooks are read from `hooks.json` in the working directory, or from the file `tools.hooksFile` names (resolved against the working directory).
+A hooks file inside an untrusted workspace is not loaded; `/trust workspace trusted` loads it.
+A hooks file that another user owns or can write is not loaded.
+
+```json
+{
+  "hooks": {
+    "Post:tool:write": [
+      { "type": "command", "command": "echo \"written\" >> .goodvibes/write-log.txt", "async": true, "description": "Log file writes" }
+    ],
+    "Pre:tool:exec": [
+      { "type": "prompt", "prompt": "Review this command for safety: $ARGUMENTS", "model": "anthropic:claude-haiku-4-5" }
+    ]
+  },
+  "chains": [
+    {
+      "name": "notify-after-agent-completes",
+      "steps": [
+        { "match": "Lifecycle:agent:spawned" },
+        { "match": "Lifecycle:agent:completed", "within": "5m" }
+      ],
+      "action": { "match": "Lifecycle:agent:completed", "type": "command", "command": "notify-send 'Agent finished'" }
+    }
+  ]
+}
+```
+
+### Event paths
+
+A hook is listed under an event path `Phase:Category:Specific`; `*` matches any specific (`Pre:tool:*`). Segments are case-sensitive.
+
+| Phase | When | Authority |
+| --- | --- | --- |
+| `Pre` | Before the operation | Can refuse it (`decision: "deny"`), rewrite its input (`updatedInput`) or add a note the model reads (`additionalContext`). A `Pre:tool:*` hook that fails refuses the call. `Pre:tool:*` hooks do not run in `yolo` mode. |
+| `Post` | After it succeeds | Observes only. |
+| `Fail` | When it fails | Observes only. |
+| `Change` | When tracked state changes | Observes only. |
+| `Lifecycle` | On lifecycle transitions | Observes only. |
+
+Categories: `tool`, `file`, `git`, `agent`, `compact`, `llm`, `mcp`, `config`, `budget`, `session`, `contract`, `communication`, `permission`, `transport`, `webhook`.
+`Pre:git:*` and `Post:git:*` fire only for git operations GoodVibes itself performs through its own git service (its checkpoint, worktree and commit work). A `git push` or any other git command the model runs through the `exec` tool raises only `Pre:tool:exec` (and `Post:tool:exec`), so a hook meant to stop the model's git commands must match `Pre:tool:exec`.
+`/hooks contracts [words]` lists every hook point.
+A key that matches no hook point is not loaded; `goodvibes hooks validate` reports it.
+
+### Hook types and fields
+
+| Type | Action |
+| --- | --- |
+| `command` | Run a shell command; the event is passed as JSON on standard input. |
+| `prompt` | Send a prompt to a model; `$ARGUMENTS` is replaced with the event JSON. |
+| `agent` | Start a helper agent for the event. |
+| `http` | POST the event to `url` (redirects are not followed). |
+| `ts` | Run a TypeScript module (`path`) whose default export handles the event. |
+
+Fields: `match`, `matcher` (an exact, case-sensitive string compared with the event's third segment, its specific name: under `Pre:tool:*`, `"matcher": "exec"` limits the hook to `exec` calls; there are no wildcards or patterns), `type`, `command` / `prompt` / `url` / `path`, `headers`, `model`, `timeout` (seconds; default 30, 60 for `agent`), `statusMessage`, `async`, `once`, `description`, `name`, `enabled` (default true).
+A chain step takes `match`, `capture`, `within` (`30s`, `5m`), `condition`, `optional` and `debounce`.
+
+### The command hook contract
+
+A `command` hook runs `/bin/sh -c "<command>"` in its own process group, with your privileges, in the program's current directory (not necessarily the project when `--cd` was used), so give scripts by absolute path.
+
+Standard input receives one JSON object, the event:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | The event path, for example `Pre:tool:exec`. |
+| `phase`, `category`, `specific` | Its three segments. |
+| `sessionId` | The session the event belongs to. |
+| `timestamp` | Milliseconds since the epoch. |
+| `payload` | What happened (below). |
+| `agentId` | Present when a helper agent raised the event. |
+
+The payloads of the tool and file events:
+
+| Event | `payload` |
+| --- | --- |
+| `Pre:tool:<tool>` | `callId`, `tool`, `args` (the call's arguments exactly as the model sent them; for `exec`, `args.commands[].cmd` holds each shell command; for `edit`, `args.edits[].path`; for `write`, `args.files[].path`). |
+| `Post:tool:<tool>` | `callId`, `tool`, `result` (the tool's result object). Fired only when the call succeeded. It has no `args`. |
+| `Post:file:write`, `Post:file:edit`, `Fail:file:write`, `Fail:file:edit` | `tool`, `callId`, `path`, and `error` on `Fail`. For `write`, `path` is the call's `files` argument encoded as a JSON string (contents included); for `edit`, `path` is an empty string, because `edit` names its files inside `edits`. |
+| `Change:file:external` | `filePath` (absolute) and `change` (`changed` or `deleted`): a watched file changed outside GoodVibes. |
+
+The other categories carry their own payloads; `/hooks contracts` lists each point, and `/hooks simulate <eventPath>` shows what fires.
+
+What the hook returns:
+
+- Exit code `0` with nothing, or with text that is not JSON, on standard output means success with no decision.
+- Exit code `0` with a JSON object on standard output is the hook's result. Its fields: `ok` (default `true`), `decision` (`allow`, `deny` or `ask`), `reason`, `updatedInput` (an object that replaces the call's arguments), `additionalContext` (text the model reads with the call's result), `error`.
+- A non-zero exit code, or running past `timeout` (default 30 seconds; the process group is then killed), is a failure: `command exited with code <n>: <first 200 characters of standard error>`.
+
+How a `Pre:tool:*` result is used:
+
+- `"decision": "deny"` refuses the call before the permission gate sees it; the model receives `reason` (or `Tool '<tool>' was refused by its Pre hook.`). The first deny of several hooks wins.
+- `updatedInput` is what the gate checks and what runs; when several hooks return one, the last wins.
+- `"decision": "ask"` and `"decision": "allow"` change nothing for a tool call: the permission gate still decides.
+- A hook that fails without a decision refuses the call: `Hook '<name>' at Pre:tool:<tool> failed (<error>), so the call was refused. Fix or remove the hook, then retry.`
+
+`Pre:tool:*` hooks finish before the call runs. `Post:*`, `Fail:*` and file hooks run beside the turn: the next call does not wait for them, and their failure is only logged.
+
+### What `yolo` does to hooks
+
+In the `yolo` permission mode (`--yolo`, Shift+Tab, or `permissions.mode` `yolo`), `Pre:tool:*` hooks are not run at all, so a hook that blocks a command has no effect in a `yolo` session or a `goodvibes --yolo run`. `Post:*`, `Fail:*` and file hooks still run.
+
+### Example: refuse every `git push` the model runs
+
+A hook fires only for the tool the model calls directly; a tool that one tool runs inside another (for example `agent_harness` starting a process) does not fire the inner tool's hook. So the hook must be registered under every tool the model can call that runs a command, now or later. In the two programs' tool registries these are:
+
+| Tool | Program | How it runs a command |
+| --- | --- | --- |
+| `exec` | both | `commands[].cmd`, or base64-encoded in `commands[].cmd_base64` |
+| `repl` | both | code that starts a process |
+| `workflow` | both | hook actions and scheduled commands, run later |
+| `trigger` | both | `definition.spec.command` plus `args` (an argv list, not a shell line), run later |
+| `state` | both | a `command` hook added with `mode: "hooks"`, run later on its event |
+| `terminal` | Agent | `command`, a tracked background process |
+| `process` | Agent | `command` for `action: "start"`, and `data` written to a running process's standard input with `action: "write"` |
+| `agent_harness` | Agent | modes such as `run_background_process` and `run_workspace_action` |
+| `agent_operator_method` | Agent | daemon methods, including running a command on a paired peer or registered backend |
+
+1. Save this script as `<project>/.goodvibes/hooks/block-git-push.sh` and make it executable (`chmod +x`). It needs `jq` 1.6 or later.
+
+```sh
+#!/bin/sh
+if jq -e '
+  .payload.args as $a
+  | ([ $a | .. | strings ]
+     + [ $a | .. | objects | .cmd_base64? | strings | (try @base64d catch "") ]
+     | any(test("\\bgit\\b[^;&|]*\\bpush\\b")))
+  or ([ $a | .. | objects | select((.args? | type) == "array")
+        | [ .command?, .args[]? ] | map(strings) | join(" ") ]
+      | any(test("\\bgit\\b") and test("\\bpush\\b")))
+' >/dev/null; then
+  printf '%s\n' '{"decision":"deny","reason":"git push is blocked by this project'"'"'s hook. Ask the owner to push."}'
+fi
+exit 0
+```
+
+It refuses the call when any text value in the call's arguments (or the decoded text of a `cmd_base64`) contains `git` followed by `push` before a `;`, `&` or `|`, or when an argv-style object (`command` plus an `args` list, as `trigger` takes) contains both words.
+
+2. Add it to `<project>/hooks.json` under each of those tools, using the absolute path of the script:
+
+```json
+{
+  "hooks": {
+    "Pre:tool:exec":                   [{ "name": "block-git-push-exec", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:terminal":               [{ "name": "block-git-push-terminal", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:process":                [{ "name": "block-git-push-process", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:repl":                   [{ "name": "block-git-push-repl", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:workflow":               [{ "name": "block-git-push-workflow", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:trigger":                [{ "name": "block-git-push-trigger", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:state":                  [{ "name": "block-git-push-state", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:agent_harness":          [{ "name": "block-git-push-agent_harness", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }],
+    "Pre:tool:agent_operator_method":  [{ "name": "block-git-push-agent_operator_method", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/block-git-push.sh" }]
+  }
+}
+```
+
+The terminal app accepts the four Agent-only keys and never fires them. Do not put the script under `Pre:tool:*`: that would also refuse `write` and `edit` calls whose file text mentions `git push`.
+
+3. Run `goodvibes hooks validate`; it prints one `PASS  Pre:tool:<tool> #0 block-git-push-<tool> (contract: intercept/blocking)` line per key (nine) and `result: all hooks are valid.`
+4. If the workspace is not trusted yet, run `/trust workspace trusted`: in either program the waiting hooks file loads at once. After editing `hooks.json` later, run `/hooks reload` in the terminal app, or restart the Agent.
+5. Check it: `/hooks simulate Pre:tool:exec` lists the hook.
+
+Tested inputs, refused: `cd x && git -C repo push` (`exec`), the base64 form of `git push origin main`, a `terminal` command `git push`, `process` `action: "start"` with `git push origin main`, `process` `action: "write"` with data `git push`, `repl` code `Bun.spawnSync(["git","push"])`, a `trigger` with `command: "git"` and `args: ["push"]` (either key order), a `state` command hook `git push`, a `workflow` schedule `git push`, and `agent_harness` `run_background_process` with `git push`. Passed: `git status`, `npm run dev`, a `trigger` running `git status`.
+
+It also refuses harmless commands that contain the two words in that order, for example `git commit -m "push fix"` or `git log --grep push`.
+
+What it does not stop:
+
+- Any call in the `yolo` permission mode, where `Pre:tool:*` hooks do not run.
+- A command whose words are not in that order or are built when it runs: `echo push | xargs git`, `g''it push`, `$(printf git) push`, a variable holding `push` (including one set in `exec`'s `env`), a script file the model wrote earlier and then runs (`sh publish.sh`), a git alias (`git config alias.p push` followed by `git p`), or text sent to a running shell in pieces (`process` `write` of `git ` and then `push`).
+- Tools of MCP servers (a git MCP server's push tool is the call `mcp` with `mode: "call"`); add a `Pre:tool:mcp` entry with a script that inspects `.payload.args.qualifiedName` to cover a specific server tool.
+- Agents hosted with `/agents host` and runners started with `/remote dispatch`, which run their own tools in their own process.
+- Commands the owner runs: `!git push` in the composer, or a shell outside GoodVibes.
+- If `jq` is missing or the script fails, every call under these keys is refused (a failing `Pre:tool:*` hook refuses the call).
+
+### Example: format files after every edit
+
+Because `Post:tool:edit` carries no arguments and `Post:file:edit` carries no path, this hook formats every file git reports as changed or new (it needs a git repository and the project's own `prettier`; `--no-install` keeps `npx` from downloading one). Save as `<project>/.goodvibes/hooks/format-changed.sh` (executable):
+
+```sh
+#!/bin/sh
+cat >/dev/null   # the event on stdin is not needed
+cd "$(git rev-parse --show-toplevel)" || exit 0
+{ git diff --name-only --diff-filter=ACMR HEAD; git ls-files --others --exclude-standard; } \
+  | grep -E '\.(ts|tsx|js|jsx|json|css|md)$' \
+  | xargs -r npx --no-install prettier --write >/dev/null 2>&1
+exit 0
+```
+
+```json
+{
+  "hooks": {
+    "Post:tool:edit": [
+      { "name": "format-after-edit", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/format-changed.sh", "timeout": 60 }
+    ],
+    "Post:tool:write": [
+      { "name": "format-after-write", "type": "command", "command": "/home/me/work/project/.goodvibes/hooks/format-changed.sh", "timeout": 60 }
+    ]
+  }
+}
+```
+
+It formats files the owner changed too, not only the model's. The hook runs beside the turn, so the model's next tool call may start before formatting ends; when the model then edits a file the formatter changed, the `edit` tool refuses (the file changed since it was read) and the model reads it again.
+
+### `/hooks`
+
+| Form | Effect |
+| --- | --- |
+| `contracts [filter]` | List hook points. |
+| `reload` | Reload hooks from the file. |
+| `scaffold <name> <match> <command\|prompt\|agent\|http\|ts>` | Add a named hook skeleton to the file. |
+| `chain <name> <event1,event2,...>` | Add a chain skeleton. |
+| `enable <name>`, `disable <name>`, `remove <name>` | Change a named hook. |
+| `simulate <eventPath>` | Show what fires for an event. |
+| `inspect <path>`, `import <path> [merge\|replace]`, `export [path]` | Move hook sets between files. |
+
+Every `/hooks` change (`scaffold`, `chain`, `enable`, `disable`, `remove`, `import`) edits the hooks file itself: the file the setting `tools.hooksFile` names, resolved against the working directory, which is `<project>/hooks.json` by default.
+Before writing, the command reads the file again; a file that is not valid JSON, is writable by other users, or is owned by another user is not changed (`The hooks file <path> was not changed: it was not loaded because <reason>. Fix the file, then retry.`).
+The file is written to a temporary file and renamed over the old one, keeping its permissions, with two-space JSON indentation; the hooks are then loaded again at once.
+
+`/hooks scaffold lint-after-write Post:tool:write command` prints `Scaffolded managed hook lint-after-write at Post:tool:write in /home/me/work/project/hooks.json` and adds this entry under the key `Post:tool:write`:
+
+```json
+{
+  "name": "lint-after-write",
+  "match": "Post:tool:write",
+  "type": "command",
+  "enabled": false,
+  "description": "Managed hook scaffold for Post:tool:write",
+  "command": "echo implement-hook"
+}
+```
+
+A scaffolded hook starts disabled. Replace its placeholder, then run `/hooks enable lint-after-write`.
+The placeholder for each type: `command` gets `"command": "echo implement-hook"`; `prompt` gets `"prompt": "Return a HookResult JSON object for $ARGUMENTS."`; `agent` gets `"prompt": "Handle this hook event: $ARGUMENTS"`; `http` gets `"url": "http://localhost:3000/hooks"`; `ts` gets `"path": "./hooks/handler.ts"`.
+
+`/hooks chain notify-done Lifecycle:agent:spawned,Lifecycle:agent:completed` appends to the file's `chains` list:
+
+```json
+{
+  "name": "notify-done",
+  "description": "Managed hook workflow for Lifecycle:agent:spawned -> Lifecycle:agent:completed",
+  "steps": [{ "match": "Lifecycle:agent:spawned" }, { "match": "Lifecycle:agent:completed" }],
+  "action": { "name": "notify-done-action", "match": "Lifecycle:agent:completed", "type": "command", "command": "echo chain-action", "enabled": true }
+}
+```
+
+A scaffolded chain's action is enabled at once and runs `echo chain-action` until it is edited.
+`goodvibes doctor hooks` lists registered hooks and their source.
+
+## Named API services
+
+`~/.goodvibes/tui/services.json` defines named API services the `fetch` tool can call by name, with their credentials kept in the secret store.
+A project's `.goodvibes/tui/services.json` adds services only when they name keys in the owner's secret store and the owner confirms each with `/services trust <name>`.
+`/services [open|list|inspect <name>|test <name>|resolve|auth <name>|auth-review|doctor|trust <name>|export <path>|import <path>]` (alias `/svc`) manages them.
+With none: `[services] No services configured. Add entries to ~/.goodvibes/tui/services.json or /services import <path>`.
+`/services auth <name>` with a missing credential prints `Service <name> has no resolvable auth headers right now. /services inspect <name> shows which credential is missing.`
+
+## Headless runs
+
+`goodvibes run` runs one prompt without the interface and exits. `exec`, `-p/--prompt` and `--print` with no command are the same.
+The terminal app runs the turn in the `run` process itself with its local model; it does not need the daemon.
+The `--intake-*` flags instead work on a prompt captured through native admission on the daemon.
+
+```sh
+goodvibes run "summarize the current project"
+goodvibes run --output json "list risks"
+goodvibes run --output stream-json --omit-accumulated --timeout 10m --max-turns 20 "fix the failing test"
+goodvibes --just-vibes run "tidy the test fixtures and tell me what you could not do"
+goodvibes run --session user-0008b454 "continue with the next step"
+```
+
+### Flags of `run`
+
+| Flag | Effect |
+| --- | --- |
+| `--output text\|json\|stream-json` | Output format (below). |
+| `--timeout <duration>` | Cancel after this long, as Ctrl-C would; exit `124`, `stopReason` `timeout`. `90`, `90s`, `5m`, `1h`. A value that is not a positive duration is refused with exit `2`: `--timeout expects a positive duration such as 90, 90s, 5m or 1h, not "abc".` |
+| `--max-turns <n>` | Stop once the model has answered `n` times in this run's own loop and still asks for tools; exit `1`, `stopReason` `max_turns`. Helper agents and helper models do not count. Tools from that last answer are not run. A value that is not a whole number of at least 1 is refused with exit `2`: `--max-turns expects a positive whole number, not "0".` |
+| `--omit-accumulated` | With `stream-json`, leave `accumulated` out of `STREAM_DELTA` frames. |
+| `--answer-permissions` | With `stream-json`, answer owner prompts on standard input. Without it, a call that needs the owner is refused. With another format it is refused with exit `2`. |
+| `--continue`, `--resume [id]`, `--session <id>` | Continue the last or the named session. A session that does not exist fails. |
+| `--intake-status`, `--intake-retry`, `--intake-resume`, `--intake-cancel` | Inspect, retry, resume or cancel the saved native input. They take no prompt; use one at a time. |
+
+A refusal while the command line is read (an unknown option, a bad `--timeout` or `--max-turns` value, `--answer-permissions` without `stream-json`, a run-only flag on another command) prints the one-line reason, a blank line, then the program's whole top-level help, on standard error, and exits `2`.
+A run with no prompt is refused after the command line is read, so it prints no help. The session named by `--continue`, `--resume` or `--session` is claimed first, so when that session is open in another running copy the run reports `session-open-elsewhere` (exit `1`) instead. Otherwise it exits `2` and prints, by output format:
+
+| Format | Terminal app | Agent |
+| --- | --- | --- |
+| `text` | `A prompt is required.` on standard error and one empty line on standard output | `A complete original prompt is required.` on standard error and one empty line on standard output |
+| `json` | `{"schemaVersion":1,"ok":false,"response":"","error":"A prompt is required.","stopReason":"invalid-input","sessionId":null,"usage":null}` on standard output; standard error empty | the same object with `"error":"A complete original prompt is required."` |
+| `stream-json` | the same object with `"type":"TURN_RESULT"` first | the same object with `"type":"NATIVE_INTAKE_RESULT"` first |
+
+### Output formats
+
+- `text`: the answer on standard output. Errors, and the message of a run that never reached the model, go to standard error. Calls `just-vibes` held go to standard error as `Held for you (not run): <id> <tool>: <reason>; ...`.
+- `json`: nothing until the end, then one JSON object on one line: the final frame.
+- `stream-json`: one JSON object per line as events happen, then the final frame.
+
+When no decision model was in use for the run, its one-line explanation (for example `No decision model is in use: none is set, so decisions take their fallbacks. Next: to use one, set judgment.model, judgment.endpoint or TYPESAFE_API_KEY.`) goes to standard error in every format, and the JSON formats also carry it in `diagnostics`.
+When a request moves from one sign-in of a provider to another (OpenAI: subscription to API key), one line goes to standard error in every format, once per move: `<model> answered through your <provider> <sign-in>: the <previous sign-in> failed (<reason>).`
+Free text in any frame (`error`, `reason`, `question`, `summary`, `detail`, a tool's error) has credentials masked and is cut at 1000 characters followed by `...`. Tool arguments, agent task text, agent output and the full contract request are never included.
+Consumers ignore frame types and fields they do not know. A field shown as optional is left out when it has no value; it is never sent as `null`, except `sessionId` and `usage` in the final frame.
+
+### Stream frames
+
+Every stream frame is one JSON object whose first two keys are `schemaVersion` (always `1`) and `type`.
+
+| `type` | Field | Type | Meaning |
+| --- | --- | --- | --- |
+| `STREAM_DELTA` | `content` | string | The new text of this chunk. |
+| | `accumulated` | string | The whole answer streamed so far in this model response. Left out with `--omit-accumulated`. |
+| `DRAFT_WITHDRAWN` | `reason` | string | The completion check sent the streamed answer back. Discard the text received so far; the replacement streams from empty. |
+| `TOOL_EXECUTING` | `turnId`, `callId`, `tool` | string | A tool call starts. |
+| `TOOL_SUCCEEDED` | `turnId`, `callId`, `tool` | string | The call finished. |
+| | `durationMs` | number | How long it ran. |
+| `TOOL_FAILED` | `turnId`, `callId`, `tool` | string | The call failed. |
+| | `durationMs` | number | How long it ran. |
+| | `error` | string | Why. |
+| `TOOL_CANCELLED` | `turnId`, `callId`, `tool` | string | The call was cancelled. |
+| | `reason` | string, optional | Why. |
+| `PERMISSION_REQUESTED` | `callId`, `tool` | string | A tool call reached the permission gate. Written when the gate has decided it, just before `PERMISSION_DECIDED`; a request never decided is written when the run ends, without `ownerPrompt`. |
+| | `category` | string | `read`, `write`, `execute` or `delegate`. |
+| | `riskLevel` | string, optional | `low`, `medium`, `high` or `critical`. |
+| | `summary` | string, optional | What the call does, in one line. |
+| | `ownerPrompt` | boolean | `true` when the owner was asked to answer this call. |
+| `PERMISSION_DECIDED` | `callId`, `tool`, `category` | string | The gate's decision on the call. |
+| | `approved` | boolean | Whether it may run. |
+| | `source` | string | Who decided: `boundary`, `stakes_preset`, `config_policy`, `managed_policy`, `safety_check`, `runtime_mode`, `invocation_admission`, `session_override`, `user_rule`, `user_prompt` (the owner answered), `jev_decision` (the decision model). |
+| | `ownerPrompt` | boolean | `true` when the owner was asked. |
+| | `reasonCode` | string, optional | The exact reason: `boundary_judgment_input`, `boundary_catastrophic`, `boundary_surface_authority`, `boundary_card_details`, `boundary_outward_effect`, `owner_act`, `preset_allow`, `preset_deny`, `owner_approved_outward`, `config_allow`, `config_deny`, `managed_policy_allow`, `managed_policy_deny`, `safety_guardrail`, `mode_allow_all`, `mode_queued_for_owner` (held by `just-vibes`), `invocation_already_admitted`, `mode_denied`, `plan_mode`, `session_cached_allow`, `session_cached_deny`, `user_rule_allow`, `user_rule_deny`, `user_approved`, `user_denied`, `jev_act`, `jev_revise`, `jev_defer`, `jev_reject`. |
+| `PERMISSION_PROMPT` | `callId`, `tool`, `category` | string | With `--answer-permissions` only: the owner is asked, and the run waits for an answer on standard input. |
+| | `riskLevel` | string | As above. |
+| | `summary` | string | As above. |
+| | `answer` | string | The exact line to write, for example `Write one line to stdin: {"type":"PERMISSION_ANSWER","callId":"c1","approved":true} (or false).` |
+| `PERMISSION_ANSWERED` | `callId` | string | An answer line was accepted. |
+| | `approved` | boolean | The answer. |
+| `PERMISSION_ANSWER_REJECTED` | `callId` | string, optional | Present when the line's `callId` was a string. |
+| | `reason` | string | Why the line was not used. |
+| | `waiting` | array of string | Call ids still waiting for an answer. |
+| `AGENT_SPAWNING`, `AGENT_RUNNING` | `agentId`, `taskId` | string | A helper agent starts. |
+| | `parentAgentId`, `contractId` | string, optional | Its parent agent and contract. |
+| | `contractRole` | string, optional | `owner`, `unit` or `planner`. |
+| `AGENT_COMPLETED` | `agentId`, `taskId` | string | The agent finished. |
+| | `durationMs`, `toolCallsMade` | number, optional | How long it ran and how many tool calls it made. |
+| `AGENT_FAILED` | `agentId`, `taskId` | string | The agent failed. |
+| | `error` | string, optional | Why. |
+| | `durationMs` | number, optional | How long it ran. |
+| `AGENT_CANCELLED` | `agentId`, `taskId` | string | The agent was cancelled. |
+| | `reason` | string, optional | Why. |
+| `CONTRACT_CREATED` | `contractId`, `sessionId`, `ownerAgentId` | string | Delegated work became a contract. |
+| | `origin` | string | `turn`, `agent-tool`, `cli`, `hosted`, `external` or `proposal`. |
+| `CONTRACT_STATUS_CHANGED` | `contractId` | string | The contract moved. |
+| | `from`, `to` | string | `queued`, `shaping`, `planning`, `checking-plan`, `running`, `judging`, `fixing`, `committing`, `awaiting-owner`, `passed`, `failed`, `cancelled`. |
+| `CONTRACT_ESCALATED` | `contractId`, `escalationId`, `targetId`, `question` | string | The contract waits on its owner. |
+| | `scope` | string | `plan`, `unit`, `group`, `deliverable` or `shape`. |
+| | `reason` | string | `plan-unresolved`, `stalled`, `unsettled`, `fix-rounds-exhausted`, `writing-unclear`, `attempts-undecided` or `owner-decision-needed`. |
+| `CONTRACT_PASSED` | `contractId` | string | The contract passed. |
+| | `criteriaMet`, `criteriaJudged` | number | Acceptance criteria met, out of those judged. |
+| `CONTRACT_FAILED` | `contractId`, `reason` | string | The contract failed. |
+| | `failureKind` | string | `transport`, `max_turns`, `planning`, `budget`, `owner-rejected`, `judgment-unavailable`, `zombie` or `other`. |
+| `CONTRACT_CANCELLED` | `contractId`, `reason` | string | The contract was cancelled. |
+| `USAGE` | `turnId`, `provider`, `model` | string | One model response: its provider and model id. Helper agents and helper models count here too. |
+| | `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens` | number | Tokens of this response. |
+| | `costUsdCents` | number, optional | Its price in US cents, when the model is priced. |
+| | `signIn` | object, optional | For a provider with more than one sign-in: `route` (`subscription` or `api-key`), and `movedFrom` (the route that failed) with `reason` when this response moved sign-in. |
+| `SESSION_RECOVERED` | the `recovery` fields | | The session was restored from a crash snapshot. Written before the first request. |
+
+For each tool call the gate decides first, so `PERMISSION_REQUESTED` and `PERMISSION_DECIDED` come before `TOOL_EXECUTING`. A call the gate refuses produces `PERMISSION_DECIDED` with `approved: false` and then `TOOL_FAILED`, with no `TOOL_EXECUTING`. A call a `Pre:tool:*` hook refuses never reaches the gate: it produces only `TOOL_FAILED`, whose `error` is the hook's reason.
+
+### The final frame
+
+`json` prints only this object. `stream-json` prints it last, with `type` first: `TURN_RESULT` for a turn the terminal app ran itself, `NATIVE_INTAKE_RESULT` for an `--intake-*` run.
+
+| Field | Present | Type | Meaning |
+| --- | --- | --- | --- |
+| `type` | `stream-json` only | string | `TURN_RESULT` or `NATIVE_INTAKE_RESULT`. |
+| `schemaVersion` | always | number | `1`. |
+| `ok` | always | boolean | `true` exactly when the exit code is `0`. |
+| `response` | always | string | The answer. When delegated work produced the answer, the work's answers joined by blank lines. For a run that never reached a model, the status message. |
+| `error` | when a model turn ran, and on most failures | string | What went wrong. A run whose model turn completed carries `""`. A native-intake result that never reached a model (for example `native-unavailable`) has no `error`; its message is in `response`. |
+| `stopReason` | always | string | See the table below. |
+| `events` | when a turn ran | number | How many events the run observed. |
+| `sessionId` | always | string or `null` | The session; `null` when no model turn ran. |
+| `model` | when a turn ran | string | The selected model's registry key. |
+| `provider` | when a turn ran | string | The selected provider. |
+| `signIn` | when a provider with more than one sign-in answered | string | The sign-in that answered last: `subscription` or `api-key`. |
+| `usage` | always | object or `null` | Summed over every model response of the run (helper agents and helper models included): `modelCalls`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, and `costUsdCents` only when every response was priced. `null` when no model turn ran. |
+| `heldForOwner` | when `just-vibes` held calls | array | One object per held call: `id`, `tool`, `summary`, `reason`. Nothing was run for them; run again in `ask-me`, or answer them with `--answer-permissions`, to decide each. |
+| `kind` | on some failures | string | `outcome-unknown` (the daemon may have acted) or `unavailable` (nothing was sent). |
+| `cause` | with `kind`, when known | string | `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
+| `native` | for native intake | object | `status` (`pending`, `recorded`, `unknown`, `invalid`, `unavailable`), `message`, `cause`, `request` (`requestId`, `inputId`), `result` (the host's record, whose `kind` is for example `captured`, `processing`, `turn`, `work`, `blocked`, `refused`, `cancelled`), `execution`, `nextStep` (`retry`, `resume`, `cancel` or `inspect`; run `--intake-<nextStep>`, where `inspect` means `--intake-status`), `notSent: true` (this run's own text was not sent because an earlier input must move first), `hostedTurn` (the daemon-hosted reply: `state`, `sessionId`, and on failure `failure` with `summary` and `retryable`). |
+| `refusal` | when refused before starting | object | `code` (`SESSION_OPEN_ELSEWHERE`), `state`, `reason`, `next` (array of steps). |
+| `recovery` | when restored from a crash snapshot | object | `sessionId`, `applied` (boolean), `refusal` (when not applied: `no-snapshot`, `unusable-snapshot`, `apply-failed`), `snapshotAt` (ISO time), `snapshotKept` (boolean), `messages` (number), `turns` (number), `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults` number, `interruptedToolCalls` as `{ callId, tool }`, `partialReply` boolean), `lost` (array of sentences). |
+| `diagnostics` | when no decision model was in use | object | `decisionModel`: `inUse: false`, `policy` (`Hybrid`, `Decision Model Only` or `No Decision Model`), `reason` (`not-set`, `selected`, `unavailable`), `line`, and `failure` (`model`, `what`, `nextStep`) when the set model was failing. |
+
+`stopReason` values:
+
+| Value | Exit | Meaning |
+| --- | --- | --- |
+| `completed` | 0 | The turn, and any work it delegated, finished with an answer. |
+| `empty_response` | 1 | The model returned no text. |
+| `max_turns` | 1 | `--max-turns` was reached. |
+| `timeout` | 124 | `--timeout` was reached. |
+| `cancelled` | 130 | Ctrl-C, SIGTERM, or a cancellation this run issued to delegated work. |
+| `contract-failed` | 1 | Delegated work (a contract) ended without passing; `error` says why. |
+| `awaiting-owner` | 1 | Delegated work stopped for an owner decision; open the session interactively and answer it. |
+| `agent-failed` | 1 | A helper agent started outside a contract ended without a completed report. |
+| (`preflight_failed`, `context_overflow`) | 3 | Never reported by a headless run. When the turn fails its preflight check or its context does not fit, the run sees no completion, error or cancellation event and reports `turn-unsettled` (exit `3`) instead. |
+| `provider_error` | 1 | The provider failed (after any sign-in move inside the provider). |
+| `provider_exhausted` | 1 | Every backend of the selected `synthetic` model is exhausted (rate limits and cooldowns): `All providers for the selected synthetic model are exhausted`. |
+| `hook_denied` | 1 | A `Pre:llm:chat` hook refused the model request, which ends the turn. (A `Pre:tool:*` hook that refuses a tool call fails only that call; the turn goes on.) |
+| `tool_loop_circuit_breaker` | 1 | The turn was stopped by a turn limit or its budget before the request was complete: `Stopped: <the limit, or 'a turn limit was reached'>. The request is not complete.` |
+| `unexpected_error` | 1 | The turn failed in an unexpected way (the run's own error is in `error`), including a turn admitted through native intake that then failed in this process (`The turn failed in this process: <reason>`). |
+| `turn-unsettled` | 3 | The turn ended without a completion, error or cancellation event; this includes a failed preflight check and a context that does not fit. |
+| `session-open-elsewhere` | 1 | The session named by `--continue`, `--resume` or `--session` is open in another running copy. |
+| `invalid-input` | 2 | No prompt, or a prompt given with an `--intake-*` flag. |
+| `native-<kind>` | varies | An `--intake-*` run: `<kind>` is the kind of the host's record. `--intake-status` exits `0` whenever the host has a record. Otherwise `native-work` exits `0` when the work has an execution state, `native-blocked` and `native-refused` exit `1`, `native-cancelled` exits `130`, and any other kind (`native-captured`, `native-processing`, `native-turn` not run by this process) exits `3`. With no record kind the reason is `native-<status>`: `native-invalid` exits `2`, `native-unavailable` exits `1`, and `native-pending` (another intake action is already in progress), `native-recorded` (the host recorded the input without a result kind) and `native-detached` (no intake state came back at all) exit `3`. |
+| `native-unknown` | 3 | The outcome on the host is unknown. |
+| `native-unavailable` | 1 | No daemon or no credential; nothing was sent. |
+
+A failure while shutting down after an otherwise successful turn changes exit `0` to `1` and appends `shutdown failed: ...` or `session pointer not written: ...` to `error`.
+
+### A complete example stream
+
+A run that lists files with one shell command, decided by the decision model:
+
+```text
+$ goodvibes run --output stream-json "how many TypeScript files are in src?"
+{"schemaVersion":1,"type":"STREAM_DELTA","content":"I'll count them.","accumulated":"I'll count them."}
+{"schemaVersion":1,"type":"USAGE","turnId":"turn-1","provider":"openai","model":"gpt-5.4","inputTokens":5120,"outputTokens":48,"cacheReadTokens":0,"cacheWriteTokens":0,"costUsdCents":1.3,"signIn":{"route":"subscription"}}
+{"schemaVersion":1,"type":"PERMISSION_REQUESTED","callId":"call-1","tool":"exec","category":"execute","riskLevel":"high","summary":"Execute shell command","ownerPrompt":false}
+{"schemaVersion":1,"type":"PERMISSION_DECIDED","callId":"call-1","tool":"exec","category":"execute","approved":true,"source":"jev_decision","ownerPrompt":false,"reasonCode":"jev_act"}
+{"schemaVersion":1,"type":"TOOL_EXECUTING","turnId":"turn-1","callId":"call-1","tool":"exec"}
+{"schemaVersion":1,"type":"TOOL_SUCCEEDED","turnId":"turn-1","callId":"call-1","tool":"exec","durationMs":41}
+{"schemaVersion":1,"type":"STREAM_DELTA","content":"There are 212 ","accumulated":"There are 212 "}
+{"schemaVersion":1,"type":"STREAM_DELTA","content":"TypeScript files in src.","accumulated":"There are 212 TypeScript files in src."}
+{"schemaVersion":1,"type":"USAGE","turnId":"turn-1","provider":"openai","model":"gpt-5.4","inputTokens":5390,"outputTokens":12,"cacheReadTokens":4864,"cacheWriteTokens":0,"costUsdCents":0.4,"signIn":{"route":"subscription"}}
+{"type":"TURN_RESULT","schemaVersion":1,"ok":true,"response":"There are 212 TypeScript files in src.","error":"","stopReason":"completed","events":11,"sessionId":"user-1a2b3c4d","model":"openai:gpt-5.4","provider":"openai","signIn":"subscription","usage":{"modelCalls":2,"inputTokens":10510,"outputTokens":60,"cacheReadTokens":4864,"cacheWriteTokens":0,"costUsdCents":1.7}}
+```
+
+The ids, counts and prices above are illustrative; the field names and their order are what the program writes.
+
+### Answering permission prompts from a script
+
+1. Run with `--output stream-json --answer-permissions`, with standard input connected to the script.
+2. For each call that needs the owner, the run writes a `PERMISSION_PROMPT` frame and waits.
+3. The script writes one line: `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}`. Optional fields: `remember` (boolean) and `note` (text the model sees on a refusal, cut at 2000 characters).
+4. The run acknowledges with `PERMISSION_ANSWERED`, or rejects the line with `PERMISSION_ANSWER_REJECTED` and the reason (`callId must be the string from the PERMISSION_PROMPT frame`, `approved must be true or false`, `no prompt is waiting for this call id; it was answered already, or never asked`).
+
+Lines that are not a `PERMISSION_ANSWER` are ignored. A call never answered is refused when standard input ends, the run is cancelled or the run finishes; it is never approved by silence.
+
+A complete script that approves every prompt (Linux, with `jq`):
+
+```sh
+mkfifo answers
+exec 3<>answers   # hold the pipe open, so the run's input does not end after the first answer
+goodvibes run --output stream-json --answer-permissions "delete the build directory" <answers |
+while IFS= read -r frame; do
+  printf '%s\n' "$frame"
+  call=$(printf '%s' "$frame" | jq -r 'select(.type=="PERMISSION_PROMPT") | .callId')
+  if [ -n "$call" ]; then
+    printf '{"type":"PERMISSION_ANSWER","callId":"%s","approved":true}\n' "$call" >&3
+  fi
+done
+exec 3>&-
+rm answers
+```
+
+### Crash recovery in runs
+
+Every run writes its session's crash snapshot at the same moments the interface does, and records the session as the last one, so `--continue` reaches a run that was killed.
+`run --continue`, `--resume [id]` or `--session <id>` on a session whose snapshot is newer than its saved copy restores the snapshot first, without asking; the interrupted turn is recorded as interrupted and not run again.
+Text mode prints one `[Recovery]` line on standard error; `stream-json` writes `SESSION_RECOVERED`; both JSON formats carry `recovery`.
+A session another running copy has open is refused before anything is sent: exit `1`, `stopReason` `session-open-elsewhere`, `refusal.code` `SESSION_OPEN_ELSEWHERE`.
+
+### Exit codes of `run`
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Completed. |
+| `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, or the daemon was unavailable or refused the input. |
+| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with an `--intake-*` flag (`Recovery uses the original journal input; do not supply a replacement prompt.`). |
+| `3` | Outcome unknown: the turn ended without a final event (`turn-unsettled`, which includes a failed preflight check or a context that does not fit), or a native input may have taken effect on the daemon (run `goodvibes run --intake-status` before retrying). |
+| `124` | `--timeout` reached. |
+| `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
+
+A run that finished without a decision model still exits `0`; `diagnostics` says so.
+
+## Editors: the Agent Client Protocol
+
+`goodvibes acp` runs the terminal app as an Agent Client Protocol agent on standard input and output, so an ACP editor (Zed and others) can drive it.
+Standard output carries only protocol frames; everything for a person goes to standard error.
+It takes no arguments; an argument prints its usage and exits `2`.
+It exits `0` when the editor closes standard input or on SIGINT or SIGTERM, and `1` when ACP cannot run (the reason is one line on standard error).
+Prompts are text only; session restore (`loadSession`) is not supported and `initialize` reports it as `false`.
+Editor threads share the one embedded daemon of the home directory (`GOODVIBES_HOME` selects it); a thread whose working directory lies outside it gets its own; `session/close` ends a thread.
+
+Zed configuration:
+
+```json
+{ "agent_servers": { "GoodVibes": { "command": "goodvibes", "args": ["acp"] } } }
+```
+
+To expose the operator API to an MCP client instead, use `goodvibes-daemon mcp serve` (described under "`mcp serve`" in the daemon part).
+`/remote dispatch` and `/remote dispatch-pool` start this same command as their subagent; `ACP_AGENT_CMD` replaces it. (There is no model tool named `delegate`.)
+
+## Project instructions
+
+The model's standing instructions are built from these files, each present and non-empty file appended in this order (a later file takes precedence where they disagree):
+
+1. `~/.goodvibes/SYSTEM.md`
+2. `~/.goodvibes/GOODVIBES.md` (the owner's global instructions)
+3. the nearest `AGENTS.md`, found by walking up from the working directory
+4. `<project>/.goodvibes/GOODVIBES.md` (the project's instructions)
+5. the file named by the setting `provider.systemPromptFile`
+
+To give the terminal app standing instructions for one project, write them to `<project>/.goodvibes/GOODVIBES.md`; for every project, to `~/.goodvibes/GOODVIBES.md`.
+
+## Settings the terminal app reads most
+
+Every key is listed under "Settings" in the reference part. The prefixes that change the terminal app's own behavior:
+
+<!-- generated: settings:display -->
+
+<!-- generated: settings:behavior -->
+
+<!-- generated: settings:ui -->
+
+<!-- generated: settings:tools -->
+
+<!-- generated: settings:checkpoints -->
+
+<!-- generated: settings:runtime -->

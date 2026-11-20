@@ -73,6 +73,7 @@ export type ToolEvent =
       limitMs: number;
       elapsedMs: number;
     }
+  /** A tool call's token budget (`limitTokens`) was exceeded (`usedTokens`) in `phase`. Declared for subscribers and read by forensics; nothing in this release emits it. */
   | {
       type: 'BUDGET_EXCEEDED_TOKENS';
       callId: string;
@@ -82,6 +83,7 @@ export type ToolEvent =
       limitTokens: number;
       usedTokens: number;
     }
+  /** A tool call's cost budget in US dollars (`limitCostUsd`) was exceeded (`usedCostUsd`) in `phase`. Declared for subscribers and read by forensics; nothing in this release emits it. */
   | {
       type: 'BUDGET_EXCEEDED_COST';
       callId: string;

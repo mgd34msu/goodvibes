@@ -12,6 +12,11 @@ export type AutomationExecutionMode = 'isolated' | 'current' | 'pinned' | 'backg
 export type AutomationRunOutcome = (typeof AUTOMATION_RUN_OUTCOMES)[number];
 
 export type AutomationEvent =
+  /**
+   * A scheduled job was created. `name` is its display name, `scheduleKind`
+   * how it repeats (`at` once, `every` an interval, `cron` an expression), and
+   * `enabled` whether it will run.
+   */
   | {
       type: 'AUTOMATION_JOB_CREATED';
       jobId: string;
@@ -19,20 +24,32 @@ export type AutomationEvent =
       scheduleKind: AutomationScheduleKind;
       enabled: boolean;
     }
+  /**
+   * A scheduled job's definition changed; `changedFields` names the fields
+   * that differ. A change of `enabled` is also announced by
+   * AUTOMATION_JOB_ENABLED or AUTOMATION_JOB_DISABLED.
+   */
   | {
       type: 'AUTOMATION_JOB_UPDATED';
       jobId: string;
       changedFields: string[];
     }
+  /** A scheduled job was turned on and will run at its next due time. */
   | {
       type: 'AUTOMATION_JOB_ENABLED';
       jobId: string;
     }
+  /** A scheduled job was turned off; `reason` is why it was paused (`disabled` when none was given). */
   | {
       type: 'AUTOMATION_JOB_DISABLED';
       jobId: string;
       reason: string;
     }
+  /**
+   * A run of a scheduled job began. `runId` names the run, `startedAt` is its
+   * start time (milliseconds since the epoch) and `attempt` counts retries of
+   * the same run, from 1.
+   */
   | {
       type: 'AUTOMATION_RUN_STARTED';
       jobId: string;
@@ -68,6 +85,11 @@ export type AutomationEvent =
       error: string;
       retryable: boolean;
     }
+  /**
+   * A run failed and its job turned itself off after too many failures in a
+   * row: `consecutiveFailures` is the count and `reason` why it was paused
+   * (`failure-threshold-reached` unless the job gave its own).
+   */
   | {
       type: 'AUTOMATION_JOB_AUTO_DISABLED';
       jobId: string;

@@ -155,7 +155,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
   },
   providers: COMMON_COMMAND_HELP['providers'],
-  models: COMMON_COMMAND_HELP['models'],
+  // The terminal app also lists the synthetic models' fallback chains.
+  models: { ...COMMON_COMMAND_HELP['models'], usage: [...COMMON_COMMAND_HELP['models'].usage, 'models chain [filter]'] },
   auth: {
     usage: [
       'auth status',
@@ -181,7 +182,9 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'subscription list',
       'subscription providers',
       'subscription inspect <provider>',
-      'subscription login <provider> start|finish',
+      'subscription login <provider> start [--open]',
+      'subscription login <provider> finish <code-or-url>',
+      'subscription refresh <provider>',
       'subscription logout <provider>',
     ],
     summary: 'Manage OAuth/subscription-backed provider sessions such as OpenAI subscription access.',

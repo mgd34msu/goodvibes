@@ -100,16 +100,16 @@ export function errorBodySchema(knownCodes: readonly string[]): JsonSchema {
       next: { type: 'array', items: { type: 'string' }, description: 'Steps that would get past the refusal, most useful first.' },
       hint: { type: 'string', description: '`next[0]` when `next` is present.' },
       code: { type: 'string', description: 'A stable code. Known values are listed in `x-known-codes`; treat any other as opaque.', 'x-known-codes': [...knownCodes].sort() },
-      category: { type: 'string', enum: Object.values(DaemonErrorCategory) },
-      source: { type: 'string' },
-      recoverable: { type: 'boolean' },
-      status: { type: 'integer' },
-      provider: { type: 'string' },
-      operation: { type: 'string' },
-      phase: { type: 'string' },
-      requestId: { type: 'string' },
-      providerCode: { type: 'string' },
-      providerType: { type: 'string' },
+      category: { type: 'string', enum: Object.values(DaemonErrorCategory), description: 'The kind of failure: authentication, authorization, billing, rate limit, timeout, network, a bad request, not found, a permission refusal, a tool, configuration, protocol, a service failure, an internal fault, or unknown.' },
+      source: { type: 'string', description: 'The layer the failure came from, such as `provider`, `tool`, `transport`, `config`, `permission` or `runtime`.' },
+      recoverable: { type: 'boolean', description: 'True when another attempt can succeed; false when retrying the same request cannot.' },
+      status: { type: 'integer', description: 'The HTTP status of the failure, including one an upstream provider answered with.' },
+      provider: { type: 'string', description: 'The model provider involved, when a provider failed.' },
+      operation: { type: 'string', description: 'What was being done when it failed, such as `chat` or `embed`.' },
+      phase: { type: 'string', description: 'Where in that operation it failed, such as `request`, `stream`, `response` or `auth`.' },
+      requestId: { type: 'string', description: 'The request id to quote when reporting the failure: the daemon\'s own, or the one an upstream service returned.' },
+      providerCode: { type: 'string', description: 'The error code the upstream provider gave, verbatim.' },
+      providerType: { type: 'string', description: 'The error type the upstream provider gave, verbatim.' },
       retryAfterMs: { type: 'number', description: 'Present when retrying later can succeed.' },
     },
     additionalProperties: true,
@@ -118,7 +118,7 @@ export function errorBodySchema(knownCodes: readonly string[]): JsonSchema {
 
 /** Codes the shared REST layer puts on any route: a body or query value that disagrees with the path, and a missing scope. */
 export const REST_LAYER_CODES: readonly ContractErrorCode[] = [
-  { code: 'INVALID_ARGUMENT', status: 400, meaning: 'A body field or query parameter disagrees with the path value of the same name; nothing was changed.' },
+  { code: 'INVALID_ARGUMENT', status: 400, meaning: 'A request field or parameter is missing, malformed or not allowed for this call, for example a body field that disagrees with the path value of the same name, a workspace outside the allowed roots, or a scope list containing `*`; the body names the field and why, and nothing was changed.' },
   { code: 'MISSING_SCOPE', status: 403, meaning: 'The principal lacks a scope the method requires; the body lists requiredScopes, grantedScopes and missingScopes.' },
 ];
 
@@ -130,6 +130,20 @@ export function knownErrorCodes(methods: readonly OperatorMethodContract[]): str
     ...methods.flatMap((method) => (method.errorCodes ?? []).map((entry) => entry.code)),
   ])];
 }
+
+/**
+ * The request body of `POST /api/control-plane/methods/{methodId}/invoke`: an
+ * envelope, not the method input itself. The daemon refuses a body without a
+ * `body` field with 400 (daemon-api control-routes.ts, gatewayInvoke).
+ */
+export const INVOKE_ENVELOPE_SCHEMA: JsonSchema = {
+  type: 'object',
+  required: ['body'],
+  properties: {
+    body: { description: 'The method input, matching the method\'s inputSchema. Send `{}` for a method that takes none.' },
+    query: { type: 'object', additionalProperties: true, description: 'Query parameters for the method, as name-value pairs.' },
+  },
+};
 
 /** Methods whose 200 response is a server-sent event stream, not a JSON document. */
 export const SSE_METHODS: ReadonlySet<string> = new Set(['control.events.stream', 'companion.chat.events.stream']);

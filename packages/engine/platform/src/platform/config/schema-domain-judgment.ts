@@ -47,7 +47,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'judgment.endpoint',
     type: 'string',
     default: '',
-    description: 'System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused',
+    description: 'Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused',
     validate: isEndpoint,
     validationHint: 'empty, or an http(s) URL without embedded credentials, query or fragment',
   },
@@ -87,7 +87,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: [],
     description: 'Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops',
     validate: validJudgmentFallbackSettings,
-    validationHint: 'array of { endpoint, model, keySource: "env" | "secret", keyName }; no credentials in URLs or inline keys',
+    validationHint: 'array of { endpoint, model, keySource: "env" | "secret" | "none", keyName } (keyName empty for "none"); no credentials in URLs or inline keys',
   },
   {
     key: 'judgment.timeoutMs',

@@ -48,7 +48,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
   const MCP_ADD_COMMAND_USAGE =
-    '/mcp add <name> <command|https-url> ...; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
+    `/mcp add <name> <command|https-url> [options] [-- <server args>]; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>; everything after -- is passed to the server command as it is`;
   const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>';
   const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>';
   const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [--keep]  (this session only; --keep keeps it in the server\'s MCP config past a restart; /mcp clear lifts it)';
@@ -251,7 +251,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       secretArgs: { flags: ['--env', '--header'] },
       description: 'Manage MCP servers and their tools; /mcp deny lasts this session, deny --keep and allow are kept in the MCP config, clear removes either',
       ...(policy.hidden ? { hidden: true } : {}),
-      usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]|trust|role|deny <server> <tool> [--keep]|allow <server> <tool>|clear <server> <tool>]',
+      usage: `[servers|review|tools [<server>]|config|add <name> <command|https-url> [--scope project|global] [--role <role>] [--trust constrained|ask-on-risk|blocked${policy.allowAllOnAdd ? '|allow-all' : ''}] [--env KEY=VALUE] [--header Name=Value] [-- <server args>]|remove|reload|auth-review|repair [server]|trust|role|quarantine <server> [detail|approve [operatorId]]|deny <server> <tool> [--keep]|allow <server> <tool>|clear <server> <tool>]`,
       argsHint: '[servers|review|tools|config|add|remove]',
       async handler(args, ctx) {
         const print = (message: string) => ctx.print(message);

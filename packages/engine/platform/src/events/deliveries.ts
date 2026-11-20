@@ -14,6 +14,11 @@ export const DELIVERY_KINDS = ['notification', 'reply', 'callback'] as const;
 export type DeliveryKind = (typeof DELIVERY_KINDS)[number];
 
 export type DeliveryEvent =
+  /**
+   * A scheduled run's result was queued for delivery to a route: `surfaceKind`
+   * is the surface (Slack, a webhook, ntfy...), `targetId` the route, and
+   * `deliveryKind` whether it is a reply, a webhook callback or a notification.
+   */
   | {
       type: 'DELIVERY_QUEUED';
       deliveryId: string;
@@ -24,6 +29,7 @@ export type DeliveryEvent =
       targetId: string;
       deliveryKind: DeliveryKind;
     }
+  /** An attempt to send a queued delivery began. */
   | {
       type: 'DELIVERY_STARTED';
       deliveryId: string;
@@ -33,6 +39,7 @@ export type DeliveryEvent =
       targetId: string;
       startedAt: number;
     }
+  /** A delivery reached its target; `durationMs` is how long the attempt took. */
   | {
       type: 'DELIVERY_SUCCEEDED';
       deliveryId: string;
@@ -43,6 +50,7 @@ export type DeliveryEvent =
       completedAt: number;
       durationMs: number;
     }
+  /** A delivery attempt failed; `retryable` says whether another attempt will follow (false once every try is used, which DELIVERY_DEAD_LETTERED then announces). */
   | {
       type: 'DELIVERY_FAILED';
       deliveryId: string;
@@ -66,6 +74,7 @@ export type DeliveryEvent =
       runId: string;
       surface: 'agent';
     }
+  /** A delivery used every attempt it had and was set aside as a dead letter; `attempts` is how many were made and `reason` the last failure. */
   | {
       type: 'DELIVERY_DEAD_LETTERED';
       deliveryId: string;

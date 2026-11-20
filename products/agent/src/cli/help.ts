@@ -204,8 +204,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['status', 'status --json', '--runtime-url http://127.0.0.1:3421 status'],
   },
   doctor: {
-    usage: ['doctor', 'doctor --json', '--runtime-url http://127.0.0.1:3421 doctor'],
-    summary: 'Print status plus actionable setup warnings with cause, impact, and next action.',
+    usage: ['doctor', 'doctor --json', 'doctor --strict', '--runtime-url http://127.0.0.1:3421 doctor'],
+    summary: 'Print status plus actionable setup warnings with cause, impact, and next action. Exits 0 when the install is usable and 1 for a must-fix finding; --strict also exits 1 for a warning, for CI.',
     examples: ['doctor', 'doctor --json', '--runtime-url http://127.0.0.1:3421 doctor'],
   },
   providers: COMMON_COMMAND_HELP['providers'],
@@ -300,7 +300,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     usage: [
       'memory list [class] [--scope session|project|team] [--limit <n>]',
       'memory search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]',
-      'memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>]',
+      'memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <state>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>]',
       'memory show <id>',
       'memory queue [limit]',
       'memory review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]',
@@ -558,6 +558,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'subscription inspect <provider>',
       'subscription login <provider> start [--open]',
       'subscription login <provider> finish <code-or-url>',
+      'subscription refresh <provider>',
       'subscription logout <provider>',
     ],
     summary: 'Manage OAuth/subscription-backed provider sessions such as OpenAI subscription access.',

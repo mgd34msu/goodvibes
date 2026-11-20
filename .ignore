@@ -9,3 +9,4 @@ packages/engine/contracts/artifacts/operator-openapi.json
 packages/engine/contracts/artifacts/operator-contract.json
 packages/engine/contracts/src/generated/operator-contract.ts
 products/tui/docs/foundation-artifacts/operator-contract.json
+docs/llms-full.txt

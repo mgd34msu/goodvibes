@@ -109,9 +109,9 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'the fact. '
       + 'THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a '
       + 'daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup '
-      + 'step at all. Turning it on never downloads anything itself: on a host whose artifacts are missing or fail '
-      + 'verification it says exactly which, and names the command that fetches them, rather than silently pulling '
-      + '6.1 MB the moment a switch moves.',
+      + 'step at all. Turning it on in the terminal app or Agent (settings, /config, a model\'s settings call) runs the same '
+      + 'setup as /voice wake setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; '
+      + 'installing a speech-to-text engine is only proposed.',
   },
   {
     key: 'voice.wake.models',

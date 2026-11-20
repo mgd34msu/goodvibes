@@ -97,6 +97,7 @@ MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted
 | Engine code, docs or JSON (planning ids such as `W1.2`, `WO-12`, `DEBT-3`; `TODO`/`FIXME`/`XXX`/`HACK` comments) | `bun run internal-id:check` | Remove the id or marker. |
 | A Jev decision (`define*Decision`, `askAs`, a judgment registry or fixture) | `bun run judgment:lint` | Register the decision and give every answer a fixture. |
 | A runtime event in `packages/engine/platform/src/events/*.ts` | `bun run events:check` | `bun run events:generate`, then commit `events/contracts/event-rules.generated.ts`. |
+| A setting, a command or its help, a slash command, a tool, an operator method, an event, an error code, a provider, an environment variable read, an installer option, or anything under `docs/llms/` | `bun run llms:check` | `bun run llms:generate`, then commit `docs/llms-full.txt`; a variable it names as undescribed gets its line in `packages/engine/scripts/generate-llms-full-env.ts`. |
 | An exported symbol of the engine entry points or any `package.json` subpath | `bun run build` then `bun run api:check` | Intended change: `bun run api:extract` and `bun run api:subpath`, then commit `packages/engine/etc/`. |
 | A new directory with `index.ts` under `packages/engine/platform/src/platform` | `bun run exports:check` | Add it to the `exports` map in `packages/engine/package.json`, or list it as internal in `INTENTIONALLY_INTERNAL` in `packages/engine/scripts/engine-package-lists.ts` with a reason. |
 | Operator or peer methods, their schemas, or anything feeding the contract | `bun run contracts:check` | `bun run refresh:contracts`, then commit the regenerated files. |
@@ -114,6 +115,7 @@ They are megabytes each and some are single lines of hundreds of kilobytes. The 
 - `packages/engine/contracts/artifacts/operator-contract.json`, `packages/engine/contracts/src/generated/operator-contract.ts`
 - `packages/engine/contracts/artifacts/operator-openapi.json` (the only tracked OpenAPI copy)
 - `packages/engine/docs/reference-operator.md`, `products/tui/docs/foundation-artifacts/operator-contract.json`
+- `docs/llms-full.txt` (built from `docs/llms/` and the registries by `bun run llms:generate`; edit the parts instead)
 - `.goodvibes/` (local state and worktrees)
 
 To look up one operator method, query the JSON: `jq '.["x-operator-methods"][] | select(.id=="<method>")' packages/engine/contracts/artifacts/operator-openapi.json`.

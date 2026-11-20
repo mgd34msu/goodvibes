@@ -14,6 +14,7 @@ export const MCP_TOOL_SCHEMA: ToolDefinition = {
       view: {
         type: 'string',
         enum: ['descriptor', 'preview', 'full'],
+        description: 'How much of each server servers and security return: descriptor (a summary, the default), preview, or full (the whole record).',
       },
       qualifiedName: { type: 'string', description: 'mcp:<server>:<tool>, as mode:"tools" lists it.' },
       input: {
@@ -21,14 +22,16 @@ export const MCP_TOOL_SCHEMA: ToolDefinition = {
         description: 'Arguments for mode:"call", shaped by the tool\'s own schema (read it with mode:"schema").',
         additionalProperties: true,
       },
-      serverName: { type: 'string' },
+      serverName: { type: 'string', description: 'The server to act on: required for approve-quarantine, set-trust and set-role; for servers, tools and security it narrows the list to that server.' },
       trustMode: {
         type: 'string',
         enum: ['constrained', 'ask-on-risk', 'allow-all', 'blocked'],
+        description: 'The trust mode set-trust gives the server.',
       },
       role: {
         type: 'string',
         enum: ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'deploy', 'automation'],
+        description: 'The role set-role gives the server, which decides how its tools are treated (deploy is stored as ops).',
       },
     },
     required: ['mode'],

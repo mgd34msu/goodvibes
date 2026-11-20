@@ -258,6 +258,7 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
           setupField('enabled', 'Enabled', 'boolean', false, { configKey: 'surfaces.telegram.enabled', defaultValue: false }),
           setupField('mode', 'Mode', 'select', true, {
             configKey: 'surfaces.telegram.mode',
+            defaultValue: 'webhook',
             options: [{ value: 'webhook', label: 'Webhook' }, { value: 'polling', label: 'Polling' }],
           }),
           setupField('botUsername', 'Bot username', 'string', false, { configKey: 'surfaces.telegram.botUsername', placeholder: '@goodvibes_bot' }),

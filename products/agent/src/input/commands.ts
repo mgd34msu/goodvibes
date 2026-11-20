@@ -68,8 +68,8 @@ function registerAgentMemoryCommand(registry: CommandRegistry): void {
     readVerbs: ['list', 'search', 'queue', 'snapshots'],
     aliases: ['mem'],
     description: 'Agent-local memory: add, search, review, stale, and delete durable memory records; list its copies and restore one',
-    usage: '<list|add|search|queue|review|stale|remove|snapshots|restore> [args]',
-    argsHint: 'list|add|search|queue|review|stale|remove|snapshots|restore',
+    usage: '<list|add|search|get|link|queue|review|stale|contradict|promote|remove|snapshots|restore> [args]',
+    argsHint: 'list|add|search|get|link|queue|review|stale|contradict|promote|remove|snapshots|restore',
     // The same lines ask the owner as under /recall (remove, restore).
     confirm: recallCommand.confirm,
     handler: async (args: string[], context: CommandContext): Promise<void> => {

@@ -92,6 +92,15 @@ function pad(left: string): string {
   return left.length >= COLUMN ? `${left}\n${' '.repeat(COLUMN)}` : left.padEnd(COLUMN);
 }
 
+/** A flag a passthrough command parses itself, in the same columns as the global ones. */
+function renderPassthroughFlagLine(flag: { readonly tokens: readonly string[]; readonly takesValue: boolean; readonly summary: string }): string {
+  const shorts = flag.tokens.filter((token) => !token.startsWith('--'));
+  const longs = flag.tokens.filter((token) => token.startsWith('--'));
+  const value = flag.takesValue ? ' <value>' : '';
+  const left = shorts.length > 0 ? `  ${shorts.join(', ')}, ${longs.join(', ')}${value}` : `      ${longs.join(', ')}${value}`;
+  return `${pad(left)}${flag.summary}`;
+}
+
 /** `-y, --yes` / `    --json` / `-m, --model <registryKey>` */
 function renderFlagLine(flag: DaemonCommandFlagSpec): string {
   const shorts = flag.tokens.filter((token) => !token.startsWith('--'));
@@ -124,7 +133,8 @@ export function renderGoodVibesDaemonHelp(
     'and the verb families every GoodVibes client calls.',
     '',
     `Run with no command it starts serving in the foreground. Run \`${binary}`,
-    `install-service\` to have it come back after a reboot as a ${serviceKindForPlatform(platform)}.`,
+    `install-service\` to have it start on its own as a ${serviceKindForPlatform(platform)}`,
+    '(at login; at boot on Linux with lingering).',
     '',
     'Commands:',
     ...commands,
@@ -142,11 +152,16 @@ export function renderGoodVibesDaemonHelp(
     '',
     'Exit codes:',
     `${pad('  0')}the command did what it says`,
-    `${pad('  1')}it ran and failed: the reason is printed`,
+    `${pad('  1')}it ran and failed: the reason is printed; cluster also exits 1`,
+    `${pad('   ')}for a word or flag it does not understand after its name`,
     `${pad('  2')}the command line was wrong: an unknown command, an unknown flag,`,
     `${pad('   ')}a flag this command does not take, or a missing value`,
-    `${pad('  3')}service-status only: installed, but not running`,
-    `${pad('  4')}service-status only: not installed`,
+    `${pad('  3')}service-status: installed, but not running;`,
+    `${pad('   ')}install-service: installed, but it did not start`,
+    `${pad('  4')}service-status, start-service, stop-service, restart-service,`,
+    `${pad('   ')}uninstall-service: no service is installed`,
+    `${pad('  5')}install-service, refresh-service, uninstall-service: the definition`,
+    `${pad('   ')}at the service's path was not written by GoodVibes; nothing was changed`,
   ].join('\n');
 }
 
@@ -192,7 +207,7 @@ export function renderDaemonCommandHelp(
   if (spec.passthrough) {
     lines.push(
       '',
-      ...(answersHelpFlag(spec) ? [`This command has its own flags; run \`${binary} ${spec.name} --help\` to see them.`] : []),
+      ...((spec.passthroughFlags ?? []).length > 0 ? [`Options \`${spec.name}\` reads itself (\`--help\` only right after \`${spec.name}\`):`, ...(spec.passthroughFlags ?? []).map(renderPassthroughFlagLine), ''] : []),
       `Every word after \`${spec.name}\` is its own argument; give global options before the command: \`${binary} --daemon-home <dir> ${spec.name} …\`.`,
     );
   }

@@ -23,9 +23,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EngineErrorCodes } from '../errors/src/error-codes.ts';
 import { GATEWAY_METHOD_INVOKE_PATH } from '../daemon-api/src/operator.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
 import type { ContractErrorCode, OperatorContractManifest, OperatorMethodContract, OperatorEventContract, JsonSchema } from '../contracts/src/types.ts';
 import {
-  buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, pathParamNames, replayKey, requestBodySchema,
+  buildParameters, errorBodySchema, hasRequestBody, INVOKE_ENVELOPE_SCHEMA, isOpaqueSchema, knownErrorCodes, pathParamNames, replayKey, requestBodySchema,
   REST_LAYER_CODES, SSE_METHODS, SSE_RESPONSE,
 } from './openapi-shared.ts';
 
@@ -204,10 +205,10 @@ paths[INVOKE_PATH] = {
   post: {
     operationId: 'gateway.invoke',
     summary: 'Invoke a method that has no REST route',
-    description: 'The methods listed in `x-invoke-only-methods` are reachable only here (and over the WebSocket). Send the method input as the body.',
+    description: 'The methods listed in `x-invoke-only-methods` are reachable only here (and over the WebSocket). The request body is an envelope: the method input goes in `body` (required; `{}` for a method that takes none) and any query parameters in `query`. A request without `body` is refused with 400. The response is the method output itself.',
     tags: ['gateway'],
     parameters: [{ name: 'methodId', in: 'path', required: true, schema: { type: 'string', enum: wsOnly.map((m) => m.id).sort() } }],
-    requestBody: { required: false, content: { 'application/json': { schema: { type: 'object' } } } },
+    requestBody: { required: true, content: { 'application/json': { schema: INVOKE_ENVELOPE_SCHEMA } } },
     responses: { '200': { description: 'The method output.', content: { 'application/json': { schema: {} } } }, '401': { $ref: '#/components/responses/Unauthorized' }, default: { $ref: '#/components/responses/Error' } },
     'x-invoke-only-methods': wsOnly.map((m) => m.id).sort(),
   },
@@ -224,7 +225,7 @@ const document = {
       + '`contracts/artifacts/operator-openapi.json`; this one is generated from the same contract by '
       + '`bun run agent-spec:generate` and is not written by any build.',
   },
-  servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: '4483' } }, description: 'Local daemon' }],
+  servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: String(DEFAULT_CONFIG.controlPlane.port) } }, description: 'Local daemon (controlPlane.port)' }],
   security: [{ bearerAuth: [] }, { sessionCookie: [] }],
   tags: [...FAMILIES, 'events', 'gateway'].map((name) => ({ name })),
   paths,

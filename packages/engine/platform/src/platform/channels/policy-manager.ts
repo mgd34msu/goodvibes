@@ -191,7 +191,7 @@ export function describeActorAdmission(
     // Nobody is admitted on an unowned surface until the owner accepts a claim: speaking first does not make anyone the owner.
     return {
       admitted: false,
-      reason: 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, or set the surface policy open for a shared channel.',
+      reason: 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, and add other senders with the allowlist edit.',
     };
   }
   if (decision.allowed) {
@@ -566,7 +566,7 @@ export class ChannelPolicyManager {
             + 'Accept to add this sender to the allowlist: the surface answers their next message. Decline if you do not know them; they are not asked about again.'
           : `${where} arrived on ${input.surface} from ${shownId}${name}, and ${input.surface} has no owner yet, so it was not answered. `
             + 'Accept to make this sender the owner: the surface then answers them, and only them until you add others with the allowlist edit. '
-            + 'Decline if this is not you. For a shared channel, set the surface policy open instead.',
+            + 'Decline if this is not you.',
         options: ['accept', 'decline'],
         askedBy: `${input.surface} channel`,
         metadata: {

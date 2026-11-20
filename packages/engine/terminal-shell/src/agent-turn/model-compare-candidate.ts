@@ -14,10 +14,16 @@ export function registerComparisonCandidate(registry: ToolRegistry, deps: AgentM
   const candidate: Tool = {
     definition: { name: NAME, description: 'Run one metered blind-comparison candidate using an exact model and bounded output.', sideEffects: ['network'], concurrency: 'parallel', parameters: {
       type: 'object', properties: {
-        registryKey: { type: 'string' }, modelId: { type: 'string' }, providerId: { type: 'string' }, blindId: { type: 'string' },
-        prompt: { type: 'string' }, systemPrompt: { type: 'string' }, maxTokens: { type: 'integer', minimum: 0 },
-        metered: { type: 'boolean', const: true },
-        comparisonRequest: { type: 'object', additionalProperties: true }, screeningId: { type: 'string' },
+        registryKey: { type: 'string', description: 'The model\'s registry key; with modelId and providerId it must name a model that can still be selected.' },
+        modelId: { type: 'string', description: 'The exact model id to run.' },
+        providerId: { type: 'string', description: 'The provider that serves the model.' },
+        blindId: { type: 'string', description: 'The label this candidate\'s answer is shown under in the blind comparison.' },
+        prompt: { type: 'string', description: 'The prompt every candidate of the comparison is sent.' },
+        systemPrompt: { type: 'string', description: 'The system prompt every candidate of the comparison is sent.' },
+        maxTokens: { type: 'integer', minimum: 0, description: 'The most output tokens the candidate may produce.' },
+        metered: { type: 'boolean', const: true, description: 'Must be true: the call is a paid model request.' },
+        comparisonRequest: { type: 'object', additionalProperties: true, description: 'The comparison request this candidate belongs to, checked against the screening.' },
+        screeningId: { type: 'string', description: 'The screening agent_model_compare mode "run" made of the request; a candidate without a current one is held.' },
       }, required: ['registryKey', 'modelId', 'providerId', 'blindId', 'prompt', 'systemPrompt', 'maxTokens', 'metered', 'comparisonRequest', 'screeningId'], additionalProperties: false,
     } },
     async execute(args, options) {

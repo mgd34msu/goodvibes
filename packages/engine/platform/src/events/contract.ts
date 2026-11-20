@@ -275,10 +275,23 @@ export interface ContractUnitRouteSummary {
 }
 
 export type ContractEvent = (
+  /**
+   * A contract was created for a piece of work. `ask` is the request as given,
+   * `origin` where it came from (a turn, the agent tool, the command line, a
+   * hosted session, an outside client or a proposal), `sessionId` the session
+   * it belongs to and `ownerAgentId` the agent record its parent waits on.
+   */
   | { type: 'CONTRACT_CREATED'; contractId: string; sessionId: string; origin: ContractOrigin; ask: string; ownerAgentId: string;
       /** What is wrong with the `contract.gates` setting, one sentence each with the fix; absent when every gate can run. */
       gateProblems?: readonly string[] }
+  /** A contract moved from one lifecycle status to another (queued, shaping, planning, running, judging, fixing, committing, awaiting-owner, passed, failed, cancelled). */
   | { type: 'CONTRACT_STATUS_CHANGED'; contractId: string; from: ContractStatus; to: ContractStatus }
+  /**
+   * The request was read for its shape before planning: whether it forbids
+   * delegating, asks for parallel agents, forbids writing, or asks for several
+   * attempts. Each reading carries its verdict, probability and what code does
+   * with it; `decisionIds` are the decision-log records.
+   */
   | {
       type: 'CONTRACT_SHAPED';
       contractId: string;
@@ -288,6 +301,11 @@ export type ContractEvent = (
       asksForAttempts: ContractShapeReading;
       decisionIds: readonly string[];
     }
+  /**
+   * The planner produced a plan (or repaired one): the goal, the acceptance
+   * criteria, the groups of units and the units themselves. `repair` is 0 for
+   * the first plan and n for the nth repair.
+   */
   | {
       type: 'CONTRACT_PLANNED';
       contractId: string;
@@ -298,6 +316,11 @@ export type ContractEvent = (
       /** 0 for the first plan, n for the nth repair. */
       repair: number;
     }
+  /**
+   * One check of the plan ran: `structure` and `criterion-trace` by code, the
+   * others by the decision model. `passed` says whether it held; `problems`
+   * lists what is wrong, by code and target.
+   */
   | {
       type: 'CONTRACT_PLAN_CHECKED';
       contractId: string;
@@ -307,7 +330,9 @@ export type ContractEvent = (
       problems: readonly ContractPlanProblem[];
       decisionIds: readonly string[];
     }
+  /** A group of units moved from one status to another. */
   | { type: 'CONTRACT_GROUP_STATUS_CHANGED'; contractId: string; groupId: string; from: ContractGroupStatus; to: ContractGroupStatus }
+  /** A unit of work moved from one status to another; `agentId` is the agent working it, when one is. */
   | {
       type: 'CONTRACT_UNIT_STATUS_CHANGED';
       contractId: string;
@@ -317,7 +342,21 @@ export type ContractEvent = (
       to: ContractUnitStatus;
       agentId?: string | undefined;
     }
+  /**
+   * An agent was started to work a unit. `route` is the model, provider and
+   * reasoning effort chosen and why; `purpose` says whether it is the unit's
+   * first agent, a fresh start, or a retry after a transport failure, a silence
+   * or a resume.
+   */
   | { type: 'CONTRACT_UNIT_SPAWNED'; contractId: string; unitId: string; agentId: string; route: ContractUnitRouteSummary; purpose: UnitSpawnPurpose }
+  /**
+   * A unit, group or the whole deliverable was checked against its criteria.
+   * `trigger` is what started the check (a turn ended, the agent finished or
+   * failed, a fix passed, a resume, an owner amendment); `result` what came of
+   * it (pass, nudge, await-owner, a native decision, stall, recorded). It
+   * carries the reading of each criterion, the goal, the quality items, the
+   * gate commands and the verification of the agent's claims.
+   */
   | {
       type: 'CONTRACT_CHECKED';
       contractId: string;
@@ -333,6 +372,13 @@ export type ContractEvent = (
       claims?: ClaimVerificationKind | undefined;
       decisionIds: readonly string[];
     }
+  /**
+   * A unit's agent was told what is still wrong (`kinds`: unmet or unshown
+   * criteria, a regression, quality, a gate, claims) so it fixes it and is
+   * checked again. `delivery` is how it reached the agent: `hold` (kept for
+   * the end of its current turn), `bus` (sent while it runs) or `wake` (a
+   * finished or failed agent was woken with it).
+   */
   | {
       type: 'CONTRACT_NUDGED';
       contractId: string;
@@ -344,8 +390,15 @@ export type ContractEvent = (
       delivery: NudgeDelivery;
       agentId: string;
     }
+  /** The nudged agent took the nudge into its conversation, at turn `turn`. */
   | { type: 'CONTRACT_NUDGE_CONSUMED'; contractId: string; unitId: string; nudgeId: string; agentId: string; turn?: number | undefined }
+  /** A criterion that read met at check `metAtCheckId` reads unmet at check `checkId`; a nudge always follows. */
   | { type: 'CONTRACT_CRITERION_REGRESSED'; contractId: string; unitId: string; criterionId: string; metAtCheckId: string; checkId: string }
+  /**
+   * A unit, group or deliverable stopped making progress on its unmet
+   * criteria. `route` is what happens next: `split` (a planned fix of smaller
+   * units), `fresh` (a new agent starts it over) or `owner` (the owner is asked).
+   */
   | {
       type: 'CONTRACT_STALLED';
       contractId: string;
@@ -356,7 +409,14 @@ export type ContractEvent = (
       reason: string;
       decisionId?: string | undefined;
     }
+  /** A fix group was planned for a stalled or failing target: `unitIds` are its units and `round` counts fix rounds. */
   | { type: 'CONTRACT_FIX_PLANNED'; contractId: string; scope: CheckScope; targetId: string; groupId: string; unitIds: readonly string[]; round: number }
+  /**
+   * The contract needs the owner: `question` is what the owner is asked,
+   * `reason` why (an unresolved plan, a stall, an unsettled reading, fix rounds
+   * used up, unclear writing permission, undecided attempts, an owner-only
+   * decision), and the contract waits in `awaiting-owner` for the reply.
+   */
   | {
       type: 'CONTRACT_ESCALATED';
       contractId: string;
@@ -367,10 +427,27 @@ export type ContractEvent = (
       question: string;
       unmetCriterionIds: readonly string[];
     }
+  /**
+   * The owner answered an escalation. `reading` is how the reply was read
+   * (approve, reject, amend, unclear) and `action` what the runner did with it
+   * (approved, amended, stopped, asked again, refused).
+   */
   | { type: 'CONTRACT_OWNER_REPLIED'; contractId: string; escalationId: string; reading: OwnerReplyReading; outcome: ContractOutcome; action: OwnerReplyAction }
+  /**
+   * One gate command from the `contract.gates` setting ran against a target:
+   * whether it passed or was skipped, how long it took, its outcome, whether it
+   * is required, and why when it did not pass.
+   */
   | { type: 'CONTRACT_GATE_RESULT'; contractId: string; targetId: string; gate: string; passed: boolean; skipped: boolean; durationMs: number; outcome?: GateResultOutcome; required?: boolean; reason?: string }
+  /** A unit's agent produced nothing for `silentMs`; `action` says whether it was retried with a new agent or the unit failed. */
   | { type: 'CONTRACT_UNIT_SILENT'; contractId: string; unitId: string; agentId: string; silentMs: number; action: UnitSilenceAction }
+  /** Merging a unit's branch back conflicted: `branch` and `path` name the unit's worktree and `files` the conflicting files. */
   | { type: 'CONTRACT_MERGE_CONFLICT'; contractId: string; unitId: string; branch: string; path: string; files: readonly string[] }
+  /**
+   * A unit run as several attempts had the passing attempts compared:
+   * `candidateIds` are the attempts that passed, `chosen` the one kept (null
+   * when none could be chosen) and `outcome` what code does with the choice.
+   */
   | {
       type: 'CONTRACT_ATTEMPTS_SELECTED';
       contractId: string;
@@ -380,8 +457,20 @@ export type ContractEvent = (
       outcome: ContractOutcome;
       decisionId?: string | undefined;
     }
+  /**
+   * The finished work was published to the project: `committed` (as a git
+   * commit, `hash` given), `applied` (as uncommitted changes), `skipped`
+   * (nothing to publish) or `failed`; `note` says what was done.
+   */
   | { type: 'CONTRACT_COMMITTED'; contractId: string; status: ContractCommitStatus; hash?: string | undefined; note: string }
+  /** The contract passed: `criteriaMet` of `criteriaJudged` criteria met, `excluded` criteria not judged, after `nudges` nudges. */
   | { type: 'CONTRACT_PASSED'; contractId: string; criteriaMet: number; criteriaJudged: number; excluded: number; nudges: number }
+  /**
+   * The contract failed. `failureKind` names the cause (transport, max_turns,
+   * planning, budget, owner-rejected, judgment-unavailable, zombie, other) and
+   * `reason` says it in words; `turnLimit` and its source are given for a
+   * max_turns failure.
+   */
   | {
       type: 'CONTRACT_FAILED';
       contractId: string;
@@ -392,7 +481,14 @@ export type ContractEvent = (
       turnLimit?: number | undefined;
       turnLimitSource?: TurnLimitSource | undefined;
     }
+  /** The contract was cancelled; `reason` says why and `filesModified` how many files it had changed. */
   | { type: 'CONTRACT_CANCELLED'; contractId: string; reason: string; filesModified: number }
+  /**
+   * A request to start an agent was refused: a contract's unit agent or
+   * planner may not start agents of its own (the contract plans sub-work), or
+   * the spawn would pass the nesting depth or active-agent limits. `depth` and
+   * `activeAgents` are the values at the refusal.
+   */
   | {
       type: 'CONTRACT_SPAWN_GUARD_TRIGGERED';
       /** Absent when the refused spawn belongs to no contract (the conversation-level recursion guard). */

@@ -10,10 +10,10 @@
    "url": "http://127.0.0.1:{port}",
    "variables": {
     "port": {
-     "default": "4483"
+     "default": "3421"
     }
    },
-   "description": "Local daemon"
+   "description": "Local daemon (controlPlane.port)"
   }
  ],
  "security": [
@@ -2036,7 +2036,7 @@
    "post": {
     "operationId": "sessions.followUp",
     "summary": "Queue Shared Session Follow-Up",
-    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
+    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2086,7 +2086,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -2554,7 +2554,7 @@
    "post": {
     "operationId": "sessions.messages.create",
     "summary": "Post Shared Session Message",
-    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
+    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2628,7 +2628,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -3430,7 +3430,7 @@
    "post": {
     "operationId": "sessions.steer",
     "summary": "Steer Shared Session",
-    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
+    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -3480,7 +3480,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -4353,7 +4353,7 @@
    "post": {
     "operationId": "gateway.invoke",
     "summary": "Invoke a method that has no REST route",
-    "description": "The methods listed in `x-invoke-only-methods` are reachable only here (and over the WebSocket). Send the method input as the body.",
+    "description": "The methods listed in `x-invoke-only-methods` are reachable only here (and over the WebSocket). The request body is an envelope: the method input goes in `body` (required; `{}` for a method that takes none) and any query parameters in `query`. A request without `body` is refused with 400. The response is the method output itself.",
     "tags": [
      "gateway"
     ],
@@ -4390,11 +4390,24 @@
      }
     ],
     "requestBody": {
-     "required": false,
+     "required": true,
      "content": {
       "application/json": {
        "schema": {
-        "type": "object"
+        "type": "object",
+        "required": [
+         "body"
+        ],
+        "properties": {
+         "body": {
+          "description": "The method input, matching the method's inputSchema. Send `{}` for a method that takes none."
+         },
+         "query": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Query parameters for the method, as name-value pairs."
+         }
+        }
        }
       }
      }
@@ -4612,34 +4625,44 @@
        "service",
        "internal",
        "unknown"
-      ]
+      ],
+      "description": "The kind of failure: authentication, authorization, billing, rate limit, timeout, network, a bad request, not found, a permission refusal, a tool, configuration, protocol, a service failure, an internal fault, or unknown."
      },
      "source": {
-      "type": "string"
+      "type": "string",
+      "description": "The layer the failure came from, such as `provider`, `tool`, `transport`, `config`, `permission` or `runtime`."
      },
      "recoverable": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "True when another attempt can succeed; false when retrying the same request cannot."
      },
      "status": {
-      "type": "integer"
+      "type": "integer",
+      "description": "The HTTP status of the failure, including one an upstream provider answered with."
      },
      "provider": {
-      "type": "string"
+      "type": "string",
+      "description": "The model provider involved, when a provider failed."
      },
      "operation": {
-      "type": "string"
+      "type": "string",
+      "description": "What was being done when it failed, such as `chat` or `embed`."
      },
      "phase": {
-      "type": "string"
+      "type": "string",
+      "description": "Where in that operation it failed, such as `request`, `stream`, `response` or `auth`."
      },
      "requestId": {
-      "type": "string"
+      "type": "string",
+      "description": "The request id to quote when reporting the failure: the daemon's own, or the one an upstream service returned."
      },
      "providerCode": {
-      "type": "string"
+      "type": "string",
+      "description": "The error code the upstream provider gave, verbatim."
      },
      "providerType": {
-      "type": "string"
+      "type": "string",
+      "description": "The error type the upstream provider gave, verbatim."
      },
      "retryAfterMs": {
       "type": "number",

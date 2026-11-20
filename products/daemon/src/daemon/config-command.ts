@@ -258,8 +258,10 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
     lines: [
       `${key} = ${printable}`,
       ...(storedInSecretStore && credentialText?.trim() ? ['  the credential is in the secret store; the settings file holds only the reference above.'] : []),
-      '  written to disk. A running daemon applies most keys live, including a changed control-plane',
-      '  host or port; a key that is only read when the daemon starts applies the next time it starts.',
+      '  written to disk. A running daemon applies most keys live, including a move to another control-plane',
+      '  port; a key that is only read when the daemon starts applies the next time it starts. A host change',
+      '  that keeps the same port (between loopback and all interfaces) cannot be bound while the old',
+      '  listener holds the port: the daemon keeps serving the old address until it is restarted.',
     ],
   };
 }

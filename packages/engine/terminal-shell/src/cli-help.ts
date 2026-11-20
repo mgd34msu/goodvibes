@@ -46,7 +46,7 @@ export const COMMON_COMMAND_HELP = {
     examples: ['providers', 'providers inspect openai', 'providers use openai openai:gpt-6.1-sol'],
   },
   models: {
-    usage: ['models [provider]', 'models current', 'models use <registryKey>', 'models pin <registryKey>', 'models unpin <registryKey>', 'models pinned', 'models recent'],
+    usage: ['models [list] [provider|filter]', 'models current', 'models use|set <registryKey>', 'models pin <registryKey>', 'models unpin <registryKey>', 'models pinned', 'models recent'],
     summary: 'List, inspect, select, pin, and review model choices.',
     examples: ['models current', 'models openai', 'models use openai:gpt-5.4'],
   },

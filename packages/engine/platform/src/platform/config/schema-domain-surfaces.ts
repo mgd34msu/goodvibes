@@ -200,7 +200,7 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.slack.appToken',
     type: 'string',
     default: '',
-    description: 'Slack app-level token used for advanced client flows',
+    description: 'Slack app-level token (xapp-...): with it the daemon connects to Slack over Socket Mode, so Slack needs no public request URL',
   },
   {
     key: 'surfaces.slack.defaultChannel',

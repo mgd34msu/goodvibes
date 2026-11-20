@@ -32,8 +32,8 @@ export const READ_TOOL_SCHEMA = {
             type: 'object',
             description: 'Line range to read (1-based, inclusive). Used with extract=lines.',
             properties: {
-              start: { type: 'integer', minimum: 1 },
-              end: { type: 'integer', minimum: 1 },
+              start: { type: 'integer', minimum: 1, description: 'First line to read, counting from 1.' },
+              end: { type: 'integer', minimum: 1, description: 'Last line to read, included.' },
             },
             required: ['start', 'end'],
           },

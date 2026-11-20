@@ -6,7 +6,23 @@ case "${1:-}" in
   --help|-h)
     cat <<'HELP'
 Usage: ./scripts/install-from-checkout.sh [--prefix DIR] [--bin-dir DIR] [--data-dir DIR] [--workspace DIR]
-                    [--port PORT] [--no-service|--service]
+                    [--port PORT] [--no-service|--service] [--decision-policy POLICY]
+       ./scripts/install-from-checkout.sh --uninstall [--prefix DIR] [--purge]
+
+Options:
+  --prefix DIR          Where the programs are installed (default: $HOME/.local/share/goodvibes).
+  --bin-dir DIR         Where the commands are linked (default: $HOME/.local/bin, or the previous install's).
+  --data-dir DIR        The data directory: GOODVIBES_HOME for every installed command
+                        (default: $HOME/.local/share/goodvibes-data, or the previous install's).
+  --workspace DIR       The project directory the daemon service works in (default: this checkout,
+                        or the previous install's).
+  --port PORT           The daemon and WebUI port on 127.0.0.1 (default: 3421, or the previous install's).
+  --no-service          Do not run the daemon as a systemd user service.
+  --service             Run the daemon as a systemd user service (the default).
+  --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or
+                        "No Decision Model" (sets judgment.policy).
+  --uninstall           Run ./scripts/uninstall.sh with the remaining options instead of installing.
+  --help|-h             Print this help and exit.
 
 Build and install the daemon, terminal UI, agent and WebUI from this checkout.
 Linux x64/arm64 with glibc is supported. Run as your regular user, without sudo.

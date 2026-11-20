@@ -3,8 +3,8 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireWebhookNotifier } from './runtime-services.ts';
 const commands = createNotifyRuntimeCommands<CommandContext>(requireWebhookNotifier, {
   description: 'Manage webhook notification URLs (ntfy.sh format)',
-  usage: 'add <url> | remove <n|url> | list [--show] | clear | test',
-  argsHint: 'add|remove|list|clear|test',
+  usage: 'add <url> | remove <n|url> | list [--show] | clear | test | failed | resend <id|all>',
+  argsHint: 'add|remove|list|clear|test|failed|resend',
   maskUrls: true,
   allowSend: false,
 });

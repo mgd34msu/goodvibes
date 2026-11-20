@@ -8,7 +8,15 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --prefix) [ "$#" -ge 2 ] && [ -n "$2" ] || { echo '--prefix needs a directory.' >&2; exit 1; }; prefix=$2; explicit_prefix=1; shift 2 ;;
     --purge) purge=1; shift ;;
-    --help|-h) echo 'Usage: uninstall.sh [--prefix DIR] [--purge]'; echo 'Removes managed programs/services and preserves user data. --purge applies to receipt-owned installations.'; exit 0 ;;
+    --help|-h)
+      echo 'Usage: uninstall.sh [--prefix DIR] [--purge]'
+      echo 'Removes managed programs/services and preserves user data. --purge applies to receipt-owned installations.'
+      echo ''
+      echo 'Options:'
+      echo '  --prefix DIR   The checkout installation to remove (default: $HOME/.local/share/goodvibes).'
+      echo '  --purge        Also remove that installation data directory (receipt-owned installations only).'
+      echo '  --help|-h      Print this help and exit.'
+      exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done

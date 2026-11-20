@@ -3294,6 +3294,17 @@ parse_options() {
         say 'Install released GoodVibes binaries, daemon, agent, browser driver and WebUI.'
         say 'Usage: install.sh [--version VERSION] [--bin-dir DIR] [--no-service|--service] [--decision-policy POLICY] [--uninstall]'
         say 'GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.'
+        say ''
+        say 'Options:'
+        say '  --version VERSION     Install this release, such as v3.3.1, for every program (default: latest;'
+        say '                        also GOODVIBES_VERSION).'
+        say '  --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).'
+        say '  --no-service          Do not install the daemon as a service (also GOODVIBES_DAEMON_SERVICE=0).'
+        say '  --service             Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0.'
+        say '  --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or'
+        say '                        "No Decision Model" (sets judgment.policy).'
+        say '  --uninstall           Remove the installed programs and services; settings and data in ~/.goodvibes are kept.'
+        say '  --help|-h             Print this help and exit.'
         exit 0 ;;
       --uninstall) UNINSTALL=1; shift ;;
       --no-service) DAEMON_SERVICE=0; shift ;;

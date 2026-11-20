@@ -12,7 +12,7 @@
  *
  * The daemon is a SYSTEM SERVICE. These subcommands install it as a durable host
  * service (systemd user unit on Linux, launchd agent on macOS, a Scheduled Task
- * on Windows) so N surfaces share ONE daemon that survives reboots, instead of
+ * on Windows) so N surfaces share ONE daemon that starts on its own at login (at boot with lingering), instead of
  * every surface spawning a session-scoped daemon.
  *
  * Drift note: the platform's older `systemd-user-service.ts` (a Linux-only,

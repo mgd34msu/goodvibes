@@ -811,7 +811,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "controlPlane.streamMode",
     "type": "enum",
-    "default": "both",
+    "default": "sse",
     "description": "Which live update stream the daemon listener serves: sse serves GET /api/control-plane/events only, websocket serves the /api/control-plane/ws upgrade only, both serves both. The other one is refused with STREAM_MODE_NOT_SERVED naming this setting. The terminal apps and the web UI read the Server-Sent Events stream, so websocket alone leaves them without live updates. Takes effect on the next request.",
     "enumValues": [
       "sse",
@@ -1120,7 +1120,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.budget.dailyItem",
     "type": "number",
     "default": 0,
-    "description": "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it.",
+    "description": "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it. While payments.budget.dailyOverage is also 0, a purchase with any tax, fee or paid delivery is refused, not asked about.",
     "validationHint": "a plain number like 100 or 19.99, no greater than 1000000",
     "unit": "money"
   },
@@ -1623,7 +1623,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "voice.wake.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on never downloads anything itself: on a host whose artifacts are missing or fail verification it says exactly which, and names the command that fetches them, rather than silently pulling 6.1 MB the moment a switch moves."
+    "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /config, a model's settings call) runs the same setup as /voice wake setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
   },
   {
     "key": "voice.wake.models",
@@ -1969,7 +1969,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over within about a second when one is shut down or crashes. Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger's node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way."
+    "description": "Let this machine share inbound channel work with your OTHER goodvibes machines on this network, so exactly one of them reads each inbox (Telegram polling, ntfy subscriptions, inbox pollers) instead of all of them answering the same message. For a homelab where you run goodvibes on several machines that are all yours and configured with the same surfaces: switch it on everywhere and they sort it out between themselves, including taking over at once when one is shut down normally, and after cluster.masterTimeoutSeconds (90 seconds by default) when one crashes. Off by default because switching it on asserts that every goodvibes node on this network belongs to you, on a shared network (an office, a shared house) a stranger's node would join the same coordination and one of you would stop receiving messages with nothing to indicate why. Outbound sends, sessions and the control plane are unaffected either way."
   },
   {
     "key": "cluster.heartbeatSeconds",
@@ -2078,7 +2078,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.slack.appToken",
     "type": "string",
     "default": "",
-    "description": "Slack app-level token used for advanced client flows"
+    "description": "Slack app-level token (xapp-...): with it the daemon connects to Slack over Socket Mode, so Slack needs no public request URL"
   },
   {
     "key": "surfaces.slack.defaultChannel",
@@ -3132,7 +3132,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "service.autostart",
     "type": "boolean",
     "default": false,
-    "description": "Start Goodvibes automatically when the host boots or logs in"
+    "description": "Whether the daemon's service starts on its own at login. Changing it on the terminal app's settings screen installs and enables the service (on) or disables it (off); set any other way (a settings file, a command, Agent, the daemon) it is only recorded, and goodvibes status and doctor read it to warn about an installed service with it off. goodvibes-daemon install-service makes the service start at login whatever its value"
   },
   {
     "key": "service.restartOnFailure",
@@ -4121,7 +4121,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "judgment.endpoint",
     "type": "string",
     "default": "",
-    "description": "System One endpoint the engine asks for judgments; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused",
+    "description": "Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. Choose credential references explicitly when changing destinations; embedded credentials, query strings and fragments are refused",
     "validationHint": "empty, or an http(s) URL without embedded credentials, query or fragment"
   },
   {
@@ -4160,7 +4160,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "object",
     "default": [],
     "description": "Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops",
-    "validationHint": "array of { endpoint, model, keySource: \"env\" | \"secret\", keyName }; no credentials in URLs or inline keys"
+    "validationHint": "array of { endpoint, model, keySource: \"env\" | \"secret\" | \"none\", keyName } (keyName empty for \"none\"); no credentials in URLs or inline keys"
   },
   {
     "key": "judgment.timeoutMs",
@@ -4281,7 +4281,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "integrations.delivery.sloEnforced",
     "type": "boolean",
     "default": true,
-    "description": "Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics (replayable via /notify replay). When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default."
+    "description": "Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default."
   },
   {
     "key": "policy.registryEnabled",
@@ -4592,7 +4592,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "provider.fallbackModels",
     "type": "object",
     "default": [],
-    "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure.",
+    "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure. Only the terminal app's interactive session moves a turn to the next model; `goodvibes run`, the Agent and the daemon's hosted sessions do not, and at most name the next model in this order when a turn fails.",
     "validationHint": "list of provider-qualified model ids, for example [\"anthropic:claude-sonnet-5\"]"
   },
   {
@@ -4658,7 +4658,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "sandbox.egressAllowlist",
     "type": "object",
     "default": [],
-    "description": "Commands the exec sandbox lets reach the network; every other sandboxed command runs with the network off. Applies from the next command",
+    "description": "Commands the exec sandbox lets reach the network, by base name; every other sandboxed command runs with the network off. The entry * lets every command reach the network. Applies from the next command",
     "validationHint": "list of non-empty command names, for example [\"git\", \"npm\"]"
   },
   {
@@ -5178,7 +5178,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "integration-delivery-slo",
     "name": "Integration Delivery SLO",
-    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Dead-letter entries are exposed via /notify dlq and replayable via /notify replay. Enabled by default alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
+    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. Enabled by default alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
     "domain": "integrations",
     "enablement": {
       "key": "integrations.delivery.sloEnforced",

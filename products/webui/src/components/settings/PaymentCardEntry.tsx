@@ -329,7 +329,7 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
           />
         </Field>
 
-        <Field label={`Issuer cap (${currency}, optional)`} help="The cap is what you declared. We cannot verify it and never enforce it; only your card issuer can.">
+        <Field label={`Issuer cap (${currency}, optional)`} help="The cap is what you declared; GoodVibes cannot verify it. A purchase whose total is over it is refused before checkout, since the issuer would decline it; only your card issuer enforces the real limit.">
           <Input
             id="gv-card-cap"
             type="text"

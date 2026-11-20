@@ -64,18 +64,21 @@ export function isChannelSurfaceKind(kind: string | undefined): kind is ChannelS
  * working or starts failing.
  */
 export type SurfaceEvent =
+  /** A chat surface (`surfaceKind`, such as Slack or Telegram) was turned on for account `accountId`. */
   | {
       type: 'SURFACE_ENABLED';
       surfaceKind: SurfaceKind;
       surfaceId: string;
       accountId: string;
     }
+  /** A chat surface was turned off; `reason` says why. */
   | {
       type: 'SURFACE_DISABLED';
       surfaceKind: SurfaceKind;
       surfaceId: string;
       reason: string;
     }
+  /** A surface's health check found it working again (it was not before); `displayName` is the surface's label. */
   | {
       type: 'SURFACE_ACCOUNT_CONNECTED';
       surfaceKind: SurfaceKind;
@@ -83,6 +86,7 @@ export type SurfaceEvent =
       accountId: string;
       displayName: string;
     }
+  /** A surface's health check found it failing (it was not before); `error` is the last error or the state it is in. */
   | {
       type: 'SURFACE_ACCOUNT_DEGRADED';
       surfaceKind: SurfaceKind;
@@ -90,6 +94,7 @@ export type SurfaceEvent =
       accountId: string;
       error: string;
     }
+  /** A surface gained (`enabled: true`) or lost (`enabled: false`) a capability, by name. */
   | {
       type: 'SURFACE_CAPABILITY_CHANGED';
       surfaceKind: SurfaceKind;

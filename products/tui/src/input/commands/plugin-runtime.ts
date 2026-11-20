@@ -4,7 +4,7 @@ import type { CommandRegistry } from '../command-registry.ts';
 import { describeUncheckedCatalogEntries, installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry, uninstallEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
-import { pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
+import { PLUGIN_TRUST_USAGE, pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
@@ -19,12 +19,14 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
     rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'publish-local' ? 3 : undefined),
     aliases: [],
     description: 'Manage plugins, trust, review, and ecosystem paths',
-    usage: 'list | dirs | inspect <name> | review | installed | catalog-review <id> | publish-local <id> <path> <summary...> | unpublish <id> | install <id> [project|user] | update <id> [project|user] | uninstall <id> [project|user] | enable <name> | disable <name> | reload',
-    argsHint: 'list | dirs | inspect | review | installed | catalog-review | publish-local | unpublish | install | update | uninstall | enable | disable | reload',
+    usage: `list | dirs | inspect <name> | review | installed | catalog-review <id> | publish-local <id> <path> <summary...> | unpublish <id> | install <id> [project|user] | update <id> [project|user] | uninstall <id> [project|user] | enable <name> | disable <name> | reload | ${PLUGIN_TRUST_USAGE} | quarantine <name> [add|lift] [reason]`,
+    argsHint: 'list | dirs | inspect | review | installed | catalog-review | publish-local | unpublish | install | update | uninstall | enable | disable | reload | trust | trust-key | verify | capabilities | quarantine',
     subcommands: {
       list: '', dirs: '', inspect: '<name>', review: '', installed: '', 'catalog-review': '<id>',
       'publish-local': '<id> <path> <summary...>', unpublish: '<id>', install: '<id> [project|user]',
       update: '<id> [project|user]', uninstall: '<id> [project|user]', enable: '<name>', disable: '<name>', reload: '',
+      trust: '<name> <untrusted|limited|trusted> [note]', 'trust-key': '<name> <key.pem>', verify: '<name>', capabilities: '<name>',
+      quarantine: '<name> [add|lift] [reason]',
     },
     confirm(args, ctx) {
       const trustQuestion = pluginTrustConfirmation(ctx.extensions.pluginManager, args);
@@ -58,7 +60,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
             .map((dir) => `  ${dir}`)
             .join('\n');
           ctx.print(
-            `No plugins installed.\nPlugin search directories:\n${directories}\nPlace a plugin folder in one of those locations with manifest.json and index.ts.`
+            `No plugins installed.\nPlugin search directories:\n${directories}\nPlace a plugin folder in one of those locations with manifest.json and its entry file (index.js unless the manifest's "main" names another).`
           );
           return;
         }

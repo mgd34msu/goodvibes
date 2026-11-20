@@ -1,0 +1,1192 @@
+# The operator HTTP API
+
+Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` itself, scripts and other programs) drives the daemon through one API: the operator API on the daemon's control plane. This part explains how an automated client authenticates, which scopes exist, how to call any method, how to run a conversation and a task, how to answer approvals, how to stream events and reconnect, how errors and retries work, and which SDK entry points wrap all of it. The list of every method with its route and scopes is in "Operator API methods" in the reference, and the list of every event in "Events".
+
+## Terms used in this part
+
+| Term | Meaning |
+| --- | --- |
+| method | One operation of the operator API, named by an id such as `sessions.create`. There are 636 in 3.3.1. |
+| REST route | The HTTP method and path a method is bound to, such as `POST /api/sessions`. |
+| invoke-only method | A method with no REST route. It is called through `POST /api/control-plane/methods/<id>/invoke` or a WebSocket `call` frame. |
+| access | Each method is `public` (no credential), `authenticated` (any valid credential holding its scopes) or `admin` (an admin credential). |
+| shared session | A conversation record in the daemon's session broker: messages, inputs, participants. Every conversation has one, whichever process runs its model loop. |
+| hosted session | A shared session whose model loop runs inside the daemon. Its id starts with `hosted-`. |
+| turn | One model response to one user input, with the tool calls it makes. |
+| input | A queued user message for a session (a steer or a follow-up), with a state: `queued`, `delivered`, `completed`, `failed`, `cancelled`. |
+| approval | A pending permission ask raised by the permission gate for one tool call. |
+
+## Base address and how to call it
+
+The base address is the daemon's control plane: `http://127.0.0.1:3421` by default. When the daemon was started on another port, use that port. When it is reached through a proxy, Tailscale or TLS, use that address (see "Network exposure" in "The daemon, the web UI and networking").
+
+There are four ways to call a method:
+
+| Way | When to use it |
+| --- | --- |
+| The method's REST route | The method has one (`GET /api/sessions`, `POST /api/sessions/{sessionId}/follow-up`). |
+| `POST /api/control-plane/methods/<id>/invoke` | The method has no REST route (all `sessions.hosted.*`, `pairing.*`, `fleet.*`, `inbox.*`, `relay.*`, `tailscale.*`, and others), or you want one route for everything. |
+| A `call` frame on the WebSocket `/api/control-plane/ws` | You already hold a WebSocket open for events. |
+| The SDK (`@goodvibes-jev/engine`) | You write TypeScript or JavaScript. See "SDK entry points". |
+
+The daemon describes itself:
+
+| Route | Returns | Scope |
+| --- | --- | --- |
+| `GET /api/control-plane/methods` | Every method with its id, title, description, access, scopes, REST route, input JSON Schema and output JSON Schema. | `read:control-plane` |
+| `GET /api/control-plane/methods/{methodId}` | One method. | `read:control-plane` |
+| `GET /api/control-plane/events/catalog` | Every event, its scopes, domains and payload schema. | `read:control-plane`, `read:events` |
+| `GET /api/control-plane/contract` | The whole contract document. | `read:control-plane` |
+| `GET /status` | Version, build and cluster status. | `read:control-plane` |
+
+Example: what does `sessions.hosted.create` take?
+
+```sh
+curl -sS -H "Authorization: Bearer $GV_TOKEN" \
+  http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.create
+```
+
+### Three rules clients trip on
+
+1. **The invoke route takes an envelope.** `POST /api/control-plane/methods/<id>/invoke` reads the method's input from a field called `body`, with an optional `query` beside it. Send `{"body":{"workspaceRoot":"/home/alex/projects/app"}}`, not `{"workspaceRoot":"/home/alex/projects/app"}`. The bare form is refused with `400` `{"error":"Missing required field: body. Expected envelope shape: { query?, body }","status":400}`. REST routes take the input directly as the JSON body; only the invoke route uses the envelope.
+2. **Watching a turn live needs an admin credential.** `GET /api/sessions/{sessionId}/events` answers a non-admin `403` `{"error":"Admin role required","code":"ADMIN_REQUIRED",...}`, and the event domains that carry a turn (`session`, `turn`, `tools`) are admin-only on the main stream too: `GET /api/control-plane/events?domains=session,turn,tools` answers a non-admin `403` `EVENT_ACCESS_DENIED` with all three in `withheldDomains`, whatever scopes it holds. A non-admin cannot stream a turn at all; it can only poll for the result (see "The least-privilege client").
+3. **To make a hosted session run a turn, use `sessions.followUp` (or `sessions.steer`), not `sessions.messages.create`.** `POST /api/sessions/{sessionId}/messages` with no `kind` (which means `kind: "message"`) answers `202` with `"routedTo":"conversation"` and records the message in the transcript, but the hosted session's loop does not run a turn for it. Send `POST /api/sessions/{sessionId}/follow-up` with `{"body":"<text>","messageId":"<id>"}`.
+
+Every response from the daemon carries the header `x-goodvibes-decision-policy` (for example `{"policy":"Hybrid","operation":"decision","reason":null,"revision":0}`), which says which decision model policy is in force.
+
+## Authentication
+
+Every method except three needs a credential. The three public methods are `control.auth.current` (`GET /api/control-plane/auth`), `control.auth.login` (`POST /login`) and `control.auth.logout` (`POST /logout`). The web UI bundle served at `/` is also public.
+
+A credential is sent in one of two ways:
+
+- `Authorization: Bearer <token>`, for any token;
+- the cookie `goodvibes_session=<token>`, which `POST /login` sets (`HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS).
+
+When both are present, the bearer header is used.
+
+### Which credential an automated client should use
+
+| Situation | Credential |
+| --- | --- |
+| A script on the daemon's own machine, run by the owner | The operator token from `~/.goodvibes/daemon/operator-tokens.json` (field `token`). It has full authority. |
+| A script or service anywhere that should be able to do only some things | A device token minted with a scope list (below). It can be revoked on its own. |
+| A program that must keep working after the shared token is revoked | A device token of its own. |
+| A person signing in from a browser | A sign-in (`POST /login`), 12 hours. |
+
+Reading the operator token in a shell:
+
+```sh
+GV_TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.goodvibes/daemon/operator-tokens.json')))['token'])")
+```
+
+### Checking a credential
+
+`GET /api/control-plane/auth` is public and reports what the request authenticated as.
+
+```sh
+curl -sS -H "Authorization: Bearer $GV_TOKEN" http://127.0.0.1:3421/api/control-plane/auth
+```
+
+```json
+{
+  "authenticated": true,
+  "authMode": "shared-token",
+  "tokenPresent": true,
+  "authorizationHeaderPresent": true,
+  "sessionCookiePresent": false,
+  "principalId": "shared-token",
+  "principalKind": "token",
+  "credential": "local",
+  "admin": true,
+  "scopes": ["read:accounts", "read:approvals", "...", "write:worktrees"],
+  "roles": ["admin"],
+  "expiresAt": null
+}
+```
+
+`authMode` is `anonymous` (no credential sent), `invalid` (a credential that does not authenticate), `shared-token` (the operator token) or `session` (any other valid credential: a device token as well as a sign-in; use `credential` to tell them apart). `credential` is `local` (the operator token sent straight from the daemon's machine), `shared-token` (the operator token from anywhere else, or through a proxy), `device-token`, `agent` (the Agent's own pairing) or `user-session`. `principalId` is `shared-token`, `pairing:<token id>` for a device token, or the sign-in user. `expiresAt` is set for a sign-in.
+
+### Minting a scoped token for a script
+
+A device token with a scope list holds only those scopes and is never admin. `pairing.tokens.create` is not an admin method: any credential holding `write:control-plane` may call it, except the Agent's own credential (the method is owner-only). An admin caller may name any scopes; a narrowed caller may name only scopes it holds itself. Example with the operator token:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/control-plane/methods/pairing.tokens.create/invoke \
+  -d '{"body":{"name":"nightly report","scopes":["read:sessions","read:transcripts","read:events","read:tasks"],"attemptId":"nightly-report-1"}}'
+```
+
+```json
+{"token":{"id":"pair-d58c1c36-428d-4bd7-811d-dc96988d9afa","name":"nightly report","token":"<the secret, shown once>","createdAt":1795022092889}}
+```
+
+Rules:
+
+- The secret is returned once and starts with `gvp_`. Only its hash is stored.
+- The token is an offer until its first use. If nothing uses it within 15 minutes it stops working (`PAIRING_OFFER_EXPIRED`). Use it once right away.
+- `attemptId` must be 8 to 128 letters, digits, `.`, `_`, `:` or `-` (otherwise `400` `INVALID_ARGUMENT` `attemptId must be 8 to 128 letters, digits or . _ : -`). Sending the same `attemptId` again while the token is still unused returns the same token id with a new secret; the earlier secret of that offer stops working, so use the newest one. A lost reply therefore never creates a second token.
+- Subset rule: a narrowed caller (not admin) can grant only scopes it holds. Naming one it does not hold is `403` `MISSING_SCOPE` (`A paired device cannot be given scopes this credential does not hold: read:events. Name only scopes you hold, or ask an admin.`). A narrowed caller that leaves `scopes` out gives the new token exactly its own list.
+- An admin caller that leaves `scopes` out mints a token with full authority (admin).
+- `scopes` must be a nonempty list of scope names. `"*"`, an empty list or an empty name is refused with `400` `INVALID_ARGUMENT` (`scopes must be a nonempty list of operator scopes (such as read:sessions); leave it out for full operator authority.`).
+- `client` is `"agent"` or absent (anything else is `400`). `client: "agent"` mints the Agent's own credential; do not use it for scripts.
+- Revoke with `pairing.tokens.delete` (`{"body":{"id":"pair-..."}}`). It answers `{"id":"pair-...","revoked":true,"alsoRevoked":["pair-...",...]}`: every token that the revoked token minted is revoked with it, and so on down. A script that mints child tokens with its own device token loses all of them when its own token is revoked. The next request with any of them gets `401`, and their open streams receive a `closed` frame. An unknown id is `404` `PAIRING_TOKEN_NOT_FOUND`. Who may revoke: `pairing.tokens.delete` is not an admin method and needs only `write:control-plane`, so any credential holding that scope can revoke any device token (in testing, a device token holding only `write:control-plane` and `read:pairing` reached the lookup and got `404` for an unknown id, not `403`), with one exception: the Agent's own credential is refused, because the method is owner-only (`403` `{"error":"pairing.tokens.delete is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}`). So do not give `write:control-plane` to a token that should not be able to cut other devices off.
+
+The new token, checked:
+
+```json
+{"authMode":"session","principalId":"pairing:pair-d58c1c36-428d-4bd7-811d-dc96988d9afa","principalKind":"token","credential":"device-token","admin":false,"scopes":["read:events","read:sessions","read:tasks","read:transcripts"],"roles":[]}
+```
+
+### Signing in with a username and password
+
+```sh
+curl -sS -i -X POST -H 'content-type: application/json' http://127.0.0.1:3421/login \
+  -d '{"username":"admin","password":"<password>"}'
+```
+
+```text
+HTTP/1.1 200 OK
+set-cookie: goodvibes_session=<token>; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 19 Nov 2026 05:14:45 GMT; Max-Age=43199
+```
+
+```json
+{"authenticated":true,"token":"<token>","username":"admin","expiresAt":1795065285233}
+```
+
+The `token` works as a bearer token or as the cookie until `expiresAt` (12 hours). A wrong password answers `401` `{"error":"Invalid credentials"}`. Five attempts per minute per address are allowed; the sixth answers `429` with code `RATE_LIMITED` and the header `Retry-After: 60`. A body sent without `content-type: application/json` answers `415` `SIGN_IN_NOT_JSON` and does not count as an attempt. `POST /logout` with the same credential ends that sign-in and answers `{"revoked":true}`; a credential that is not a sign-in answers `401` `SESSION_UNKNOWN`. Creating users and the bootstrap password are in "Sign-in users" in "The daemon, the web UI and networking".
+
+### Credentials over the WebSocket
+
+The upgrade request to `/api/control-plane/ws` must itself be authenticated: send `Authorization: Bearer <token>` on the upgrade, or, from a browser on the same origin, the sign-in cookie. An unauthenticated upgrade answers `401`. An upgrade with an `Origin` header must come from the daemon's own origin or one listed in `controlPlane.cors.allowedOrigins`.
+
+## Scopes
+
+### What a credential holds
+
+| Credential | Scopes held |
+| --- | --- |
+| Operator token, device token minted without a list, sign-in user with role `admin` and no list | Every scope (admin). |
+| Sign-in user without the `admin` role and no list | Every `read:` scope except the owner-private ones below and `read:telemetry-sensitive`. No `write:` scope and no `ingest:` scope. Not admin. |
+| Device token with a scope list | Exactly that list. Not admin. A device token's list can never contain `*` (minting refuses it). |
+| Sign-in user with a stored scope list | That list, never more than the role's default. Not admin. A stored list containing `*` counts as no list (the role's default set, admin for an `admin` user). |
+
+A method requires every scope it lists, and an `admin` method also requires an admin credential. Some admin methods are additionally owner-only: the Agent's own credential is refused (for example `approvals.approve`, `approvals.deny`, `inbox.answer`, `sessions.permissionMode.set`).
+
+The owner-private read scopes, which a non-admin sign-in does not get by default: `read:email`, `read:profile`, `read:profile-document`, `read:payments`, `read:occasions`, `read:memory`, `read:transcripts`, `read:pairing`, `read:remote`, `read:checkpoints`, `read:calendar`, `read:approvals`, `read:principals`, `read:browser-content`, `read:knowledge-content`, `read:channel-content`, `read:automation-content`, `read:fleet-content`, `read:skill-content`.
+
+### Every scope
+
+Each family has a `read:` scope for looking and a `write:` scope for changing; some families also have a `-content` read scope for the bodies (messages, pages, records) as opposed to their metadata. The complete list of scopes, with how many methods and event streams need each one and whether a read-only grant includes it, is "Operator scopes" in the reference; which scopes each method needs is in "Operator API methods" there.
+
+Scopes that no method lists, because an HTTP route checks them directly:
+
+| Scope | Checked by | Who has it |
+| --- | --- | --- |
+| `read:telemetry` | `GET /api/v1/telemetry/*` and the telemetry stream. | Every credential without its own scope list, including a non-admin sign-in; a scoped token only when its list names it. |
+| `read:telemetry-sensitive` | The raw (unredacted) telemetry view, `?view=raw`. It also needs the setting `telemetry.includeRawPrompts` on; without it the answer is `403` `TELEMETRY_RAW_DISABLED`. | Admin credentials, and a token minted with it. Never part of a non-admin sign-in's default set, although it is not one of the owner-private scopes. |
+| `ingest:telemetry`, `write:telemetry` | `POST /api/v1/telemetry/otlp/v1/traces`, `/logs` and `/metrics` (OTLP over HTTP into the daemon). Either one is enough. | Admin credentials, and a token minted with one of them. |
+
+## Access: what each route family and event needs
+
+Every method has one of three access levels, and an event has one of two:
+
+- **public**: no credential.
+- **scope** (the contract calls it `authenticated`): any valid credential that holds every scope the method lists. A narrowed device token or a non-admin sign-in can call it when it holds those scopes.
+- **admin**: an admin credential (the operator token, a device token minted without a scope list, or a sign-in user with the `admin` role and no narrowing list), and the method's scopes. A non-admin is refused with `403` `ADMIN_REQUIRED` (`Gateway method requires admin access: <method>`, or `Admin role required` on some routes) whatever scopes it holds.
+
+Each method's access is in the Access column of "Operator API methods" in the reference (`authenticated` there is "scope" here). A client can also ask the daemon: `GET /api/control-plane/methods/{methodId}` answers `{"method":{...}}`, the method's descriptor wrapped in `method`, with the fields `id`, `title`, `description`, `category`, `access`, `scopes`, `effect` (`read`, `write` or `outward`), `http` (its REST route, when it has one), `invokable`, `transport`, `source`, `inputSchema`, `outputSchema`, and, when the method declares them, `replay` (its retry key, see "Idempotency and safe retries") and `errorCodes` (`[{code, status, meaning}]`). `GET /api/control-plane/methods` lists them all. By family (the method id's first part, as the contract groups them), the access of the methods that only read and of those that change something:
+
+| Family | Reads | Writes |
+| --- | --- | --- |
+| accounts | scope | (none) |
+| acp | scope | scope |
+| approvals | scope | scope, except admin: `approvals.approve`, `approvals.cancel`, `approvals.claim`, `approvals.deny`, `inbox.answer` |
+| artifacts | admin | admin |
+| auth | admin | admin |
+| automation | scope | admin |
+| batch | scope | admin |
+| browser | scope | scope |
+| calendar | scope | admin |
+| channels | scope | scope, except admin: `channels.accounts.action.default`, `channels.accounts.action.named`, `channels.actions.invoke`, `channels.allowlist.edit`, `channels.allowlist.resolve`, `channels.authorize`, `channels.drafts.delete`, `channels.drafts.save`, `channels.inbox.applyLabels`, `channels.inbox.triage`, `channels.policies.update`, `channels.profiles.delete`, `channels.profiles.set`, `channels.routing.assign`, `channels.routing.delete`, `channels.targets.resolve`, `channels.tools.invoke` |
+| checkin | scope | scope, except admin: `checkin.config.set` |
+| checkpoints | scope | scope |
+| ci | scope | scope |
+| cloudflare | admin | admin |
+| companion | scope | scope |
+| config | admin | admin |
+| continuity | scope | (none) |
+| contracts | scope | scope |
+| control-plane | scope | scope, except public: `control.auth.current`, `control.auth.login`, `control.auth.logout`; admin: `relay.pairing.mint`, `update.check` |
+| cost | scope | (none) |
+| deliveries | scope | scope |
+| email | scope, except admin: `email.attachment.get`, `email.drafts.list`, `email.expectation.wait`, `email.inbox.read` | admin |
+| flags | scope, except admin: `flags.status` | (none) |
+| fleet | scope | scope, except admin: `fleet.interrupt`, `fleet.resume`, `fleet.stop` |
+| health | scope, except admin: `runtime.state.get` | scope, except admin: `voice.local.install`, `voice.setup` |
+| inbound | admin | admin |
+| intelligence | scope | (none) |
+| judgment | (none) | scope |
+| knowledge | scope | scope, except admin: `homeassistant.homeGraph.generateHomeGraphPacket`, `homeassistant.homeGraph.generateRoomPage`, `homeassistant.homeGraph.import`, `homeassistant.homeGraph.ingestHomeGraphArtifact`, `homeassistant.homeGraph.ingestHomeGraphNote`, `homeassistant.homeGraph.ingestHomeGraphUrl`, `homeassistant.homeGraph.linkHomeGraphKnowledge`, `homeassistant.homeGraph.refinement.run`, `homeassistant.homeGraph.refinement.task.cancel`, `homeassistant.homeGraph.refreshDevicePassport`, `homeassistant.homeGraph.reindex`, `homeassistant.homeGraph.reset`, `homeassistant.homeGraph.reviewHomeGraphFact`, `homeassistant.homeGraph.syncHomeGraph`, `homeassistant.homeGraph.unlinkHomeGraphKnowledge`, `knowledge.candidate.decide`, `knowledge.ingest.artifact`, `knowledge.ingest.bookmarks`, `knowledge.ingest.browserHistory`, `knowledge.ingest.connector`, `knowledge.ingest.url`, `knowledge.ingest.urls`, `knowledge.issue.review`, `knowledge.job-run.cancel`, `knowledge.job.run`, `knowledge.lint`, `knowledge.projection.materialize`, `knowledge.refinement.run`, `knowledge.refinement.task.cancel`, `knowledge.reindex`, `knowledge.schedule.delete`, `knowledge.schedule.enable`, `knowledge.schedule.save`, `projectPlanning.decisions.record`, `projectPlanning.workPlan.clearCompleted`, `projectPlanning.workPlan.task.create`, `projectPlanning.workPlan.task.delete`, `projectPlanning.workPlan.task.status`, `projectPlanning.workPlan.task.update`, `projectPlanning.workPlan.tasks.reorder` |
+| mcp | scope, except admin: `mcp.servers.reveal` | admin |
+| media | scope, except admin: `multimodal.packet` | admin |
+| memory | scope | admin |
+| occasions | scope | scope, except admin: `occasions.acknowledge`, `occasions.answer`, `occasions.confirm`, `occasions.conflict.resolve`, `occasions.interview.answer`, `occasions.interview.record`, `occasions.plans.confirm`, `occasions.plans.remove`, `occasions.plans.update`, `occasions.remove`, `occasions.sweep`, `occasions.update` |
+| pairing | scope | scope |
+| panels | scope | admin |
+| payments | scope | admin |
+| permissions | scope | scope |
+| principals | scope | scope |
+| profile | scope | admin |
+| providers | scope | admin |
+| push | scope | scope |
+| quota | scope | (none) |
+| relay | scope, except admin: `stepup.credentials.list` | admin |
+| remote | scope, except admin: `remote.backends.list` | admin |
+| remote-access | scope | admin |
+| review | scope | (none) |
+| rewind | scope | scope |
+| routes | scope, except admin: `routes.bindings.list` | admin |
+| runtime | scope | scope |
+| scheduler | admin | (none) |
+| services | admin | admin |
+| sessions | scope | scope, except admin: `sessions.close`, `sessions.create`, `sessions.delete`, `sessions.detach`, `sessions.followUp`, `sessions.inputs.cancel`, `sessions.inputs.deliver`, `sessions.messages.create`, `sessions.permissionMode.set`, `sessions.register`, `sessions.reopen`, `sessions.steer` |
+| settings | admin | (none) |
+| skills | scope | scope |
+| tasks | scope | admin |
+| telemetry | scope | (none) |
+| voice | scope | admin |
+| watchers | scope, except admin: `watchers.triggers.grant.list`, `watchers.triggers.history`, `watchers.triggers.list`, `watchers.triggers.status` | admin |
+| web-search | scope | admin |
+| work-ledger | admin | admin |
+| workspaces | scope | scope |
+| worktrees | scope | scope |
+
+Other route families outside the operator methods:
+
+| Route | Access |
+| --- | --- |
+| `GET /api/sessions/{sessionId}/events` | admin |
+| `GET /api/control-plane/events`, `/api/control-plane/ws` | any credential with `read:events`; what it receives depends on the event access below |
+| `GET /v1/models` | any valid credential |
+| `POST /v1/chat/completions`, `GET /v1/chat/completions/{id}` | admin |
+| `GET /api/cluster/*`, `POST /api/cluster/*` | admin |
+| `/api/remote/pair/request`, `/api/remote/pair/verify` | none (peer pairing) |
+| `/api/remote/heartbeat`, `/api/remote/work/*` (peer side) | peer token |
+| `/webhook/...` | each channel's own check |
+
+### Access of every event
+
+Every event needs `read:events`; some need more. Each event a client can subscribe to, with its catalog name, its SSE name (the `event:` line of a frame), its domain, its access and its scopes, is in "Event streams a client subscribes to" in the reference. A runtime domain's catalog name is `runtime.<domain>` and its SSE name is the domain name; the other events have their own SSE names (`control.approval_update` is `approval-update`). The rules that matter to a client:
+
+- Admin only: the domains that carry a conversation or the daemon's inner state, among them `session`, `turn`, `tools`, `tasks`, `agents`, `gate` (approvals and the owner inbox), `config` and `fleet`, and the `approval-update`, `owner-inbox-update`, `hosted-session-update` and `session-update` events. A non-admin credential never receives them, whatever scopes it holds.
+- Any credential with the scopes: the rest, among them `providers`, `automation`, `surfaces`, `transport`, `ops` and the `ready` and `heartbeat` frames. `surface-message` also needs `read:transcripts`, and the `remote-*` events `read:remote`.
+- An event a plugin adds is admin-only.
+- Two frames are not in the catalog: `gap` (events were dropped, see "Reconnecting") and `closed` (the daemon ended the stream, see "Server-Sent Events"). Any stream can receive them.
+
+### The least-privilege client
+
+What a non-admin credential can and cannot do with conversations, checked against a 3.3.1 daemon with a device token holding `read:sessions`, `write:sessions`, `read:transcripts` and `read:events`:
+
+| Action | Non-admin? | How |
+| --- | --- | --- |
+| List workspaces, create a hosted session, give it its first turn | Yes | `sessions.hosted.workspaces`, `sessions.hosted.create` with `initialPrompt` (not with `originSurface` `agent`). |
+| Send a further turn (`sessions.followUp`, `sessions.steer`, `sessions.messages.create`) | No | Admin methods. |
+| Stream the turn (text deltas, tool calls) | No | `turn`, `tools` and `session` are admin-only, on every stream. |
+| Know the turn has ended | Yes, by polling | `sessions.hosted.list` (`read:transcripts`): the session's `status` goes `running` then `idle`, and `turnCount` and `lastTurnAt` move. |
+| Read the reply | Yes | `sessions.hosted.attach` (`write:sessions`) returns `history` with the `user`, `assistant`, `system` and `tool` messages. `GET /api/sessions/{id}/messages` does not have the reply (see "7. Read the transcript"). |
+| Cancel a running turn | Yes | `sessions.turns.cancel` (`write:sessions`). |
+| Detach, kill | Yes | `sessions.hosted.detach`, `sessions.hosted.kill`. |
+| Approve or deny a tool call the turn asks for | No | Admin and owner-only. In `ask-me` mode a non-admin's turn waits for the owner. |
+| Run a task | No | `tasks.create` is admin. |
+
+So the least-privilege client that works end to end is:
+
+- **One turn per session, result by polling:** a device token with `read:sessions`, `write:sessions` and `read:transcripts`. Create the session with `initialPrompt`, poll `sessions.hosted.list` about once a second until the session's `status` is `idle` and its `turnCount` has grown, then call `sessions.hosted.attach` and read the last `assistant` message in `history` (a failed turn leaves a `system` message instead, for example `No model 'openrouter:openrouter/free' for provider 'openrouter' in registry.`). Kill or detach the session when done.
+
+**A reply can be lost before it is read.** `sessions.hosted.attach` is the only way to read a hosted session's reply, and it works only while the session is live: on an ended session it answers `409` `{"error":"Hosted session <id> is unavailable: it is terminated (killed).","code":"HOSTED_SESSION_TERMINATED",...}` (the reason in brackets says why it ended), and no method returns an ended session's history. The record is kept for `hostedSessions.terminatedRetentionMs` (24 hours), visible in `sessions.hosted.list` with `includeTerminated`, but without its messages. A session whose detach policy is `kill` (the default, `hostedSessions.detachPolicy`) ends by itself:
+
+- when its last attached client detaches, or its attachment lease lapses without renewal (an attach renews it; the lease is `leaseMs` on attach, 30 seconds to 24 hours, default `hostedSessions.attachmentTtlMs`, 10 minutes);
+- when no client was ever attached and it has sat idle for one lease after its last turn;
+- when the daemon restarts.
+
+A `survive` session ends only when it is killed (and stays across a daemon restart). To make sure the reply can be read:
+
+1. Create the session with `"detachPolicy":"survive"` (any caller may set it).
+2. Or attach at once with your `clientId` (`clientId` on `sessions.hosted.create`, or `sessions.hosted.attach` right after) and attach again within every lease while you poll; give a long `leaseMs` when polling is slow.
+3. Read the reply, then kill or detach the session yourself.
+
+On `409` `HOSTED_SESSION_TERMINATED`: the session is gone and so is its reply; do not retry the attach. What the turn did to files stays done. Create a new session if the answer is still needed, and send the prompt again.
+- **Several turns, live text, approvals or tasks:** an admin credential. Use a device token minted without a scope list, so it can be revoked on its own.
+
+There is no non-admin way to watch a turn as it runs.
+
+## Calling a method
+
+### REST routes
+
+Path parameters are in the path; for `GET`, other inputs are query parameters; for `POST`, inputs are the JSON body. Example:
+
+```sh
+curl -sS -H "Authorization: Bearer $GV_TOKEN" 'http://127.0.0.1:3421/api/tasks?limit=5'
+```
+
+```json
+{"queued":0,"running":0,"blocked":0,"totals":{"created":0,"completed":0,"failed":0,"cancelled":0},"tasks":[]}
+```
+
+### The invoke route
+
+`POST /api/control-plane/methods/<methodId>/invoke` calls any invokable method by id. The request body is an envelope: the method's input goes under `body`, and `query` is optional.
+
+```json
+{ "body": { "<input field>": "<value>" }, "query": { } }
+```
+
+Sending the input without the envelope is refused:
+
+```json
+{"error":"Missing required field: body. Expected envelope shape: { query?, body }","status":400}
+```
+
+An unknown method id answers `404` `{"error":"Unknown gateway method","code":"METHOD_NOT_FOUND","status":404}`. A method that is in the catalog but cannot be dispatched by id (for example the streams, `/login`, `/logout`) answers `400` with code `NOT_INVOKABLE`. The response body is the method's output.
+
+### The WebSocket
+
+Open `ws://<daemon>/api/control-plane/ws?domains=<comma list>` (or `wss://`) with `Authorization: Bearer <token>` on the upgrade. Optional query parameter `clientKind`: `tui`, `web`, `slack`, `discord`, `ntfy`, `daemon` or `webhook` (default `web`). The daemon must serve the WebSocket (`controlPlane.streamMode` `websocket` or `both`; see "Live update streams" in the previous part); otherwise the upgrade answers `409` `STREAM_MODE_NOT_SERVED`.
+
+Frames are JSON text. The client sends:
+
+| Frame | Effect | Reply |
+| --- | --- | --- |
+| `{"type":"auth","token":"<optional>","domains":["session"],"label":"<optional>"}` | Confirms the principal and optionally subscribes. | `{"type":"auth","ok":true,"clientId":"cp-...","principalId":"shared-token"}`, or `ok:false` and the socket closes. |
+| `{"type":"subscribe","domains":["turn","tools"]}` | Add event domains. | `{"type":"subscribed","clientId":"...","domains":[...]}` |
+| `{"type":"unsubscribe","domains":["tools"]}` | Remove domains (all when `domains` is omitted). | `{"type":"unsubscribed",...}` |
+| `{"type":"ping"}` | Keep-alive. | `{"type":"pong","ts":1795022871821}` |
+| `{"type":"call","id":"c1","methodId":"sessions.hosted.list","body":{}}` | Call a method by id. | `{"type":"response","id":"c1","ok":true,"status":200,"body":{...}}` |
+| `{"type":"call","id":"c2","method":"GET","path":"/api/approvals"}` | Call a REST route. | `{"type":"response","id":"c2","ok":true,"status":200,"body":{...}}` |
+
+In a `call` frame with `methodId`, `body` is the method's input itself (the frame is the envelope, so do not nest another `body`); in a `call` frame with `method` and `path`, `body` is the JSON body that route takes. A `call` frame may also carry `query` and `explicitUserRequest: true` (only when a person asked for this action just now). The `ready` event can arrive before the `auth` reply. A method id the daemon does not know answers `{"type":"response","id":"...","ok":false,"status":404,"body":{"error":"Unknown gateway method: <id>","code":"METHOD_NOT_FOUND",...}}` (over HTTP the text is `Unknown gateway method`, without the id). The daemon sends events as `{"type":"event","event":"<event name>","payload":{...}}`. Observed opening of a socket subscribed to `session`:
+
+```text
+{"type":"event","event":"ready","payload":{"clientId":"cp-6e80f602","domains":["session"],"transport":"websocket"}}
+{"type":"auth","ok":true,"clientId":"cp-6e80f602","principalId":"shared-token"}
+{"type":"pong","ts":1795022871821}
+{"type":"response","id":"c1","ok":true,"status":200,"body":{"sessions":[]}}
+```
+
+A call made after the credential was revoked answers `{"type":"response","id":"...","ok":false,"status":401,...}`.
+
+## Error answers
+
+### Reading an error answer
+
+Every error is a JSON object. Only `error` (one sentence for a person) is always present; branch on `code`, never on the text. The other fields an error can carry (`code`, `status`, `category`, `state`, `next`, `hint`, `source`, `recoverable`, `requestId`, `retryAfterMs`, the provider fields, and `requiredScopes`/`grantedScopes`/`missingScopes` on `MISSING_SCOPE`) are described in "Error body" in the reference. What a client must know about them:
+
+- Many answers carry only some fields: `{"error":"Unknown approval","status":404}` has no `code`; `{"error":"Missing required field: task (non-empty string)"}` has neither `code` nor `status`; the unknown-`modelId` `500` has `category` but no `code`. Read the HTTP status from the response, not from the body.
+- `recoverable` is often absent; when present it settles whether to retry (see "Deciding whether to retry").
+- A `429` gives its wait as `retryAfterMs` in the body or as the `Retry-After` header (seconds), or neither.
+- Some refusals are not errors: a `200` with `"applied":false` and a `refusal` (approvals, the owner inbox), and a `202`/`409` with `"mode":"rejected"` (`POST /task` in a session, `sessions.steer`).
+- `/v1/*` routes answer in the OpenAI error shape (see "OpenAI-compatible endpoints"); WebSocket calls wrap the body in `{"type":"response","ok":false,"status":...,"body":{...}}`.
+
+Examples captured from a 3.3.1 daemon:
+
+```json
+{"error":"Authentication required","code":"AUTH_REQUIRED","category":"authentication","source":"runtime","status":401}
+```
+
+```json
+{"error":"Missing required scope for approvals.list: read:approvals","code":"MISSING_SCOPE","category":"authorization","source":"permission","recoverable":false,"status":403,"state":"the credential does not hold read:approvals","next":["Use a credential that holds read:approvals, or an admin session."],"requiredScopes":["read:approvals"],"grantedScopes":["read:events","read:sessions","read:tasks","read:transcripts"],"missingScopes":["read:approvals"]}
+```
+
+```json
+{"error":"Gateway method requires admin access: sessions.create","code":"ADMIN_REQUIRED","category":"authorization","status":403}
+```
+
+```json
+{"error":"Unknown shared session","code":"SESSION_NOT_FOUND","status":404}
+```
+
+```json
+{"error":"Session is closed","code":"SESSION_CLOSED","status":409}
+```
+
+```json
+{"error":"Route not found: /api/status","hint":"Check the daemon API path and version. New platform-facing routes are published under /api/v1.","code":"NOT_FOUND","category":"not_found","source":"runtime","recoverable":false,"status":404}
+```
+
+### Status codes
+
+| Status | Meaning | What to do |
+| --- | --- | --- |
+| `400` | The input is wrong (`INVALID_ARGUMENT`, `VALIDATION_FAILED`, `INVALID_MESSAGE_ID`, `INVALID_KIND`, `UNKNOWN_EVENT_DOMAIN`, `NOT_INVOKABLE`). Nothing was changed. | Fix the input. Do not retry unchanged. |
+| `401` | No valid credential (`AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PAIRING_OFFER_EXPIRED`, `PAIRING_TOKEN_ROTATION_DUE`). | Get a new credential. |
+| `403` | The credential lacks authority (`MISSING_SCOPE`, `ADMIN_REQUIRED`, `PERMISSION_DENIED`, `EVENT_ACCESS_DENIED`, `CONTROL_PLANE_LOCAL_ONLY`, `SESSION_NOT_OWNED`, `HOSTED_SURFACE_FORBIDDEN`). | Use another credential, or change the setting named. |
+| `404` | Not found (`NOT_FOUND`, `METHOD_NOT_FOUND`, `SESSION_NOT_FOUND`, `CONTRACT_NOT_FOUND`, `SESSION_NOT_LOCAL`). | Check the id. |
+| `409` | The state does not allow it (`SESSION_CLOSED`, `SESSION_ACTIVE`, `HOSTED_SESSION_STILL_RUNNING`, `IDEMPOTENCY_KEY_REUSED`, `STREAM_MODE_NOT_SERVED`, `CANCEL_NOT_ALLOWED`). | Read the state, then act. |
+| `429` | Rate limited (`RATE_LIMITED`). | Wait for `Retry-After` or `retryAfterMs`. |
+| `500` | The daemon failed (`INTERNAL_ERROR`, `SESSION_AGENT_BIND_FAILED`). | Read the state before retrying. |
+| `503` | A dependency is unavailable (`SERVICE_UNAVAILABLE`, `relay-disabled`). | Retry later. |
+| `400` | `INVALID_INPUT` (the input does not match the method's schema, for example `client must be one of ["agent"]`, `sessionId is required`) and `INVALID_JSON` (`Invalid JSON body`: the body is not JSON). | Fix the input. |
+
+Every code with its HTTP status, meaning and whether to retry is in the reference: "Codes any route may answer" (codes the request layer and the routes send) and "Codes a method declares" (each method's own codes, with the methods that declare it). For one method, `GET /api/control-plane/methods/{methodId}` lists its `errorCodes`. `INVALID_ARGUMENT` is used for any input the method refuses (a workspace outside the allowed roots, a malformed `routing`, a bad `scopes` list), not only for a body field that disagrees with the path.
+
+### Codes that need more than their name
+
+| Code | Status | What happened | What to do |
+| --- | --- | --- | --- |
+| `OWNER_ONLY` | `403` | The method is the owner's own act and the request came with the Agent's own credential (credential kind `agent`). Body, observed for every owner-only method through invoke and REST alike: `{"error":"<method id> is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}`. Owner-only methods include `approvals.approve`, `approvals.deny`, `inbox.answer`, `credentials.set`, `pairing.tokens.create`, `pairing.tokens.delete` and `sessions.permissionMode.set`. | Not retryable with that credential. The owner does it from his own app, or a script uses its own device token. |
+| `HOSTED_SESSION_TERMINATED` | `409` | The hosted session has ended; its reply can no longer be read. | Do not retry; create a new session. Keep sessions you must read from with `detachPolicy` `survive` (see "The least-privilege client"). |
+| `HOSTED_SESSION_LIMIT_REACHED` | `429` | `hostedSessions.maxSessions` hosted sessions already exist. No `Retry-After`. | Kill or detach a session, or raise the setting. A plain wait succeeds only if a session ends meanwhile. |
+| `PAIRING_TOKEN_ROTATION_DUE` | `401` | A device token older than managed token rotation allows (`security.tokenAudit.managed` on, and the token's age past the rotation limit). Body `state`: `the token of "<name>" is <n> days old and managed token rotation (security.tokenAudit.managed) allows <m> days`. | Pair the device again for a new token, then revoke the old one. |
+| `PAIRING_OFFER_EXPIRED` | `401` | A device token was not used within 15 minutes of being minted. | Mint a new one and use it at once. |
+| `SESSION_NOT_LOCAL` | `404` | `This daemon does not host a live runtime for session <id>.`: a live-session control (`sessions.permissionMode.get`/`.set`, `sessions.contextUsage.get`, `sessions.turns.cancel`, `sessions.toolCalls.cancel`, `sessions.queuedMessages.*`) was asked for a session that has no model loop in this daemon: one a terminal app runs in its own process, a hosted session that ended, or an id nobody holds. | Act on it in the app that runs it, or use a live hosted session of this daemon (`sessions.hosted.list`). |
+| (no code) `500` | `500` | `Model '<id>' is not in this daemon's model registry.` from `sessions.hosted.create` with an unknown `modelId`; `category` `service`. | Do not retry; fix `modelId`. |
+| `INVALID_INPUT` | `400` | The invoke input does not match the method's input schema. | Fix the input. |
+| `INVALID_JSON` | `400` | The body is not valid JSON. | Fix the body. |
+
+### SDK kinds
+
+The SDK (`@goodvibes-jev/engine/errors`) turns every error into a `GoodVibesError` with a `kind`, computed from the wire `category` (for example `bad_request` becomes `validation`, `rate_limit` becomes `rate-limit`). The full mapping is "Categories and kinds" in the reference. The kind `contract` exists only in the client: the SDK raises it itself, for example when `operator.invoke()` is asked for an invoke-only method (`CONTRACT_MISMATCH`) or a response does not match the contract (`ContractError`). A daemon never sends `category` `contract`.
+
+### Deciding whether to retry
+
+Apply these in order, and give every request a limit on attempts (for example 5) and on total time, so that no rule below can loop forever:
+
+1. The body says `"recoverable": false`: do not repeat the same request.
+2. The body says `"recoverable": true`: repeat it, after `retryAfterMs` or `Retry-After` when given.
+3. A `500` that names a cause in the request (an unknown model, id or setting), or the same `500` body twice in a row: permanent. Do not retry; fix the request. The unknown-`modelId` refusal of `sessions.hosted.create` is one: it carries no `code` and no `recoverable`, and the SDK counts it as transient, so a client that retries every `500` loops on it until its attempt limit.
+4. `429` `HOSTED_SESSION_LIMIT_REACHED`: free a session first (see the table above); retrying alone does not help.
+5. Status `408`, `429`, `500`, `502`, `503`, `504` or `529`: retryable (the SDK treats exactly these as transient). Wait `retryAfterMs` or `Retry-After` when given, otherwise back off (1, 2, 4 ... 30 seconds), and stop at the attempt limit. For a `500` on a write, read the state first (the write may have happened) unless the method has a replay key.
+6. Any other `4xx`: not retryable as is. `401` needs a new credential, `403` another credential or setting, `404` another id, `409` a different state (read it first), `400` a corrected request.
+
+The SDK exposes its own answer as `error.recoverable` on every `GoodVibesError`; it follows rules 1, 2, 5 and 6, so apply rules 3 and 4 and the attempt limit yourself.
+
+## Idempotency and safe retries
+
+A client that loses a response cannot tell whether the request was applied. The rule:
+
+- A method whose effect is `read` is safe to repeat.
+- A method that declares a retry key is safe to repeat with the same key. Which methods declare one is the Retry column of "Operator API methods" in the reference, and `GET /api/control-plane/methods/{methodId}` returns the key as `replay`.
+- Every other method that writes or sends (effect `write` or `outward`, the Effect column of the same table) has no declared retry behaviour ("not declared" in the Retry column). Treat it as unsafe to repeat: after a lost response, read the state and look for what you did before sending again, unless you have read its handler and know a repeat does no harm.
+
+The methods with a declared key, and what a repeat does:
+
+| Method | Key | Behaviour on a repeat |
+| --- | --- | --- |
+| `sessions.messages.create`, `sessions.steer`, `sessions.followUp` | Body `messageId`: 1 to 128 letters, digits, `.`, `_`, `:` or `-`, chosen by the caller. | The same `messageId` to the same session from the same surface returns the receipt of the input already recorded (same `input.id`, same message) instead of recording a second one. The match is on the key alone (surface kind, surface id, `messageId`, session), not on the body: a repeat with a different body returns the first input and the new text is dropped. An input that failed is run again under its first text. Another format is refused with `400` `INVALID_MESSAGE_ID`. |
+| `contracts.start` | Header `Idempotency-Key` (or body `idempotencyKey`; the header wins). | Same key and same body: the first contract is returned with header `Idempotent-Replayed: true` and `replayed: true`. Same key, different body: `409` `IDEMPOTENCY_KEY_REUSED`. Kept across daemon restarts. |
+| `sessions.register` | Body `sessionId`. | A repeat is a heartbeat and returns the existing record. |
+| `pairing.tokens.create`, `pairing.tokens.migrate` | Body `attemptId` (8 to 128 letters, digits, `.`, `_`, `:` or `-`). | While the token is unused, the repeat returns the same token id with a new secret, and the earlier secret stops working. |
+| `workLedger.submit` | Body `requestId`. | Same id, same content: the original receipt with `replayed: true`. |
+| `workLedger.importLegacy` | Body `requestId`. | The durable result is replayed. |
+
+The HTTP response to a repeated `messageId` has the same status (`202`) and does not carry a `duplicate` field; recognise a repeat by the same `input.id` and `message.id` in the response. Its `mode` reports the input's current progress (for example `continued-live`), not the first answer's `mode`. Two scripts that send to one session with the default surface (`surfaceKind` `web`, `surfaceId` `surface:web`) share one key space: give each script its own `surfaceId`, or messageIds that cannot collide. Choose a new `messageId` for every new message.
+
+Writes with no declared key whose handlers make a repeat harmless (read from the handlers; the Retry column still says "not declared" for them):
+
+| Write | A repeat |
+| --- | --- |
+| `sessions.hosted.kill` | Killing a session that has already ended returns its record unchanged, `200` (observed). |
+| `sessions.detach` | Detaching a surface that is no longer a participant, or detaching from a closed session, returns the session unchanged; nothing is published. An unknown session is `404`. |
+| `sessions.turns.cancel` with `expectedTurnId` | Compares the turn id first: a repeat after the turn ended answers `already-ended` (or `turn-not-found`/`stale-turn` once the id is forgotten) and cancels nothing else. |
+| `inbox.post` with a `key` | While an item posted under that `key` is still open, a repeat returns that item with `created: false` instead of asking the owner again. Without a `key`, a repeat posts a second item. |
+| `approvals.cancel` | An approval that already ended is returned unchanged with `applied: false` and a `refusal`. A surface releasing an ask it raised with `approvals.raise` passes the `holdId` it got: a repeated release with the same `holdId` changes nothing, while a repeat without it can give up another surface's hold. |
+
+The writes a client needs most, and what their handlers do on a repeat:
+
+| Write | Repeat after a lost response |
+| --- | --- |
+| Create a session: `sessions.hosted.create`, `sessions.create` | No key: a repeat creates a second session. Look first with `sessions.hosted.list` (or `GET /api/sessions`) for the one you made (same `title` and `workspaceRoot`), and create again only if it is not there. Kill an extra one with `sessions.hosted.kill`. |
+| Send a message or turn: `sessions.followUp`, `sessions.steer`, `sessions.messages.create` | Safe with the same `messageId` (above). Without a `messageId` a repeat records a second input and runs a second turn. |
+| Run a task: `POST /task` (`tasks.create`) | No key: a repeat starts a second agent and pays for it twice. Look first with `GET /api/tasks` (newest first; match the `title`, which is the task text), and send again only if it is not there. `POST /api/tasks/{taskId}/retry` is refused (`400`) when repeated, because the first retry leaves the task `queued`. |
+| Decide an approval: `POST /api/approvals/{id}/approve` or `/deny`, `inbox.answer` | Safe: the first decision wins. A repeat, or a different decision afterwards, answers `200` with `"applied":false` and a `refusal` naming who decided; nothing changes. |
+| Write a setting: `POST /config` (`config.set`), `config.setMany`, `config.reset` | Safe: writing the same value again leaves the same state. |
+
+## Sessions: shared and hosted
+
+A shared session is the record every conversation has: its messages, queued inputs, participants and status (`active` or `closed`). The `sessions.*` REST methods work on shared sessions.
+
+A hosted session is a shared session whose model loop runs inside the daemon. `sessions.hosted.*` (invoke-only) create, attach, detach, list and kill hosted sessions. A hosted session's id (`hosted-<uuid>`) is also its shared-session id, so the `sessions.*` routes work on it: `sessions.followUp` and `sessions.steer` drive its turns, `sessions.turns.cancel` cancels a turn, and `GET /api/sessions/{id}/messages` lists the user messages sent to it through those routes. Its replies are read with `sessions.hosted.attach`, not from `/messages` (see "7. Read the transcript").
+
+For an automated client that wants the model to do work, create a hosted session. A shared session made with `sessions.create` has no model loop of its own; its inputs wait for a surface to collect them.
+
+How to send text to a session:
+
+| Method | Route | Use |
+| --- | --- | --- |
+| `sessions.followUp` | `POST /api/sessions/{sessionId}/follow-up` | Start a new turn when the session is idle, or queue one to run after the current turn. Use this for a hosted session. |
+| `sessions.steer` | `POST /api/sessions/{sessionId}/steer` | On a session answered by a running agent, hand the text to that agent now. On a hosted session it behaves exactly like `sessions.followUp` (see below). |
+| `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | Append a user message with routing by `kind` (`message`, the default; `task`; `followup`). With the default `kind` the response is `{"messageId":"...","routedTo":"conversation","sessionId":"..."}` and, on a hosted session, no turn runs. Do not use it to drive a hosted session. With `kind` `task` and an unknown `sessionId` it creates a new session and starts an agent instead of refusing (see "Form 2: a task in a shared session"). |
+
+All three are admin methods with scope `write:sessions` and accept `messageId`, `surfaceKind`, `surfaceId` and `routing` (provider, model, fallbacks, reasoning effort, tool list, execution intent). A missing or empty `body` is refused with `400` (`Missing shared session steer body`, `Missing shared session follow-up body`).
+
+### Steer and follow-up on a hosted session
+
+A hosted session has no agent id of its own; its loop is the session's "surface". So for a hosted session the broker queues every steer and follow-up for the hosted engine, whatever state the session is in, and answers `202` with `"mode":"queued-for-surface"` and `"agentId":null`. The engine then collects the input and submits it to the session's loop:
+
+- If the session is idle, the text starts a new turn at once. This is true for `sessions.steer` as well; `allowSpawnFallback` is not needed and changes nothing for a hosted session.
+- If a turn is running, the text waits and runs as the next turn after the current one. Inputs of one session are delivered one after another, in the order they were accepted. While it waits inside the loop it is listed by `GET /api/sessions/{sessionId}/queued-messages`, where it can be edited or deleted.
+
+The `409` `"mode":"rejected"` answer (`No active agent accepted the steer request.`) applies only to a session whose agent is running but did not take the steer; a hosted session never gets it. On a closed session both methods answer `409` `SESSION_CLOSED`; on an unknown id, `404` `SESSION_NOT_FOUND`.
+
+## Starting a hosted session and sending a turn
+
+This is the complete sequence for a script. Every request uses an admin token in `$GV_TOKEN`. The example responses are from a 3.3.1 daemon; ids, times and paths differ on your machine.
+
+### 1. Check the credential
+
+```sh
+curl -sS -H "Authorization: Bearer $GV_TOKEN" http://127.0.0.1:3421/api/control-plane/auth
+```
+
+Continue only when `authenticated` is `true` and `admin` is `true`.
+
+### 2. Find an allowed workspace
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.workspaces/invoke -d '{"body":{}}'
+```
+
+```json
+{"roots":["/home/alex/projects/app"]}
+```
+
+`workspaceRoot` must be one of these roots or a folder inside one. To add a root, call `workspaces.registrations.add` (`POST /api/workspaces/registrations`, scope `write:workspaces`). The home directory, the filesystem root and the daemon's state directory are refused.
+
+### 3. Create the session
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.create/invoke \
+  -d '{"body":{"workspaceRoot":"/home/alex/projects/app","title":"API demo","detachPolicy":"survive"}}'
+```
+
+```json
+{"session":{"id":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c","workspaceRoot":"/home/alex/projects/app","title":"API demo","status":"idle","detachPolicy":"survive","effectiveDetachPolicy":"survive","attachedClients":[],"createdAt":1795021975653,"updatedAt":1795021975653,"turnCount":0,"messageCount":0,"restoredFromDisk":false,"contractIds":[],"permissionMode":"jev-decides"}}
+```
+
+Inputs of `sessions.hosted.create`:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `workspaceRoot` | yes | Absolute path of an allowed folder. |
+| `title` | no | Shown in lists. Default: the first prompt. |
+| `modelId` | no | A model registry key; checked now, so an unknown model is refused here (see the refusals below). Default: the daemon's current model. |
+| `initialPrompt` | no | Submitted as the first user message. The call does not wait for that turn. |
+| `detachPolicy` | no | `kill` or `survive`. Default: `hostedSessions.detachPolicy` (`kill`). Use `survive` for a script that may disconnect. |
+| `clientId` | no | Attaches this client at creation. |
+| `originSurface` | no | `agent`, `tui` or `webui`: whose settings and prompt the session uses. `agent` needs an admin caller (`403` `HOSTED_SURFACE_FORBIDDEN` otherwise). |
+
+Refusals, observed on a 3.3.1 daemon:
+
+| Status | Body | Cause | What to do |
+| --- | --- | --- | --- |
+| `400` | `INVALID_ARGUMENT`, for example `'/etc' is outside the folders this daemon runs work in (/home/alex/projects/app). Pick one of them, or register the project first with workspaces.registrations.add (or by opening it in the terminal app).` | `workspaceRoot` outside the allowed roots. | Pick an allowed root. |
+| `400` | `{"error":"sessionId is required","code":"INVALID_INPUT","category":"bad_request","status":400}` (this example from `sessions.hosted.attach`) | The input does not match the method's schema. | Fix the input. |
+| `409` | `{"error":"Hosted session <id> is unavailable: it is terminated (<reason>).","code":"HOSTED_SESSION_TERMINATED",...}` (from `sessions.hosted.attach` and the other `sessions.hosted.*` calls on an ended session) | The session ended (killed, detached under the `kill` policy, the daemon restarted). | Do not retry. Its history cannot be read any more; create a new session (see "The least-privilege client"). |
+| `429` | `{"error":"This daemon already hosts 1 sessions, the configured maximum (hostedSessions.maxSessions). Kill one, or raise the setting.","code":"HOSTED_SESSION_LIMIT_REACHED","category":"rate_limit","status":429}` | `hostedSessions.maxSessions` live sessions already exist. No `Retry-After` is sent. | Waiting does not help unless a session ends: kill or detach one (`sessions.hosted.list`, then `sessions.hosted.kill`), or raise the setting. |
+| `500` | `{"error":"Model 'nope:nope' is not in this daemon's model registry.","category":"service","status":500}`, with no `code` and no `recoverable` | `modelId` names no model this daemon knows. | **Do not retry**: the same request fails the same way every time. Pick a model from the registry (the `provider:model` ids that `GET /v1/models` lists) or leave `modelId` out. A generic retry rule that repeats every `500` would loop on this one; see "Deciding whether to retry". |
+
+The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). Permission modes are explained in "Permissions, decisions and safety".
+
+### 4. Open the event stream before sending
+
+Open the session's own stream so no event is missed:
+
+```sh
+curl -sS -N -H "Authorization: Bearer $GV_TOKEN" \
+  http://127.0.0.1:3421/api/sessions/hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c/events
+```
+
+`GET /api/sessions/{sessionId}/events` is a Server-Sent Events stream of that session's events on the default domains plus `tools`. It needs an admin credential (`403` `ADMIN_REQUIRED` otherwise). A non-admin client has no stream that carries a turn; it follows "The least-privilege client" instead (poll `sessions.hosted.list`, read `sessions.hosted.attach`). The walkthrough below uses an admin token.
+
+The stream opens with:
+
+```text
+event: ready
+data: {"clientId":"shared-session:hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c:60e06900","domains":["session","tasks","agents","automation","routes","control-plane","deliveries","surfaces","watchers","transport","ops","knowledge","providers","turn","tools"],"transport":"sse","resume":{"resume":"none"}}
+```
+
+### 5. Send the turn
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/sessions/hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c/follow-up \
+  -d '{"body":"Say hello in one word.","messageId":"demo-2"}'
+```
+
+`202 Accepted`:
+
+```json
+{"session":{"id":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c","kind":"hosted","project":"/home/alex/projects/app","title":"API demo","status":"active","createdAt":1795021975670,"updatedAt":1795022021931,"lastMessageAt":1795022021930,"lastActivityAt":1795022021931,"messageCount":2,"pendingInputCount":1,"routeIds":[],"surfaceKinds":["service","web"],"participants":[{"surfaceKind":"service","surfaceId":"daemon:hosted-sessions","lastSeenAt":1795021975670},{"surfaceKind":"web","surfaceId":"surface:web","lastSeenAt":1795022021929}],"metadata":{"surfaceManaged":true}},"message":{"id":"smsg-0031a27e","sessionId":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c","role":"user","body":"Say hello in one word.","createdAt":1795022021930,"surfaceKind":"web","surfaceId":"surface:web","metadata":{"sessionIntent":"follow-up"}},"input":{"id":"sin-3aff9d7a","sessionId":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c","intent":"follow-up","state":"queued","correlationId":"session-input:sin-3aff9d7a","causationId":"smsg-0031a27e","body":"Say hello in one word.","createdAt":1795022021930,"updatedAt":1795022021930,"surfaceKind":"web","surfaceId":"surface:web","metadata":{"providerMessageKey":"web:surface:web::demo-2:session:hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c"}},"mode":"queued-for-surface","agentId":null}
+```
+
+Sending the same `messageId` again, with this body or any other, returns the same `input.id` (`sin-3aff9d7a`) and message, with `mode` `continued-live` and the input's current state, and records nothing new. In testing, a second follow-up with `"messageId":"k1"` and a different body returned the first message's id and text.
+
+### 6. Read the turn from the stream
+
+The stream then carries, in order (payloads shortened):
+
+```text
+event: session-update
+data: {"event":"session-message-appended","payload":{"sessionId":"hosted-7f45...","message":{"id":"smsg-0031a27e","role":"user","body":"Say hello in one word.",...}},"createdAt":1795022021930}
+
+event: session-update
+data: {"event":"session-input-queued","payload":{"sessionId":"hosted-7f45...","inputId":"sin-3aff9d7a","intent":"follow-up","state":"queued",...},"createdAt":1795022021930}
+
+event: hosted-session-update
+data: {"event":"hosted-session-turn-started","session":{"id":"hosted-7f45...","status":"running",...},"createdAt":1795022021935,"detail":"a turn was submitted"}
+
+event: turn
+data: {"type":"TURN_SUBMITTED","ts":1795022021934,"traceId":"hosted-7f45...:70f47a4e-...","sessionId":"hosted-7f45...","source":"orchestrator","payload":{"type":"TURN_SUBMITTED","turnId":"70f47a4e-9c8f-47b2-8bdc-a2e6f4d78565","prompt":"Say hello in one word.",...}}
+
+event: turn
+data: {"type":"LLM_REQUEST_STARTED",...,"payload":{"type":"LLM_REQUEST_STARTED","turnId":"70f47a4e-...","provider":"openrouter","model":"openrouter/free",...}}
+
+event: turn
+data: {"type":"STREAM_DELTA",...,"payload":{"type":"STREAM_DELTA","turnId":"70f47a4e-...","content":"Hello.","provisional":true}}
+
+event: turn
+data: {"type":"LLM_RESPONSE_RECEIVED",...,"payload":{"type":"LLM_RESPONSE_RECEIVED","turnId":"70f47a4e-...","provider":"openrouter","model":"openrouter/free","toolCallCount":0,"inputTokens":18104,"outputTokens":7,"durationMs":1741,"retries":0,"costSource":"unknown"}}
+
+event: hosted-session-update
+data: {"event":"hosted-session-turn-ended","session":{"id":"hosted-7f45...","status":"idle","turnCount":1,"messageCount":2,...},"createdAt":1795022023832,"detail":"completed"}
+
+event: turn
+data: {"type":"TURN_COMPLETED",...,"payload":{"type":"TURN_COMPLETED","turnId":"70f47a4e-9c8f-47b2-8bdc-a2e6f4d78565","response":"Hello.","stopReason":"completed"}}
+
+event: session-update
+data: {"event":"session-input-completed","payload":{"sessionId":"hosted-7f45...","inputId":"sin-3aff9d7a","intent":"follow-up","state":"completed",...},"createdAt":1795022023833}
+```
+
+Every event frame of this stream also carries an `id:` line (for example `id: evt-78d3f857`), omitted above; keep the last one for reconnecting.
+
+How to read it:
+
+- To tie your input to its turn: `TURN_SUBMITTED` carries `payload.origin.metadata.correlationId` = `session-input:<input.id>`, the `input.id` the follow-up answered with. Take the `turnId` from that frame; every later turn frame carries it.
+- `STREAM_DELTA` carries text as it arrives; `provisional: true` text may still be revised.
+- A turn ends with exactly one of `TURN_COMPLETED` (with the final `response` and `stopReason`), `TURN_ERROR`, `TURN_CANCEL` or `PREFLIGHT_FAIL`. Wait for one of these with your `turnId`. The `hosted-session-turn-ended` update can arrive before `TURN_COMPLETED` (it did in the capture above); no order between them is promised, so do not stop on it.
+- Tool activity arrives on the `tools` domain as `TOOL_RECEIVED`, `TOOL_EXECUTING`, `TOOL_SUCCEEDED` and `TOOL_FAILED`.
+- The input's final state arrives as `session-input-completed` (or failed).
+- Payload fields of every event are in "Events" in the reference.
+
+### 7. Read the transcript
+
+The model's replies of a hosted session are read with `sessions.hosted.attach`:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.attach/invoke \
+  -d '{"body":{"sessionId":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c","clientId":"my-script"}}'
+```
+
+It returns the hosted session and its `history`: the loop's own transcript, with roles `user`, `assistant`, `system` and `tool`, including tool calls. The last `assistant` message is the reply; a failed turn leaves a `system` message instead. It also attaches the client: attach again with the same `clientId` to renew the lease (`leaseMs` sets it for this attachment), and detach when done (step 9).
+
+`GET /api/sessions/{sessionId}/messages` (and `GET /api/sessions/{sessionId}`, which returns the record with its newest 100 messages) is the shared session's record, not the loop's transcript. For a hosted session it holds the user messages sent through `sessions.followUp`, `sessions.steer` or `sessions.messages.create`, and no replies: the hosted loop settles each input it ran without writing its answer into the shared session (from the code: `settleNativeTurnInput` only marks the input `completed`, `failed` or `cancelled`). An `initialPrompt` given to `sessions.hosted.create` goes straight to the loop and is not there either. Use `/messages` to see what was sent, and `attach` to see what was answered.
+
+### 8. Cancel a turn, if needed
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/sessions/hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c/turns/cancel \
+  -d '{"expectedTurnId":"70f47a4e-9c8f-47b2-8bdc-a2e6f4d78565"}'
+```
+
+The response `status` is `cancellation-requested`, `already-ended`, `stale-turn` (another turn is running; `activeTurnId` names it) or `turn-not-found`. Acceptance does not mean the turn has stopped; wait for its end event. A single tool call can be cancelled with `POST /api/sessions/{sessionId}/tool-calls/{callId}/cancel`.
+
+### 9. Finish
+
+- To leave it running for later: `sessions.hosted.detach` with `sessionId` and `clientId`. With `survive` it stays idle; with `kill` it ends when the last client leaves.
+- To end it: `sessions.hosted.kill` with `sessionId`. The record is kept with reason `killed`.
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/api/control-plane/methods/sessions.hosted.kill/invoke \
+  -d '{"body":{"sessionId":"hosted-7f45bf4b-2f52-4c97-a54f-2a93a23c443c"}}'
+```
+
+After that, sending to it answers `409` `{"error":"Session is closed","code":"SESSION_CLOSED","status":409}`. `POST /api/sessions/{sessionId}/close` on a hosted session that is still running answers `409` `HOSTED_SESSION_STILL_RUNNING`; kill it instead.
+
+## Answering approvals
+
+When the permission mode needs the owner to decide a tool call, the gate raises an approval and the turn waits.
+
+1. Watch for it. Every approval change arrives as event `approval-update` on domain `gate`, with the whole `approval` record. A stream opened without `?domains=` carries it; a stream that names its domains carries it only when the list includes `gate` (see "What a stream without `domains` carries"). A non-admin credential cannot receive `gate` (`403` `EVENT_ACCESS_DENIED`).
+2. Or poll `GET /api/approvals` (scope `read:approvals`): it returns `awaitingDecision`, `mode` (the daemon's `permissions.mode` setting, not any one session's mode), counts and the newest 50 `approvals`. Add `?approvalId=<id>` to read one; an id that matches no approval is not an error: the answer is `200` with `"approvals":[]` (and the counts), so check that the list is not empty. A pending approval does not expire by itself unless the code that raised it set a time limit; then the record carries `expiresAt` and becomes `expired` when it passes.
+
+   ```json
+   {"awaitingDecision":false,"mode":"jev-decides","approvalCount":0,"denialCount":0,"promptCount":0,"totalChecks":0,"approvals":[]}
+   ```
+
+   An approval record has `id`, `callId`, `sessionId`, `status` (`pending`, `claimed`, `approved`, `denied`, `cancelled`, `expired`) and `request` (`tool`, `args`, `category` `read`/`write`/`execute`/`delegate`, and `analysis` with `classification`, `riskLevel` `low`/`medium`/`high`/`critical`, `summary`, `reasons`, `target`, `blastRadius`).
+3. Decide it (admin, owner-only, scope `write:approvals`):
+
+   ```sh
+   curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+     http://127.0.0.1:3421/api/approvals/<approvalId>/approve -d '{"note":"ok"}'
+
+   curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+     http://127.0.0.1:3421/api/approvals/<approvalId>/deny -d '{"reason":"use the staging database instead"}'
+   ```
+
+   | Field | Method | Meaning |
+   | --- | --- | --- |
+   | `rememberTier` | approve, deny | Make it a standing rule: `session`, `exact`, `command-class`, `path` or `tool`. Queued asks it covers are decided too. |
+   | `reason` | approve, deny | Free text. On a denial the model receives it, so it can adapt. |
+   | `selectedHunks` | approve | For an edit: approve only these hunk indices. |
+   | `modifiedArgs` | approve | Approve with changed arguments, for example the answer to a command's prompt. |
+   | `note` | all | A note on the record. |
+   | `disposition` | approve, deny | Optional and redundant with the URL: `approved` for approve; `denied` or `amended` (the owner changed the request) for deny. Any other value is `400`. |
+   | `remember` | approve, deny | A boolean recorded on the decision, asking that it be remembered; `rememberTier` is what makes a standing rule and names its reach. `amended` cannot be combined with `remember: true` or `rememberTier` (`400` `An amendment cannot create a remembered approval rule.`). |
+
+   The body may be empty or omitted; every field is optional. A successful decision answers `200`:
+
+   ```json
+   {"approval":{"id":"<approvalId>","status":"approved","request":{"tool":"...","args":{},"category":"execute","analysis":{...}},"decision":{...},...},"applied":true,"recorded":{"approved":true,"rememberTier":null,"reasonStored":false,"modifiedArgsDelivered":false}}
+   ```
+
+   `recorded` is read back from the record the daemon stored: whether it was approved, the tier saved (or `null`), whether a reason was stored, and whether modified arguments reached the waiting call.
+
+   | Status | Body | Cause |
+   | --- | --- | --- |
+   | `200` | `"applied":false` and `"refusal":"Approval is denied by <who>, which is final; it cannot become approved. Nothing changed."` | The approval had already ended (approved, denied, cancelled or expired). Not an error: the first decision wins. |
+   | `200` | `"applied":false` and `"refusal":"Approval is still pending; this approve was not recorded. Read the approval again and retry."` | The decision did not land; read it and retry. |
+   | `400` | `disposition must match the approval action.` | `disposition` was sent and is not `approved` (approve) or `denied`/`amended` (deny). |
+   | `400` | `rememberTier must be one of: session, exact, command-class, path, tool.` | Bad `rememberTier`. |
+   | `400` | `reason must be a string.` | Bad `reason`. |
+   | `400` | `selectedHunks must be an array of integer hunk indices.` | Bad `selectedHunks` (approve only). An index out of range, or `selectedHunks` on an approval that is not an edit, is also `400` with the daemon's message. |
+   | `400` | `modifiedArgs must be an object of tool arguments.` | Bad `modifiedArgs` (approve only). |
+   | `401` | `AUTH_REQUIRED` | No credential. |
+   | `403` | `ADMIN_REQUIRED` | Not an admin credential. |
+   | `403` | `{"error":"approvals.approve is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}` (`approvals.deny` for a denial) | The request came with the Agent's own credential (credential kind `agent`). Observed the same through `POST /api/approvals/{id}/approve` and through invoke. Applies to approve and deny, not to claim or cancel. |
+   | `404` | `{"error":"Unknown approval","status":404}` | No approval has that id. |
+
+   The contract marks approve and deny as owner-only but does not name the `OWNER_ONLY` code or the `400` validation messages; the table above is what the daemon returns. The `OWNER_ONLY` check runs before the approval is looked up, so it answers the same for an id that does not exist. The approval id is taken from the path; an `approvalId` in the body is not used.
+4. `POST /api/approvals/<approvalId>/claim` marks that you are handling it (advisory). `POST /api/approvals/<approvalId>/cancel` withdraws it.
+
+Remember tiers and permission modes are explained in "Permissions, decisions and safety".
+
+### The owner inbox
+
+Approvals are one kind of item in the owner inbox, which also holds questions agents left, channel claims, purchase windows, queued actions and decisions the decision model made. `inbox.list` (invoke, `read:approvals`) lists them (`status` `open`, `closed` or `all`; `kinds`; `sessionId`; `limit`; `itemId`). `inbox.answer` (invoke, admin, owner-only) answers one with one of its `options`, or with `text`: `{"body":{"itemId":"...","option":"approve"}}`. Changes arrive as event `owner-inbox-update` on domain `gate`. The first answer wins; a later one returns `applied: false` with who answered.
+
+## Settings through the API
+
+All `config.*` and `credentials.*` methods are admin methods: a non-admin, whatever its scopes, gets `403` `ADMIN_REQUIRED` (`Gateway method requires admin access: config.get`).
+
+| Method | Route | Scope | Does |
+| --- | --- | --- | --- |
+| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (58 top-level groups in 3.3.1: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
+| `credentials.get` | `GET /config/credentials[?key=<config key>]` | `read:config` | `{"available":true,"credentials":[...]}`: whether each credential is configured and usable, never the secret. `503` `CREDENTIAL_STORE_UNAVAILABLE` when no secret store is wired. |
+| `config.set` | `POST /config` `{"key":"<config key>","value":<JSON>}` | `write:config` | Write one value. |
+| `config.setMany` | `POST /config/many` `{"entries":[{"key":"...","value":...},...]}` | `write:config` | Write several values as one update: every entry is checked before anything is written. |
+| `config.reset` | `POST /config/reset` `{"key":"<config key>"}` | `write:config` | Remove the explicit value so the key reads as its default, in every settings file that holds it. |
+| `credentials.set` | invoke only: `{"body":{"key":"<config key>","value":"<secret>"}}` | `write:config`, owner-only | Store a secret for a credential setting (for example `surfaces.telegram.botToken`) in the encrypted store and point the setting at it. Answers `success`, `key`, `secretKey`, `scope`, `reference`, `configScope`, `ownership`, `credentialScope`; never the value. |
+| `credentials.delete` | invoke only: `{"body":{"key":"<config key>"}}` | `write:config`, owner-only | Delete the stored secret, then the reference. `cleared: false` means nothing was stored (not an error). |
+
+Example, checked against a 3.3.1 daemon:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/config -d '{"key":"atRest.retentionMaxAgeDays","value":31}'
+```
+
+```json
+{"success":true,"key":"atRest.retentionMaxAgeDays","value":31,"persistedTo":"/home/alex/.goodvibes/daemon/settings.json","tier":"daemon","daemonOwned":true,"effectiveOrigin":"daemon"}
+```
+
+`value` is what the daemon holds after the write (a value it coerced is shown coerced), `persistedTo` the file written, `tier` the layer (`daemon` for a daemon-owned key; `global` for one written to the daemon's own surface file, `~/.goodvibes/daemon-host/settings.json`; `default` after a reset), and `effectiveOrigin` where the value in force comes from. `config.setMany` answers `{"success":true,"revision":<n>,"entries":[<one such object per key>]}`; `config.reset` answers like `config.set` with the default value.
+
+Refusals:
+
+| Status | Body | Cause |
+| --- | --- | --- |
+| `400` | `{"error":"Missing or invalid key","status":400}` | `config.set` with no `key`. |
+| `400` | `{"error":"Invalid config key","status":400}` | `config.set` with a key the daemon does not know. |
+| `400` | `CONFIG_ERROR`, for example `Invalid value for atRest.retentionMaxAgeDays (integer in [1, 365])` | A value of the wrong type or out of range. |
+| `400` | `SECRET_CONFIG_KEY` `Config key surfaces.telegram.botToken holds a credential and is not written to the config file as plain text.` | A credential setting given a literal value (use `credentials.set`, or pass a `goodvibes://secrets/` reference). `config.reset` refuses a credential setting the same way (use `credentials.delete`). |
+| `400` | `INVALID_ARGUMENT` `The request names no config key.` / `The request names no settings to write.` / `Every entry needs a key and a value.` / `<key> is not a config key this daemon knows.` | `config.reset` or `config.setMany` input faults. |
+| `400` | `INVALID_ARGUMENT` | `runtime.workingDir` in `config.setMany` or `config.reset`; set it alone with `config.set`, which moves the daemon's workspace once no session is mid-turn. |
+| `403` | `CONFIG_MANAGED` | The key is locked by managed policy. |
+| `409` | `CONFIG_SET_NOT_APPLIED` `Config key <key> did not take the requested value in <file>. The host now reports <value>.` | A higher layer (managed policy, an environment variable, a daemon-owned value) overrides what was written. `config.setMany` adds `notApplied` (the keys), `revision` and `entries`; the write itself happened. |
+
+**An admin API write is the owner's own act.** `config.set`, `config.setMany` and `config.reset` are recorded as the owner's change made from the daemon API, so a value that loosens security or spending (for example `permissions.mode` `yolo`, a higher payment limit) is written at once, with no question asked; in testing `POST /config {"key":"permissions.mode","value":"yolo"}` answered `200` and took effect. The owner-only check on loosening applies only when a model's tool call asks for the change. Give a script a narrowed token (which cannot call `config.*`) unless it must change settings.
+
+A replicated setting written on one cluster node reaches the other nodes; see "Clusters" in "The daemon, the web UI and networking".
+
+## Running and watching a task
+
+A task is a one-off piece of agent work: the daemon starts an agent (a sub-agent with its own model loop) for the text you send. `POST /task` (`tasks.create`, admin, scope `write:tasks`) has two forms, chosen by whether the body names a session.
+
+### Form 1: a task on its own
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
+  http://127.0.0.1:3421/task -d '{"task":"say hi","tools":["read"]}'
+```
+
+The daemon reads these fields: `task` (required, a non-empty string), `model` (a model registry key), `tools` (up to 64 tool names), and `routing.executionIntent`. `tools` is added to the agent's default tool set, it does not restrict it: in testing `"tools":["read"]` started an agent with `read`, `write`, `edit`, `find`, `exec`, `analyze`, `inspect`, `fetch` and `registry`. The daemon starts the agent at once and answers `202`:
+
+```json
+{"acknowledged":true,"agentId":"agent-65854493","status":"pending","task":"say hi","model":null,"tools":["read","write","edit","find","exec","analyze","inspect","fetch","registry"]}
+```
+
+`status` is the agent's state when it was started; `model` is `null` when none was named and the daemon's current model is used. An agent that cannot run fails within milliseconds; in testing, with no usable model, `GET /task/agent-65854493` answered `"status":"failed"` with `error` `no route for the planner: The session's model openrouter/free is not available for this work ...`.
+
+### Form 2: a task in a shared session
+
+When the body has `sessionId`, `routeId` or `surfaceKind`, the text is recorded as a message in that shared session first (a missing `sessionId` with a `routeId` uses or creates the session bound to that route). The fields read in this form are `task`, `model`, `tools`, `routing` (all of `providerId`, `modelId`, `tools`, `executionIntent`, and the rest of the routing object), `sessionId`, `routeId`, `surfaceKind` (default `web`), `surfaceId` (default `surface:web`), `externalId`, `threadId`, `userId`, `displayName`, `title` and `metadata`. The answer depends on the session:
+
+| Session state | Status | Body |
+| --- | --- | --- |
+| An agent is answering the session and took the text | `202` | `{"acknowledged":true,"mode":"continued-live","sessionId":"...","agentId":"<running agent>","inputId":"sin-..."}` |
+| An agent is answering the session; the text is queued to run after it | `202` | `{"acknowledged":true,"mode":"queued-follow-up","sessionId":"...","agentId":"...","inputId":"sin-..."}` |
+| An agent is answering but did not take it | `409` | `{"acknowledged":false,"mode":"rejected","sessionId":"...","inputId":"sin-..."}` |
+| No agent is answering | `202` | `{"acknowledged":true,"mode":"spawn","sessionId":"...","agentId":"<new agent>","status":"pending"}` |
+
+Do not send a task into a hosted session; use `sessions.followUp` there (see "Steer and follow-up on a hosted session").
+
+**An unknown `sessionId` is not refused.** Form 2 with a `sessionId` that no session has (a typo, a stale id, an id from another daemon) creates a new shared session and starts an agent in it: the answer is `202` `{"acknowledged":true,"mode":"spawn","sessionId":"sess-<new>","agentId":"agent-<new>",...}`, and the agent starts paid model work. The `sessionId` in the answer differs from the one sent, which is the only sign. The same holds for `POST /api/sessions/{sessionId}/messages` with `"kind":"task"`; with the default `kind` (`message`) or `followup`, and for `sessions.steer` and `sessions.followUp`, an unknown id is refused with `404` `SESSION_NOT_FOUND`. (From the code: the broker refuses an unknown id for every intent except `submit`, which these two use. The contract lists `SESSION_NOT_FOUND` for `tasks.create` and `sessions.messages.create`, but they do not send it for this case.) Check first, every time:
+
+```sh
+curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $GV_TOKEN" \
+  http://127.0.0.1:3421/api/sessions/<sessionId>      # 200: it exists; 404: do not send the task
+```
+
+and, after sending, compare the `sessionId` in the answer with the one you sent.
+
+### Every refusal of `POST /task`
+
+| Status | Body | Cause |
+| --- | --- | --- |
+| `401` | `AUTH_REQUIRED` | No credential. |
+| `403` | `ADMIN_REQUIRED` | The credential is not admin. |
+| `400` | `{"error":"Missing required field: task (non-empty string)"}` | No `task`, or an empty one. |
+| `400` | `INVALID_ARGUMENT` naming the field | A malformed `routing` or `tools`, or a `surfaceKind` that is not one of the allowed surface kinds (the error lists them). |
+| `400` | invalid JSON body | The body is not a JSON object. |
+| `409` | `SESSION_CLOSED` | Form 2 with a closed session; reopen it with `POST /api/sessions/{sessionId}/reopen`. |
+| `409` | `"mode":"rejected"` (above) | Form 2: the running agent did not take the text. |
+| `429` | `CAPACITY_EXCEEDED`, header `Retry-After: 5`, `hint` naming `fleet.maxSize` | The daemon already runs `fleet.maxSize` agents. Wait and retry, or raise the setting. |
+| `500` | the spawn error, or `Failed to spawn agent` | The agent could not be started (for example an unknown model). In form 2 the input is released back to the queue. |
+| `500` | `SESSION_AGENT_BIND_FAILED` | Form 2: the agent started but could not be bound to the session; the input was released to the queue. |
+
+Where the code and the contract disagree, the code above is what the daemon does: the contract lists `provider` as an input, but no form reads a top-level `provider` (use `routing.providerId` in form 2, or a `provider:model` key in `model`); form 1 ignores `routing` except `executionIntent`; the form-2 responses carry `inputId`, which the contract's output schema does not name; and the contract does not list `CAPACITY_EXCEEDED` or the `409` `rejected` answer.
+
+`POST /task` has no idempotency key. After a lost response, look for the task with `GET /api/tasks` before sending it again.
+
+### Watching and acting on a task
+
+A task started this way is a runtime task of kind `agent` whose id is the agent id (`agent-...`).
+
+Statuses:
+
+| Thing | Values | Where |
+| --- | --- | --- |
+| Runtime task | `queued`, `running`, `blocked`, `completed`, `failed`, `cancelled` | `GET /api/tasks`, `GET /api/tasks/{taskId}` |
+| Agent | `pending`, `running`, `completed`, `failed`, `cancelled` | `GET /task/{agentId}`, the `POST /task` answer |
+
+| Route | Returns | Access |
+| --- | --- | --- |
+| `GET /task/{agentId}` | `{"agentId","task","status","model","tools","durationMs","toolCallCount","progress","error"}`, not wrapped. `404` `Agent not found: <agentId>` for an unknown agent. | scope `read:transcripts` |
+| `GET /api/tasks?limit=<n>` | `{"queued","running","blocked","totals":{"created","completed","failed","cancelled"},"tasks":[...]}`, newest first. A caller without `read:transcripts` sees each task's kind as its title and no description. | scope `read:tasks` |
+| `GET /api/tasks/{taskId}` | `{"task":{...}}`, wrapped: `id`, `kind` (`exec`, `agent`, `acp`, `scheduler`, `daemon`, `mcp`, `plugin`, `integration`), `title`, `description`, `status`, `owner` (the agent now running it), `cancellable`, `parentTaskId`, `childTaskIds`, `queuedAt`, `startedAt`, `endedAt`, `retryPolicy`, `exitCode`, `error`, `result`, `turnId`. `404` `{"error":"Unknown runtime task","status":404}`. | scope `read:transcripts` |
+| Event domains `tasks`, `agents` | Task and agent lifecycle events. | admin |
+
+Example, a failed task:
+
+```json
+{"task":{"id":"agent-65854493","kind":"agent","title":"say hi","description":"say hi","status":"failed","owner":"agent-65854493","cancellable":true,"childTaskIds":[],"queuedAt":1795025546685,"startedAt":1795025546697,"endedAt":1795025546725,"error":"Agent agent-65854493 failed: ..."}}
+```
+
+Act on it (admin, `write:tasks`):
+
+- `POST /api/tasks/{taskId}/cancel` stops the task's agent (its `owner`) and asks the task store to mark the task `cancelled` with error `Cancelled via control plane`. It answers `200` `{"task":{...}}` with the task as the store now holds it. There is no state check: cancelling a task that already ended is not an error, and the store decides whether the state changes, so read `task.status` in the answer. An unknown id answers `404` `Unknown runtime task`.
+- `POST /api/tasks/{taskId}/retry` starts a new agent and answers `{"retried":true,"task":{...},"agentId":"<new agent id>"}`. Only failed or cancelled agent tasks can be retried: another kind answers `400` `Retry is only implemented for agent tasks`, another state `400` `Task cannot be retried: only failed or cancelled tasks can be retried`. A full fleet answers `429` `CAPACITY_EXCEEDED`.
+
+What a retry keeps and drops:
+
+- It keeps the text (the task's description, or its title).
+- It drops `model`, `tools`, `routing` and the session: the new agent runs on the daemon's current model with the default tool set, outside any session.
+- The new run is tracked as a **new** task whose id is the new agent id returned in `agentId`. Follow that id (`GET /task/<new agentId>`, `GET /api/tasks/<new agentId>`).
+- The original task is set back to `queued` with `owner` naming the new agent, and stays `queued`: in testing, after the new agent failed, `GET /api/tasks` listed the original as `queued` and the new one as `failed`. Cancel the original if a list of open tasks matters to you.
+- Retry has no idempotency key, but a repeated retry of the same task is refused, because the original is `queued` after the first one (`400` `Task cannot be retried: ...`). Retrying the new task's id after it fails starts another agent.
+
+For larger work with acceptance criteria, use contracts: `POST /api/contracts` (`contracts.start`, with `Idempotency-Key`), `GET /api/contracts/{contractId}`, `POST /api/contracts/{contractId}/cancel`, `POST /api/contracts/{contractId}/reply`; contracts are explained in "The terminal app (`goodvibes`)".
+
+## Event streams
+
+### Server-Sent Events
+
+`GET /api/control-plane/events?domains=<comma list>` (scope `read:events`) opens a `text/event-stream`. Each frame is:
+
+```text
+id: evt-889d6f52
+event: <event name>
+data: <one line of JSON>
+```
+
+The first frame is `ready`:
+
+```text
+event: ready
+data: {"clientId":"cp-35ac99c9","domains":["session","turn","tools","tasks"],"transport":"sse","resume":{"resume":"none"}}
+```
+
+Event names:
+
+| Event name | Carries |
+| --- | --- |
+| `ready` | The stream is open: client id, domains, resume outcome. |
+| `heartbeat` | Sent at open and every 15 seconds: `{"clientId":"...","ts":...}`. |
+| A domain name (`turn`, `tools`, `session`, `tasks`, `agents`, ...) | One runtime event of that domain: `{"type":"<EVENT>","ts":...,"traceId":"...","sessionId":"...","source":"...","payload":{...}}`. |
+| `session-update` | A shared-session change: `session-created`, `session-message-appended`, `session-input-queued`, `session-input-delivered`, `session-input-completed`, `session-route-attached` and others. |
+| `hosted-session-update` | A hosted-session change: `hosted-session-created`, `-attached`, `-turn-started`, `-turn-ended`, `-restored` and others. |
+| `approval-update` | An approval record changed (domain `gate`). |
+| `owner-inbox-update` | An owner-inbox item changed (domain `gate`). |
+| `surface-message` | A message for a surface. |
+| `remote-pair-requested`, `remote-peer`, ... | Remote peer activity. |
+| `gap` | Events were dropped because this client read too slowly: `{"dropped":<n>,"afterId":"<last delivered id>"}`. Reconnect with `Last-Event-ID` set to `afterId`. |
+| `closed` | The daemon ended the stream: `{"reason":"credential-revoked","next":"Sign in again or pair this device again, then reconnect."}`. It is sent when the stream's credential is revoked (the device token deleted, or revoked with the token that minted it, the sign-in ended, the shared token replaced). It is the last frame; do not reconnect with the same credential. |
+
+The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
+
+The domains (28 in 3.3.1) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
+
+How the daemon decides what a stream carries:
+
+| Request | Result |
+| --- | --- |
+| No `domains` parameter | See "What a stream without `domains` carries" below. |
+| Only unknown names (`?domains=bogus`) | `400` `UNKNOWN_EVENT_DOMAIN` with `unrecognisedDomains`; the stream is not opened. |
+| Known and unknown names | The known ones are used; `ready` lists the others under `unrecognisedDomains`. |
+| Some allowed and some not (`?domains=providers,session,automation` for a non-admin) | The stream opens with the allowed ones. `ready` names the refused ones: `{"clientId":"cp-cb69c602","domains":["providers","automation"],"transport":"sse","withheldDomains":["session"],"resume":{"resume":"none"}}`. |
+| None allowed (`?domains=session,turn,tools` for a non-admin), or a credential that may receive nothing | `403` `{"error":"This credential may not receive the requested event domains: session, turn, tools.","code":"EVENT_ACCESS_DENIED","category":"authorization","status":403,"state":"the event stream was not opened","next":["Sign in as an admin, or open the stream with domains this credential may read."],"withheldDomains":["session","turn","tools"]}` |
+
+Always read `withheldDomains` in the `ready` frame: a stream that opened is not a stream that carries everything asked for.
+
+#### What a stream without `domains` carries
+
+Two kinds of frame travel on a stream, and `domains` filters them differently (from the code, `control-plane/gateway.ts` and `gateway-scope-enforcement.ts`; the admin results observed on a 3.3.1 daemon):
+
+| Frames | Opened without `domains` | Opened with `domains=<list>` |
+| --- | --- | --- |
+| Runtime events (`turn`, `tools`, `gate`, `config`, ... frames named after their domain: `TURN_*`, `TOOL_*` and the rest) | Only the 14 default domains: `session`, `tasks`, `agents`, `automation`, `routes`, `control-plane`, `deliveries`, `surfaces`, `watchers`, `transport`, `ops`, `knowledge`, `providers`, `turn`. These are what the `ready` frame lists. No `tools`, `gate`, `config`, `fleet`, `contracts` or `mcp` runtime events, so no tool calls. | Exactly the listed domains. |
+| Broadcast events: `approval-update` and `owner-inbox-update` (tagged `gate`), `session-update` and `hosted-session-update` (tagged `session`), and the untagged ones (`surface-message`, the `remote-*` events) | All of them, whatever the `ready` frame lists, so approvals do arrive. | A tagged one only when its tag is listed (`approval-update` needs `gate` in the list); an untagged one always. |
+
+Access applies on top in both cases: a non-admin credential never receives an admin-only event or domain (`approval-update`, `owner-inbox-update`, `session-update`, `hosted-session-update`, the `session`, `turn`, `tools`, `tasks`, `agents`, `gate` domains and the others in "Access of every event"); a non-admin stream without `domains` opens on the defaults it may read and lists the rest under `withheldDomains`.
+
+So an admin client that wants approvals can open the stream without `domains` (it then also gets every session update but no tool calls), or name its domains and include `gate`: `?domains=gate,session,turn,tools`. A stream opened with `?domains=session` gets no `approval-update`. Listing `domains` replaces the defaults; it does not add to them.
+
+### Reconnecting
+
+- If no frame (not even a heartbeat) arrives for 35 seconds, the connection is dead: reconnect.
+- Reconnect with the header `Last-Event-ID: <id of the last event you processed>`. The `ready` frame's `resume` says what happened:
+  - `{"resume":"resumed","sinceId":"...","replayed":<n>}`: the events after that id were replayed, in order. Nothing was missed.
+  - `{"resume":"unresolved","sinceId":"..."}`: that id is no longer in the daemon's buffer of the last 500 events (or the daemon restarted). Nothing was replayed. Re-read state (`GET /api/sessions/{id}`, `GET /api/approvals`, `GET /api/tasks`) before trusting the stream.
+  - `{"resume":"none"}`: no `Last-Event-ID` was sent. The daemon sends up to 20 recent events, plus the start of any turn still running, so a client can render it.
+- After a `gap` event, reconnect with `Last-Event-ID` set to its `afterId`.
+- A turn's end is always one of `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, `PREFLIGHT_FAIL`. After any reconnect that is not `resumed`, check the session's state instead of waiting for an end event that may already have been sent.
+- Back off between attempts (for example 1, 2, 4, 8 seconds, up to 30).
+- A `401` on reconnect, or a `closed` frame, means the credential was revoked or expired; do not retry with it.
+
+### Per-session stream
+
+`GET /api/sessions/{sessionId}/events` (admin) carries only that session's events (and events with no session) on the default domains plus `tools`, with the same frames and reconnect rules. It takes no `domains` parameter.
+
+### Telemetry stream
+
+`GET /api/v1/telemetry/stream` (scope `read:telemetry`) is a separate Server-Sent Events stream of telemetry records. See "Telemetry" in "The daemon, the web UI and networking".
+
+## Rate limits
+
+| What | Limit | Answer when exceeded |
+| --- | --- | --- |
+| `POST /login` | 5 per minute per address | `429` `RATE_LIMITED` |
+| `POST /api/remote/pair/request` | 10 per minute per address | `429` `RATE_LIMITED`, `Retry-After: 60` |
+| Companion chat messages | `runtime.companionChatLimiter.perSessionLimit` per 60 seconds per session (0 means `GOODVIBES_CHAT_LIMITER_THRESHOLD`, else 10) | refused |
+
+These are the request-rate limits the daemon applies to its own routes. Provider rate limits come back as errors on the turn (`RATE_LIMITED` with `retryAfterMs` when the provider gave one).
+
+## OpenAI-compatible endpoints
+
+When `controlPlane.openaiCompatible.enabled` is `true` (default), the daemon answers OpenAI-style requests under `controlPlane.openaiCompatible.pathPrefix` (default `/v1`). There are three routes and no others (no `/v1/embeddings`, `/v1/completions` or `/v1/responses`):
+
+| Route | Access |
+| --- | --- |
+| `GET /v1/models` | Any valid credential (a scoped device token works). |
+| `POST /v1/chat/completions` | Admin. A non-admin gets the daemon's own `403` body `{"error":"Admin role required","code":"ADMIN_REQUIRED",...}`, not the OpenAI shape, because these requests spend provider money. |
+| `GET /v1/chat/completions/{id}` | Admin. Reads back a completion that was queued as batch work. |
+
+No credential answers `401` `AUTH_REQUIRED` in the daemon's own shape.
+
+### Model ids
+
+`GET /v1/models` answers `{"object":"list","data":[{"id":"...","object":"model","created":<seconds>,"owned_by":"<provider>"},...]}`, sorted by id. It always contains `goodvibes/current`, which means the daemon's current model (whatever it is when the request arrives); the others are registry keys `provider:model`, such as `openrouter:openrouter/free` or `decision-router:auto`. A request's `model` may be `goodvibes/current`, a registry key, or a bare model id when exactly one provider has it. `model` is required: there is no default.
+
+### Request
+
+`POST /v1/chat/completions` takes the OpenAI chat-completions body:
+
+| Field | Handling |
+| --- | --- |
+| `model` | Required. Missing: `400` `model_not_found` `Missing required field: model.`. Unknown: `400` `model_not_found` naming candidates (`Unknown model 'nope-model-x'. Did you mean: ...`). |
+| `messages` | Required (missing: `400` `missing_messages`). Roles `system` and `developer` (joined into the system prompt), `user`, `assistant` (with `tool_calls`), `tool` (with `tool_call_id`). Any other role, a message that is not an object or has no role, or a tool message without `tool_call_id` is `400` `invalid_messages`. |
+| `stream` | `true` streams `chat.completion.chunk` objects as `data: {...}` lines and ends with `data: [DONE]`; the last chunk before `[DONE]` carries `usage`. |
+| `max_completion_tokens`, `max_tokens` | Applied (the first wins). |
+| `tools` | Offered to the model as in the OpenAI API; tool calls come back to the caller in `tool_calls`. GoodVibes' own tools are not run. |
+| `tool_choice` | `auto` or `none` (`none` offers no tools). Anything else is refused. |
+| `reasoning_effort` | Applied. |
+| `response_format` | Only `{"type":"text"}`. Anything else is refused. |
+| `n` | Only `1`. Anything else is refused. |
+| `stop` | Only absent or `[]`. Anything else is refused. |
+| `logprobs` | Only absent or `false`. `true` is refused. |
+| `temperature`, `top_p`, `presence_penalty`, `frequency_penalty`, `seed`, `logit_bias`, `top_logprobs` | Ignored. The request is served, and the response header `x-goodvibes-ignored-params` names the ones that were sent, comma-separated. |
+
+A refused parameter answers `400` with `type` `invalid_request_error`, `code` `unsupported_parameter` and `param` naming it, for example `{"error":{"message":"This endpoint returns one choice per request. Remove \"n\" and resend.","type":"invalid_request_error","param":"n","code":"unsupported_parameter"}}` or `Stop sequences are not applied by this endpoint. Remove "stop" and resend.`.
+
+### Response
+
+```json
+{"id":"chatcmpl-goodvibes-<uuid>","object":"chat.completion","created":1795025562,"model":"goodvibes/current",
+ "choices":[{"index":0,"message":{"role":"assistant","content":"Hello.","tool_calls":[...]},"logprobs":null,"finish_reason":"stop"}],
+ "usage":{"prompt_tokens":18104,"completion_tokens":7,"total_tokens":18111}}
+```
+
+`model` echoes what you asked for (`goodvibes/current` stays `goodvibes/current`). `finish_reason` is `stop`, `length` (the token limit), `tool_calls` or `content_filter`. `usage.prompt_tokens` includes cached prompt tokens. `tool_calls` is present only when the model called a tool. Cost is not reported.
+
+### Errors
+
+Every error from these routes, except the credential refusals above, has the OpenAI shape `{"error":{"message":"...","type":"...","param":<name or null>,"code":"..."}}`. `type` follows the status: `401` `authentication_error`, `403` `permission_error`, `404` `not_found_error`, `429` `rate_limit_error`, other `4xx` `invalid_request_error`, `5xx` `server_error`. A provider failure keeps the provider's status (`502` when it gave none) with code `provider_error`. A body that is not JSON is `400` `invalid_json`.
+
+### Batch execution
+
+The header `x-goodvibes-execution` takes `batch` or `live` (anything else: `400` `invalid_execution`). With `batch`, and `batch.mode` not `off`, the request is queued as provider batch work and answered `202` with `{"id":"<job id>","object":"chat.completion.batch_job","status":"queued","created":...,"model":"...","poll":"/v1/chat/completions/<job id>"}` and a `location` header. `GET` that path: `202` with the same body while it waits, `200` with the completion when done, `409` `batch_cancelled`, `410` `batch_expired`, or `502` when it failed. `batch.mode` off with `batch` asked is `409` `batch_disabled`; `batch` with `"stream": true` is `400` `batch_stream_unsupported`.
+
+### With an OpenAI client
+
+Python (`pip install openai`), using an admin token:
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:3421/v1", api_key=os.environ["GV_TOKEN"])
+print([m.id for m in client.models.list().data][:5])
+reply = client.chat.completions.create(
+    model="goodvibes/current",
+    messages=[{"role": "system", "content": "Answer in one word."}, {"role": "user", "content": "Say hello."}],
+    max_tokens=20,
+)
+print(reply.choices[0].message.content, reply.usage)
+for chunk in client.chat.completions.create(model="goodvibes/current", messages=[{"role": "user", "content": "Count to 3."}], stream=True):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+TypeScript (`npm install openai`):
+
+```ts
+import OpenAI from 'openai';
+const client = new OpenAI({ baseURL: 'http://127.0.0.1:3421/v1', apiKey: process.env.GV_TOKEN! });
+const reply = await client.chat.completions.create({ model: 'goodvibes/current', messages: [{ role: 'user', content: 'Say hello.' }] });
+console.log(reply.choices[0]!.message.content);
+```
+
+The client sends the token as `Authorization: Bearer <token>`, which is what the daemon reads. Do not pass `n`, `stop` or a JSON `response_format`; they are refused.
+
+## The MCP bridge
+
+`goodvibes-daemon mcp serve` exposes the operator API as MCP tools over standard input and output, for MCP clients. See "`mcp serve`" in "The daemon, the web UI and networking".
+
+## SDK entry points
+
+The package `@goodvibes-jev/engine` (version 3.3.1) contains typed clients for this API. It does not call model providers itself; the daemon does.
+
+How it is published: two packages of the repository are publishable, `@goodvibes-jev/engine` (`packages/engine`) and `@goodvibes-jev/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
+
+```sh
+npm view @goodvibes-jev/engine versions --json
+```
+
+When the version you need is there, install it like any package:
+
+```sh
+bun add @goodvibes-jev/engine@3.3.1
+npm install @goodvibes-jev/engine@3.3.1
+```
+
+When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
+
+```sh
+git clone https://github.com/mgd34msu/goodvibes.git
+cd goodvibes
+git checkout v3.3.1
+bun install
+bun run build                 # produces the dist/ directories the package's exports name
+mkdir -p products/my-client
+cat > products/my-client/package.json <<'JSON'
+{ "name": "my-client", "private": true, "type": "module",
+  "dependencies": { "@goodvibes-jev/engine": "workspace:*" } }
+JSON
+bun install                   # links the new workspace
+bun products/my-client/main.ts
+```
+
+Every folder under `packages/` and `products/` is a workspace, and a script must live inside the checkout for `@goodvibes-jev/engine` to resolve; a script elsewhere fails with `Cannot find module '@goodvibes-jev/engine/...'`. Under Bun the package's `bun` export condition loads the TypeScript sources directly.
+
+Do not make a tarball of the package by hand from a checkout (`npm pack` or `bun pm pack` in `packages/engine`): the tarball keeps the `bun` export condition, which names `src/` files the tarball does not contain, so imports under Bun fail. The release removes that condition when it stages the packages; only a registry release or the checkout's workspace gives a working package.
+
+| Import | Use |
+| --- | --- |
+| `@goodvibes-jev/engine/platform` | `createGoodVibesPlatform({ baseUrl, authToken })` for Bun and Node: `operator` (typed methods), `realtime` (events), `auth`, `peer`. Also `createMemoryTokenStore`. |
+| `@goodvibes-jev/engine/platform/browser` | `createBrowserGoodVibesPlatform`, for web pages. |
+| `@goodvibes-jev/engine/platform/react-native`, `@goodvibes-jev/engine/platform/expo` | `createReactNativeGoodVibesPlatform`, `createExpoGoodVibesPlatform`. |
+| `@goodvibes-jev/engine/platform/auth` | `createMemoryTokenStore`, `createBrowserTokenStore`. |
+| `@goodvibes-jev/engine/operator-client` | `createOperatorApiClient({ baseUrl, authToken })`: the operator client alone. |
+| `@goodvibes-jev/engine/transport-http` | The HTTP transport, retry, Server-Sent Events reader, private-network checks. |
+| `@goodvibes-jev/engine/transport-realtime` | Event buses and `forSession(events, sessionId)`. |
+| `@goodvibes-jev/engine/peer-client` | The peer API client for remote nodes. |
+| `@goodvibes-jev/engine/contracts` | The operator and peer contracts, method ids, event domains. |
+| `@goodvibes-jev/engine/errors` | `GoodVibesError`, `HttpStatusError`, `ContractError` and the error codes. |
+| `@goodvibes-jev/engine/platform/daemon` | `dispatchDaemonApiRoutes` and the pieces for embedding a daemon in your own Bun server. |
+| `@goodvibes-jev/engine/daemon-api/relay-server-entry` | The relay server program. |
+
+Example, verified against a 3.3.1 daemon:
+
+```ts
+import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { forSession } from '@goodvibes-jev/engine/transport-realtime';
+
+const baseUrl = 'http://127.0.0.1:3421';
+const token = process.env.GV_TOKEN!;
+const gv = createGoodVibesPlatform({ baseUrl, authToken: token });
+
+// Typed methods that have a REST route:
+const auth = await gv.operator.invoke('control.auth.current', {});
+const sessions = await gv.operator.sessions.list();
+
+// Invoke-only methods are not reachable through operator.invoke(); call the invoke route:
+const res = await fetch(`${baseUrl}/api/control-plane/methods/sessions.hosted.create/invoke`, {
+  method: 'POST',
+  headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ body: { workspaceRoot: '/home/alex/projects/app', detachPolicy: 'survive' } }),
+});
+const { session } = await res.json();
+
+// Live events for that session only:
+const events = forSession(gv.realtime.viaSse(), session.id);
+events.turn.onEnvelope('STREAM_DELTA', (e) => process.stdout.write(e.payload.content));
+```
+
+Facts about the SDK:
+
+- `gv.operator` has `invoke(methodId, input)`, `stream`, `listOperations`, `getOperation`, and namespaces `sessions`, `tasks`, `approvals`, `providers`, `accounts`, `localAuth`, `control`, `telemetry`.
+- `operator.invoke()` works only for methods with a REST route. For an invoke-only method it throws `GoodVibesError` with code `CONTRACT_MISMATCH` (`Operator method "sessions.hosted.list" does not expose an HTTP binding`). Call the invoke route, or send a WebSocket `call` frame.
+- A refused request throws `HttpStatusError` with `code` and `status`, for example `code` `SESSION_NOT_FOUND`, `status` `404`.
+- Responses are checked against the contract's output schema by default (`validateResponses: true`); a mismatch throws `ContractError`, which usually means the daemon runs another version.
+- `gv.realtime.viaSse()` and `gv.realtime.viaWebSocket()` return event buses with one property per domain (`session`, `turn`, `tools`, `tasks`, `agents`, ...). The connection opens on the first subscription.
+
+## Method and event reference
+
+Every operator method (id, REST route or invoke-only, scopes) is listed in "Operator API methods" in the reference. Every event is listed in "Event streams a client subscribes to" and "Runtime events by domain", and every error code in "Codes any route may answer" and "Codes a method declares". `GET /api/control-plane/methods/{methodId}` returns any one method's full input and output schema from the running daemon.

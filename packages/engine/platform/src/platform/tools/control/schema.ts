@@ -9,6 +9,7 @@ export const CONTROL_TOOL_SCHEMA: ToolDefinition = {
       mode: {
         type: 'string',
         enum: ['commands', 'panels', 'subscriptions', 'sandbox-presets'],
+        description: 'What to list: commands (slash commands), panels, subscriptions (built-in subscription providers) or sandbox-presets.',
       },
     },
     required: ['mode'],

@@ -10,13 +10,13 @@ export const REPL_TOOL_SCHEMA: ToolDefinition = {
   parameters: {
     type: 'object',
     properties: {
-      mode: { type: 'string', enum: ['eval', 'history'] },
+      mode: { type: 'string', enum: ['eval', 'history'], description: 'eval runs expression; history lists this session\'s eval attempts.' },
       runtime: { type: 'string', enum: [...REPL_RUNTIMES], description: 'Default: javascript.' },
-      expression: { type: 'string' },
+      expression: { type: 'string', description: 'The code to evaluate in the chosen runtime (for sql, the statements). Required for eval.' },
       timeout_ms: { type: 'integer', minimum: 0, description: 'Optional execution timeout in ms. Omitted: 120000. 0 waits for completion or cancellation.' },
       offset: { type: 'integer', minimum: 0, description: 'History page offset, oldest first. Omitted: the newest page.' },
       limit: { type: 'integer', minimum: 0, description: 'History page size. Default: 20.' },
-      bindings: { type: 'object', additionalProperties: true },
+      bindings: { type: 'object', additionalProperties: true, description: 'Named JSON values the snippet can use: globals for javascript, typescript and python, $name parameters for sql, and a schema entry (SDL text) for graphql.' },
     },
     required: ['mode'],
     additionalProperties: false,

@@ -20,8 +20,7 @@ import type { ProviderAuthRouteDescriptor } from '../../providers/interface.js';
 import type { ConfiguredVia, ProviderConfiguredStatus } from '../../providers/configured-status.js';
 import { findModelDefinition } from '../../providers/registry-models.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
-import { BUILTIN_COMPAT_PROVIDERS } from '../../providers/builtin-catalog.js';
-import { BEDROCK_PROVIDER_LABELS } from '../../providers/amazon-bedrock.js';
+import { providerDisplayLabel } from '../../providers/provider-labels.js';
 import {
   REASONING_EFFORT_SEVERITY,
   readReasoningEffortLevel,
@@ -30,53 +29,6 @@ import {
 } from '../../providers/reasoning-effort.js';
 import { resolveReasoningEffortSpec } from '../../providers/reasoning-effort-families.js';
 import { logger } from '../../utils/logger.js';
-
-// ---------------------------------------------------------------------------
-// Provider label map, brand-accurate display names
-// ---------------------------------------------------------------------------
-
-const BUILTIN_LABEL_MAP: Record<string, string> = {
-  // Native / first-party providers (not in BUILTIN_COMPAT_PROVIDERS)
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  gemini: 'Gemini',
-  inceptionlabs: 'Inception Labs',
-  ...BEDROCK_PROVIDER_LABELS,
-  'anthropic-vertex': 'Anthropic (Vertex)',
-  'github-copilot': 'GitHub Copilot',
-  groq: 'Groq',
-  cerebras: 'Cerebras',
-  mistral: 'Mistral',
-  'ollama-cloud': 'Ollama Cloud',
-  huggingface: 'Hugging Face',
-  nvidia: 'NVIDIA',
-  llm7: 'LLM7',
-  perplexity: 'Perplexity',
-  deepgram: 'Deepgram',
-  elevenlabs: 'ElevenLabs',
-  microsoft: 'Microsoft',
-  vydra: 'Vydra',
-  byteplus: 'BytePlus',
-  fal: 'fal.ai',
-  comfy: 'ComfyUI',
-  runway: 'Runway',
-  alibaba: 'Alibaba Cloud',
-  synthetic: 'Synthetic (Local)',
-};
-
-// Build label map from the built-in provider catalog.
-const _catalogLabelMap: Record<string, string> = {};
-for (const def of BUILTIN_COMPAT_PROVIDERS) {
-  if (def.label) _catalogLabelMap[def.id] = def.label;
-}
-
-function getProviderLabel(providerId: string): string {
-  return (
-    BUILTIN_LABEL_MAP[providerId] ??
-    _catalogLabelMap[providerId] ??
-    providerId.charAt(0).toUpperCase() + providerId.slice(1)
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Response shape types
@@ -278,7 +230,7 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
     const status = statuses.get(providerId) ?? { configured: false, envVars: [] };
     providers.push({
       id: providerId,
-      label: getProviderLabel(providerId),
+      label: providerDisplayLabel(providerId),
       configured: status.configured,
       configuredVia: status.configuredVia,
       envVars: [...status.envVars],

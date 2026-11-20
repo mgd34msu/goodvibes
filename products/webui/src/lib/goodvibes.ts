@@ -1048,8 +1048,8 @@ export type CredentialSetOutcome = OperatorMethodOutput<'credentials.set'>;
 /**
  * A stored card as every surface may see it: metadata only. There is no field for the
  * number, the expiry as typed, the CVV or the cardholder name, because the daemon has no
- * method that returns them. `issuerCapMinorUnits` is the owner's declaration, never an
- * enforcement layer; `materialComplete` says whether every secret field is present, never
+ * method that returns them. `issuerCapMinorUnits` is the owner's declaration (a purchase over it is refused before
+ * checkout); `materialComplete` says whether every secret field is present, never
  * which, and never the values.
  */
 export type PaymentCardMetadata = OperatorMethodOutput<'payments.cards.list'>['cards'][number];

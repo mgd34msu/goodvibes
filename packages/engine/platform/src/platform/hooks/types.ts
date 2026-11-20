@@ -28,7 +28,7 @@ export interface HookEvent {
 
 /** Result returned by a hook handler */
 export interface HookResult {
-  /** For Pre hooks: allow, deny, or ask */
+  /** For a Pre hook that may deny: `deny` refuses the call or request; `allow` and `ask` have no effect on a tool call. */
   decision?: 'allow' | 'deny' | 'ask' | undefined;
   /** Reason for denial */
   reason?: string | undefined;
@@ -59,7 +59,7 @@ export interface HookDefinition {
   matcher?: string | undefined;
   /** Hook type */
   type: HookType;
-  /** For command hooks: shell command to execute */
+  /** For command hooks: the shell command to run. It receives the event JSON on stdin and may print a result JSON on stdout (the fields a hook returns); a non-zero exit is a failure, and output that is not JSON counts as success with no result. */
   command?: string | undefined;
   /** For prompt/agent hooks: the prompt text. $ARGUMENTS replaced with event JSON. */
   prompt?: string | undefined;
@@ -101,19 +101,29 @@ export interface HookDefinition {
 
 /** Hook chain step */
 export interface ChainStep {
+  /** The event path pattern this step waits for, such as `Post:tool:edit`. */
   match: string;
+  /** Values kept from the matching event: a name for each, mapped to the event payload field it is read from. */
   capture?: Record<string, string> | undefined;
-  within?: string;       // e.g., "30s", "5m"
-  condition?: string;    // JS expression evaluated against payload
+  /** How long after the previous step this step may arrive, such as `30s` or `5m`; later, the chain starts over. */
+  within?: string;
+  /** An expression over the event payload fields that must be true for the event to count (`===`, `!==`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`), such as `exitCode !== 0`. */
+  condition?: string;
+  /** The step may be skipped: an event for the next step moves past it. */
   optional?: boolean | undefined;
-  debounce?: string;     // e.g., "2s"
+  /** For an optional step: wait this long after its last matching event (such as `2s`) before moving on, so a burst counts once. */
+  debounce?: string;
 }
 
 /** Hook chain definition */
 export interface HookChain {
+  /** The chain's name, unique among chains. */
   name: string;
+  /** What the chain is for, in words. */
   description?: string | undefined;
+  /** The events that must happen, in order, before the action runs. */
   steps: ChainStep[];
+  /** The hook that runs once every step has happened; its `match` is the event path it reports. */
   action: HookDefinition;
 }
 

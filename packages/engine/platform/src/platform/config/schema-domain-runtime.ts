@@ -316,7 +316,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'controlPlane.streamMode',
     type: 'enum',
-    default: 'both',
+    default: 'sse',
     description: 'Which live update stream the daemon listener serves: sse serves GET /api/control-plane/events only, websocket serves the /api/control-plane/ws upgrade only, both serves both. The other one is refused with STREAM_MODE_NOT_SERVED naming this setting. The terminal apps and the web UI read the Server-Sent Events stream, so websocket alone leaves them without live updates. Takes effect on the next request.',
     enumValues: ['sse', 'websocket', 'both'],
   },
@@ -519,7 +519,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'service.autostart',
     type: 'boolean',
     default: false,
-    description: 'Start Goodvibes automatically when the host boots or logs in',
+    description: 'Whether the daemon\'s service starts on its own at login. Changing it on the terminal app\'s settings screen installs and enables the service (on) or disables it (off); set any other way (a settings file, a command, Agent, the daemon) it is only recorded, and goodvibes status and doctor read it to warn about an installed service with it off. goodvibes-daemon install-service makes the service start at login whatever its value',
   },
   {
     key: 'service.restartOnFailure',

@@ -323,7 +323,7 @@ function usage(): string {
     'Usage: goodvibes-agent memory <subcommand>',
     '  list [class] [--scope <session|project|team>] [--limit <n>]',
     '  search <query> [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]',
-    '  add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>]',
+    '  add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <state>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>]',
     '  show <id>',
     '  queue [limit]',
     '  review <id> <fresh|reviewed|stale|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]',
@@ -497,7 +497,7 @@ async function handleAdd(runtime: CliCommandRuntime, store: MemoryCommandStore, 
     return failure(
       runtime,
       'invalid_memory_command',
-      'Usage: goodvibes-agent memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b]',
+      'Usage: goodvibes-agent memory add <class> <summary> [--scope <scope>] [--detail <text>] [--tags a,b] [--confidence <0-100>] [--review-state <state>] [--session <id>] [--turn <id>] [--task <id>] [--file <path>]',
       2,
     );
   const detail = optionValue(options, 'detail');

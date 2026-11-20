@@ -27,7 +27,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
 import { GATEWAY_METHOD_INVOKE_PATH } from '../daemon-api/src/operator.ts';
-import { buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, replayKey, requestBodySchema, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
+import { buildParameters, errorBodySchema, hasRequestBody, INVOKE_ENVELOPE_SCHEMA, isOpaqueSchema, knownErrorCodes, replayKey, requestBodySchema, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
+import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -124,16 +125,14 @@ function buildInvokeOperation(invokeOnly: readonly OperatorMethodContract[]): Op
       'The generic invoke endpoint. Every invokable cataloged method is reachable here by ' +
       'its method id; methods WITHOUT a dedicated REST binding (listed in `x-invoke-only-methods`) ' +
       'are reachable ONLY here. Per-method request/response schemas are the same as the ' +
-      'per-method entries in `x-operator-methods`.',
+      'per-method entries in `x-operator-methods`. The request body is an envelope: the method input goes in `body` ' +
+      '(required; `{}` for a method that takes none) and any query parameters in `query`. A request without `body` ' +
+      'is refused with 400. The response is the method output itself.',
     tags: ['gateway'],
     parameters: [{ name: 'methodId', in: 'path', required: true, schema: { type: 'string' } }],
     requestBody: {
-      required: false,
-      content: {
-        'application/json': {
-          schema: { type: 'object', description: 'The method-specific input (see the method\'s inputSchema).' },
-        },
-      },
+      required: true,
+      content: { 'application/json': { schema: INVOKE_ENVELOPE_SCHEMA } },
     },
     responses: {
       '200': {
@@ -182,7 +181,7 @@ function buildDocument(contract: OperatorContractManifest): Record<string, unkno
         `${invokeOnly.length} reachable only through the generic invoke endpoint. ` +
         'Regenerate with `bun run openapi:generate`; drift fails `contracts:check`.',
     },
-    servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: '4483' } }, description: 'Local daemon' }],
+    servers: [{ url: 'http://127.0.0.1:{port}', variables: { port: { default: String(DEFAULT_CONFIG.controlPlane.port) } }, description: 'Local daemon (controlPlane.port)' }],
     security: [{ bearerAuth: [] }, { sessionCookie: [] }],
     paths,
     components: {

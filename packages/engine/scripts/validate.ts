@@ -58,6 +58,9 @@ const STEPS: readonly Step[] = [
   script('gates', 'judgment:lint'),
   // The event validator's rules are generated from the event unions.
   script('gates', 'events:check'),
+  // docs/llms-full.txt is the hand-written parts in docs/llms with every list
+  // the code holds (settings, commands, tools, methods, variables) built in.
+  script('gates', 'llms:check'),
   script('gates', 'version:check'),
   // Fails when a flag's graduation state blocks a release.
   script('gates', 'flags:graduation'),

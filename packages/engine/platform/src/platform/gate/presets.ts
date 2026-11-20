@@ -40,19 +40,19 @@ export interface GatePresetDefinition extends GatePreset {
 export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>> = {
   'ask-me': {
     name: 'ask-me', label: 'Ask me', mode: 'ask-me',
-    summary: 'Ordinary actions run automatically; dangerous actions and owner-only decisions ask you.',
+    summary: 'With a working decision model, an action runs unless it reads as critical, irreversible or weakening security, or is an owner-only decision; those ask you. Without one, every action that is not a plain read asks you unless a per-tool setting allows it.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
   'jev-decides': {
     name: 'jev-decides', label: 'Jev decides', mode: 'jev-decides',
-    summary: 'Jev stands in for you on judgment calls, allowing justified actions and refusing harmful ones; owner-only decisions still ask you. Without a working decision model you are asked instead.',
+    summary: 'Jev decides every action the permission rules do not settle, critical ones included, allowing justified actions and refusing harmful ones; owner-only decisions still ask you. Without a working decision model it behaves as ask-me.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
   'just-vibes': {
     name: 'just-vibes', label: 'Just vibes', mode: 'just-vibes',
-    summary: 'Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end of the run.',
+    summary: 'Does as much as it can without interrupting you: Jev decides every action the permission rules do not settle, critical ones included; what Jev would not run, owner-only decisions, and every such action when no decision model works are held and listed at the end of the run.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
@@ -64,7 +64,7 @@ export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>
   },
   plan: {
     name: 'plan', label: 'Plan', mode: 'plan',
-    summary: 'Planning only; execution and state changes are held until an execution mode is selected.',
+    summary: 'Planning only: every action that is not a read is refused before its stakes are considered; reads run under the usual rules. Leave plan mode to carry out the plan.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: true,
   },
@@ -112,7 +112,7 @@ export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
  */
 export function retiredPermissionModeNotice(mode: unknown): string | undefined {
   if (mode !== 'prompt' && mode !== 'normal' && mode !== 'accept-edits' && mode !== 'custom') return undefined;
-  return `permissions.mode "${mode}" is retired and now runs as ask-me: ordinary actions run without asking and only critical actions ask. `
+  return `permissions.mode "${mode}" is retired and now runs as ask-me: with a working decision model ordinary actions run without asking and only critical actions ask; without one, every action that is not a plain read asks. `
     + 'To be asked less, choose jev-decides, just-vibes or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.';
 }
 

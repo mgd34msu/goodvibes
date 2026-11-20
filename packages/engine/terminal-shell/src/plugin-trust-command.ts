@@ -194,12 +194,11 @@ function controlsOf<Ctx>(manager: PluginManagerOf<Ctx>, ctx: Ctx): PluginControl
   return plugins;
 }
 
-/** The plugins on this machine, by the manager the app gives (one list for both apps; each app's context carries its manager). */
-let pluginManagerOf: PluginManagerOf<unknown> = () => undefined;
-const PLUGINS = defineList<unknown>({
+/** The plugins on this machine: both apps' command contexts carry the plugin manager under `extensions`. */
+const PLUGINS = defineList<{ readonly extensions?: { readonly pluginManager?: PluginControls | undefined } | undefined }>({
   name: 'plugins',
   async read(ctx) {
-    return (pluginManagerOf(ctx)?.list() ?? []).map((plugin): ListRow => ({
+    return (ctx.extensions?.pluginManager?.list() ?? []).map((plugin): ListRow => ({
       value: plugin.name, label: plugin.name,
       detail: plugin.description,
       state: `${plugin.quarantined ? 'quarantined' : plugin.active ? 'active' : plugin.enabled ? 'enabled' : 'disabled'}, ${plugin.trustTier}`,
@@ -217,7 +216,6 @@ const TIERS = [
 
 /** List, switch on and off, reload, quarantine, and set the trust of plugins. */
 export function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerOf<Ctx>, command: string): readonly ActionDescription<Ctx>[] {
-  pluginManagerOf = manager as PluginManagerOf<unknown>;
   return [
     readAction<Ctx>({
       id: 'list', label: 'See your plugins', word: 'list',

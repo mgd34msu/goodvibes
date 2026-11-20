@@ -347,11 +347,11 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       boundary: 'Conversation export writes a local workspace file and requires an explicit output intent.',
     };
   }
-  if (root === 'activity') {
+  if (root === 'agents') {
     return {
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: 'Opens the Activity view (running work, what needs you, what is coming up, recent activity); it only changes what is on screen.',
+      boundary: 'Opens Your agents (what is running, what waits for you, what is scheduled, the background services); it only changes what is on screen.',
     };
   }
   if (root === 'notifications') {

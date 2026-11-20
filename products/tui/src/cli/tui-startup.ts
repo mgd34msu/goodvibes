@@ -4,7 +4,7 @@ import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
 import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
@@ -144,6 +144,16 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
+  // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
+  commandContext.openFirstRun = () => {
+    const deps = firstRunDeps(commandContext, shellPaths, render, true);
+    if (!deps.pushSurfaceModal) return;
+    const modal = new FirstRunModal(deps);
+    deps.pushSurfaceModal(modal);
+    void modal.load().catch((error: unknown) => {
+      logger.warn('First run could not start', { error: summarizeError(error) });
+    });
+  };
   // --continue or bare --resume with no saved conversation: say so, then start
   // as a plain launch would rather than opening an unexplained empty session.
   const nothingToContinue = (): void => {
@@ -151,8 +161,9 @@ export function applyInitialTuiCliState(options: {
     runFirstRunSteps();
   };
 
-  if (cli.command === 'onboarding') {
-    input.openOnboardingWizard({ mode: 'edit', reset: true });
+  if (cli.command === 'setup') {
+    // `goodvibes setup`: the /setup topics, over the empty conversation.
+    void commandContext.executeCommand?.('setup', []);
   } else if (cli.command === 'open') {
     // The entry point refused a link that does not parse, so this one does.
     const link = parseDeepLink(cli.commandArgs[0] ?? '');

@@ -5,7 +5,7 @@ import type { InputHandler } from '../input/handler.ts';
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
-import { installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
+import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes-jev/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -181,8 +181,19 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
+  // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
+  commandContext.openFirstRun = () => {
+    const deps = firstRunDeps(commandContext, shellPaths, render, true);
+    if (!deps.pushSurfaceModal) return;
+    const modal = new FirstRunModal(deps);
+    deps.pushSurfaceModal(modal);
+    void modal.load().catch((error: unknown) => {
+      logger.warn('First run could not start', { error: summarizeError(error) });
+    });
+  };
   if (cli.command === 'onboarding') {
-    input.openAgentWorkspace(commandContext, undefined, 'ONBOARDING');
+    // The setup topics, over the empty conversation.
+    void commandContext.executeCommand?.('setup', []);
   } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
     const requested = cli.flags.resume ?? cli.commandArgs.slice(1).join(' ').trim();
     const target = requested === 'latest' ? (readLastSessionPointer({ surface }) ?? '') : requested;

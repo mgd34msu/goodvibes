@@ -84,7 +84,7 @@ export function registerDocumentsRuntimeCommands(registry: CommandRegistry): voi
       'list', 'show', 'create', 'revise', 'export',
       { label: 'Review a draft…', actions: ['mark-reviewed', 'comment', 'resolve-comment', 'suggest', 'accept-suggestion', 'reject-suggestion'] },
       { label: 'Put an artifact in a draft…', actions: ['insert-artifact', 'attach-artifact'] },
-      { label: 'Review packet…', actions: ['readiness', 'packet-steps', 'save-preset', 'refresh-preset', 'share-packet'] },
+      { label: 'Review packet…', actions: ['readiness', 'packet-steps', 'timeline', 'save-preset', 'refresh-preset', 'share-packet'] },
     ],
     actions: [
       ownerRead(TOOL, readAction<CommandContext>({
@@ -213,6 +213,8 @@ export function registerDocumentsRuntimeCommands(registry: CommandRegistry): voi
         'Lists what still stands in the way of review: open comments, suggestions waiting, missing sources, hidden comparisons and the handoff.', 'reviewer_readiness'),
       laneRead('packet-steps', 'See the review packet steps', 'packet-steps',
         'Shows the review packet\'s steps (review, export, compare, judge, hand off, decide, archive), which are done, and the next one.', 'review_packet_wizard'),
+      laneRead('timeline', 'See the review packet timeline', 'timeline',
+        'Lists, oldest first, what happened to the review packet: drafts, comments, suggestions, attachments, exports, comparisons, judgments, model decisions, presets and handoffs.', 'review_packet_timeline'),
       {
         id: 'save-preset', label: 'Save a review packet preset', word: 'save-preset',
         inputs: [

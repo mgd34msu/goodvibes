@@ -11,8 +11,6 @@ import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSear
 import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
-import { readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
-import { syncAgentWorkspaceLiveCounters } from './agent-workspace-live-counters.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter } from './agent-workspace-onboarding-finish.ts';
 import { completeOnboardingAction, onSubscriptionLoginSuccessAction } from './agent-workspace-onboarding-actions.ts';
@@ -33,6 +31,8 @@ export interface CommandReportReading {
   /** The report action's own name. */
   readonly label: string;
   readonly lines: readonly string[] | null;
+  /** The report reaches past this machine (a mailbox, a host, a provider): not run until Ctrl+R asks for it. */
+  readonly waiting?: true;
 }
 
 export class AgentWorkspace {
@@ -56,6 +56,8 @@ export class AgentWorkspace {
   private context: CommandContext | null = null;
   /** Each command's short report, read once per opening when one of its rows is first selected. */
   private readonly reports = new Map<string, CommandReportReading>();
+  /** Reports the owner asked for with Ctrl+R in this opening, run even though they reach past this machine. */
+  private readonly checkNow = new Set<string>();
   private dispatchCommand: AgentWorkspaceCommandDispatcher | null = null;
   private _onlyGroup: AgentWorkspaceCategoryGroup | null = null;
   /** The rows a `/setup` topic shows; null shows every row. */
@@ -72,6 +74,7 @@ export class AgentWorkspace {
     context.nativeWorkLedger?.open();
     this.dispatchCommand = dispatchCommand;
     this.reports.clear();
+    this.checkNow.clear();
     this._onlyGroup = onlyGroup ?? null;
     this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
@@ -112,25 +115,7 @@ export class AgentWorkspace {
     // has its own asynchronous setup status and does not start one.
     if (this.requestRender) {
       this.readHostSetup(false);
-      this.readHostMailbox();
     }
-  }
-
-  /**
-   * The inbox settings are the connected host's: one reading when the
-   * workspace opens, and the snapshot is rebuilt when it lands so the inbox
-   * line says what `/mail status` says instead of this process's local copy.
-   */
-  private readHostMailbox(): void {
-    const context = this.context;
-    const reading = readHostMailboxStatus(context);
-    if (!context || !reading) return;
-    void reading.then(() => {
-      if (this.context !== context || !this.active) return;
-      this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
-      this.clampSelection();
-      this.requestRender?.();
-    });
   }
 
   private requestRender: (() => void) | null = null;
@@ -305,12 +290,14 @@ export class AgentWorkspace {
     }
     this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(this.context);
     this.reports.clear();
+    // Ctrl+R also checks the selected row's report now, wherever it reads.
+    const selected = this.selectedAction ? this.reportCommandFor(this.selectedAction) : undefined;
+    if (selected) this.checkNow.add(selected);
     this.readHostSetup(true);
     this.status = 'Runtime context refreshed; checking the connected host again.';
     this.lastActionResult = { kind: 'refreshed', title: 'Runtime context refreshed', detail: 'Provider, model, session, local memory, runtime endpoint, and Agent knowledge route posture were re-read from the live command context. The connected host is being checked again; its setup steps update when it answers.' };
   }
 
-  /** Render-path live counter mirror (see syncAgentWorkspaceLiveCounters). */ syncLiveCountersForRender(): void { syncAgentWorkspaceLiveCounters({ context: this.context, runtimeSnapshot: this.runtimeSnapshot, setRuntimeSnapshot: (snapshot) => { this.runtimeSnapshot = snapshot; }, clampSelection: () => this.clampSelection() }); }
 
   beginActionSearch(): void {
     beginAgentWorkspaceActionSearch(this);
@@ -340,9 +327,18 @@ export class AgentWorkspace {
    * The short report of `command` (its report action: what the command
    * prints when run bare), for the pane beside a selected row. Read the first
    * time a row of that command is selected in this opening, by running that
-   * read exactly as the command does; until it lands the reading says so.
+   * read exactly as the command does, but only when the report reads nothing
+   * past this machine (`readsOnlyThisMachine`); any other waits for Ctrl+R.
+   * Until it lands the reading says so.
    * Undefined for a command with no report that only reads.
    */
+  /** The command whose report goes with a row: the command it runs, or `/model` for a model picker. */
+  reportCommandFor(action: AgentWorkspaceAction): string | undefined {
+    if (action.kind === 'act') return action.act?.command;
+    if (action.kind === 'model-picker') return 'model';
+    return undefined;
+  }
+
   commandReport(command: string): CommandReportReading | undefined {
     const known = this.reports.get(command);
     if (known) return known;
@@ -353,6 +349,8 @@ export class AgentWorkspace {
     if (!context || !described || !action || action.id === 'open' || action.touches !== 'reads' || action.lasts !== 'not-a-change'
       || action.inputs.some((input) => input.required === true)) return undefined;
     const reading: CommandReportReading = { command, line: `/${command}${action.word ? ` ${action.word}` : ''}`, label: action.label, lines: null };
+    // Selecting a row never reaches past this machine: such a report waits for Ctrl+R.
+    if (action.readsOnlyThisMachine !== true && !this.checkNow.has(command)) return { ...reading, waiting: true };
     this.reports.set(command, reading);
     const run = action.run as unknown as (values: Readonly<Record<string, string>>, ctx: CommandContext) => ReturnType<ActionDescription<never>['run']>;
     void captureCommandPrint(context, () => run({}, context)).then((outcome) => {

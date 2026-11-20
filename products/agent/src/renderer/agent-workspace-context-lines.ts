@@ -3,7 +3,8 @@
  * area is for and what the selected row will do, and shows only facts a
  * command prints: the selected row's command's own short report (read by
  * running that report exactly as the command does, so the pane and the
- * command cannot disagree), a setting's value as `/settings get` reads it, and
+ * command cannot disagree; a report that reaches past this machine waits for
+ * Ctrl+R), a setting's value as `/settings get` reads it, and
  * in Work & Approvals the work view `/work open` shows.
  */
 import type { AgentWorkspace, AgentWorkspaceAction, AgentWorkspaceCategory } from '../input/agent-workspace.ts';
@@ -17,13 +18,6 @@ const REPORT_LINES = 8;
 export function compactText(text: string, maxWidth = 104): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   return normalized.length <= maxWidth ? normalized : `${normalized.slice(0, maxWidth - 3).trimEnd()}...`;
-}
-
-/** The command whose report goes with a row, if it has one. */
-function reportCommandOf(action: AgentWorkspaceAction): string | undefined {
-  if (action.kind === 'act') return action.act?.command;
-  if (action.kind === 'model-picker') return 'model';
-  return undefined;
 }
 
 function whatItDoes(workspace: AgentWorkspace, action: AgentWorkspaceAction): ContextLine[] {
@@ -44,10 +38,11 @@ function whatItDoes(workspace: AgentWorkspace, action: AgentWorkspaceAction): Co
 }
 
 function reportLines(workspace: AgentWorkspace, action: AgentWorkspaceAction): ContextLine[] {
-  const command = reportCommandOf(action);
+  const command = workspace.reportCommandFor(action);
   const report = command ? workspace.commandReport(command) : undefined;
   if (!report) return [];
   const lines: ContextLine[] = [{ text: '', fg: PALETTE.muted }, { text: `Now, as ${report.line} shows it:`, fg: PALETTE.title, bold: true }];
+  if (report.waiting) return [...lines, { text: 'Press ctrl+r to check now.', fg: PALETTE.dim, dim: true }];
   if (report.lines === null) return [...lines, { text: 'Reading…', fg: PALETTE.dim, dim: true }];
   if (report.lines.length === 0) return [...lines, { text: 'Nothing to show.', fg: PALETTE.muted }];
   lines.push(...report.lines.slice(0, REPORT_LINES).map((text): ContextLine => ({ text, fg: PALETTE.info })));

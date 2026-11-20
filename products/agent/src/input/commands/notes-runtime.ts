@@ -128,7 +128,7 @@ export function registerNotesRuntimeCommands(registry: CommandRegistry): void {
     ],
     actions: [
       readAction<CommandContext>({
-        id: 'list', label: 'See your notes', word: 'list', operator: LOCAL_ONLY,
+        id: 'list', label: 'See your notes', readsOnlyThisMachine: true, word: 'list', operator: LOCAL_ONLY,
         sentence: 'Lists your notes, newest last, with whether you reviewed each.',
         async rowValue(ctx) { const count = notesOf(ctx).list().length; return count === 1 ? '1 note' : `${count} notes`; },
         async run(_values, ctx) { return renderList('Notes', notesOf(ctx).list()); },

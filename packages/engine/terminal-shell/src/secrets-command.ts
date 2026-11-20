@@ -147,7 +147,7 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
     report: 'see-secrets',
     actions: [
       {
-        id: 'see-secrets', label: 'See your secrets', word: 'list', inputs: [],
+        id: 'see-secrets', label: 'See your secrets', readsOnlyThisMachine: true, word: 'list', inputs: [],
         async rowValue(ctx) {
           const keys = new Set((await storeOf(ctx).listDetailed()).filter((record) => record.source !== 'env').map((record) => record.key));
           return keys.size === 0 ? 'none stored yet' : `${keys.size} stored`;

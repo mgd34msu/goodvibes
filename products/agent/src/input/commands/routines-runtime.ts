@@ -320,7 +320,7 @@ export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void
     ],
     actions: [
       readAction<CommandContext>({
-        id: 'list', label: 'See your routines', word: 'list',
+        id: 'list', label: 'See your routines', readsOnlyThisMachine: true, word: 'list',
         inputs: [choiceInput({ id: 'only', label: 'Only', help: 'Some of them', choices: [{ value: 'enabled', label: 'Switched on' }, { value: 'attention', label: 'Needing setup' }], typed: { flag: '--only' }, optional: { default: '', means: 'all of them' } })],
         sentence: 'Lists your routines: whether each is on, reviewed and ready, and how often it was started.', example: { only: 'enabled' }, operator: LOCAL_ONLY,
         async rowValue(ctx) {

@@ -117,6 +117,13 @@ export interface ActionDescription<Ctx> {
   readonly stepTitles?: readonly string[] | undefined;
   /** A short live value beside the action's row on the first screen ("none connected yet"), read when the list opens. */
   readonly rowValue?: ((ctx: Ctx) => Promise<string>) | undefined;
+  /**
+   * On a command's report action: it reads only this machine's own files and
+   * settings, never a mailbox, a daemon or remote host, or a provider, and costs
+   * nothing to run. The Agent workspace runs such a report when one of the
+   * command's rows is selected; any other report waits for Ctrl+R.
+   */
+  readonly readsOnlyThisMachine?: true | undefined;
 }
 
 export interface CommandDescription<Ctx> {

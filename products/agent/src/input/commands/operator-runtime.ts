@@ -25,6 +25,7 @@ import {
   setHarnessSetting,
 } from '../../agent/harness-control.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { instructionFilesReport, lastTurnsReport } from './agent-context-reports.ts';
 
 function readValuedFlag(args: readonly string[], flag: string): string | undefined {
   const assignmentPrefix = `${flag}=`;
@@ -185,4 +186,6 @@ const contextInspectionCommand = createContextInspectionCommand<CommandContext>(
     return Math.ceil(text.length / 4);
   },
   total: (_messages, estimates) => estimates.reduce((sum, value) => sum + value, 0),
+  instructionFiles: instructionFilesReport,
+  lastTurns: lastTurnsReport,
 });

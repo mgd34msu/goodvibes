@@ -124,6 +124,8 @@ const ONBOARDING_DETAIL_CATEGORIES_BASE: readonly AgentWorkspaceCategory[] = [
     detail: 'Give the assistant a memory of who you are and what you care about. Create personas, starter memories, skills, and routines, or import context files you already have. These records are stored locally and used on every turn.',
     actions: [
       actRow('context-vibe-status', 'personas vibe'),
+      actRow('context-instruction-files', 'context files'),
+      actRow('context-last-turns', 'context given'),
       actRow('context-profile-from-discovered', 'agent-home create-learned'),
       actRow('context-persona-discovery', 'personas import'),
       actRow('context-skill-discovery', 'my-skills import-discovered'),

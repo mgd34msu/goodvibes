@@ -13,7 +13,6 @@ import type { CommandContext } from './command-registry.ts';
 import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/note-registry';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
 import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
-import { AgentResearchSourceRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import {
@@ -26,16 +25,7 @@ import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
-import { readMailboxStatus } from './commands/email-settings.ts';
-import { heldHostMailboxReading, readHostMailboxStatus } from './agent-workspace-host-mailbox.ts';
-import { CALENDAR_OAUTH_CLIENT_ID_KEYS } from '../agent/calendar/calendar-oauth-service.ts';
-import { readConfigBoolean, readConfigNumber, readConfigString, readFallbackOrderText } from './agent-workspace-snapshot-config.ts';
-/** Whether a calendar OAuth client id is kept for each provider (no I/O; read from settings). */
-export interface AgentWorkspaceCalendarOAuthConfigStatus {
-  readonly google: boolean;
-  readonly microsoft: boolean;
-}
-import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
+import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 
 /**
  * Store ids whose read failed, with the reason. A snapshot builder that cannot
@@ -130,24 +120,6 @@ export function buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context: Comm
   } catch (error) {
     recordReadFailure(failures, 'routine-receipts', error);
     return { count: 0, successful: 0, failed: 0, latest: null };
-  }
-}
-
-export function buildAgentWorkspaceResearchSourceSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
-  try {
-    const shellPaths = context.workspace?.shellPaths;
-    if (!shellPaths) return { count: 0, candidate: 0, reviewed: 0, rejected: 0, used: 0 };
-    const snapshot = AgentResearchSourceRegistry.fromShellPaths(shellPaths).snapshot();
-    return {
-      count: snapshot.sources.length,
-      candidate: snapshot.candidates.length,
-      reviewed: snapshot.reviewed.length,
-      rejected: snapshot.rejected.length,
-      used: snapshot.used.length,
-    };
-  } catch (error) {
-    recordReadFailure(failures, 'research-sources', error);
-    return { count: 0, candidate: 0, reviewed: 0, rejected: 0, used: 0 };
   }
 }
 
@@ -311,68 +283,6 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
   } as const;
 }
 
-/**
- * Honest email-connect status for the inbox connect wizard's entry state
- *, config validation only, no network I/O. With a connected host the inbox
- * settings are the host's, so this shows the workspace's reading of the host
- * (agent-workspace-host-mailbox.ts), the fact `/mail status` reports, and says
- * it is reading until that lands. Best-effort: never throws, returns null on
- * any read failure.
- */
-export function buildAgentWorkspaceEmailConnectStatus(context: CommandContext): AgentWorkspaceEmailConnectStatus | null {
-  try {
-    const host = heldHostMailboxReading();
-    if (host?.state === 'reading') {
-      // A build with no reading under way (a caller that does not repaint) starts the one read; a later build shows it.
-      void readHostMailboxStatus(context);
-      return { connected: false, username: '', imapHost: '', errors: [], readingFromHost: true };
-    }
-    if (host?.state === 'failed') {
-      return { connected: false, username: '', imapHost: '', errors: [`the inbox settings could not be read from the connected host: ${host.reason}`] };
-    }
-    const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const status = host?.state === 'read' ? host.status : readMailboxStatus((key) => cm.get(key));
-    return {
-      connected: status.ready,
-      username: status.settings.username ?? '',
-      imapHost: status.settings.imapHost ?? '',
-      errors: [...status.problems],
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Honest calendar-OAuth build state per provider for the advanced connect
- * cards (F1c), config read only, no network I/O. "Configured" means a
- * config-override client id has been stored (through this same card);
- * "not configured" means the build still ships only the bundled platform
- * placeholder client id, the state in which a bare /calendar connect always
- * fails at the config stage. Best-effort: never throws, returns null on any
- * read failure.
- */
-export function buildAgentWorkspaceCalendarOAuthConfigStatus(context: CommandContext): AgentWorkspaceCalendarOAuthConfigStatus | null {
-  try {
-    const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const hasClientId = (key: string): boolean => {
-      let value: unknown;
-      try {
-        value = cm.get(key);
-      } catch {
-        return false;
-      }
-      return typeof value === 'string' && value.trim().length > 0;
-    };
-    return {
-      google: hasClientId(CALENDAR_OAUTH_CLIENT_ID_KEYS.google),
-      microsoft: hasClientId(CALENDAR_OAUTH_CLIENT_ID_KEYS.microsoft),
-    };
-  } catch {
-    return null;
-  }
-}
-
 export function buildAgentWorkspaceSubscriptionSnapshot(context: CommandContext) {
   try {
     const manager = context.platform?.subscriptionManager;
@@ -387,19 +297,10 @@ export function buildAgentWorkspaceSubscriptionSnapshot(context: CommandContext)
 }
 
 export interface AgentWorkspaceConfigSettingsSnapshot {
-  readonly ttsProvider: string;
-  readonly ttsVoice: string;
-  readonly ttsLlmProvider: string;
-  readonly ttsLlmModel: string;
   readonly embeddingProvider: string;
   readonly reasoningEffort: string;
   readonly helperEnabled: boolean;
   readonly toolLlmEnabled: boolean;
-  readonly providerFallbackOrder: string;
-  readonly cacheEnabled: boolean;
-  readonly cacheStableTtl: string;
-  readonly cacheMonitorHitRate: boolean;
-  readonly cacheHitRateWarningThreshold: number;
   readonly hitlMode: string;
   readonly guidanceMode: string;
   readonly saveHistory: boolean;
@@ -414,19 +315,9 @@ export interface AgentWorkspaceConfigSettingsSnapshot {
   readonly operationalMessages: string;
   readonly systemMessages: string;
   readonly permissionMode: string;
-  readonly toolAutoHeal: boolean;
-  readonly toolsDefaultTokenBudget: number;
   readonly artifactMaxBytes: number;
   readonly rawPromptTelemetry: boolean;
-  readonly automationEnabled: boolean;
-  readonly automationMaxConcurrentRuns: number;
-  readonly automationRunHistoryLimit: number;
-  readonly automationDefaultTimeoutMs: number;
-  readonly automationCatchUpWindowMinutes: number;
-  readonly automationFailureCooldownMs: number;
-  readonly automationDeleteAfterRun: boolean;
   readonly browserPwaEnabled: boolean;
-  readonly browserPwaPublicBaseUrl: string;
   readonly voiceSurfaceEnabled: boolean;
 }
 
@@ -445,19 +336,10 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
   const num = (key: string, fallback: number) => readConfigNumber(context, key, fallback, failures);
   const bool = (key: string, fallback: boolean) => readConfigBoolean(context, key, fallback, failures);
   return {
-    ttsProvider: str('tts.provider', '(provider default)'),
-    ttsVoice: str('tts.voice', '(voice default)'),
-    ttsLlmProvider: str('tts.llmProvider', ''),
-    ttsLlmModel: str('tts.llmModel', ''),
     embeddingProvider: str('provider.embeddingProvider', '(provider default)'),
     reasoningEffort: str('provider.reasoningEffort', '(default)'),
     helperEnabled: bool('helper.enabled', false),
     toolLlmEnabled: bool('tools.llmEnabled', false),
-    providerFallbackOrder: readFallbackOrderText(context, failures),
-    cacheEnabled: bool('cache.enabled', true),
-    cacheStableTtl: str('cache.stableTtl', '(default)'),
-    cacheMonitorHitRate: bool('cache.monitorHitRate', true),
-    cacheHitRateWarningThreshold: num('cache.hitRateWarningThreshold', 0.3),
     hitlMode: str('behavior.hitlMode', '(default)'),
     guidanceMode: str('behavior.guidanceMode', '(default)'),
     saveHistory: bool('behavior.saveHistory', true),
@@ -472,19 +354,9 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
     operationalMessages: str('ui.operationalMessages', '(default)'),
     systemMessages: str('ui.systemMessages', '(default)'),
     permissionMode: readPermissionMode(context, failures),
-    toolAutoHeal: bool('tools.autoHeal', false),
-    toolsDefaultTokenBudget: num('tools.defaultTokenBudget', 0),
     artifactMaxBytes: num('storage.artifacts.maxBytes', 512 * 1024 * 1024),
     rawPromptTelemetry: bool('telemetry.includeRawPrompts', false),
-    automationEnabled: bool('automation.enabled', false),
-    automationMaxConcurrentRuns: num('automation.maxConcurrentRuns', 4),
-    automationRunHistoryLimit: num('automation.runHistoryLimit', 100),
-    automationDefaultTimeoutMs: num('automation.defaultTimeoutMs', 2 * 60 * 60 * 1000),
-    automationCatchUpWindowMinutes: num('automation.catchUpWindowMinutes', 30),
-    automationFailureCooldownMs: num('automation.failureCooldownMs', 5 * 60 * 1000),
-    automationDeleteAfterRun: bool('automation.deleteAfterRun', false),
     browserPwaEnabled: bool('web.enabled', false),
-    browserPwaPublicBaseUrl: str('web.publicBaseUrl', '(not configured)'),
     voiceSurfaceEnabled: bool('ui.voiceEnabled', false),
   };
 }

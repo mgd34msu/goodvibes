@@ -34,7 +34,7 @@ export function registerInteractionModeCommand<Context extends InteractionModeCo
     report: 'show',
     actions: [
       readAction<Context>({
-        id: 'show', label: 'See how much the app prints', word: 'show',
+        id: 'show', label: 'See how much the app prints', readsOnlyThisMachine: true, word: 'show',
         sentence: 'Shows the print level, what it does, and any kind of notification set on its own.',
         async run(_values, ctx) {
           const mgr = managerOf(ctx);

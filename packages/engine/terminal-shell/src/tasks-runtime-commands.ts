@@ -39,6 +39,8 @@ export interface TasksPolicy<Context> {
   readonly open: (context: Context) => void;
   readonly row: (entry: UnionTask) => string;
   readonly detail: (context: Context, entry: UnionTask) => string[];
+  /** The commands running in the background here and what they take (the Agent; the terminal app shows them in its process monitor). */
+  readonly processes?: ((context: Context) => string) | undefined;
 }
 
 let installed: TasksPolicy<CommandActionContext> | undefined;
@@ -162,7 +164,7 @@ export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
   group: 'Agents and work',
   report: 'list',
   firstScreenRows: [
-    'list', 'open', 'show', 'output',
+    'list', 'open', 'show', 'output', 'processes',
     { label: 'Add or start a task…', actions: ['create', 'start', 'update'] },
     { label: 'Finish, pause or stop a task…', actions: ['complete', 'fail', 'pause', 'resume', 'cancel', 'retry'] },
   ],
@@ -195,6 +197,16 @@ export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
           ...(hidden > 0 ? [`  ... and ${hidden} more (narrow it: /tasks list --status running)`] : []),
           ...daemonNote,
         ].join('\n');
+      },
+    }),
+    readAction<CommandActionContext>({
+      id: 'processes', label: 'See commands running in the background', word: 'processes',
+      sentence: 'Lists the commands running in the background here, which have finished, and whether a running one can be given input, a terminal, or sudo.',
+      operator: { terminalOnly: 'Background commands run in this terminal.' },
+      async run(_values, ctx) {
+        const policy = policyOf();
+        if (!policy.processes) throw commandRefusal('The terminal app shows background commands in its process monitor (F2).');
+        return policy.processes(ctx);
       },
     }),
     doAction<CommandActionContext>({

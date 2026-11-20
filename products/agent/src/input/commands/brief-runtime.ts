@@ -87,42 +87,42 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
 
   const nextActions = [
     snapshot.provider === 'unknown' || snapshot.model === 'unknown'
-      ? 'Choose the assistant model from Agent Workspace -> Start -> Choose main model.'
+      ? 'Choose the assistant model: /model use.'
       : '',
     snapshot.localMemoryCount === 0
-      ? 'Store durable non-secret facts from Agent Workspace -> Memory -> Create memory.'
+      ? 'Keep durable, non-secret facts: /memory add.'
       : snapshot.localMemoryReviewQueueCount > 0
-        ? `Review ${plural(snapshot.localMemoryReviewQueueCount, 'memory record')} from Agent Workspace -> Memory -> Learning curator.`
+        ? `Review ${plural(snapshot.localMemoryReviewQueueCount, 'memory record')}: /memory queue.`
         : '',
     !hasLocalSkillBehavior
-      ? 'Create reusable procedures from Agent Workspace -> Skills or import reviewed skill files.'
+      ? 'Make reusable procedures: /my-skills create, or import a skill file with /my-skills import-discovered.'
       : '',
     skillSetupGaps > 0
-      ? `Resolve ${plural(skillSetupGaps, 'skill')} with setup gaps from Agent Workspace -> Skills.`
+      ? `Give ${plural(skillSetupGaps, 'skill')} what they need: /my-skills attention.`
       : '',
     skillBundleSetupGaps > 0
-      ? `Resolve ${plural(skillBundleSetupGaps, 'skill bundle')} with setup gaps from Agent Workspace -> Skills.`
+      ? `Give ${plural(skillBundleSetupGaps, 'skill bundle')} what they need: /my-skills bundles-attention.`
       : '',
     hasLocalSkillBehavior && skillSetupGaps === 0 && skillBundleSetupGaps === 0 && snapshot.activeSkillCount === 0
-      ? 'Enable reviewed skills or bundles from Agent Workspace -> Skills.'
+      ? 'Switch on reviewed skills or bundles: /my-skills enable.'
       : '',
     snapshot.localRoutineCount === 0
-      ? 'Create repeatable workflows from Agent Workspace -> Routines; promote schedules only with explicit confirmation.'
+      ? 'Make repeatable workflows: /routines create; put one on a schedule with /routines promote.'
       : routineSetupGaps > 0
-        ? `Resolve ${plural(routineSetupGaps, 'routine')} with setup gaps from Agent Workspace -> Routines.`
+        ? `Give ${plural(routineSetupGaps, 'routine')} what they need: /routines list --only attention.`
         : snapshot.enabledRoutineCount === 0
-        ? 'Enable reviewed routines from Agent Workspace -> Routines.'
+        ? 'Switch on reviewed routines: /routines enable.'
         : '',
     channelSetupGaps > 0
-      ? `Review ${plural(channelSetupGaps, 'enabled channel')} needing setup from Agent Workspace -> Messaging.`
+      ? `Finish setting up ${plural(channelSetupGaps, 'enabled channel')}: /channels setup.`
       : '',
     voiceSetupNeedsReview
-      ? 'Review voice setup from Agent Workspace -> Voice & Media before relying on spoken replies.'
+      ? 'Check the voice setup before relying on spoken replies: /voice status.'
       : '',
     mediaSetupNeedsReview
-      ? 'Review media provider setup from Agent Workspace -> Voice & Media before relying on image or media workflows.'
+      ? 'Check the media providers before relying on images or media: /media providers.'
       : '',
-    'Use Agent Workspace -> Knowledge for Agent Knowledge status, search, and explicit ingest forms.',
+    'Agent Knowledge: /knowledge.',
     'Hand build, fix or review work to the terminal app only when you mean to: /agents hand-off.',
   ].filter((line): line is string => line.length > 0);
 
@@ -143,6 +143,8 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
     `  routines: ${snapshot.enabledRoutineCount}/${snapshot.localRoutineCount} enabled; setup gaps ${routineSetupGaps}`,
     `  channels: ${readyChannels}/${snapshot.channels.length} ready; ${enabledChannels} enabled; setup gaps ${channelSetupGaps}`,
     `  voice/media: ${snapshot.voiceProviderCount} voice, ${snapshot.mediaProviderCount} media; browser tools ${snapshot.voiceMediaReadiness.browserToolState}`,
+    `  spoken replies: ${snapshot.voiceMediaReadiness.selectedTtsProviderLabel} (${snapshot.voiceMediaReadiness.selectedTtsProviderStatus}); voice ${snapshot.voiceSurfaceEnabled ? 'on' : 'off'}; ${snapshot.voiceMediaReadiness.readyVoiceProviderCount} voice and ${snapshot.voiceMediaReadiness.readyMediaProviderCount} media providers ready`,
+    `  this device: ${snapshot.companionAccess.pairingReady ? 'paired with its host' : 'not paired with a host'} (${snapshot.companionAccess.hostUrl}); phones and their camera, location and notifications: /devices nodes`,
     formatWorkPlanLine(workPlan),
     'unavailable' in jobReading ? `  schedules unavailable: ${jobReading.unavailable}` : `  schedules ${enabledJobs}/${jobs.length} visible jobs enabled`,
     '',

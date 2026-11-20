@@ -349,7 +349,7 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
   ],
   actions: [
     {
-      id: 'see-servers', label: 'See your servers', word: 'servers', inputs: [],
+      id: 'see-servers', label: 'See your servers', readsOnlyThisMachine: true, word: 'servers', inputs: [],
       async rowValue(ctx) {
         const servers = mcpApiOf(ctx).listServerSecurity();
         const connected = servers.filter((server) => server.connected).length;

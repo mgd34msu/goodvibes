@@ -271,7 +271,7 @@ function change(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' |
   const { run, ...rest } = fields;
   return { risk: 'none', ...rest, done: '', touches: 'this-machine', lasts: 'kept', operator: { terminalOnly: LOCAL }, run: (values, ctx) => guarded(ctx, (registry) => run(values, ctx, registry)) };
 }
-function show(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' | 'word' | 'sentence'> & Partial<Pick<ActionDescription<CommandContext>, 'inputs' | 'example'>> & { readonly run: (values: ActionValues, ctx: CommandContext, registry: AgentSkillRegistry) => string | Promise<string> }): ActionDescription<CommandContext> {
+function show(fields: Pick<ActionDescription<CommandContext>, 'id' | 'label' | 'word' | 'sentence'> & Partial<Pick<ActionDescription<CommandContext>, 'inputs' | 'example' | 'readsOnlyThisMachine'>> & { readonly run: (values: ActionValues, ctx: CommandContext, registry: AgentSkillRegistry) => string | Promise<string> }): ActionDescription<CommandContext> {
   const { run, ...rest } = fields;
   return readAction<CommandContext>({ ...rest, run: (values, ctx) => guarded(ctx, (registry) => run(values, ctx, registry)) });
 }
@@ -300,7 +300,7 @@ const MY_SKILLS = defineCommand<CommandContext>({
     { label: 'Skill bundles', actions: ['bundles', 'bundle-show', 'bundle-create', 'bundle-search', 'bundle-enable', 'bundle-disable', 'bundle-review', 'bundle-stale', 'bundle-update', 'bundle-delete', 'bundles-enabled', 'bundles-attention'] },
   ],
   actions: [
-    show({ id: 'list', label: 'See your skills', word: 'list', sentence: 'Lists every Agent-local skill with its state, review and readiness.', run: (_v, _c, registry) => renderList('Agent Skills', registry, registry.list()) }),
+    show({ id: 'list', label: 'See your skills', readsOnlyThisMachine: true, word: 'list', sentence: 'Lists every Agent-local skill with its state, review and readiness.', run: (_v, _c, registry) => renderList('Agent Skills', registry, registry.list()) }),
     show({ id: 'enabled', label: 'See the skills that are on', word: 'enabled', sentence: 'Lists the skills that are switched on.', run: (_v, _c, registry) => renderList('Enabled Agent Skills', registry, registry.snapshot().enabledSkills) }),
     show({ id: 'attention', label: 'See skills that need setting up', word: 'attention', sentence: 'Lists skills missing an environment variable or a command they need.', run: (_v, _c, registry) => renderList('Agent Skills needing setup', registry, registry.list().filter((skill) => !evaluateAgentSkillReadiness(skill).ready), 'No Agent-local skills need setup.') }),
     show({

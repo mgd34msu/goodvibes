@@ -2,32 +2,28 @@ import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-s
 import { basename } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
-import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
-import { storeFileChangeStamp } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-change-stamp';
+import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { agentRuntimeProfileBaseHome } from '../agent/runtime-profile.ts';
-import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
+import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
-import { buildProcessSupervisionSummary, buildProjectContextSummary, buildPromptContextReceiptTimeline, buildResearchBrowserRunnerContract, buildResearchVisualReportContract, buildVibeSummary } from './agent-workspace-context-snapshot.ts';
-import { summarizeMemoryItem, summarizeRoutineItem, summarizeRuntimeProfile, summarizeStarterTemplate } from './agent-workspace-local-library-snapshot.ts';
+import { buildPromptContextReceiptTimeline, buildVibeSummary } from './agent-workspace-context-snapshot.ts';
+import { summarizeMemoryItem, summarizeRoutineItem } from './agent-workspace-local-library-snapshot.ts';
 import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts } from './agent-workspace-review-packet-snapshot.ts';
 import { buildSetupSmokeHistory, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
 import { readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
 import {
   buildAgentWorkspaceArtifactListSnapshot,
-  buildAgentWorkspaceCalendarOAuthConfigStatus,
   buildAgentWorkspaceCompanionAccessSnapshot,
   buildAgentWorkspaceConfigSettingsSnapshot,
   buildAgentWorkspaceCurrentModelSnapshot,
-  buildAgentWorkspaceEmailConnectStatus,
   buildAgentWorkspaceMcpServerSnapshot,
   buildAgentWorkspaceNoteSnapshot,
   buildAgentWorkspacePersonaSnapshot,
   buildAgentWorkspaceRecentReviewerHandoffsSnapshot,
   buildAgentWorkspaceResearchRunSnapshot,
-  buildAgentWorkspaceResearchSourceSnapshot,
   buildAgentWorkspaceRoutineScheduleReceiptsSnapshot,
   buildAgentWorkspaceRuntimeProfilesSnapshot,
   buildAgentWorkspaceSessionMemoryCount,
@@ -39,10 +35,6 @@ import {
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
-
-// Re-exported so this module's public surface still carries this builder,
-// whose body now lives in agent-workspace-snapshot-builders.ts.
-export { buildAgentWorkspaceEmailConnectStatus } from './agent-workspace-snapshot-builders.ts';
 
 const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
   personas: 'personas',
@@ -104,10 +96,7 @@ export interface AgentWorkspaceLiveMemoryCounters {
  * (no caching). Throws if the read itself fails (e.g. the memory API errors
  * mid-call) rather than swallowing it, callers that need a best-effort,
  * never-throws default (the full runtime snapshot builder below) should use
- * buildAgentWorkspaceMemorySnapshot instead. The render-path live-counter
- * refresh (AgentWorkspace.syncLiveCountersForRender) calls this
- * directly so a genuine read failure can be surfaced as "stale" instead of
- * being silently rewritten to a fabricated 0.
+ * buildAgentWorkspaceMemorySnapshot instead.
  *
  * NOTE (observability flag): these live process/state counters are
  * flagged as observability-shaped content whose eventual surface home is the
@@ -192,22 +181,6 @@ export function readLiveAgentRoutineCounters(context: CommandContext): AgentWork
     enabled: snapshot.enabledRoutines.length,
     items: snapshot.routines.map(summarizeRoutineItem),
   };
-}
-
-/**
- * One stamp for the stores the live counters read: the shared memory file and
- * the routine store, two stat calls. Null when a store has no file to stamp
- * (an in-memory memory API, or no memory file yet), so the caller reads it.
- */
-export function readLiveAgentCounterStamp(context: CommandContext): string | null {
-  const shellPaths = context.workspace?.shellPaths;
-  const memory = context.clients?.agentKnowledgeApi?.memory;
-  if (!shellPaths) return memory ? null : 'no-stores';
-  // A stub shell path service may carry no home; such a store is read every paint.
-  const home: unknown = shellPaths.homeDirectory;
-  const memoryStamp = !memory ? 'no-memory' : typeof home === 'string' ? storeFileChangeStamp(resolveCanonicalMemoryDbPath(home)) : 'absent';
-  if (memoryStamp === 'absent') return null;
-  return `${memoryStamp}|${AgentRoutineRegistry.fromShellPaths(shellPaths).changeStamp()}`;
 }
 
 /**
@@ -335,14 +308,13 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const skillSnapshot = buildAgentWorkspaceSkillSnapshot(context, readFailures);
   const routineSnapshot = buildAgentWorkspaceRoutineCounters(context, readFailures);
   const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context, readFailures);
-  const researchSourceSnapshot = buildAgentWorkspaceResearchSourceSnapshot(context, readFailures);
   const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
   const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
-  const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
+  const { reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
   const setupSmokeHistory = buildSetupSmokeHistory(context);
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   // The profile functions resolve the base home themselves, from inside a profile session too.
-  const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
+  const { runtimeProfiles, runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
   const { voiceProviders, mediaProviders, voiceMediaReadiness } = buildAgentWorkspaceVoiceMediaPart(context);
   const mcpSnapshot = buildAgentWorkspaceMcpServerSnapshot(context);
   const warnings: string[] = [];
@@ -353,7 +325,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const companionAccess = buildAgentWorkspaceCompanionAccessSnapshot(context, runtimeBaseUrl);
   const subscriptionSnapshot = buildAgentWorkspaceSubscriptionSnapshot(context);
   const channels = buildAgentWorkspaceChannels(context);
-  const channelSetupGuide = buildAgentWorkspaceChannelSetupGuide(channels);
   const homeDirectory = context.workspace?.shellPaths?.homeDirectory;
   const nativeCredential = homeDirectory
     ? readConnectedHostOperatorToken(homeDirectory, runtimeBaseUrl)
@@ -402,12 +373,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     setupCompletionMarkerExists(context),
   );
   warnings.push(...describeReadFailures(readFailures));
-  const researchBrowserRunnerContract = buildResearchBrowserRunnerContract(context);
-  const researchVisualReportContract = buildResearchVisualReportContract(researchSourceSnapshot);
   const vibe = buildVibeSummary(context);
-  const projectContext = buildProjectContextSummary(context);
   const promptContextReceipts = buildPromptContextReceiptTimeline(context);
-  const processSupervision = buildProcessSupervisionSummary(context);
 
   return {
     provider,
@@ -417,11 +384,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     reasoningEffort: config.reasoningEffort,
     helperEnabled: config.helperEnabled,
     toolLlmEnabled: config.toolLlmEnabled,
-    providerFallbackOrder: config.providerFallbackOrder,
-    cacheEnabled: config.cacheEnabled,
-    cacheStableTtl: config.cacheStableTtl,
-    cacheMonitorHitRate: config.cacheMonitorHitRate,
-    cacheHitRateWarningThreshold: config.cacheHitRateWarningThreshold,
     hitlMode: config.hitlMode,
     guidanceMode: config.guidanceMode,
     saveHistory: config.saveHistory,
@@ -436,17 +398,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     operationalMessages: config.operationalMessages,
     systemMessages: config.systemMessages,
     permissionMode: config.permissionMode,
-    toolAutoHeal: config.toolAutoHeal,
-    toolsDefaultTokenBudget: config.toolsDefaultTokenBudget,
     artifactMaxBytes: config.artifactMaxBytes,
     rawPromptTelemetry: config.rawPromptTelemetry,
-    automationEnabled: config.automationEnabled,
-    automationMaxConcurrentRuns: config.automationMaxConcurrentRuns,
-    automationRunHistoryLimit: config.automationRunHistoryLimit,
-    automationDefaultTimeoutMs: config.automationDefaultTimeoutMs,
-    automationCatchUpWindowMinutes: config.automationCatchUpWindowMinutes,
-    automationFailureCooldownMs: config.automationFailureCooldownMs,
-    automationDeleteAfterRun: config.automationDeleteAfterRun,
     sessionId: context.session?.runtime?.sessionId ?? 'unknown',
     workingDirectory: context.workspace?.shellPaths?.workingDirectory ?? 'unavailable',
     homeDirectory: context.workspace?.shellPaths?.homeDirectory ?? 'unavailable',
@@ -460,32 +413,18 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     localMemoryPromptActiveCount: memorySnapshot.promptActiveCount,
     localMemoryTemporallyPendingCount: memorySnapshot.temporallyPendingCount,
     localMemoryTemporallyExpiredCount: memorySnapshot.temporallyExpiredCount,
-    localMemories: memorySnapshot.items,
     localNoteCount: noteSnapshot.count,
     localNoteReviewQueueCount: noteSnapshot.reviewQueueCount,
     localNotes: noteSnapshot.items,
-    researchSourceCount: researchSourceSnapshot.count,
-    researchSourceCandidateCount: researchSourceSnapshot.candidate,
-    researchSourceReviewedCount: researchSourceSnapshot.reviewed,
-    researchSourceRejectedCount: researchSourceSnapshot.rejected,
-    researchSourceUsedCount: researchSourceSnapshot.used,
     researchRunCount: researchRunSnapshot.count,
     researchRunPlannedCount: researchRunSnapshot.planned,
     researchRunRunningCount: researchRunSnapshot.running,
     researchRunPausedCount: researchRunSnapshot.paused,
     researchRunBlockedCount: researchRunSnapshot.blocked,
-    researchRunTerminalCount: researchRunSnapshot.terminal,
     researchRuns: researchRunSnapshot.items,
-    researchBrowserRunnerContract,
-    researchVisualReportContract,
     vibe,
-    projectContext,
     promptContextReceipts,
-    processSupervision,
-    recentReviewerHandoffArtifactCount: recentReviewerHandoffs.count,
-    recentReviewerHandoffArtifacts: recentReviewerHandoffs.items,
     reviewPacketTimeline,
-    reviewPacketDefaults,
     reviewPacketWizard,
     localRoutineCount: routineSnapshot.count,
     enabledRoutineCount: routineSnapshot.enabled,
@@ -503,47 +442,25 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     localSkills: skillSnapshot.items,
     localPersonaCount: personaSnapshot.count,
     activePersonaName: personaSnapshot.activeName,
-    localPersonas: personaSnapshot.items,
-    discoveredBehavior,
     knowledgeRoute: AGENT_KNOWLEDGE_ROUTE,
     knowledgeIsolation: AGENT_KNOWLEDGE_ISOLATION,
     executionPolicy: 'serial-proactive',
     delegatedReviewPolicy: 'explicit-build-delegation-only',
     companionAccess,
     channels,
-    channelSetupGuide,
     voiceProviderCount: voiceProviders.length,
-    voiceStreamingProviderCount: voiceProviders.filter((entry) => entry.capabilities.includes('tts-stream')).length,
-    voiceSttProviderCount: voiceProviders.filter((entry) => entry.capabilities.includes('stt')).length,
-    voiceRealtimeProviderCount: voiceProviders.filter((entry) => entry.capabilities.includes('realtime')).length,
-    ttsProvider: config.ttsProvider,
-    ttsVoice: config.ttsVoice,
-    ttsResponseModel: config.ttsLlmProvider && config.ttsLlmModel ? `${config.ttsLlmProvider}/${config.ttsLlmModel}` : '(chat route)',
     voiceSurfaceEnabled: config.voiceSurfaceEnabled,
     mediaProviderCount: mediaProviders.length,
-    mediaUnderstandingProviderCount: mediaProviders.filter((entry) => entry.capabilities.includes('understand')).length,
     mediaGenerationProviderCount: mediaProviders.filter((entry) => entry.capabilities.includes('generate')).length,
     voiceMediaReadiness,
-    mcpServerCount: mcpSnapshot.serverCount,
-    mcpConnectedServerCount: mcpSnapshot.connectedCount,
     mcpQuarantinedServerCount: mcpSnapshot.quarantinedCount,
     mcpAllowAllServerCount: mcpSnapshot.allowAllCount,
     browserToolExposureEnabled: config.browserPwaEnabled,
     activeRuntimeProfile: activeRuntimeProfileName(context.workspace?.shellPaths?.homeDirectory ?? ''),
-    selectedRuntimeProfile: selectedRuntimeProfile?.id ?? null,
-    selectedRuntimeProfileExists: selectedRuntimeProfile?.exists ?? false,
-    selectedRuntimeProfileSelectedAt: selectedRuntimeProfile?.selectedAt ?? null,
     runtimeProfileCount: runtimeProfiles.length,
-    runtimeProfiles: runtimeProfiles.map(summarizeRuntimeProfile),
-    runtimeProfileRoot,
     runtimeStarterTemplateCount: runtimeStarterTemplates.length,
-    localStarterTemplateCount: runtimeStarterTemplates.filter((template) => template.source === 'local').length,
-    runtimeStarterTemplates: runtimeStarterTemplates.map(summarizeStarterTemplate),
     setupChecklist,
     setupWizard,
     warnings,
-    liveCountersStale: false,
-    emailConnectStatus: buildAgentWorkspaceEmailConnectStatus(context),
-    calendarOAuthConfigStatus: buildAgentWorkspaceCalendarOAuthConfigStatus(context),
   };
 }

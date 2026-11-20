@@ -177,7 +177,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
     ],
     actions: [
       readAction<CommandContext>({
-        id: 'list', label: 'See your personas', word: 'list',
+        id: 'list', label: 'See your personas', readsOnlyThisMachine: true, word: 'list',
         sentence: 'Lists your personas: which is in use, which you reviewed, and what each is for.', operator: LOCAL_ONLY,
         async rowValue(ctx) {
           const snapshot = registryFromContext(ctx).snapshot();

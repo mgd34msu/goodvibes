@@ -7,6 +7,7 @@
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { readAction, textInput } from './described-command-kit.js';
+import { commandRefusal } from './command-confirmation.js';
 import type { CommandActionContext } from './command-actions/types.js';
 
 type ContextMessages = ReturnType<TerminalConversationManager['getMessagesForLLM']>;
@@ -20,6 +21,10 @@ export function createContextInspectionCommand<Context extends ContextInspection
   readonly window: (args: string[], context: Context) => void;
   readonly estimate: (message: ContextMessages[number]) => number;
   readonly total: (messages: ContextMessages, estimates: number[]) => number;
+  /** The project instruction files read into each turn, and any held back with why (the Agent only). */
+  readonly instructionFiles?: ((context: Context) => string) | undefined;
+  /** What the last turns were given: memories, persona, skills and routines, and what was left out (the Agent only). */
+  readonly lastTurns?: ((context: Context) => string) | undefined;
 }): DescribedCommand<Context> {
   return defineCommand<Context>({
     name: 'context',
@@ -39,6 +44,24 @@ export function createContextInspectionCommand<Context extends ContextInspection
           const measured = messages.map((message) => ({ message, tokens: policy.estimate(message) }));
           const total = policy.total(messages, measured.map((entry) => entry.tokens));
           return ['What fills the context:', ...measured.map(({ message, tokens }) => `  ${message.role.padEnd(12)} ~${tokens.toLocaleString()} tokens`), `  ${'Total'.padEnd(12)} ~${total.toLocaleString()} tokens (${messages.length} messages)`].join('\n');
+        },
+      }),
+      readAction<Context>({
+        id: 'files', label: 'See the project instruction files', word: 'files',
+        sentence: 'Lists the project instruction files (AGENTS.md, CLAUDE.md and the like) read into each turn, any cut short, and any held back with why.',
+        operator: { terminalOnly: 'The Agent reads them from this machine.' },
+        async run(_values, context) {
+          if (!policy.instructionFiles) throw commandRefusal('Only the Agent lists the instruction files it reads; this program does not.');
+          return policy.instructionFiles(context);
+        },
+      }),
+      readAction<Context>({
+        id: 'given', label: 'See what the last turns were given', word: 'given',
+        sentence: 'Shows, for the last turns, how many memories, personas, skills and routines were given to the model, how many were left out, and roughly how many tokens it took.',
+        operator: { terminalOnly: 'The Agent keeps these records on this machine.' },
+        async run(_values, context) {
+          if (!policy.lastTurns) throw commandRefusal('Only the Agent keeps a record of what each turn was given; /context shows what fills the context now.');
+          return policy.lastTurns(context);
         },
       }),
       readAction<Context>({

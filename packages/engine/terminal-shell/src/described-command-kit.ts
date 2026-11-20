@@ -8,7 +8,7 @@
 import type { ActionDescription, ActionValues, CommandReport, FixedChoice, InputDescription, ListName } from './command-actions/types.js';
 
 type ReadFields<Ctx> = Pick<ActionDescription<Ctx>, 'id' | 'label' | 'word' | 'sentence' | 'run'>
-  & Partial<Pick<ActionDescription<Ctx>, 'inputs' | 'example' | 'operator' | 'rowValue' | 'stepTitles'>>;
+  & Partial<Pick<ActionDescription<Ctx>, 'inputs' | 'example' | 'operator' | 'rowValue' | 'stepTitles' | 'readsOnlyThisMachine'>>;
 
 /** An action that only shows something: it reads, changes nothing and has no done line. */
 export function readAction<Ctx>(fields: ReadFields<Ctx>): ActionDescription<Ctx> {

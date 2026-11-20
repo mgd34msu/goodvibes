@@ -1,19 +1,8 @@
 import type { CommandContext } from './command-registry.ts';
 import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
-import { discoverProjectContextFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/project-context-files';
 import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import type { AgentWorkspaceProcessSupervisionSummary, AgentWorkspacePromptContextReceiptSummary, AgentWorkspacePromptContextReceiptTimeline, AgentWorkspaceProjectContextSummary, AgentWorkspaceResearchContractSummary, AgentWorkspaceVibeSummary } from './agent-workspace-types.ts';
+import type { AgentWorkspaceProcessSupervisionSummary, AgentWorkspacePromptContextReceiptSummary, AgentWorkspacePromptContextReceiptTimeline, AgentWorkspaceVibeSummary } from './agent-workspace-types.ts';
 
-type WorkspaceMcpServerRecord = {
-  readonly name?: string;
-  readonly role?: string;
-  readonly connected?: boolean;
-  readonly trustMode?: string;
-  readonly schemaFreshness?: string;
-};
-
-const RESEARCH_BROWSER_TERMS = ['browser', 'desktop', 'computer use', 'screenshot', 'screen recording'];
-const WORKSPACE_PROJECT_CONTEXT_SOURCES = ['.hermes.md', 'HERMES.md', 'AGENTS.md', 'CLAUDE.md', 'HERMES_HOME/SOUL.md', '.cursorrules', '.cursor/rules/*.mdc'] as const;
 const WORKSPACE_PROMPT_CONTEXT_INSPECT_ROUTE = 'context action:"prompt" includeParameters:true' as const;
 type WorkspacePromptReceiptOutcomeStatus = AgentWorkspacePromptContextReceiptSummary['outcomeStatus'];
 
@@ -23,71 +12,6 @@ function promptReceiptInspectRoute(receiptId: string): string {
 
 function promptReceiptOutcomeRoute(status: WorkspacePromptReceiptOutcomeStatus): string {
   return `context action:"receipts" outcomeStatus:${JSON.stringify(status)} includeParameters:true`;
-}
-
-function workspaceMcpServers(context: CommandContext): readonly WorkspaceMcpServerRecord[] {
-  try {
-    return (context.clients?.mcpApi?.listServerSecurity?.() ?? []) as readonly WorkspaceMcpServerRecord[];
-  } catch {
-    return [];
-  }
-}
-
-function matchesResearchBrowserTerm(server: WorkspaceMcpServerRecord): boolean {
-  const haystack = `${server.name ?? ''}\n${server.role ?? ''}`.toLowerCase();
-  return RESEARCH_BROWSER_TERMS.some((term) => haystack.includes(term));
-}
-
-export function buildResearchBrowserRunnerContract(context: CommandContext): AgentWorkspaceResearchContractSummary {
-  const browserServers = workspaceMcpServers(context).filter(matchesResearchBrowserTerm);
-  const ready = browserServers.some((server) =>
-    server.connected === true
-    && server.schemaFreshness === 'fresh'
-    && server.trustMode !== 'blocked'
-    && server.trustMode !== 'quarantined'
-  );
-  const needsReview = !ready && browserServers.length > 0;
-  return {
-    status: ready ? 'ready-with-confirmation' : needsReview ? 'needs-review' : 'setup-contract-needed',
-    label: ready ? 'ready with confirmation' : needsReview ? 'needs setup review' : 'setup needed',
-    next: ready
-      ? 'Use browser-backed research only when live browser state or authentication is necessary.'
-      : needsReview
-        ? 'Review browser/desktop MCP trust, connection, and schema freshness before live browser-backed research.'
-        : 'Use public web/fetch research now; configure a trusted browser/desktop route before live UI research.',
-    route: 'research action:"plan" includeParameters:true',
-    details: [
-      'visible run controls',
-      'source capture receipts',
-      'bounded logs',
-      'report handoff',
-    ],
-  };
-}
-
-export function buildResearchVisualReportContract(sourceSnapshot: {
-  readonly reviewed: number;
-  readonly used: number;
-}): AgentWorkspaceResearchContractSummary {
-  const sourceReady = sourceSnapshot.reviewed + sourceSnapshot.used > 0;
-  return {
-    status: sourceReady ? 'visual-report-packet-ready' : 'waiting-for-reviewed-sources',
-    label: sourceReady ? 'visual report packet ready' : 'waiting for reviewed sources',
-    next: sourceReady
-      ? 'Save a sourced visual report packet now, then archive or promote the same reviewed artifact.'
-      : 'Review at least one source before saving a report or visual packet.',
-    route: sourceReady
-      ? 'research action:"report" title:"..." question:"..." sources:[...] visualReport:true requireCitationCoverage:true'
-      : 'research action:"sources" includeParameters:true',
-    details: [
-      'at-a-glance',
-      'evidence matrix',
-      'source map',
-      'citations',
-      'handoff',
-      'archive',
-    ],
-  };
 }
 
 export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSummary {
@@ -138,55 +62,6 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       initProjectRoute: '/personas vibe-create',
       initGlobalRoute: '/personas vibe-create global',
       next: 'VIBE.md discovery failed; use /personas vibe for a focused diagnostic.',
-    };
-  }
-}
-
-export function buildProjectContextSummary(context: CommandContext): AgentWorkspaceProjectContextSummary {
-  const shellPaths = context.workspace?.shellPaths;
-  if (!shellPaths) {
-    return {
-      status: 'unavailable',
-      loaded: 0,
-      blocked: 0,
-      truncated: 0,
-      supportedSources: WORKSPACE_PROJECT_CONTEXT_SOURCES,
-      targetAware: true,
-      catalogRoute: 'context action:"files"',
-      inspectRoute: 'context action:"file"',
-      next: 'Open a normal Agent workspace before relying on project context files.',
-    };
-  }
-  try {
-    const snapshot = discoverProjectContextFiles(shellPaths);
-    const truncated = snapshot.files.filter((file) => file.truncated).length;
-    const status = snapshot.blocked.length > 0 ? 'attention' : snapshot.files.length > 0 ? 'ready' : 'needs-setup';
-    return {
-      status,
-      loaded: snapshot.files.length,
-      blocked: snapshot.blocked.length,
-      truncated,
-      supportedSources: WORKSPACE_PROJECT_CONTEXT_SOURCES,
-      targetAware: true,
-      catalogRoute: 'context action:"files"',
-      inspectRoute: 'context action:"file"',
-      next: snapshot.blocked.length > 0
-        ? 'Inspect blocked context files before relying on project instructions.'
-        : snapshot.files.length > 0
-          ? 'Project context instructions are available; inspect target-specific files before nuanced work.'
-          : 'Add AGENTS.md or another supported context file when the project needs persistent instructions.',
-    };
-  } catch {
-    return {
-      status: 'unavailable',
-      loaded: 0,
-      blocked: 0,
-      truncated: 0,
-      supportedSources: WORKSPACE_PROJECT_CONTEXT_SOURCES,
-      targetAware: true,
-      catalogRoute: 'context action:"files"',
-      inspectRoute: 'context action:"file"',
-      next: 'Project context discovery failed; use context action:"files" for a focused diagnostic.',
     };
   }
 }

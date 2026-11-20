@@ -160,7 +160,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
       name: 'pin', title: 'Pinned models', summary: 'Keep models you use at the top of the model picker', group: 'Models', report: 'see-pinned',
       actions: [
         readAction<Context & CommandActionContext>({
-          id: 'see-pinned', label: 'See pinned models', word: 'list',
+          id: 'see-pinned', label: 'See pinned models', readsOnlyThisMachine: true, word: 'list',
           sentence: 'Lists the models pinned to the top of the model picker.',
           operator: { terminalOnly: 'Pins are kept by the terminal app.' },
           async run(_values, ctx) {

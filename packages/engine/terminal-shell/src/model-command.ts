@@ -289,7 +289,7 @@ export const EFFORT_COMMAND: CommandDescription<ModelCommandContext> = {
   report: 'see-effort',
   actions: [
     readAction<ModelCommandContext>({
-      id: 'see-effort', label: 'See how hard the model thinks', word: 'show',
+      id: 'see-effort', label: 'See how hard the model thinks', readsOnlyThisMachine: true, word: 'show',
       sentence: 'Shows the level you chose, the level the model in use runs at, and the levels it offers.',
       operator: { terminalOnly: 'The levels belong to the model this terminal app uses.' },
       async rowValue(ctx) {

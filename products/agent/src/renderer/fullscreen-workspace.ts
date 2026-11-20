@@ -154,11 +154,15 @@ export function getFullscreenWorkspaceMetrics(options: Pick<
   // below the controls' minimum.
   const maxContextRows = Math.max(2, Math.min(Math.round(panelRows * 0.5), panelRows - Math.min(MIN_CONTROL_ROWS, Math.max(4, panelRows - 2)) - 1));
   const minContextRows = clamp(options.minContextRows ?? 10, 2, maxContextRows);
-  const contextRows = clamp(
+  // On a short screen the context keeps at least six rows (the controls keep
+  // four), so what the selected row does stays readable; taller screens are
+  // unchanged.
+  const shortScreenFloor = Math.min(6, Math.max(2, panelRows - 5));
+  const contextRows = Math.max(shortScreenFloor, clamp(
     Math.max(Math.round(panelRows * (options.contextRatio ?? 0.4)), options.contextNeed ?? 0),
     Math.min(minContextRows, maxContextRows),
     maxContextRows,
-  );
+  ));
   const controlRows = Math.max(2, panelRows - contextRows - 1);
   return { safeWidth, safeHeight, leftWidth, centerWidth, bodyRows, contextWidth, contextRows, controlRows };
 }

@@ -301,7 +301,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
   }
 
   if (window.end < allActions.length) rows.push({ text: `${GLYPHS.navigation.moreBelow} ${allActions.length - window.end} more action(s) below`, kind: 'more', fg: PALETTE.dim, dim: true });
-  rows.push({ text: '' });
+  if (height > 6) rows.push({ text: '' });
   // Wrapped here, where the rows are budgeted, so the result window below
   // accounts for every row the status takes.
   for (const line of wrapText(`Status: ${workspace.status}`, Math.max(1, width))) rows.push({ text: line, fg: PALETTE.muted });

@@ -89,13 +89,8 @@ export interface ConversationLayerContext {
   readonly footerRows?: number;
 }
 
-/**
- * The Agent workspace as it is painted on screen. Each paint first compares
- * the memory and routine stores' change stamp and re-reads their counters only
- * when a store changed, so the counters follow the disk without a per-paint scan.
- */
+/** The Agent workspace as it is painted on screen. */
 export function renderAgentWorkspaceLayer(workspace: InputHandler['agentWorkspace'], width: number, height: number): SurfaceLayer {
-  workspace.syncLiveCountersForRender();
   return renderAgentWorkspace(workspace, width, height);
 }
 

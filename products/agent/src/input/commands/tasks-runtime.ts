@@ -22,8 +22,10 @@ import { requireOperatorClient, requireShellPaths } from './runtime-services.ts'
 
 import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/tasks-runtime-commands';
 import { commandRefusal } from './confirmation.ts';
+import { backgroundCommandsReport } from './agent-context-reports.ts';
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
   listTitle: 'Tasks',
+  processes: backgroundCommandsReport,
   local: (ctx) => requireOperatorClient(ctx).tasks,
   verbs: (ctx) =>
     createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),

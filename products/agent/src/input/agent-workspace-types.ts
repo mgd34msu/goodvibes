@@ -258,14 +258,6 @@ export interface AgentWorkspaceResearchRunSummary {
   readonly reportArtifactId?: string;
 }
 
-export interface AgentWorkspaceResearchContractSummary {
-  readonly status: string;
-  readonly label: string;
-  readonly next: string;
-  readonly route: string;
-  readonly details: readonly string[];
-}
-
 export interface AgentWorkspaceVibeSummary {
   readonly status: 'ready' | 'attention' | 'needs-setup' | 'unavailable';
   readonly applied: number;
@@ -276,18 +268,6 @@ export interface AgentWorkspaceVibeSummary {
   readonly statusRoute: '/personas vibe';
   readonly initProjectRoute: '/personas vibe-create';
   readonly initGlobalRoute: '/personas vibe-create global';
-  readonly next: string;
-}
-
-export interface AgentWorkspaceProjectContextSummary {
-  readonly status: 'ready' | 'attention' | 'needs-setup' | 'unavailable';
-  readonly loaded: number;
-  readonly blocked: number;
-  readonly truncated: number;
-  readonly supportedSources: readonly string[];
-  readonly targetAware: boolean;
-  readonly catalogRoute: 'context action:"files"';
-  readonly inspectRoute: 'context action:"file"';
   readonly next: string;
 }
 
@@ -358,16 +338,6 @@ export interface AgentWorkspaceCompanionAccessSummary {
   readonly nextStep: string;
 }
 
-/** Honest, no-I/O email-connect status (config validation only) for the inbox connect card/wizard. */
-export interface AgentWorkspaceEmailConnectStatus {
-  readonly connected: boolean;
-  readonly username: string;
-  readonly imapHost: string;
-  readonly errors: readonly string[];
-  /** The connected host holds the inbox settings and its answer has not landed yet. */
-  readonly readingFromHost?: boolean;
-}
-
 export interface AgentWorkspaceRuntimeSnapshot {
   readonly provider: string;
   readonly model: string;
@@ -376,12 +346,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly reasoningEffort: string;
   readonly helperEnabled: boolean;
   readonly toolLlmEnabled: boolean;
-  /** `provider.fallbackModels`, joined, or `none`. */
-  readonly providerFallbackOrder: string;
-  readonly cacheEnabled: boolean;
-  readonly cacheStableTtl: string;
-  readonly cacheMonitorHitRate: boolean;
-  readonly cacheHitRateWarningThreshold: number;
   readonly hitlMode: string;
   readonly guidanceMode: string;
   readonly saveHistory: boolean;
@@ -396,17 +360,8 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly operationalMessages: string;
   readonly systemMessages: string;
   readonly permissionMode: string;
-  readonly toolAutoHeal: boolean;
-  readonly toolsDefaultTokenBudget: number;
   readonly artifactMaxBytes: number;
   readonly rawPromptTelemetry: boolean;
-  readonly automationEnabled: boolean;
-  readonly automationMaxConcurrentRuns: number;
-  readonly automationRunHistoryLimit: number;
-  readonly automationDefaultTimeoutMs: number;
-  readonly automationCatchUpWindowMinutes: number;
-  readonly automationFailureCooldownMs: number;
-  readonly automationDeleteAfterRun: boolean;
   readonly sessionId: string;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
@@ -420,32 +375,18 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly localMemoryPromptActiveCount: number;
   readonly localMemoryTemporallyPendingCount: number;
   readonly localMemoryTemporallyExpiredCount: number;
-  readonly localMemories: readonly AgentWorkspaceLocalLibraryItem[];
   readonly localNoteCount: number;
   readonly localNoteReviewQueueCount: number;
   readonly localNotes: readonly AgentWorkspaceLocalLibraryItem[];
-  readonly researchSourceCount: number;
-  readonly researchSourceCandidateCount: number;
-  readonly researchSourceReviewedCount: number;
-  readonly researchSourceRejectedCount: number;
-  readonly researchSourceUsedCount: number;
   readonly researchRunCount: number;
   readonly researchRunPlannedCount: number;
   readonly researchRunRunningCount: number;
   readonly researchRunPausedCount: number;
   readonly researchRunBlockedCount: number;
-  readonly researchRunTerminalCount: number;
   readonly researchRuns: readonly AgentWorkspaceResearchRunSummary[];
-  readonly researchBrowserRunnerContract: AgentWorkspaceResearchContractSummary;
-  readonly researchVisualReportContract: AgentWorkspaceResearchContractSummary;
   readonly vibe: AgentWorkspaceVibeSummary;
-  readonly projectContext: AgentWorkspaceProjectContextSummary;
   readonly promptContextReceipts: AgentWorkspacePromptContextReceiptTimeline;
-  readonly processSupervision: AgentWorkspaceProcessSupervisionSummary;
-  readonly recentReviewerHandoffArtifactCount: number;
-  readonly recentReviewerHandoffArtifacts: readonly AgentWorkspaceRecentReviewerHandoffArtifact[];
   readonly reviewPacketTimeline: AgentWorkspaceReviewPacketTimeline;
-  readonly reviewPacketDefaults: AgentWorkspaceReviewPacketDefaults;
   readonly reviewPacketWizard: AgentWorkspaceReviewPacketWizard;
   readonly localRoutineCount: number;
   readonly enabledRoutineCount: number;
@@ -463,57 +404,24 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly localSkills: readonly AgentWorkspaceLocalLibraryItem[];
   readonly localPersonaCount: number;
   readonly activePersonaName: string;
-  readonly localPersonas: readonly AgentWorkspaceLocalLibraryItem[];
-  readonly discoveredBehavior: AgentBehaviorDiscoverySnapshot;
   readonly knowledgeRoute: '/api/goodvibes-agent/knowledge';
   readonly knowledgeIsolation: 'agent-only';
   readonly executionPolicy: 'serial-proactive';
   readonly delegatedReviewPolicy: 'explicit-build-delegation-only';
   readonly companionAccess: AgentWorkspaceCompanionAccessSummary;
   readonly channels: readonly AgentWorkspaceChannelStatus[];
-  readonly channelSetupGuide: AgentWorkspaceChannelSetupGuide;
   readonly voiceProviderCount: number;
-  readonly voiceStreamingProviderCount: number;
-  readonly voiceSttProviderCount: number;
-  readonly voiceRealtimeProviderCount: number;
-  readonly ttsProvider: string;
-  readonly ttsVoice: string;
-  readonly ttsResponseModel: string;
   readonly voiceSurfaceEnabled: boolean;
   readonly mediaProviderCount: number;
-  readonly mediaUnderstandingProviderCount: number;
   readonly mediaGenerationProviderCount: number;
   readonly voiceMediaReadiness: AgentWorkspaceVoiceMediaReadiness;
-  readonly mcpServerCount: number;
-  readonly mcpConnectedServerCount: number;
   readonly mcpQuarantinedServerCount: number;
   readonly mcpAllowAllServerCount: number;
   readonly browserToolExposureEnabled: boolean;
   readonly activeRuntimeProfile: string;
-  readonly selectedRuntimeProfile: string | null;
-  readonly selectedRuntimeProfileExists: boolean;
-  readonly selectedRuntimeProfileSelectedAt: string | null;
   readonly runtimeProfileCount: number;
-  readonly runtimeProfiles: readonly AgentWorkspaceRuntimeProfileItem[];
-  readonly runtimeProfileRoot: string;
   readonly runtimeStarterTemplateCount: number;
-  readonly localStarterTemplateCount: number;
-  readonly runtimeStarterTemplates: readonly AgentWorkspaceRuntimeStarterTemplateItem[];
   readonly setupChecklist: readonly AgentWorkspaceSetupChecklistItem[];
   readonly setupWizard: AgentSetupWizard;
   readonly warnings: readonly string[];
-  /**
-   * True when the most recent render-path attempt to re-derive the live
-   * counters (memory count, routine counts + start counts) failed
-   * and the previous values below had to be kept. A fresh
-   * buildAgentWorkspaceRuntimeSnapshot() call is never stale (it just read
-   * everything); this only flips true from
-   * AgentWorkspace.syncLiveCountersForRender() when a live re-read errors.
-   * The render path uses this to label the counters honestly ("refreshing")
-   * instead of asserting a number the disk might already contradict.
-   */
-  readonly liveCountersStale: boolean;
-  /** Honest email-connect status for the connect wizard's entry state. Null when unavailable in this runtime. */
-  readonly emailConnectStatus: AgentWorkspaceEmailConnectStatus | null;
-  readonly calendarOAuthConfigStatus: { readonly google: boolean; readonly microsoft: boolean } | null; // F1c: per-provider client-id-configured state for the advanced cards
 }

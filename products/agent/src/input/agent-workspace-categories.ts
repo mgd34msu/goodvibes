@@ -233,6 +233,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('document-refresh-review-packet-preset', 'documents refresh-preset'),
       actRow('document-share-review-packet', 'documents share-packet'),
       actRow('document-reviewer-readiness', 'documents readiness'),
+      actRow('document-review-packet-timeline', 'documents timeline'),
       actRow('document-export-draft', 'documents export'),
       actRow('document-export-artifact-file', 'artifacts export'),
       actRow('document-export-artifact-package', 'artifacts package'),
@@ -503,7 +504,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Use this workspace to inspect active operator state and approval posture.',
     actions: [
       actRow('work-autonomy-queue', 'questions list'),
-      { id: 'work-background-processes', label: 'Background processes', detail: 'Commands running in the background, with their latest output. F2 opens the process monitor, where you can follow or stop each.', kind: 'guidance', safety: 'read-only' },
+      actRow('work-background-processes', 'tasks processes'),
       actRow('tasks-filter', 'tasks list'),
       actRow('task-show', 'tasks show'),
       actRow('task-output', 'tasks output'),

@@ -224,7 +224,7 @@ function sessionActions<Ctx extends SessionCommandContext>(policy: SessionComman
   };
   const actions: SessionAction<Ctx>[] = [
     {
-      id: 'current', label: 'See this session', word: 'current', inputs: [],
+      id: 'current', label: 'See this session', readsOnlyThisMachine: true, word: 'current', inputs: [],
       sentence: 'Shows this session\'s id, name, when it started, how many messages it has and its model.', done: '',
       touches: 'reads', lasts: 'not-a-change', risk: 'none',
       operator: { terminalOnly: 'It is the terminal app\'s open session.' }, example: {},

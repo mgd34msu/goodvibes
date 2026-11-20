@@ -216,7 +216,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
     ],
     actions: [
       readAction<CommandContext>({
-        id: 'list', label: 'See your Agent homes', word: 'list',
+        id: 'list', label: 'See your Agent homes', readsOnlyThisMachine: true, word: 'list',
         sentence: 'Lists your Agent homes, their folders, and which one the Agent starts in next.',
         operator: LOCAL_ONLY,
         async rowValue(ctx) {

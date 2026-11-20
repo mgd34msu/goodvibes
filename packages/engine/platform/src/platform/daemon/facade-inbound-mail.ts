@@ -142,6 +142,13 @@ export interface InboundMailCompositionOptions {
    */
   readonly channelOwner: (surface: string) => string | undefined;
   /**
+   * Loads what {@link channelOwner} reads (the channel policies, read from disk
+   * on first use). Awaited with the routes before the reader starts: mail that
+   * arrived while the daemon was down is read at once, and with no owner known
+   * yet no conversation counts as the owner's, so it would find no route.
+   */
+  readonly channelOwnersReady?: (() => Promise<void>) | undefined;
+  /**
    * The owner inbox: a mail notice no conversation can carry (the owner never
    * messaged from a chat app, or the route refuses it) is kept there, where
    * every terminal and the web UI list it. Absent: only recorded and reported.
@@ -720,7 +727,8 @@ export function composeInboundMail(
     // routes are loaded first: otherwise that mail finds no route and is
     // recorded as never announced. Routes that cannot be read do not stop the
     // reader: the mail is still recorded, and the missing route is reported.
-    try { await options.routeBindings.start(); }
+    // The owners are read the same way: a route counts as the owner's only once his owner id is known.
+    try { await Promise.all([options.routeBindings.start(), options.channelOwnersReady?.()]); }
     catch (error) {
       logger.warn('Inbound mail started without the owner\'s channel routes', { surface: 'email-inbound', detail: error instanceof Error ? error.message : String(error) });
     }

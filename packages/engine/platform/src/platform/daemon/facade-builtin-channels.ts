@@ -71,6 +71,7 @@ export function createBuiltinChannelRuntime(
     gatewayMethods: runtime.gatewayMethods,
     deliverStructuredNotice: (binding, notice, announces) => surfaceDeliveryHelper.deliverStructuredNotice(binding, notice, announces),
     channelOwner: (surface) => surfaceDeliveryHelper.channelOwner(surface),
+    channelOwnersReady: () => runtime.channelPolicy.start(),
     // A notice no conversation can carry lands in the owner inbox instead of being only recorded.
     ...(runtime.runtimeServices.ownerInbox ? { ownerInbox: runtime.runtimeServices.ownerInbox } : {}),
     // Resolve adopted Google credentials from the daemon config, secret store

@@ -46,11 +46,11 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 | --- | --- | --- |
 | See your schedules | `/schedule list` | |
 | Schedule something to run | `/schedule add (--when <words> \| --at <date> \| --every <interval> \| --cron <pattern>) [options] <what it does...>` | |
-| Run one now | `/schedule run <schedule>` | |
-| Pause one | `/schedule pause <schedule>` (picked from the ones that run) | |
-| Resume one | `/schedule resume <schedule>` (picked from the paused ones) | |
+| Run a schedule now | `/schedule run <schedule>` | |
+| Pause a schedule | `/schedule pause <schedule>` (picked from the ones that run) | |
+| Resume a schedule | `/schedule resume <schedule>` (picked from the paused ones) | |
 | Change a schedule | `/schedule change <schedule> [--when ... \| --at ... \| --every ... \| --cron ...] [--tz <zone>] [--stagger <duration>] [--name <name>] [--task <task> --success-criteria <result>] [<what it does...>]` | |
-| Remove one | `/schedule remove <schedule>` | cannot be undone |
+| Remove a schedule | `/schedule remove <schedule>` | cannot be undone |
 
 ```text
 /schedule add --when "every weekday at 9am" post the standup summary

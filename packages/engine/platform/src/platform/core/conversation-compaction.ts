@@ -5,7 +5,7 @@ import { logger } from '../utils/logger.js';
 import { compactMessages } from './context-compaction.js';
 import type { CompactionContext } from './context-compaction.js';
 import type { CompactionReceipt, CompactionResult, CompactionStrategyChoice } from './compaction-types.js';
-import { CompactionQualityError } from './compaction-types.js';
+import { ALREADY_AS_SHORT_AS_IT_GETS, CompactionQualityError, NOTHING_TO_COMPACT_YET, NothingToCompactError } from './compaction-types.js';
 import { distillConversation, DistillerUnavailableError } from './distiller-compaction.js';
 import { computeQualityScore, LOW_QUALITY_THRESHOLD } from '../runtime/compaction/quality-score.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
@@ -167,6 +167,8 @@ export async function compactConversation(
   try {
     work.assertCurrent();
     const llmMessages = host.getMessagesForLLM();
+    // Nothing the model reads yet: no summary to make, no model to ask.
+    if (llmMessages.length === 0) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
     if (!conversationRevision) originalMessages = JSON.stringify(llmMessages);
     // The caller's context was read from this conversation; the same array means the same revision.
     if (context && context.messages !== llmMessages && JSON.stringify(context.messages) !== JSON.stringify(llmMessages)) {
@@ -232,10 +234,13 @@ export async function compactConversation(
     // no-net-reduction result is treated as a failure and the conversation is
     // kept rather than swapping in a summary that did not help.
     const noReduction = result.tokensAfterEstimate >= result.tokensBeforeEstimate;
-    if (quality?.isLowQuality || noReduction) {
-      const detail = quality?.isLowQuality
-        ? `Compaction quality ${quality.score.toFixed(2)} (${quality.grade}) below threshold ${LOW_QUALITY_THRESHOLD}; conversation retained. ${quality.description}`
-        : `Compaction produced no token reduction (${result.tokensBeforeEstimate} -> ${result.tokensAfterEstimate}); conversation retained.`;
+    // A summary no shorter than the conversation gains nothing: said plainly, the conversation kept.
+    if (noReduction) {
+      logger.info('Compaction would not shorten the conversation; kept as it is', { trigger, tokensBefore: result.tokensBeforeEstimate, tokensAfter: result.tokensAfterEstimate });
+      throw new NothingToCompactError(ALREADY_AS_SHORT_AS_IT_GETS);
+    }
+    if (quality?.isLowQuality) {
+      const detail = `Compaction quality ${quality.score.toFixed(2)} (${quality.grade}) below threshold ${LOW_QUALITY_THRESHOLD}; conversation retained. ${quality.description}`;
       logger.warn('Compaction rejected by quality guard, conversation kept', { detail, trigger });
       throw new CompactionQualityError({ ...receiptBase, lowQuality: true, outcome: 'kept-original', detail });
     }
@@ -283,7 +288,7 @@ export async function compactConversation(
 
     return receipt;
   } catch (err: unknown) {
-    if (!work.current || err instanceof CompactionQualityError) throw err;
+    if (!work.current || err instanceof CompactionQualityError || err instanceof NothingToCompactError) throw err;
     const msg = summarizeError(err);
     logger.error('Compact failed', { error: msg });
     throw err;

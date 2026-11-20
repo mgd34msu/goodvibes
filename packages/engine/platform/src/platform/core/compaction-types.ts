@@ -10,6 +10,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractView } from '../contract/types.js';
 import type { ExecutionPlan } from './execution-plan.js';
 import type { CompactionQualityScore } from '../runtime/compaction/quality-score.js';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type { HelperModel } from '../config/helper-model.js';
 
 /**
@@ -271,6 +272,23 @@ export class CompactionQualityError extends Error {
   constructor(readonly receipt: CompactionReceipt) {
     super(receipt.detail ?? 'Compaction rejected by quality guard; conversation retained.');
     this.name = 'CompactionQualityError';
+  }
+}
+
+/** What a person is told when compacting would gain nothing: one plain sentence. */
+export const NOTHING_TO_COMPACT_YET = 'Nothing to compact yet.';
+export const ALREADY_AS_SHORT_AS_IT_GETS = 'This conversation is already as short as compaction can make it.';
+
+/**
+ * Thrown when there is nothing to gain by compacting: the conversation is
+ * empty, or a summary would not be shorter than what it replaces. Nothing was
+ * changed. A person who asked is told so in one sentence; an automatic
+ * compaction says nothing.
+ */
+export class NothingToCompactError extends RefusalError {
+  constructor(reason: typeof NOTHING_TO_COMPACT_YET | typeof ALREADY_AS_SHORT_AS_IT_GETS) {
+    super(refusal({ code: 'NOTHING_TO_COMPACT', state: 'nothing to compact', reason, next: [] }));
+    this.name = 'NothingToCompactError';
   }
 }
 

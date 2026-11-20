@@ -22,6 +22,10 @@ export const OPEN_INBOX_ASKS_KEY = [...queryKeys.ownerInbox, 'open-asks'] as con
 const LIST_LIMIT = 500;
 const FALLBACK_POLL_MS = 15_000;
 
+function pageOf(value: unknown): { items?: unknown; nextCursor?: unknown } | null {
+  return value as { items?: unknown; nextCursor?: unknown } | null;
+}
+
 /**
  * Every open ask in the inbox: one page in practice; past the largest page the
  * next is read with its cursor, so no ask waiting on the person is out of reach.
@@ -34,7 +38,7 @@ async function readOpenInboxAsks(): Promise<ReturnType<typeof readInboxAskItems>
     const input: OperatorMethodInput<'inbox.list'> & { readonly cursor?: string } = {
       status: 'open', kinds: INBOX_ASK_KINDS, limit: LIST_LIMIT, ...(cursor ? { cursor } : {}),
     };
-    const page = await platformClient.operator.invoke('inbox.list', input) as { items?: unknown; nextCursor?: unknown };
+    const page = pageOf(await platformClient.operator.invoke('inbox.list', input));
     if (Array.isArray(page?.items)) items.push(...(page.items as unknown[]));
     cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : '';
   } while (cursor);

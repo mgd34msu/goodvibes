@@ -47,6 +47,10 @@ function itemsOf(value: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
+function nextCursorOf(value: unknown): unknown {
+  return (value as { nextCursor?: unknown } | null)?.nextCursor;
+}
+
 interface InboxPage extends InboxLists {
   /** The cursor of the next (older) page, when there is one. */
   readonly nextCursor?: string;
@@ -62,7 +66,7 @@ async function readInboxPage(cursor: string): Promise<InboxPage> {
   };
   const answer = await platformClient.operator.invoke('inbox.list', input);
   const page = { items: itemsOf(answer) };
-  const next = (answer as { nextCursor?: unknown } | null)?.nextCursor;
+  const next = nextCursorOf(answer);
   return {
     answered: readAnswered(page),
     decisions: readDecisions(page),

@@ -30335,7 +30335,7 @@
     {
       "name": "SettingsValueSource",
       "kind": "type",
-      "text": "export type SettingsValueSource = 'default' | 'local' | 'synced' | 'managed';"
+      "text": "export type SettingsValueSource = 'default' | 'local' | 'synced' | 'managed' | 'unavailable';"
     }
   ],
   "./settings-navigation": [

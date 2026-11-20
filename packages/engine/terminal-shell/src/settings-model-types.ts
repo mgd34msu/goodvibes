@@ -57,7 +57,8 @@ export type CommonSettingsCategory =
   | 'google'
   | 'danger';
 export type SettingsFocusRegion = 'categories' | 'settings';
-export type SettingsValueSource = 'default' | 'local' | 'synced' | 'managed';
+/** Where a value comes from; `unavailable` when the daemon that holds it could not say (the row reads Unknown). */
+export type SettingsValueSource = 'default' | 'local' | 'synced' | 'managed' | 'unavailable';
 export interface CommonSettingEntryState<Source extends string = SettingsValueSource> {
   currentValue: unknown;
   isDefault: boolean;

@@ -153,7 +153,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap((group) => group.categories);
 
-export interface SettingEntry extends CommonSettingEntryState<SettingsValueSource | 'unavailable'> {
+export interface SettingEntry extends CommonSettingEntryState<SettingsValueSource> {
   setting: AgentConfigSetting;
 }
 

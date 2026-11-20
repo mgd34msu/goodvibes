@@ -469,7 +469,7 @@ export const KNOWLEDGE_COMMAND: CommandDescription<CommandActionContext> = {
         textInput({ id: 'reviewer', label: 'Reviewed by', help: 'The name recorded as the reviewer', why: 'a name', typed: { flag: '--reviewer' }, optional: { default: '', means: 'this app' } }),
       ],
       sentence: 'Issue {issue} is answered with {verdict}, until you change it.', example: { issue: 'iss-1a2b', verdict: 'accept' },
-      operator: KNOWLEDGE_METHOD('knowledge.issue.review', { issueId: 'issue', action: 'verdict' }),
+      operator: KNOWLEDGE_METHOD('knowledge.issue.review', { id: 'issue', action: 'verdict' }),
       async run(values, ctx) {
         let value: Record<string, unknown> | undefined;
         if (values.value) {

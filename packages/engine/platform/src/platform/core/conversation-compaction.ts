@@ -234,12 +234,8 @@ export async function compactConversation(
       ...(produced.fallbackReason ? { strategyFallbackReason: produced.fallbackReason } : {}),
     };
 
-    // Fail honestly when the scorer flags low quality OR the compaction bought
-    // nothing (output no smaller than input). The latter is a real failed
-    // compaction the composite score can miss, it rewards the compression axis
-    // even when a broken/empty extraction technically "shrank" tokens, so a
-    // no-net-reduction result is treated as a failure and the conversation is
-    // kept rather than swapping in a summary that did not help.
+    // Fail honestly when the scorer flags low quality: the conversation is kept
+    // rather than swapping in a summary that would lose what it needs.
     if (quality?.isLowQuality) {
       const detail = `Compaction quality ${quality.score.toFixed(2)} (${quality.grade}) below threshold ${LOW_QUALITY_THRESHOLD}; conversation retained. ${quality.description}`;
       logger.warn('Compaction rejected by quality guard, conversation kept', { detail, trigger });

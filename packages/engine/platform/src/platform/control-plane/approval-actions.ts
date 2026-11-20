@@ -50,6 +50,13 @@ export interface ApprovalActions {
   /** The viewer an authenticated actor is on this node (no actor: the program acting for the owner). */
   viewerOf(actor: Actor | undefined): ApprovalViewer;
   list(viewer: ApprovalViewer, limit?: number): readonly ApprovalReadingRow[];
+  /**
+   * The owner inbox's page: records `include` accepts, in the inbox's order
+   * (decided or ended time, else raised time, newest first; then id), at most
+   * `limit`, local and the group's. Only the page is read for the viewer, so a
+   * page costs its own rows however long the history is.
+   */
+  page?(viewer: ApprovalViewer, options: { readonly limit: number; readonly include: (record: SharedApprovalRecord) => boolean }): readonly ApprovalReadingRow[];
   /** One record by id or `<id>@<node>`, wherever it ranks. */
   get(ref: string, viewer: ApprovalViewer): ApprovalReadingRow | null;
   claim(ref: string, input: ApprovalActionInput, viewer: ApprovalViewer): Promise<ApprovalActionResult>;
@@ -139,6 +146,16 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       if (!relay) return rows;
       // This node's own first, then the group's, newest first within each.
       return [...rows, ...relay.remote().filter(shown).map((record) => remoteRow(record, viewer, relay))];
+    },
+    page: (viewer, options) => {
+      const relay = broker.relay;
+      const time = (record: SharedApprovalRecord): number => record.resolvedAt ?? record.createdAt;
+      const candidates: Array<{ readonly record: SharedApprovalRecord; readonly remote: boolean }> = [];
+      for (const record of broker.listApprovals(Number.MAX_SAFE_INTEGER)) if (options.include(record)) candidates.push({ record, remote: false });
+      for (const record of relay?.remote() ?? []) if (options.include(record)) candidates.push({ record, remote: true });
+      candidates.sort((a, b) => time(b.record) - time(a.record) || (a.record.id < b.record.id ? -1 : a.record.id > b.record.id ? 1 : 0));
+      return candidates.slice(0, Math.max(0, options.limit)).map(({ record, remote }) =>
+        remote && relay ? remoteRow(record, viewer, relay) : row(record, viewer));
     },
     get: (ref, viewer) => {
       const parsed = parse(ref);

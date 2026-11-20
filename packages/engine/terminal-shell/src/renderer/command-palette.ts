@@ -19,8 +19,9 @@
  *
  * Each row is a plain title with the slash command (or a shortcut's key)
  * right-aligned and dim. The detail pane shows the selected command's summary,
- * its actions by label, and the words that find it. Below 70 columns there is
- * no detail pane: the selected row's summary is one dim line under the list.
+ * its actions by label, and the words that find it. On an 80-column terminal there is
+ * no detail pane: the selected row's summary is one
+ * dim line under the list.
  */
 
 import type { PaletteEntry, PaletteView } from '../command-palette-types.js';
@@ -90,9 +91,10 @@ export function renderCommandPalette(palette: PaletteView, screenWidth: number, 
 
   const body = f.top + 2;
   const inner = f.r - f.l + 1;
-  // A detail pane when there is room for it; below that the list takes the
-  // width and the selected row's summary is one line under it.
-  const sideBySide = inner >= 70;
+  // A detail pane when there is room for it (wider than an 80-column
+  // terminal); below that the list takes the width and the selected row's
+  // summary is one line under it.
+  const sideBySide = inner >= 80;
   const x1 = sideBySide ? f.l + Math.floor(inner * 0.55) - 1 : f.r;
   const listBottom = sideBySide ? f.bottom : f.bottom - 2;
   const result = drawList(f.canvas, { mouseNavigation: true, rows: rowsFor(palette), top: body, bottom: listBottom, x0: f.l, x1, scrollKey: { owner: palette, name: 'list' } });

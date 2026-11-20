@@ -787,7 +787,7 @@ The `service.*` keys are daemon settings: one value for the machine, kept in the
 | `/config set service.<key> <value>` inside `goodvibes` | the same file (through the running daemon when one answers) |
 | `goodvibes-daemon install-service` / `uninstall-service` (and `goodvibes service install` / `uninstall`) | `service.enabled` and `service.autostart` `true` / `false` |
 | The release installer's `--no-service` (no service installed) and the checkout installer | `service.enabled` |
-| The setup wizard's Apply with a server-backed choice | `service.enabled`, `service.autostart` and `service.restartOnFailure` `true`; "Local TUI Only" leaves them as they are |
+| `/setup` Save with a server-backed choice (browser, other devices, webhooks, chat apps) | `service.enabled`, `service.autostart` and `service.restartOnFailure` `true`; "Local TUI Only" leaves them as they are |
 
 Editing a file by hand works too; each is plain JSON such as `{"service":{"enabled":false}}`. A program that is running notices a changed settings file within about a quarter of a second (it polls its own file, the project file, the shared file and the daemon's file every 250 ms) and applies the new values the way an in-app `set` does. Whether a value then changes behaviour at once depends on what reads it: the daemon's update loop reads its `update.*` keys once at start, launch updates read theirs at launch, and the `service.*` keys are read by the commands that use them each time they run. A program that is not running reads its file when it starts; the one-shot commands (`goodvibes doctor`, `goodvibes-daemon config`, ...) read the files each time they run.
 
@@ -1648,7 +1648,7 @@ All service findings use the terminal app's own `service.*` values, from `~/.goo
 
 | Finding id | Severity | Reported exactly when | What clears it |
 | --- | --- | --- | --- |
-| `onboarding-incomplete` | warning | The first-run marker `~/.goodvibes/tui/onboarding-checked.json` does not exist. | Start `goodvibes` and finish first run, or apply `/onboarding`. |
+| `onboarding-incomplete` | warning | The first-run marker `~/.goodvibes/tui/onboarding-checked.json` does not exist. | Start `goodvibes` and finish first run, or run `/setup` → `Run first-run again`. |
 | `service-not-installed` | warning | `service.enabled` is `true`, the daemon (or a server-backed endpoint) is on, and the service manager reports no daemon service installed. | `goodvibes-daemon install-service`. For a machine that runs without a service: `goodvibes-daemon config set service.enabled false` (the release installer's `--no-service` does this). |
 | `service-not-running` | warning | A daemon service is installed and the service manager reports it stopped. | `goodvibes-daemon start-service` (read `goodvibes-daemon service-status` and `journalctl --user -u goodvibes.service` if it stops again). |
 | `service-manager-error` | warning | `service.enabled` is `true` and systemd or launchd could not be asked; the summary carries the reason. The other service findings wait for an answer. | Run doctor from a logged-in session with a user service manager (see [Service problems and fixes](#service-problems-and-fixes)), or record a machine without a service: `goodvibes-daemon config set service.enabled false`. |
@@ -1699,7 +1699,7 @@ Severity `note` describes the arrangement and never fails. `risk` is must-fix. T
 | Command | Prints |
 | --- | --- |
 | `goodvibes status` (`--json`) | The terminal app's configuration, provider, auth, service, surfaces and onboarding state, without the findings. Exit `0`. |
-| `goodvibes onboarding status` | `checked: yes|no`, `scope`, `source`, `mode`, `updatedAt` and `workingDir` of the first-run marker. |
+| `goodvibes setup status` | `checked: yes|no`, `scope`, `source`, `mode`, `updatedAt` and `workingDir` of the first-run marker. |
 | `goodvibes-agent status` (`--json`) | The Agent's configuration, provider, auth, connected daemon and setup state. Exit `0`. |
 | `goodvibes-agent setup status` | The selected daemon address, whether the Agent holds an accepted credential for it, and the setup marker (`checked`, `scope`, `origin`, `mode`, `updated`). |
 | `goodvibes-daemon status` | What a running daemon is doing (described in the daemon part of this file). |
@@ -1750,39 +1750,32 @@ The terminal app starts that scan of this computer (never the network) when firs
 
 A part that does not fit in the free rows is left out whole (the logo always keeps its place); on an 80x24 terminal the terminal app has no free rows under its splash, so nothing is added there. Nothing of first run is written into the conversation.
 
-Esc on step 1 ("set up later") marks nothing and writes nothing; the conversation then says `Not set up yet.  Choose a model with /model, or run /onboarding.` and shows no starting prompts. The next start opens first run again.
+Esc on step 1 ("set up later") marks nothing and writes nothing; the conversation then says `Not set up yet.  Choose a model with /model, or run /setup.` and shows no starting prompts. The next start opens first run again.
 
-`/onboarding` opens the full setup screens at any time in the terminal app (below), and `goodvibes onboarding` (or `goodvibes setup`) starts the terminal app with them open. In the Agent, `/setup` and the workspace key open its setup pages.
+`/setup` opens the setup topics at any time in both programs (below), and `goodvibes setup` (`goodvibes-agent setup` in the Agent) starts the program with them open. `/setup` → `Run first-run again` opens the three steps again.
 
 The first time GoodVibes wants to write or run something in a folder, it asks whether to trust that folder. Trust levels are covered in the permissions part of this file.
 
-### The setup wizard: moving around
+### `/setup`: one form per topic
 
-The wizard fills the screen. On a wide terminal the list of screens is on the left.
+`/setup` in the terminal app lists the setup topics (the whole list is under `/setup` in the terminal app part); each topic opens one form that fills the screen, titled `/setup` and the topic, with the topic's sentence, its rows and **Save** as the last row. There is no list of other screens and no step count: another topic is another `/setup` choice. Each form holds the rows of the former wizard screens listed below for its topic.
 
 | Key | Action |
 | --- | --- |
-| Up, Down | Move between fields. |
-| Page Up, Page Down, Home, End | Move by a page, or to the first or last field. |
-| Enter or Space | Change the selected field: tick a checkbox, pick the next option of a choice, open the model picker, run an action, or start editing a text field. |
+| Up, Down | Move between rows. |
+| Page Up, Page Down, Home, End | Move by a page, or to the first or last row. |
+| Enter or Space | Change the selected row: tick a checkbox, pick the next option of a choice, open the model picker, run an action, or start editing a text field. |
 | Typing a character on a text field | Starts editing it with that character. |
 | Enter (while editing) | Saves the text. |
 | Esc (while editing) | Cancels the edit. |
 | Backspace / Delete or Ctrl+U | Deletes one character / clears the field. |
-| Tab or Right | Next screen. |
-| Shift+Tab or Left | Previous screen. |
-| `1` to `9` | Jump to that screen number. |
-| Esc | Close the wizard. |
+| Esc | Close the form without saving. |
 
-Every screen except the last ends with a **Next section** row. Nothing is saved until **Apply settings and verify** on the last screen; a wizard closed with Esc keeps nothing of what was chosen in it.
+Nothing is saved until **Save**; a form closed with Esc keeps nothing of what was chosen in it. While the form loads current settings it shows **Loading current settings**, with every row locked. If loading fails it shows **Current settings unavailable** with the reason; press Enter to try again or Esc to close.
 
-While the wizard loads current settings it shows **Loading current settings**, with every field locked. If loading fails it shows **Current settings unavailable** with the reason; press Enter to try again or Esc to close.
+Which topic holds which former screen: `Keep everything on this computer`, `Open GoodVibes in a browser`, `Use it from other devices` and `Receive webhooks` each hold their row of Capabilities and their part of Network setup (and the sign-in account of Access when the computer opens to the network); `Connect chat apps and services` holds its capability row, Choose external surfaces and one block per chosen surface; `Use Cloudflare` holds its capability row and Cloudflare batch setup; `Sign in or out of a provider` holds AI provider access without the keys, and the subscription acknowledgement; `Store a password or key` holds the provider keys and the secret storage policy; `Who can sign in here` holds the account rows of Access; `Choose a model` holds Default model; `How GoodVibes works with you` holds Shell experience; and the seven feature topics hold Safety, Context, Telemetry, Automation, Devices, Runtime and Advanced.
 
-### The setup wizard: screens in order
-
-Which screens appear depends on the choices on the first screen. The full order is: Capabilities, Network, Access, Services, one screen per chosen external surface, Cloudflare, Providers, Model, Experience, Safety, Context, Telemetry, Automation, Devices, Runtime, Advanced, Review. The number keys count only the screens currently shown, so with "Local TUI Only" on a new installation the Providers screen is screen `2`. The sections below follow that order.
-
-### Wizard screen: Choose GoodVibes capabilities
+### Setup form rows: Choose GoodVibes capabilities
 
 Tick what GoodVibes should be able to do. "Local TUI Only" and the other five exclude each other: ticking any other one unticks "Local TUI Only", and unticking all others ticks it again.
 
@@ -1797,11 +1790,11 @@ Tick what GoodVibes should be able to do. "Local TUI Only" and the other five ex
 
 Two action rows: **Select all server-backed capabilities** ticks every capability except "Local TUI Only". **Use Local TUI Only (No Servers)** clears them all.
 
-Any choice other than "Local TUI Only" saves `service.enabled`, `service.autostart`, `service.restartOnFailure` and `controlPlane.enabled` as `true`. The wizard itself does not install anything; the running daemon applies `service.autostart` (installing and enabling the service when it is not), and with no daemon running, the next daemon start applies it to an installed service, or run `goodvibes-daemon install-service`.
+Any choice other than "Local TUI Only" saves `service.enabled`, `service.autostart`, `service.restartOnFailure` and `controlPlane.enabled` as `true`. The form itself does not install anything; the running daemon applies `service.autostart` (installing and enabling the service when it is not), and with no daemon running, the next daemon start applies it to an installed service, or run `goodvibes-daemon install-service`.
 
 Keeping "Local TUI Only" saves `controlPlane.enabled` as `false` and leaves the service settings as they are: the daemon's service, which the release installer set up, keeps running and is still recorded and checked as running.
 
-### Wizard screen: Network setup (only with a server capability)
+### Setup form rows: Network setup (only with a server capability)
 
 | Field | Options and default | Effect |
 | --- | --- | --- |
@@ -1816,16 +1809,16 @@ Keeping "Local TUI Only" saves `controlPlane.enabled` as `false` and leaves the 
 
 When a network-reachable surface has TLS off, the screen shows `TLS off: <surface> transmits plaintext`. When the HTTP listener is on, it notes that browser CORS stays off until `controlPlane.cors.enabled` and `controlPlane.cors.allowedOrigins` are set.
 
-### Wizard screen: Access and accounts (with a server capability, or when local accounts already exist)
+### Setup form rows: Access and accounts (with a server capability, or when local accounts already exist)
 
 | Field | Effect |
 | --- | --- |
 | Local auth admin username | Required (with a password) before any service, browser surface or listener is exposed when no local user exists yet or a bootstrap credential is still present. Otherwise optional: an existing name rotates its password, a new name adds another admin. |
 | Local auth admin password, Confirm local auth admin password | Shown as dots only, never any of the characters typed. Nothing is created or changed until both match; while they differ the confirmation field says `Access: Confirm local auth admin password does not match the password; type it again.` and does not count as complete. Rotating a password signs that account out everywhere. Replacing a bootstrap credential deletes the bootstrap file. |
-| Confirm stored subscription state, Confirm local auth posture | Acknowledgements, required when reopening the wizard over existing state that needs review. |
+| Confirm stored subscription state, Confirm local auth posture | Acknowledgements, required when a form opens over existing state that needs review. |
 | Local auth readiness, Local auth store path | Read-only status rows. |
 
-### Wizard screen: Choose external surfaces (only with "Connect GoodVibes to external apps and services")
+### Setup form rows: Choose external surfaces (only with "Connect GoodVibes to external apps and services")
 
 One checkbox per surface: Slack, Discord, Telegram, ntfy, Outbound webhook, Home Assistant, Google Chat, Signal, WhatsApp, iMessage, Microsoft Teams, BlueBubbles, Mattermost, Telephony, Matrix. Each ticked surface adds its own setup screen. **Select all external surfaces** and **Clear all external surfaces** are actions.
 
@@ -1837,7 +1830,7 @@ One checkbox per surface: Slack, Discord, Telegram, ntfy, Outbound webhook, Home
 | Require secure storage | `require_secure` |
 | Allow plaintext storage | `plaintext_allowed` (reported as a risk by `goodvibes doctor`) |
 
-### Wizard screens: one setup screen per chosen surface
+### Setup form rows: one setup screen per chosen surface
 
 Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.enabled` as `true`, so it starts with the daemon; **No** saves the values but leaves it off until Settings > Surfaces turns it on. The fields below it are that surface's settings (`surfaces.<surface>.<key>`). Fields marked recommended never block saving. Secret fields (tokens, passwords, signing secrets) are stored in the secret store and the setting keeps a `goodvibes://` reference. What each field means, and the full setup of each surface from start to first message, is in the automation and services part of this file.
 
@@ -1859,11 +1852,11 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 | Telephony | provider (`twilio` or `bridge`), mode (`sms`, `voice` or `bridge`), Twilio account SID, Twilio auth token, from number, default recipient, bridge URL, bridge token, webhook secret |
 | Matrix | homeserver URL, access token, user ID, default room ID |
 
-### Wizard screen: Cloudflare batch setup (with the Cloudflare capability, or when Cloudflare is already configured)
+### Setup form rows: Cloudflare batch setup (with the Cloudflare capability, or when Cloudflare is already configured)
 
 **Enable Cloudflare integration** turns on the Cloudflare settings. When on, the screen shows: **Batch mode** (`Off`, `Explicit batch only`, `Eligible requests by default`), **Free-tier guardrails** (Yes by default: queues carry only signals and job bodies go to R2), one checkbox per component (Workers and Queues ticked by default; Zero Trust Tunnel, Zero Trust Access, DNS hostname, KV, Durable Objects, Secrets Store, R2 artifacts marked advanced), **Cloudflare token setup path** (`Save settings only`, `Paste temporary bootstrap token`, `Read bootstrap token from environment` with default variable `GOODVIBES_CLOUDFLARE_BOOTSTRAP_TOKEN`, `Paste final operational token`, `Use final token from environment` with default variable `CLOUDFLARE_API_TOKEN`), the account, zone, worker, queue, tunnel, Access, KV, Durable Object, R2 and Secrets Store names and ids for the chosen components, worker cron, maximum queue operations per day, **Provision Cloudflare on final apply**, and the actions **Show token requirements**, **Create operational token from bootstrap token**, **Discover accounts, zones, and resources**, **Validate Cloudflare token**, **Provision and verify now**, **Verify Worker now** and **Disable Cloudflare integration**. A bootstrap token is used once and never saved. Cloudflare work is described in the daemon part of this file.
 
-### Wizard screen: AI provider access
+### Setup form rows: AI provider access
 
 | Field | Effect |
 | --- | --- |
@@ -1876,14 +1869,14 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 | Finish OpenAI subscription sign-in | Completes the sign-in with that code. |
 | Confirm provider access review | Acknowledgement, required when reopening over existing state that needs review. |
 
-### Wizard screen: Default model
+### Setup form rows: Default model
 
 | Field | Options and default | Setting |
 | --- | --- | --- |
 | Default provider + model | Enter opens the model picker. | `provider.model` |
 | Reasoning effort | Instant, Low, Medium (default), High | `provider.reasoningEffort` |
 
-### Wizard screen: Shell experience
+### Setup form rows: Shell experience
 
 | Field | Options and default | Setting |
 | --- | --- | --- |
@@ -1893,7 +1886,7 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 
 The permission modes are explained in the permissions part of this file. YOLO is reported as a risk by `goodvibes doctor`.
 
-### Wizard screens: Safety, Context, Telemetry, Automation, Devices, Runtime, Advanced
+### Setup form rows: Safety, Context, Telemetry, Automation, Devices, Runtime, Advanced
 
 Seven screens list optional features, each as a checkbox that starts at its current state (or its default), sometimes with sub-options. Leaving a screen untouched changes nothing. Every feature is also in `/settings`.
 
@@ -1907,11 +1900,9 @@ Seven screens list optional features, each as a checkbox that starts at its curr
 | Provider and runtime behavior | Provider optimizer (sub-option `provider.optimizerMode`: `manual`, `auto` or `pinned`, with `manual` preselected when the box is ticked; the setting's own default is `off`, the optimizer inactive); Runtime budget enforcement; Overflow spill backends (`tools.overflowSpillBackend`: `file`, `ledger` default, `diagnostics`); Adaptive notification suppression |
 | Advanced runtime toggles | Unified RuntimeTask; Plugin lifecycle; MCP lifecycle; Permissions simulation mode; Policy bundle signing |
 
-### Wizard screen: Review and apply
+### Saving a form
 
-The last screen lists every change Apply will make, one row per setting as `<key>: <current> -> <new>` (at most 40 rows, then `and <n> more`). Credentials appear as `credential <key>` without their values, and an admin account as `local admin <name>`. Only settings whose value differs from what the wizard read are written.
-
-While any screen has a required field missing, a value the wizard refuses (a confirmation that does not match, a bad port) or a required acknowledgement unticked, **Apply settings and verify** shows `[Blocked]` instead of `[Ready]`, its detail lists what to finish, and the summary says how many items are left. **Apply settings and verify** saves everything, then reads each value back. A daemon-owned setting is sent to the running daemon; when no daemon is listening on its address, it is written to the daemon's settings file for the next daemon start, so a first setup on a machine with no daemon running applies. On success the wizard closes, records the first-run marker, and prints a summary of the checks. When some checks fail it says `Setup saved your settings, but <n> check(s) of them failed; ...` and lists them. When the save itself fails, the wizard stays open on this screen with **Apply did not complete** and the reasons; fix them and apply again.
+**Save** applies only what changed on the form: a setting whose value equals what the form read is not written, an acknowledgement is recorded only by a form that shows it, and the sign-in account only by a form that shows its rows. While a row on the form is missing, refused (a confirmation that does not match, a bad port) or a required acknowledgement is unticked, **Save** shows `Blocked` instead of `Ready` and its detail lists what to finish. **Save** writes the changes, then reads each value back. A daemon-owned setting is sent to the running daemon; when no daemon is listening on its address, it is written to the daemon's settings file for the next daemon start. On success the form closes and prints a summary of the checks. When some checks fail it says `Setup saved your settings, but <n> check(s) of them failed; ...` and lists them. When the save itself fails, the form stays open with **Apply did not complete** and the reasons at its top; fix them and save again.
 
 ### The Agent's first run
 
@@ -1960,7 +1951,7 @@ The Agent picks the credential it sends to the daemon in this order; the first s
 
 ### Settings, models and providers after setup
 
-- `/onboarding` in the terminal app reopens the wizard with the current settings loaded.
+- `/setup` opens one topic's form with the current settings loaded.
 - `/model` changes the model; `/settings` opens every setting; `/config set <key> <value>` sets one in the terminal app.
 - `/settings set <key> <value>` sets one in the Agent.
 - `goodvibes-daemon config set <key> <value>` sets one for the daemon.

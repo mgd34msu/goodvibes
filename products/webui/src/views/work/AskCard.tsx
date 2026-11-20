@@ -17,7 +17,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { agoWords } from '@goodvibes-jev/engine/contracts';
 import { hunkSummary, readApprovalEditHunks, readExecPromptAsk } from '../../lib/approvals';
-import { isAnswerable, type AskChoice, type OpenAsk } from '../../lib/asks';
+import { askReading, isAnswerable, type AskChoice, type OpenAsk } from '../../lib/asks';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { Input } from '../../components/ui/Field';
@@ -85,6 +85,11 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
   const cannotUndo = p.mark === 'cannot-undo';
   const question = p.kind === 'question' || p.kind === 'decision';
   const answerable = isAnswerable(ask);
+  // Why this person cannot answer an ask that still waits, in the daemon's words (the reading's refusal).
+  const reading = askReading(ask);
+  const refused = !answerable && reading?.phase === 'waiting'
+    ? reading.refusedActions.find((entry) => entry.action === 'approve' || entry.action === 'deny')?.reason
+    : undefined;
   const hunks = useMemo(() => (record ? readApprovalEditHunks(record) : null), [record]);
   const execPrompt = useMemo(() => (record ? readExecPromptAsk(record) : null), [record]);
 
@@ -255,6 +260,7 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
         />
       )}
       {answerable && (mode.step === 'choose' ? choices : rememberStep ?? textStep)}
+      {refused && <p className="ask-card__dim">{refused}</p>}
       <p className="ask-card__links">
         {p.why && (
           <button type="button" className="ask-card__link" aria-expanded={open === 'why'} onClick={() => setOpen(open === 'why' ? null : 'why')}>Why am I asked?</button>

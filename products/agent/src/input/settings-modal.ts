@@ -22,7 +22,7 @@ import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/plat
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
-import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
@@ -581,19 +581,13 @@ export class SettingsModal extends TerminalSettingsModalState<
         return this._applyTrustMode(entry, 'allow-all');
       }
 
-      // `block <tool>`, `unblock <tool>`, `exempt <tool>` or `unexempt <tool>`: the /mcp action of that word, kept in the server's MCP config. This screen is the owner's own.
-      const toolEdit = parseMcpToolRuleEdit(this.editBuffer);
-      if (toolEdit) {
-        const registry = this.mcpRegistry;
+      // `block`, `unblock`, `exempt` or `unexempt` (with or without a tool): opens that /mcp action's guided path for this server once Settings closes.
+      const guided = mcpGuidedActionFromSettings(entry.name, this.editBuffer);
+      if (guided) {
         this.editingMode = false;
         this.editBuffer = '';
         this.mcpAllowAllConfirmationTarget = null;
-        this.lastSettingEffectMessage = `Keeping ${toolEdit.rule} ${toolEdit.tool} for ${entry.name}...`;
-        keepMcpToolRuleFromSettings(registry, entry.name, toolEdit, (message, entries) => {
-          this.lastSettingEffectMessage = message;
-          if (this.mcpRegistry === registry) this.mcpEntries = entries;
-          this.requestHostSettingRender?.();
-        });
+        this.pendingGuidedAction = guided;
         return true;
       }
 

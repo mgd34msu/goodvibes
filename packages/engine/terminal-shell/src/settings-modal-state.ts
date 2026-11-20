@@ -1,4 +1,5 @@
 import type { McpEntry } from './settings-model-types.js';
+import type { SettingsGuidedAction } from './settings-mcp-entries.js';
 import type { SubscriptionEntry } from './settings-subscriptions.js';
 /** One private state instance per settings surface; product types keep their exact target/action vocabulary. */
 export class TerminalSettingsModalState<Category extends string, Entry, Target extends string, Action extends string> {
@@ -12,6 +13,8 @@ export class TerminalSettingsModalState<Category extends string, Entry, Target e
   public pendingModelPickerTarget: Target | null = null;
   public pendingProviderModelPickerTarget: Target | null = null;
   public pendingSettingsPickerAction: Action | null = null;
+  /** A described command's action the route opens as its guided path once Settings closes. */
+  public pendingGuidedAction: SettingsGuidedAction | null = null;
   public subscriptionLogoutConfirmationTarget: string | null = null;
   public groups: Map<Category, Entry[]> = new Map();
   public mcpEntries: McpEntry[] = [];
@@ -29,6 +32,7 @@ export class TerminalSettingsModalState<Category extends string, Entry, Target e
     this.pendingModelPickerTarget = null;
     this.pendingProviderModelPickerTarget = null;
     this.pendingSettingsPickerAction = null;
+    this.pendingGuidedAction = null;
     this.mcpAllowAllConfirmationTarget = null;
     this.subscriptionLogoutConfirmationTarget = null;
     this.lastSettingEffectMessage = null;

@@ -638,6 +638,9 @@ export class SettingsModal extends TerminalSettingsModalState<
       setMcpAllowAllConfirmationTarget: (v) => {
         this.mcpAllowAllConfirmationTarget = v;
       },
+      requestGuidedAction: (action) => {
+        this.pendingGuidedAction = action;
+      },
       reportMcpToolRule: (message, entries) => {
         this.lastSettingEffectMessage = message;
         this.mcpEntries = entries;

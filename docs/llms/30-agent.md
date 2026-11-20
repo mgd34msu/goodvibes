@@ -303,17 +303,18 @@ On top of the files under "Project instructions", the Agent applies:
 | `/services` | `list` and `trust <name> --yes` only. |
 | `/tasks` | Read only: `list`, `show`, `output`. |
 | `/workstream` | `start` is refused: work is started by planning it (`/workstream plan`, `approve`, `launch`), by asking for it in a message, or with `/work submit-file`. |
-| `/welcome`, `/setup` | Open the Agent workspace. |
+| `/welcome` | Opens the Agent workspace. |
+| `/setup` | A guided command: bare, it lists `Choose a model`, `Sign in or out of a provider`, `Add a provider of your own`, `Store a password or key`, `Connect chat apps and services` (the workspace's Messaging category), `History and privacy`, `Bring over settings from the terminal app`, `Pair with a GoodVibes host…` (`/setup pair [--name <name>] [--apply]`, `/setup unpair`; applying a pairing and unpairing only when the owner types it) and `Run first-run again`. Each topic opens the workspace with only that topic's rows. |
 | `/channel-profiles` | Accepts `plan` as a permission mode, as well as `ask-me`, `jev-decides`, `just-vibes` and `yolo`. |
 | `/auth` | `review`, `show <provider>`, `repair <provider>`, `bundle export <path>`, `bundle inspect <path>` only; no daemon sign-in or local users. |
 | `/update` | `check`, `apply`, `rollback`, `daemon [check]` only. |
 | `/save` | Saves to `<project>/.goodvibes/agent/sessions/`. |
 | `/quit` | Aliases `/:q` and `/:wq` only. |
-| `/help` | Shows commands and keyboard shortcuts. |
+| `/help`, `/commands`, `?` | Open help: every command as a plain title with its slash name, grouped by task, and the keyboard shortcuts as the last group; the same list as `Ctrl+P`. `/help <command>` prints one command's actions and lines. |
 
-Some shared commands are not on the Agent's first screen (the bare `/` list and `/help`'s list leave them out; they are found as soon as their name is typed, run when typed, and `/commands` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
+Some shared commands are not on the Agent's first screen (the bare `/` list leaves them out; they are found as soon as their name is typed, run when typed, and `/help` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
 
-Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels` and `/onboarding` for `/setup`, is not listed): `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for `/relay`.
+Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, is not listed): `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for `/relay`.
 
 ## The Agent's command line
 
@@ -614,7 +615,7 @@ It opens with `/agent [category]` (aliases `/home`, `/operator`), `Ctrl+G` or `/
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
 
-The workspace has these 26 categories, in this order, in seven groups; there are no others.
+The workspace has these 26 categories, in this order, in eight groups; there are no others.
 
 | Group | Category id | Label | Actions | Holds |
 | --- | --- | --- | --- | --- |

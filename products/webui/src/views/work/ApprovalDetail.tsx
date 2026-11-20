@@ -102,9 +102,8 @@ export function ApprovalDetail({ ask, approvalActions, askActions, now, onClose 
 
   return (
     <DetailPane
-      title={ask.presentation.title}
-      status={(
-        <span className="work-status">
+      title={(
+        <span className="work-status work-status--title">
           <StatusDot tone={tone} />
           {stateLine}
         </span>

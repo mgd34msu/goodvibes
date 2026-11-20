@@ -154,7 +154,7 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
   return {
     name: 'setup',
     title: 'Set up GoodVibes',
-    summary: 'Choose a topic to set up: models, sign-in, keys, access, chat apps and features.',
+    summary: 'Set GoodVibes up, one topic at a time',
     group: 'Settings',
     firstScreenRows: rows,
     actions,

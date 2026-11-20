@@ -16,7 +16,7 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
-import { keepMcpToolRuleFromSettings, keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
+import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings, type SettingsGuidedAction } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { parseListSettingEdit } from './settings-modal-lists.ts';
 import type { SettingsDaemonCredentialWriter } from './settings-modal-secrets.ts';
 import type { McpEntry, SettingEntry } from './settings-modal-types.ts';
@@ -51,6 +51,8 @@ export interface CommitEditContext {
   setMcpAllowAllConfirmationTarget(value: string | null): void;
   /** Shows the outcome of a per-tool rule once it is written and applied, with the refreshed rows. */
   reportMcpToolRule?(message: string, entries: McpEntry[]): void;
+  /** Open a /mcp action's guided path once Settings closes. */
+  requestGuidedAction?(action: SettingsGuidedAction): void;
 }
 
 /**
@@ -80,14 +82,10 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
       return true;
     }
 
-    // `block <tool>`, `unblock <tool>`, `exempt <tool>` or `unexempt <tool>`: the /mcp action of that word, kept in the server's MCP config. This screen is the owner's own.
-    const toolEdit = parseMcpToolRuleEdit(ctx.editBuffer);
-    if (toolEdit) {
-      ctx.rejectEdit?.(`Keeping ${toolEdit.rule} ${toolEdit.tool} for ${entry.name}...`);
-      keepMcpToolRuleFromSettings(ctx.mcpRegistry, entry.name, toolEdit, (message, entries) => {
-        if (ctx.reportMcpToolRule) ctx.reportMcpToolRule(message, entries);
-        else ctx.rejectEdit?.(message);
-      });
+    // `block`, `unblock`, `exempt` or `unexempt` (with or without a tool): opens that /mcp action's guided path for this server.
+    const guided = mcpGuidedActionFromSettings(entry.name, ctx.editBuffer);
+    if (guided && ctx.requestGuidedAction) {
+      ctx.requestGuidedAction(guided);
       ctx.setEditingMode(false);
       ctx.setEditBuffer('');
       ctx.setMcpAllowAllConfirmationTarget(null);

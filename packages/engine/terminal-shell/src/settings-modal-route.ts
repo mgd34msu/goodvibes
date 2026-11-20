@@ -1,6 +1,9 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
+import { describedCommandByName } from './command-actions/define.js';
+import { runGuided } from './command-actions/guided.js';
+import type { CommandActionContext } from './command-actions/types.js';
 export type SettingsRouteState<Context, Target, Action extends string> = {
   settingsModal: {
     active: boolean;
@@ -46,6 +49,8 @@ export type SettingsRouteState<Context, Target, Action extends string> = {
     pendingModelPickerTarget: Target | null;
     pendingProviderModelPickerTarget?: (Target | null) | undefined;
     pendingSettingsPickerAction?: (Action | null) | undefined;
+    /** A described command's action to open as its guided path once Settings closes (a /mcp action from an MCP row). */
+    pendingGuidedAction?: ({ readonly command: string; readonly action: string; readonly values: Readonly<Record<string, string>> } | null) | undefined;
     resetSelected?:
       | (() => {
           key: string;
@@ -86,6 +91,17 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
   readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void, changed: () => void, setExecutionMode: (value: string) => void, close: () => void) => void;
 }) {
   function consumeSettingsPickerRequest(state: SettingsRouteState<Context, Target, Action>): void {
+    const guided = state.settingsModal.pendingGuidedAction ?? null;
+    if (guided !== null) {
+      state.settingsModal.pendingGuidedAction = null;
+      const described = describedCommandByName(guided.command);
+      const action = described?.actions.find((candidate) => candidate.id === guided.action);
+      if (!state.commandContext || !described || !action) return;
+      // The guided path draws over the composer, so Settings closes first.
+      state.handleEscape();
+      void runGuided(described, { action, values: guided.values }, state.commandContext as unknown as CommandActionContext).finally(state.requestRender);
+      return;
+    }
     const settingsAction = state.settingsModal.pendingSettingsPickerAction ?? null;
     if (settingsAction !== null) {
       state.settingsModal.pendingSettingsPickerAction = null;
@@ -190,7 +206,7 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
         return true;
       }
       if (token.logicalName === 'enter' || (token.logicalName === 'space' && !modal.editingMode && !searching)) {
-        if (modal.editingMode) modal.commitEdit();
+        if (modal.editingMode) { modal.commitEdit(); consumeSettingsPickerRequest(state); }
         else if (focusRegion === 'categories' && !searching) modal.focusSettings?.();
         else {
           // Feature-unit toggle headers are boolean settings rows, so

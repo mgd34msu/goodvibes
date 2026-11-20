@@ -106,11 +106,12 @@ export function runDurabilityHousekeeping(input: DurabilityHousekeepingInput): D
  */
 export function startDurabilityHousekeeping(
   input: DurabilityHousekeepingInput,
-  options: { readonly intervalMs?: number } = {},
+  options: { readonly intervalMs?: number; readonly workAdmitted?: (() => boolean) | undefined } = {},
 ): () => void {
   runDurabilityHousekeeping(input);
   const timer = setInterval(
-    () => { runDurabilityHousekeeping(input); },
+    // Skipped while the daemon takes no new work (a self-update's restart); the start-up sweep after it runs it.
+    () => { if (options.workAdmitted?.() !== false) runDurabilityHousekeeping(input); },
     options.intervalMs ?? DURABILITY_HOUSEKEEPING_INTERVAL_MS,
   );
   timer.unref?.();

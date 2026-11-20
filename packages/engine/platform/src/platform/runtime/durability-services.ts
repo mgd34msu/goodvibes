@@ -71,6 +71,8 @@ export interface DurabilityServicesInput {
    * snapshot is accepted, and this sweep repeats for the life of the process.
    */
   readonly currentSessionId?: () => string | null;
+  /** Whether new work is admitted (daemon/work-admission.ts); the timed retention sweeps skip a tick while it is not. */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 export interface DurabilityServices {
@@ -146,6 +148,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
   const appendOnlyRetentionScheduler = new AppendOnlyRetentionScheduler({
     roots: appendOnlyRetentionRoots,
     configGet: appendOnlyRetentionConfigGet,
+    ...(input.workAdmitted ? { workAdmitted: input.workAdmitted } : {}),
   });
   appendOnlyRetentionScheduler.start();
   // Crash-residue reclaim the sweep above does not cover (session lock files,
@@ -156,7 +159,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
     surface: input.surface,
     ...(input.currentSessionId ? { currentSessionId: input.currentSessionId } : {}),
     extraQuarantineDirs: [configManager.getControlPlaneConfigDir()],
-  });
+  }, input.workAdmitted ? { workAdmitted: input.workAdmitted } : {});
   // External config edits apply LIVE through the same subscribe() pipeline an
   // in-process set() uses; the underlying watchers are unref'd. The returned
   // handle is the only way to stop them, dropping it left a 250ms poll running

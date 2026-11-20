@@ -391,6 +391,8 @@ export interface AppendOnlyRetentionSchedulerOptions {
   readonly clearTimer?: ((timer: ReturnType<typeof setTimeout>) => void) | undefined;
   /** Observation seam for hosts/tests; never used for disclosure (the sweep logs its own reclaims). */
   readonly onSweep?: ((outcome: AppendOnlySweepOutcome | null) => void) | undefined;
+  /** Whether new work is admitted (daemon/work-admission.ts); a timed sweep is skipped while it is not, and the start-up sweep after the restart runs it. */
+  readonly workAdmitted?: (() => boolean) | undefined;
 }
 
 /**
@@ -464,6 +466,7 @@ export class AppendOnlyRetentionScheduler {
     const setTimer = this.options.setTimer ?? setTimeout;
     this.timer = setTimer(() => {
       this.timer = null;
+      if (this.options.workAdmitted?.() === false) { this.scheduleNext(); return; }
       this.tick();
     }, this.intervalMs);
     // Unref'd: a pending sweep must never hold a process open.

@@ -1,4 +1,4 @@
-import { revealOrNull } from '../security/secret.js';
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { SecretsManager, SecretScope } from './secrets.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';

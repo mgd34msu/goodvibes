@@ -280,10 +280,10 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
-    public override addTurnFailure(content: string): void {
+    public override addTurnFailure(failure: Parameters<PlatformConversationManager['addTurnFailure']>[0]): void {
         const nextIndex = this.getMessageCount();
         this.messageKindRegistry.delete(nextIndex);
-        super.addTurnFailure(content);
+        super.addTurnFailure(failure);
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }

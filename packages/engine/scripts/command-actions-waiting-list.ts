@@ -149,7 +149,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'title',
   'tool',
   'tools',
-  'triggers',
   'trust',
   'tts',
   'undo',

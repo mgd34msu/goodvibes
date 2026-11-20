@@ -356,47 +356,6 @@ export function buildCliExposureReport(options: CliStatusOptions): readonly CliE
   });
 }
 
-type ServiceFindingText = Pick<CliDoctorFinding, 'cause' | 'impact' | 'action'>;
-
-const SERVICE_FINDING_TEXT: Readonly<Record<string, ServiceFindingText>> = {
-  'service-not-installed': {
-    cause: 'This machine has no daemon service, and service.enabled does not record that it should run without one.',
-    impact: 'The daemon runs only while it is started by hand or by a program that needs it, and not after a reboot.',
-    action: 'Install the service: goodvibes-daemon install-service. To keep this machine without one: goodvibes-daemon config set service.enabled false',
-  },
-  'service-not-running': {
-    cause: 'The service manager reports the daemon service installed but stopped.',
-    impact: 'The terminal app, the Agent and the web UI have no daemon to connect to until it starts.',
-    action: 'Start it: goodvibes-daemon start-service. If it stops again, read its log: goodvibes-daemon service-status',
-  },
-  'service-autostart-disabled': {
-    cause: 'The service manager reports the daemon service installed but not set to start at login.',
-    impact: 'The daemon does not come back after a login or reboot.',
-    action: 'Enable it again: goodvibes-daemon install-service',
-  },
-  'service-restart-disabled': {
-    cause: 'service.restartOnFailure is false.',
-    impact: 'A daemon that crashes stays down until it is started again.',
-    action: 'goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service',
-  },
-  'service-manager-error': {
-    cause: 'The user service manager (systemd --user or launchd) did not answer from this session.',
-    impact: 'Nothing can be said about the daemon service from here; the daemon itself may be running.',
-    action: 'Run goodvibes doctor from a logged-in desktop or SSH session with a user manager. To keep this machine without a service: goodvibes-daemon config set service.enabled false',
-  },
-  'service-log-unreadable': {
-    cause: 'The daemon service log exists but this user cannot read it.',
-    impact: 'A failed start cannot be diagnosed from the log.',
-    action: 'Check the file\'s owner and mode with ls -l on the path named above.',
-  },
-};
-
-const SERVICE_FINDING_FALLBACK: ServiceFindingText = {
-  cause: 'The daemon service differs from what this machine\'s settings expect.',
-  impact: 'The daemon or one of its endpoints may not be available.',
-  action: 'Run goodvibes service check; it names the one command that fixes each line.',
-};
-
 export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliDoctorFinding[] {
   const config = options.configManager;
   const daemonEnabled = resolveDaemonEnabled(config);
@@ -443,13 +402,11 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     });
   }
 
-  // Service facts come from the posture builder under fixed ids; doctor adds
-  // only the cause, impact and action for each id.
+  // Service findings are whole records from the posture builder (id, summary,
+  // cause, impact, one remedy): doctor prints them as they are.
   // Without a service reading (no manager asked) nothing observed can be judged.
-  const serviceIssues = options.service?.findings ?? [];
-  for (const issue of serviceIssues) {
-    const text = SERVICE_FINDING_TEXT[issue.id] ?? SERVICE_FINDING_FALLBACK;
-    findings.push({ id: issue.id, area: 'service', severity: 'warning', summary: issue.summary, ...text });
+  for (const issue of options.service?.findings ?? []) {
+    findings.push({ ...issue, area: 'service', severity: 'warning' });
   }
 
   if (!marker?.exists) {

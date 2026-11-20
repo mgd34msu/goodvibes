@@ -462,7 +462,7 @@ export class ServiceRegistry {
           resolveLocalSecret: (key) => secrets.get(key),
           homeDirectory: secrets.getGlobalHome(),
         });
-        return resolved.value;
+        return revealOrNull(resolved.value, 'dispatch');
       } catch (error) {
         logger.warn('ServiceRegistry: failed to resolve secret reference', {
           serviceName,

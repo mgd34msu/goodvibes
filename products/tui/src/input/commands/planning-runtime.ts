@@ -40,7 +40,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       if (!explicitGoal && first !== undefined && RETIRED_SUBCOMMANDS.has(first)) {
         ctx.print([
           `"/project-plan ${first}" is retired: saved planning records are read-only and nothing was changed.`,
-          '  Track work in the work plan (/work-plan) and run it with /workstream.',
+          '  Track work in the to-do list (/todo) and run it with /workstream.',
           `  To submit this text as a goal: /project-plan -- ${rawArgs.join(' ')}`,
         ].join('\n'));
         return;
@@ -84,10 +84,10 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         const planManager = requirePlanManager(ctx);
         const plans = planManager.list();
         if (plans.length === 0) {
-          ctx.print('The work plan has no items. Add one with /work-plan add <title>.');
+          ctx.print('The work plan has no items. Add one with /todo add <title>.');
           return;
         }
-        ctx.print(`Plans (${plans.length}; the project work plan is the plan, changed with /work-plan):\n${plans.map((plan) => {
+        ctx.print(`Plans (${plans.length}; the project work plan is the plan, changed with /todo):\n${plans.map((plan) => {
           const marker = plan.status === 'active' ? '▶' : ' ';
           return `  ${marker} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title} (${plan.items.length} item${plan.items.length === 1 ? '' : 's'})`;
         }).join('\n')}`);
@@ -116,8 +116,8 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       if (subcommand && args[0] === 'dismiss') {
         ctx.print([
           'Nothing was dismissed: the active plan is the project work plan, which has no separate record to archive.',
-          '  Clear finished items: /work-plan clear-done',
-          '  Drop one item: /work-plan cancel <id> or /work-plan remove <id>',
+          '  Clear finished items: /todo clear-done',
+          '  Drop one item: /todo mark <item> cancelled or /todo remove <item>',
         ].join('\n'));
         return;
       }

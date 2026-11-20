@@ -287,7 +287,7 @@ export async function resolveDeliveryCredential(
       resolveLocalSecret: (key) => secretsManager.get(key),
       homeDirectory: secretsManager.getGlobalHome?.() ?? undefined,
       configKey: options.configKey,
-    }), secretsManager));
+    }, 'dispatch'), secretsManager));
     if (!resolved) throw new Error(`Could not resolve channel delivery credential for ${options.configKey}`);
     return resolved;
   }

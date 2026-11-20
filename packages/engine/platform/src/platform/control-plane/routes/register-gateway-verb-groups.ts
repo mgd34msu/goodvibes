@@ -280,7 +280,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * check-in verb group is simply not registered, a graceful degrade, exactly
    * like the runtimeBus-gated needs-input push source above.
    */
-  readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
+  readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver' | 'deliverWithReceipt'> | undefined;
   readonly providerRegistry?: ProviderRegistry | undefined;
   readonly automationManager?:
     | (Pick<AutomationManager, 'start' | 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'> & Partial<Pick<AutomationManager, 'cancelRun'>>)

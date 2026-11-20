@@ -1142,7 +1142,7 @@ export class DaemonSurfaceDeliveryHelper {
     return resolveSecretInput(value, {
       resolveLocalSecret: (key) => this.context.secretsManager.get(key),
       homeDirectory: this.context.secretsManager.getGlobalHome?.() ?? undefined,
-    });
+    }, 'dispatch');
   }
 
   private renderAgentCompletionForSurface(

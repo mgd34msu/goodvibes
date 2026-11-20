@@ -135,7 +135,7 @@ export async function resolveSurfaceCredential(
       // same fail-open this whole module exists to prevent.
       const raw = String(context.configManager.get(source.key) ?? '');
       if (raw.length === 0) continue;
-      const resolved = await resolveSecretInput(raw, secretRefOptions(context));
+      const resolved = await resolveSecretInput(raw, secretRefOptions(context), 'dispatch');
       if (resolved !== null && resolved.length > 0) return { state: 'resolved', value: resolved };
       return { state: 'unresolvable', configKey: source.key };
     }

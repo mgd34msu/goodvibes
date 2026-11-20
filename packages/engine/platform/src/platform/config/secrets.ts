@@ -1395,11 +1395,13 @@ export class SecretsManager {
         homeDirectory: this.options.globalHome,
       });
       logger.debug('SecretsManager: resolved secret reference', { key, refSource: resolved.source });
-      if (commandBacked && resolved.value !== null && this.#revisionSource.revision() === revision) {
+      // Taken out once, inside the store, to be wrapped again as the Secret `get` returns.
+      const text = resolved.value === null ? null : resolved.value.reveal('store-write');
+      if (commandBacked && text !== null && this.#revisionSource.revision() === revision) {
         if (this.#resolvedReferences.size >= 256) this.#resolvedReferences.clear();
-        this.#resolvedReferences.set(cacheKey, { value: resolved.value, at: Date.now() });
+        this.#resolvedReferences.set(cacheKey, { value: text, at: Date.now() });
       }
-      return resolved.value;
+      return text;
     } catch (error) {
       logger.warn('SecretsManager: failed to resolve secret reference', {
         key,

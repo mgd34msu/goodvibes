@@ -42,7 +42,7 @@ goodvibes open goodvibes://open/agents   # open the app on one view
 ```
 
 `goodvibes app` is an alias of `goodvibes tui`.
-A first launch for a new user opens the onboarding wizard; `goodvibes onboarding` (alias `goodvibes setup`) opens it on demand.
+A launch whose model is not ready opens first run (choose a provider, sign in, then the conversation with starting prompts for the folder; see the install part of this file); `goodvibes onboarding` (alias `goodvibes setup`) opens the full setup wizard on demand.
 The onboarding screens are described under "First run and onboarding" in the install part.
 
 `goodvibes open <link>` takes exactly one link of the form `goodvibes://open/<view>[?target=<id>[:<kind>]]`.
@@ -784,7 +784,7 @@ Pickers (session picker, profile picker, selection lists, the recovery offer) sh
 | `Backspace` | Delete one character of the filter. |
 | `Esc` | Close the list in one press. |
 
-Configuration workspaces (`/recall`, `/work-plan`, `/marketplace`, `/plugin`, `/services`, `/subscription` and others) keep a search row that always takes typed characters.
+Configuration workspaces (`/recall`, `/todo open`, `/marketplace`, `/plugin`, `/services`, `/subscription` and others) keep a search row that always takes typed characters.
 An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`).
 An action that deletes, uninstalls or clears asks for the same key a second time; `Esc` cancels.
 
@@ -1191,7 +1191,7 @@ The run works in a copy of the suite. Before a task's session starts, its `verif
 
 `/worktree [review|panel|inspect <path>|setup <path>|attach <path> <session|task> <id>|session <id>|task <id>|recover <session|task> <id>|pause <path>|resume <path>|keep <path>|discard <path>|cleanup <path>]` (alias `/worktrees`) manages the git worktrees helper agents work in (see "Helper agents and worktrees").
 
-`/workstream`, `/graph`, `/work-plan` and `/project-plan` are described under "Contracts, workstreams and work plans" below.
+`/workstream`, `/graph`, `/todo` and `/project-plan` are described under "Contracts, workstreams and work plans" below.
 
 `/remote [list | show [agentId] | supervisor [runnerId] | capabilities [runnerId] | recover [runnerId] | setup [export <path>] | env [export <path>] | tunnel [review|export <path>] | bootstrap [export <path>|inspect <path>] | session <export|inspect|import> <path> | pool <list|show|create|assign|unassign> ... | dispatch [template] <description> | dispatch-pool <pool> [template] <description> | contract [agentId] | cancel <agentId> | export <agentId> [path] | artifact list | artifact show <id> | artifact export <id> [path] | review <id> | rerun-local <id> | import <path>]` works with self-hosted remote runners.
 
@@ -1253,7 +1253,7 @@ With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs
 `/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]` sets up payment cards and purchase approvals.
 `/devices [list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared|nodes|grants|revoke-grant <grant-id>|captures|delete-capture <capture-id>]` (alias `/device`) manages paired devices.
 `list`, `rename`, `revoke` and `migrate-shared` act on the devices of the daemon this terminal talks to, through its operator API, so with `daemon.connectedHost.url` set they change that daemon (`Paired devices on the daemon at <origin>:`). Only when the selected daemon is this machine's and does not answer do they use this machine's pairing file, which the daemon reads when it starts.
-`/payments card` fixes the daemon before the first field; if the selection changes while the card is typed, it is not sent (`The selected daemon changed while the card was being entered ... Nothing was sent.`).
+`/payments add-card` fixes the daemon before the first field; if the selection changes while the card is typed, it is not sent (`The selected daemon changed while the card was being entered ... Nothing was sent.`).
 `/qrcode [regenerate]` (aliases `/qr`, `/pair`) opens the device-pairing view; `r` there mints a new device token.
 `/host` inspects, pairs or unpairs this terminal with its host; only the owner typing it can pair or unpair (`Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair`).
 `/relay [status|pair [name]|codes|revoke <id>]` shows outbound relay status, mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name), lists the devices' relay codes, or revokes one (that device is refused through the relay from its next request; every other keeps working); with `relay.enabled` off, `pair` answers `Relay is disabled: turn on relay.enabled in /config relay first.`
@@ -1586,7 +1586,7 @@ The terminal app registers 28 tools (the same 28 run in the daemon's hosted sess
 | `web_search` | Ranked web search through a search provider. |
 | `agent` | Start and manage helper agents (see "Helper agents and worktrees"). |
 | `task` | Durable cross-session task references, dependencies, cancellations and handoffs shared by every session of the project. |
-| `work_plan` | The project work plan the owner sees in `/work-plan`. |
+| `work_plan` | The project work plan the owner sees in `/todo`. |
 | `workflow` | Hook actions, recurring background commands and workflow state; work itself is run with `agent`. |
 | `trigger` | Watch for something (for example a command exiting) and start an agent turn when it happens; the daemon supervises the watch. |
 | `state` | Session key-value state, memory by key, hooks, the print level, budget and context, tool-call analytics. |
@@ -1681,12 +1681,12 @@ How to ask for parallel work in worktrees:
 
 1. Make sure the project is a git repository with a commit (`/git init`, then commit once), or set `/config set contract.isolation worktree`.
 2. Ask in plain words for the work and name its parts, for example: `Add rate limiting to the API, a health endpoint, and retry logic in the client, as three independent pieces of work.` The model starts a contract; the planner decides how many units there are. The owner cannot force exactly N units or N worktrees; naming independent parts is what leads the planner to separate units.
-3. Or plan first: `/workstream propose <goal>`, check the units with `/workstream show <draft>`, edit them, then `/workstream approve <draft>` and `/workstream launch <draft>` (see "Workstreams").
+3. Or plan first: `/workstream plan <goal>`, check the steps with `/workstream show <plan>`, change them, then `/workstream approve <plan>` and `/workstream launch <plan>` (see "Workstreams").
 
 How to watch:
 
 - `F2` or `Ctrl+O` opens Agents, with each unit's agent; `Enter` opens one, `s` steers it, `Ctrl+X` twice stops it.
-- `/orchestration show [contractId]` and `/workstream status <id>` show units and their states; `/graph <workstreamId>` draws the task graph.
+- `/orchestration show [contractId]` and `/workstream status <workstream>` show units and their states; `/graph <workstream>` draws the task graph.
 - `/worktree` lists each worktree with its age, size and why it is kept.
 - In a headless run, the `AGENT_*` and `CONTRACT_*` frames report progress.
 
@@ -1745,9 +1745,11 @@ A reply that a failure question does not accept is refused before anything is ta
 ### Workstreams
 
 A workstream is a contract started from an owner's request.
-The owner either starts one at once or plans it as a draft first.
+The owner either starts one at once or plans it first.
+`/workstream` alone opens its list of actions ("See your workstreams" first); each action asks for what it needs, choosing workstreams, plans, steps and questions from lists, and ends by printing the line that does the same.
+Run by a model or a script, `/workstream` alone prints the list of workstreams.
 
-Start at once (the request must be typed by the owner):
+Start at once (the request must be the owner's own words, typed in the terminal or in the form):
 
 ```text
 /workstream start add rate limiting to the public API
@@ -1755,45 +1757,46 @@ Start at once (the request must be typed by the owner):
 
 Plan first, review, then launch:
 
-1. `/workstream propose add rate limiting to the public API` plans a draft and prints it. Nothing runs until launch.
-2. `/workstream drafts` lists drafts; `/workstream show <draft>` prints one.
-3. Change the plan: `/workstream edit <draft> <item> <brief>`, `/workstream drop <draft> <item>`, `/workstream move <draft> <item> <position>`, or re-plan from a new goal with `/workstream retask <draft> <goal>`.
-4. `/workstream approve <draft>` approves it.
-5. `/workstream launch <draft>` starts it. An unapproved draft is refused: `Draft <id> is not approved. Approve it with /workstream approve <id>, then launch it.`
-6. `/workstream discard <draft>` drops a draft instead.
+1. `/workstream plan add rate limiting to the public API` makes a plan and prints it. Nothing runs until launch.
+2. `/workstream plans` lists plans; `/workstream show <plan>` prints one.
+3. Change the plan: `/workstream edit <plan> <step> <brief>`, `/workstream drop <plan> <step>`, `/workstream move <plan> <step> --to <position>`, or plan again from a new goal with `/workstream replan <plan> <goal>`.
+4. `/workstream approve <plan>` approves it.
+5. `/workstream launch <plan>` starts it. An unapproved plan is refused: `Plan <id> is not approved.`, with `Approve it with /workstream approve <id>, then launch it.`
+6. `/workstream discard <plan>` throws a plan away (it asks first; this cannot be undone).
 
 Running workstreams:
 
-| Form | Effect |
-| --- | --- |
-| `/workstream list` | Workstreams of this session with status and request. |
-| `/workstream status <id>` | Units, states, budget and open questions. |
-| `/workstream cancel <id>` | Stop it: `Stopped workstream <id>.` |
-| `/workstream reply <id> <question-id> <answer>` | Answer an owner question. A closed question prints `That owner question is no longer open. Inspect /workstream status before answering.` |
-| `/workstream retry <id> <unit>` | Give one unit a fresh agent. Without a unit it lists the units and their states. |
-| `/workstream budget <id> <dollars>` | Raise the budget of a workstream waiting on it: `Workstream <id> budget is now $<n>.` |
+| Action | Line | Effect |
+| --- | --- | --- |
+| See your workstreams | `/workstream list` | Workstreams of this session with status and request. |
+| See how a workstream is going | `/workstream status <workstream>` | Steps, states, spending limit and open questions. |
+| Stop a workstream | `/workstream stop <workstream>` | Asks first (it cannot be resumed), then `Stopped workstream <id>.` |
+| Answer a workstream's question | `/workstream answer <workstream> <question> <answer>` | Answer an owner question. A closed question is refused: `That question is no longer open.` |
+| Run a step of a workstream again | `/workstream retry <workstream> <step>` | Give one step a fresh agent. |
+| Change a workstream's spending limit | `/workstream budget <workstream> <dollars>` | Asks first (it spends money), then `Workstream <id>'s limit is now $<n>.` |
 
-An id may be any unambiguous prefix. An unknown id prints `Choose one exact or unambiguous workstream ID from /workstream list.`
-`/graph <workstreamId>` draws the workstream's task graph: nodes, edges, states and pool posture.
+An id may be any unambiguous prefix. An unknown id is refused: `No workstream in this session matches <id>.`
+`/graph <workstream>` draws the workstream's task graph: nodes, edges, states and pool posture; `/graph` alone asks which workstream, from the ones the daemon knows.
 
 ### The work plan
 
-The work plan is a persistent, workspace-scoped checklist; it records work and does not run it.
+The work plan is a persistent, workspace-scoped checklist, the project's to-do list; it records work and does not run it.
 The model edits it with the `work_plan` tool; helper agents share it; its open items reach the model once per turn.
+`/todo` is its command, the same in both apps; `/todo` alone opens its list of actions ("See your to-do list" first), and a model or script running it alone gets the list.
+Changes are the owner's: a model running a `/todo` change is refused and keeps its own plan with the `work_plan` tool.
 
-| Form | Effect |
-| --- | --- |
-| `/work-plan` or `panel` | Open the work plan view. |
-| `list`, `show` | Print the items. |
-| `export` | Write the plan as Markdown. |
-| `add <title> [--owner name] [--source label] [--notes text]` | Add an item: `Added work plan item <id>.` |
-| `edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Change an item. |
-| `start <id>`, `in_progress <id>`, `done <id>`, `block <id>`, `fail <id>`, `cancel <id>`, `pending <id>` | Set its status. |
-| `cycle <id>` | Move it to the next status. |
-| `remove <id>` | Delete it. |
-| `clear-done` | Remove completed and cancelled items: `Cleared N completed/cancelled work plan items.` |
-
-Aliases: `/wp`, `/todo`, `/workplan`.
+| Action | Line | Effect |
+| --- | --- | --- |
+| See your to-do list | `/todo list` | Print the items. |
+| Open the to-do panel | `/todo open` | Open the to-do panel (terminal app only). |
+| See it as a Markdown checklist | `/todo markdown` | Print the list as Markdown. |
+| Save it as a Markdown file | `/todo export` | Write the list as Markdown and print the path. |
+| Add an item | `/todo add <title> [--owner <for whom>] [--notes <notes>] [--source <where it came from>]` | `Added item <id>.` |
+| Change an item | `/todo edit <item> <title> [--owner ...] [--notes ...] [--source ...]` | Change an item. |
+| Mark an item done, blocked or another state | `/todo mark <item> <state>` | State is one of `pending`, `in_progress`, `blocked`, `done`, `failed`, `cancelled`. |
+| Move an item to its next state | `/todo next <item>` | Not started, in progress, done, then back. |
+| Remove an item | `/todo remove <item>` | Asks first, then deletes it. |
+| Remove the finished items | `/todo clear-done` | Asks first, then removes done and cancelled items: `Removed N finished items.` |
 
 ### Project planning
 

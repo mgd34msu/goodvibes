@@ -1648,7 +1648,7 @@ All service findings use the terminal app's own `service.*` values, from `~/.goo
 
 | Finding id | Severity | Reported exactly when | What clears it |
 | --- | --- | --- | --- |
-| `onboarding-incomplete` | warning | The first-run marker `~/.goodvibes/tui/onboarding-checked.json` does not exist. | Start `goodvibes` and finish or skip the welcome step, or apply `/onboarding`. |
+| `onboarding-incomplete` | warning | The first-run marker `~/.goodvibes/tui/onboarding-checked.json` does not exist. | Start `goodvibes` and finish first run, or apply `/onboarding`. |
 | `service-not-installed` | warning | `service.enabled` is `true`, the daemon (or a server-backed endpoint) is on, and the service manager reports no daemon service installed. | `goodvibes-daemon install-service`. For a machine that runs without a service: `goodvibes-daemon config set service.enabled false` (the release installer's `--no-service` does this). |
 | `service-not-running` | warning | A daemon service is installed and the service manager reports it stopped. | `goodvibes-daemon start-service` (read `goodvibes-daemon service-status` and `journalctl --user -u goodvibes.service` if it stops again). |
 | `service-manager-error` | warning | `service.enabled` is `true` and systemd or launchd could not be asked; the summary carries the reason. The other service findings wait for an answer. | Run doctor from a logged-in session with a user service manager (see [Service problems and fixes](#service-problems-and-fixes)), or record a machine without a service: `goodvibes-daemon config set service.enabled false`. |
@@ -1719,26 +1719,40 @@ cd ~/code/my-project
 goodvibes
 ```
 
-With a key for the default model's provider present, the first start asks nothing and prints `Ready: openrouter:openrouter/free (provider openrouter). Run /onboarding anytime for full setup.`
+With a key for the default model's provider present, the first start asks nothing: the conversation opens with its starting prompts (below), and the first-run marker is written.
 
-### The welcome step of the terminal app
+### First run: three steps, the same in the terminal app and the Agent
 
-The first time `goodvibes` starts for a user (the marker `~/.goodvibes/tui/onboarding-checked.json` does not exist), it decides how much to ask:
+`goodvibes` and `goodvibes-agent` run the same first run. It opens exactly when the model the session will use is not ready (its provider has no key or sign-in and is not keyless); a ready model opens the conversation directly and writes the first-run marker (`~/.goodvibes/tui/onboarding-checked.json`, the Agent's under `~/.goodvibes/agent/`). Leaving at any step and starting again picks up from the facts: a provider chosen in settings but not signed in opens step 2 for it; otherwise step 1.
 
-1. When the session's model is ready (its provider has a key, or needs none), it asks nothing, writes the marker and prints `Ready: <model> (provider <provider>). Run /onboarding anytime for full setup.`
-2. Otherwise it opens the menu **Welcome to GoodVibes: get started**. Arrow keys move, Enter chooses. The rows are:
+**Step 1, `Welcome to GoodVibes` (`1 of 3`): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other registered providers (`38 more`):
 
-| Row | Shown when | What choosing it does |
+| Row | How | Shown with |
 | --- | --- | --- |
-| `Use <provider>` | A key for some other provider is set and the default model is not ready. Detail: `Switch to <provider:model>, from the provider whose key is set`. | Switches the main model to that provider's first model. When that model is ready, writes the marker and prints `Ready: <model>. Run /onboarding anytime for full setup.`; otherwise prints `<model> is not ready yet. Pick a model with /model, or run /onboarding for full setup.` |
-| `Start now` | The default model is ready or needs no key. | Writes the marker and starts a session on the default model. |
-| `Add an API key to start` | The default model's provider needs a key. Detail: `The default model (openrouter:openrouter/free) uses openrouter, which requires an API key (set OPENROUTER_API_KEY)`. | Writes the marker, starts a session and asks for the key at once: `[secrets] Enter value for <VAR> (input is masked; press Enter to store, Esc to cancel).` The key is typed masked and stored for this user in every project (the same entry as `/secrets set <VAR> --scope user`), then `[secrets] Stored: <VAR> (user, secure)`. Esc stores nothing; a turn sent before a key is added fails with the provider's authentication error. |
-| `Choose a model to start` | The configured default model is unknown. | As above, with the reason printed. |
-| `Full guided setup` | Always. Detail: `Choose provider, model, channels, and more`. | Opens the setup wizard (below). |
+| `ChatGPT subscription` | `sign in with your browser` | OpenAI's subscription sign-in. |
+| `Anthropic` | `paste an API key` | |
+| `OpenRouter` | `paste an API key` | `has a free model` when its model list has a free model. |
+| `A model on this computer` | | `found <server> with <n> models` (green) once the scan of this computer found a model server (Ollama, LM Studio, llama.cpp and the like); `looking for models on this computer…` while it runs; `none found` after it found none. |
 
-Pressing Esc on the menu writes the marker and starts a session on the current default model, as `Start now` does, and prints the row's detail followed by `Add a provider key anytime with /provider, or run /onboarding for full setup.`; it asks for no key and does not switch to another provider. `/onboarding` opens the wizard at any time, and `goodvibes onboarding` (or `goodvibes setup`) starts the terminal app with the wizard open.
+The terminal app starts that scan of this computer (never the network) when first run opens; the Agent's start-up already scans this computer. When a key in the environment already makes a provider usable, a line under the rows says `Found in your environment: <VARIABLE> · press a to use it and skip this step`. Keys: Up and Down move, Enter chooses, `a` uses the found key (the provider's default model is chosen and step 2 is skipped), Esc is "set up later". Choosing `Another provider…` opens the full provider picker; choosing a ready model there finishes first run.
 
-When the terminal app cannot tell whether a provider is configured, it opens the wizard directly.
+**Step 2 (`2 of 3`)** depends on the row:
+
+- A key: `Sign in to <name>`, `Paste your <name> API key.`, a masked field (no character of the key is shown) and `It is stored in secure storage, never shown again.` (`the settings file` when `storage.secretPolicy` is `plaintext_allowed`). Enter stores the key for this user (as `/secrets set --user <VARIABLE>` does) and checks it with one model-list request to the provider. A refused key is removed again and the step says `That key was refused by <name> (401). Check it and paste it again.`; an unreachable provider `GoodVibes couldn't reach <name>. Check your connection and try again.` Esc goes back to step 1.
+- The browser: `GoodVibes opened your browser to sign in.`, then `If it didn't open, go to:` and the whole sign-in address, and `Waiting for you to finish in the browser…` while the sign-in page's answer is awaited. When the browser could not be opened, or the provider's sign-in ends on a code, `Paste the code the page shows:` takes the code (or the address the browser ended on). `c` copies the address, Enter continues, Esc goes back. A sign-in cancelled in the browser says `Sign-in was cancelled in the browser. Press ⏎ to start again.`
+- A model on this computer: `Which model on this computer?` and the models found, each with its server and context window; Enter chooses one. With none found, it says so and Enter looks again.
+
+**Step 3 is the conversation.** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, only in the rows left free above the composer, GoodVibes adds:
+
+1. On the first run only: `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3`.
+2. On every empty conversation: `Try one of these in <folder>:` and three starting prompts for the folder: `What does this project do, and how do I run its tests?` (`This folder is empty. What should we build here?` in an empty folder), `Find something in this code worth fixing and show me.` (`Summarise what is in this folder.` with no code), and `Add a --verbose flag and run the tests.` when a manifest declares a command-line entry and a test command is found (`Make one small improvement and run the tests.` with tests only, `Make one small improvement and show me the change.` without tests). Tab in an empty composer puts the next prompt in the composer, unsent; a click on a prompt does the same.
+3. On the first run only: what GoodVibes asks before, for the permission mode in force (for example `GoodVibes asks before it runs commands or changes things outside this folder.`), that Shift+Tab changes how often it asks, and the command that opens the remaining setup.
+
+A part that does not fit in the free rows is left out whole (the logo always keeps its place); on an 80x24 terminal the terminal app has no free rows under its splash, so nothing is added there. Nothing of first run is written into the conversation.
+
+Esc on step 1 ("set up later") marks nothing and writes nothing; the conversation then says `Not set up yet.  Choose a model with /model, or run /onboarding.` and shows no starting prompts. The next start opens first run again.
+
+`/onboarding` opens the full setup screens at any time in the terminal app (below), and `goodvibes onboarding` (or `goodvibes setup`) starts the terminal app with them open. In the Agent, `/setup` and the workspace key open its setup pages.
 
 The first time GoodVibes wants to write or run something in a folder, it asks whether to trust that folder. Trust levels are covered in the permissions part of this file.
 
@@ -1760,7 +1774,7 @@ The wizard fills the screen. On a wide terminal the list of screens is on the le
 | `1` to `9` | Jump to that screen number. |
 | Esc | Close the wizard. |
 
-Every screen except the last ends with a **Next section** row. Nothing is saved until **Apply settings and verify** on the last screen. The position and choices are saved on every screen change, so a wizard closed with Esc reopens where it was the next time `goodvibes` starts (after the first-run marker exists). Masked values (passwords, keys, codes) are never saved with that progress.
+Every screen except the last ends with a **Next section** row. Nothing is saved until **Apply settings and verify** on the last screen; a wizard closed with Esc keeps nothing of what was chosen in it.
 
 While the wizard loads current settings it shows **Loading current settings**, with every field locked. If loading fails it shows **Current settings unavailable** with the reason; press Enter to try again or Esc to close.
 
@@ -1858,7 +1872,7 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 | One masked key field per provider that accepts an API key | A key typed here is stored in the secret store (in the daemon's tier, so every program uses it) and the provider becomes usable at once. |
 | Start OpenAI subscription sign-in (Restart when pending) | Opens the ChatGPT subscription sign-in in the browser and records a pending sign-in. Subscription sign-ins are kept in `~/.goodvibes/shared/subscriptions.json`, which the daemon, the terminal app and the Agent all read, so a sign-in made here also serves the Agent (on a checkout installation the Agent's tree differs, so it does not). |
 | OpenAI authorization URL | Shown while pending, for when the browser did not open. |
-| OpenAI callback code or URL | Paste the code or the redirected URL after signing in. Hidden and never saved with wizard progress. |
+| OpenAI callback code or URL | Paste the code or the redirected URL after signing in. Hidden. |
 | Finish OpenAI subscription sign-in | Completes the sign-in with that code. |
 | Confirm provider access review | Acknowledgement, required when reopening over existing state that needs review. |
 
@@ -1901,7 +1915,7 @@ While any screen has a required field missing, a value the wizard refuses (a con
 
 ### The Agent's first run
 
-The first time `goodvibes-agent` starts for a user (no setup completion marker), it opens the **Agent workspace** on its setup pages instead of a wizard. `goodvibes-agent setup` (or `goodvibes-agent onboarding`) opens the same, and `/agent` or `/setup` inside the Agent reopens it.
+The Agent's first start runs the same three-step first run as the terminal app (above). Its setup pages live in the **Agent workspace**: `goodvibes-agent setup` (or `goodvibes-agent onboarding`) starts the Agent with them open, and `/agent`, `/setup` or the workspace key opens them inside the Agent.
 
 Keys: Up and Down move, Left and Right switch between the page list and the page, Enter opens a row, `/` searches, Ctrl+] goes to the next area, Ctrl+R checks the daemon again, Esc closes, and typing a letter closes the workspace with that letter in the message box.
 

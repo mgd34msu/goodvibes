@@ -545,7 +545,7 @@ async function resolveConfiguredSecret(
   return resolveSecretInput(value, {
     resolveLocalSecret: deps.secretsManager ? (key) => deps.secretsManager!.get(key) : undefined,
     homeDirectory: deps.secretsManager?.getGlobalHome?.() ?? undefined,
-  });
+  }, 'dispatch');
 }
 
 function action(

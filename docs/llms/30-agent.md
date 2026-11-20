@@ -298,7 +298,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `/status` | The current model and its context window with where the window came from, and the worktrees the start-up pass removed or kept. |
 | `/services` | `list` and `trust <name> --yes` only. |
 | `/tasks` | Read only: `list`, `show`, `output`. |
-| `/workstream` | No `start`; work is started with `/work` or `/workplan submit-file`. |
+| `/workstream` | `start` is refused: work is started by planning it (`/workstream plan`, `approve`, `launch`), by asking for it in a message, or with `/work submit-file`. |
 | `/welcome`, `/setup` | Open the Agent workspace. |
 | `/channel-profiles` | Accepts `plan` as a permission mode, as well as `ask-me`, `jev-decides`, `just-vibes` and `yolo`. |
 | `/auth` | `review`, `show <provider>`, `repair <provider>`, `bundle export <path>`, `bundle inspect <path>` only; no daemon sign-in or local users. |
@@ -309,7 +309,7 @@ On top of the files under "Project instructions", the Agent applies:
 
 Some shared commands are not on the Agent's first screen (the bare `/` list and `/help`'s list leave them out; they are found as soon as their name is typed, run when typed, and `/commands` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/setup`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/skills`, `/routines`, `/channels`, `/delegate`, `/media`.
 
-Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, `/onboarding` for `/setup` and `/memory`, is not listed): `/agents`, `/bootstrap`, `/branch`, `/bridge`, `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/handoff`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/memory-review`, `/memory-sync`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-memory`, `/project-plan`, `/provider-opt`, `/queue`, `/recall`, `/relay`, `/release`, `/remote`, `/remote-env`, `/remote-setup`, `/replay`, `/resume`, `/review`, `/rewind`, `/runner-pool`, `/sandbox`, `/scan`, `/search`, `/session-memory`, `/settings-sync`, `/share`, `/team-memory`, `/teamwork`, `/teleport`, `/template`, `/test`, `/tool`, `/tools`, `/tunnel`, `/usage`, `/work-plan`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/memory` for `/recall`, `/network-scan` for `/scan`, `/workplan` for `/work-plan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
+Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, `/onboarding` for `/setup` and `/memory`, is not listed): `/agents`, `/bootstrap`, `/branch`, `/bridge`, `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/fork`, `/git`, `/graph`, `/guidance`, `/handoff`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/memory-review`, `/memory-sync`, `/merge`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-memory`, `/project-plan`, `/provider-opt`, `/queue`, `/recall`, `/relay`, `/release`, `/remote`, `/remote-env`, `/remote-setup`, `/replay`, `/resume`, `/review`, `/rewind`, `/runner-pool`, `/sandbox`, `/scan`, `/search`, `/session-memory`, `/settings-sync`, `/share`, `/team-memory`, `/teamwork`, `/teleport`, `/template`, `/test`, `/tool`, `/tools`, `/tunnel`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/memory` for `/recall`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `/sessions` for `/resume`, `goodvibes-agent relay` for `/relay`.
 
 ## The Agent's command line
 
@@ -641,7 +641,7 @@ The workspace has these 26 categories, in this order, in seven groups; there are
 | OPERATIONS | `automation` | Automation | 23 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
 | FINISH | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
-During first-run setup the workspace shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` later shows all 26.
+Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
 `/agent <category>` opens a category by its id or label.
 
 `/notes` (alias `/scratchpad`) opens Notes. `/agent-profile` (aliases `/runtime-profile`, `/agent-profiles`) manages profiles from inside the Agent with the same verbs as `goodvibes-agent profiles` (`list`, `show`, `default`, `use`, `templates`, `guide`, `template show|export|import|from-discovered`, `create`, `create-from-discovered`, `delete`).
@@ -663,9 +663,9 @@ Bare `/work` (optionally naming a project) shows native work, intent, attention,
 `/work intake-status|intake-retry|intake-resume|intake-cancel` inspect or move forward a captured conversation input (the same as the `run --intake-*` flags). A message whose intake did not answer (it may have been recorded) is not counted as sent and is not sent again on its own: the Agent says `Your message may have been sent`, keeps the text in the composer (a message from the phone or a plan is kept aside instead of being retried every few seconds), and `/work intake-status` tells whether it arrived before it is sent again.
 `/work start|status|cancel|resume <work-id>` acts on one native attempt.
 
-`/workplan` is the Agent's local to-do list (the model's `agent_work_plan` tool keeps the same list); it records items and their status and runs nothing.
-`/workplan show|markdown|add <title> [--owner <label>] [--source <label>] [--notes <text>] | pending|start|blocked|done|failed|cancelled <id> | remove <id> --yes | clear-completed --yes | submit-file <JSON-path> | submission-status | submission-retry | submission-discard` manages local todos.
-Local todos are not native work: `/workplan add Book the venue` prints `Created local todo <id>: Book the venue. Plan: ... No native work was submitted or executed.`, and `/workplan done <id>` notes `Local done is not native verified completion.`
+`/todo` is the project's to-do list, the same command and the same list as in the terminal app (the model's `agent_work_plan` tool keeps the same list); it records items and their state and runs nothing.
+Its actions are `list`, `markdown`, `export`, `add <title> [--owner ...] [--notes ...] [--source ...]`, `edit <item> <title>`, `mark <item> <state>`, `next <item>`, `remove <item>` and `clear-done` (the last two ask first); `open` (the panel) is the terminal app's only and is refused here.
+Changes are the owner's own: a model running a `/todo` change is refused. Items are not native work: submit native work with `/work submit-file <JSON-path>`.
 
 `/work-import preview|status|submit <project-id> | reconsider|recover|cancel|restart <project-id> [request-id]` imports legacy planning records into the native work ledger, with safe retry of a lost request.
 
@@ -708,7 +708,7 @@ Local todos are not native work: `/workplan add Book the venue` prints `Created 
 `/calendar add --title "Dentist" --start 2026-12-03T15:00` adds a local event; `/calendar delete <id>` without `--yes` prints `Usage: /calendar delete <id> --yes`.
 
 `/owner-profile` reads and corrects the owner profile (see `goodvibes-agent owner-profile`).
-`/payments address <billing|shipping>` stores an address for purchases, besides the card and approval forms described in the terminal-app part.
+`/payments address` writes the address to the connected host's settings; the actions of `/payments` are the same as the terminal app's.
 
 ### Channels and delivery
 

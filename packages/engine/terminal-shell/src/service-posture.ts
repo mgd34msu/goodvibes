@@ -211,11 +211,33 @@ export async function readServiceEndpoints(
   return endpoints;
 }
 
-export function serviceEndpointIssues(endpoints: readonly CliServiceEndpointPosture[], probe: boolean | undefined): string[] {
-  const issues: string[] = [];
+/**
+ * One service finding as every report states it: what is wrong (summary), why,
+ * what it costs, and the one command that fixes it. `status`, `doctor` and
+ * `service status` in both terminal apps print these records as they are, so a
+ * finding has one wording and one remedy wherever it shows.
+ */
+export interface ServiceFinding {
+  readonly id: string;
+  readonly summary: string;
+  readonly cause: string;
+  readonly impact: string;
+  readonly action: string;
+}
+
+/** The endpoint findings: one that is on but does not answer, and two configured onto one address. */
+export function serviceEndpointFindings(endpoints: readonly CliServiceEndpointPosture[], probe: boolean | undefined): ServiceFinding[] {
+  const findings: ServiceFinding[] = [];
   for (const endpoint of endpoints) {
-    if (endpoint.enabled && probe && endpoint.reachable === false)
-      issues.push(`${endpoint.label} is enabled but not reachable on ${endpoint.binding.host}:${endpoint.binding.port}.`);
+    if (endpoint.enabled && probe && endpoint.reachable === false) {
+      findings.push({
+        id: `endpoint-unreachable-${endpoint.id}`,
+        summary: `${endpoint.label} is enabled but not reachable on ${endpoint.binding.host}:${endpoint.binding.port}.`,
+        cause: 'Nothing answered on that address when it was tried: the daemon is not running, or it could not bind the address.',
+        impact: `Programs that connect to the ${endpoint.label} cannot reach it.`,
+        action: 'Start the daemon: goodvibes-daemon start-service (its log says why a bind failed: goodvibes-daemon service-status)',
+      });
+    }
   }
   const enabled = endpoints.filter((endpoint) => endpoint.enabled);
   for (const [index, left] of enabled.entries()) {
@@ -225,11 +247,31 @@ export function serviceEndpointIssues(endpoints: readonly CliServiceEndpointPost
       const a = left.binding,
         b = right.binding;
       if (a.port === b.port && (a.host === b.host || a.host === '0.0.0.0' || b.host === '0.0.0.0' || a.host === '::' || b.host === '::')) {
-        issues.push(
-          `${left.label} and ${right.label} are configured to bind the same host/port envelope (${a.host}:${a.port}, ${b.host}:${b.port}).`,
-        );
+        findings.push({
+          id: `endpoint-conflict-${left.id}-${right.id}`,
+          summary: `${left.label} and ${right.label} are configured to bind the same host/port envelope (${a.host}:${a.port}, ${b.host}:${b.port}).`,
+          cause: 'Two endpoints are set to the same port on overlapping addresses.',
+          impact: 'Only one of them can start; the other fails to bind.',
+          action: `Give one of them another port: goodvibes-daemon config set ${right.id}.port <port>`,
+        });
       }
     }
   }
-  return issues;
+  return findings;
+}
+
+/** The finding for a service log that exists but cannot be read. */
+export function serviceLogUnreadableFinding(readError: string): ServiceFinding {
+  return {
+    id: 'service-log-unreadable',
+    summary: `Service log exists but could not be read: ${readError}`,
+    cause: 'The daemon service log exists but this user cannot read it.',
+    impact: 'A failed start cannot be diagnosed from the log.',
+    action: 'Check the file\'s owner and mode with ls -l on the path named above.',
+  };
+}
+
+/** The endpoint findings' summaries, for a report that lists them as lines. */
+export function serviceEndpointIssues(endpoints: readonly CliServiceEndpointPosture[], probe: boolean | undefined): string[] {
+  return serviceEndpointFindings(endpoints, probe).map((finding) => finding.summary);
 }

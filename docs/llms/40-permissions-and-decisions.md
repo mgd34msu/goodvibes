@@ -896,7 +896,7 @@ A setting that holds a credential (channel tokens, `surfaces.email.password`, `c
 Set surfaces.slack.botToken: stored in the daemon secret tier as GOODVIBES_SURFACES_SLACK_BOT_TOKEN (value hidden).
 ```
 
-A plain value in a settings file for such a key is refused with the command that stores it. Card numbers and card security codes are never settings: they go to the daemon's card store through `/payments card` or the web UI.
+A plain value in a settings file for such a key is refused with the command that stores it. Card numbers and card security codes are never settings: they go to the daemon's card store through `/payments add-card` or the web UI.
 
 ## Headless runs and permissions
 

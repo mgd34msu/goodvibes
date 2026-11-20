@@ -210,7 +210,7 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
           if (!isGoodVibesSecretRefInput(reference)) throw commandRefusal(`${reference} is not a secret reference.`, '"See where secrets can come from" shows the reference forms.');
           try {
             const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => storeOf(ctx).get(key) });
-            return `${describeSecretRef(reference)}: ${result.value ? 'gives a value (not shown)' : 'gives nothing'}.`;
+            return `${describeSecretRef(reference)}: ${result.value !== null && !result.value.empty ? 'gives a value (not shown)' : 'gives nothing'}.`;
           } catch (error) {
             throw commandRefusal(`${describeSecretRef(reference)} could not be read: ${summarizeError(error)}`);
           }

@@ -2793,6 +2793,11 @@
       "types": "./terminal-shell/dist/payment-window-command.d.ts",
       "import": "./terminal-shell/dist/payment-window-command.js"
     },
+    "./terminal-shell/payments-command": {
+      "bun": "./terminal-shell/src/payments-command.ts",
+      "types": "./terminal-shell/dist/payments-command.d.ts",
+      "import": "./terminal-shell/dist/payments-command.js"
+    },
     "./terminal-shell/trigger-supervisor-command": {
       "bun": "./terminal-shell/src/trigger-supervisor-command.ts",
       "types": "./terminal-shell/dist/trigger-supervisor-command.d.ts",

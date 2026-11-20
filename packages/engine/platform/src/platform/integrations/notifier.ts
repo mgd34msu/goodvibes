@@ -287,7 +287,7 @@ export class Notifier implements NotificationDeadLetterSource {
   ): Promise<Notifier> {
     const resolveConfigSecret = options.resolveConfigSecret ?? ((value: unknown) => resolveSecretInput(value, options.secretsManager
       ? { resolveLocalSecret: (key) => options.secretsManager!.get(key), homeDirectory: options.secretsManager.getGlobalHome() }
-      : undefined));
+      : undefined, 'dispatch'));
     const configManager = options.configManager ?? null;
     const resolveChannels = (): Promise<NotifierChannelSetup> => resolveNotifierChannels(serviceRegistry, configManager, resolveConfigSecret);
     const notifier = new Notifier({

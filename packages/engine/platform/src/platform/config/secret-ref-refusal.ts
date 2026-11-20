@@ -1,3 +1,4 @@
+import { revealOrNull, type RevealPurpose } from '../security/secret.js';
 import { logger } from '../utils/logger.js';
 import { normalizeSecretRef, resolveSecretRef, describeSecretRef } from './secret-refs.js';
 import type { SecretRefResolutionOptions } from './secret-refs.js';
@@ -127,14 +128,21 @@ export function acceptRefShapedLiteral(
   return true;
 }
 
+/**
+ * A setting that is a secret reference (or a literal), resolved and revealed
+ * for `purpose`, the sink the caller sends it to: the one way a resolved
+ * reference's text leaves, so every caller names where it goes.
+ */
 export async function resolveSecretInput(
   input: unknown,
-  options: SecretRefResolutionOptions = {},
+  options: SecretRefResolutionOptions | undefined,
+  purpose: RevealPurpose,
 ): Promise<string | null> {
+  options ??= {};
   const ref = normalizeSecretRef(input);
   if (ref) {
     try {
-      return (await resolveSecretRef(ref, options)).value;
+      return revealOrNull((await resolveSecretRef(ref, options)).value, purpose);
     } catch (error) {
       logger.warn('Secret reference resolution failed', {
         source: ref.source,

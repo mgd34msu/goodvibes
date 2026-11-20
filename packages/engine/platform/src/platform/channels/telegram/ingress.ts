@@ -1475,7 +1475,7 @@ export class TelegramIngressSupervisor {
     const resolved = await resolveSecretInput(value, {
       resolveLocalSecret: (key) => this.deps.secretsManager.get(key),
       homeDirectory: this.deps.secretsManager.getGlobalHome?.() ?? undefined,
-    });
+    }, 'dispatch');
     return resolved ?? '';
   }
 

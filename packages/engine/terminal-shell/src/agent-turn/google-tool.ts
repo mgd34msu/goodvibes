@@ -4,7 +4,7 @@ import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/arti
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
-import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection } from './connected-host-client.js';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection, type HostCallApplied } from './connected-host-client.js';
 import { readString } from './tool-args.js';
 /**
  * The `google` tool: Gmail and the owner's calendar.
@@ -120,7 +120,8 @@ type CalendarCreateOutput = OperatorMethodOutput<'calendar.events.create'>;
 /** A refusal or failure the calendar host answered, and whether the call took effect. */
 export interface GoogleCalendarHostFailure {
   readonly message: string;
-  readonly applied: 'no' | 'unknown' | 'yes';
+  /** As the connected host reports it (`HostCallApplied`): `answered` is a success whose answer could not be read. */
+  readonly applied: HostCallApplied;
 }
 
 /**

@@ -95,7 +95,7 @@ export async function readSurfaceSecret(
     const resolved = await channelCredentials.resolve(`config:${key}`, raw, () => resolveSecretInput(raw, {
       ...(secrets ? { resolveLocalSecret: (name: string) => secrets.get(name) } : {}),
       homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
-    }), secrets);
+    }, 'dispatch'), secrets);
     if (resolved) return { value: resolved, declared: true, source: 'config' };
   }
   for (const name of target.envKeys ?? []) {

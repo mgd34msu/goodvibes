@@ -34,7 +34,9 @@
  * reason shortens (`decision model unreachable` → `unreachable`), the
  * background summary (unless it holds focus), the model, the mode's reason
  * goes, the notices, the mode's keycap. The mode's words, `asking you for
- * now`, the kept chips and the esc hint always stay.
+ * now`, the kept chips and the esc hint always stay. A segment given up
+ * before a later step freed the room comes back when it fits (the model, then
+ * the context, the branch, the cost, the menu keycap).
  */
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 import { getDisplayWidth, truncateDisplay } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -378,6 +380,25 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         if (fits())
             break;
         step();
+    }
+    // A later step can free more room than an earlier drop needed (the reason
+    // going): give the dropped segments back, most important first, until one does not fit.
+    const restores: Array<[() => boolean, () => void, () => void]> = [
+        [() => model !== null && !plan.model, () => { plan.model = true; }, () => { plan.model = false; }],
+        [() => ctx !== null && !plan.context, () => { plan.context = true; }, () => { plan.context = false; }],
+        [() => branch !== null && !plan.branch, () => { plan.branch = true; }, () => { plan.branch = false; }],
+        [() => cost !== null && !plan.cost, () => { plan.cost = true; }, () => { plan.cost = false; }],
+        [() => !plan.menu, () => { plan.menu = true; }, () => { plan.menu = false; }],
+    ];
+    for (const [dropped, restore, undo] of restores) {
+        if (!dropped())
+            continue;
+        restore();
+        if (fits())
+            continue;
+        // A less important segment never takes room a more important one could not have.
+        undo();
+        break;
     }
     // Paint the right side first, right to left, so the left side knows where it must stop.
     let rx = rightEdge;

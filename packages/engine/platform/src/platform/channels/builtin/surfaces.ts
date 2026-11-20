@@ -62,5 +62,5 @@ export async function resolveBuiltinConfigSecret(
   return resolveSecretInput(value, {
     resolveLocalSecret: (key) => deps.secretsManager.get(key),
     homeDirectory: deps.secretsManager.getGlobalHome?.() ?? undefined,
-  });
+  }, 'dispatch');
 }

@@ -119,7 +119,7 @@ export async function resolveSecretRef(
     const value = await resolveSecretInput(ref, {
       resolveLocalSecret: async (key) => await ctx.secretsManager?.get(key) ?? null,
       homeDirectory: ctx.secretsManager?.getGlobalHome(),
-    });
+    }, 'dispatch');
     return value ? { value, source: 'config-ref' } : { value: null, source: 'missing' };
   } catch (err) {
     logger.warn('resolveSecretRef: failed to resolve secret reference', { ref, error: summarizeError(err) });

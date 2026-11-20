@@ -347,7 +347,7 @@ async function resolveSlackConfigSecret(
   context: SurfaceAdapterContext,
   key: 'surfaces.slack.botToken' | 'surfaces.slack.signingSecret',
 ): Promise<string | null> {
-  return resolveSecretInput(context.configManager.get(key), slackSecretRefOptions(context));
+  return resolveSecretInput(context.configManager.get(key), slackSecretRefOptions(context), 'dispatch');
 }
 
 function slackSecretRefOptions(context: SurfaceAdapterContext): SecretRefResolutionOptions {

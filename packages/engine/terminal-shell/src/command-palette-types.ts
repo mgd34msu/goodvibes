@@ -3,24 +3,30 @@
  * share (kept apart so the renderer never imports the modal it draws).
  */
 
-export type PaletteGroup = 'Suggested' | 'Session' | 'Views' | 'Settings' | 'Commands';
+export type PaletteGroup = 'Suggested' | 'Session' | 'Views' | 'Settings' | 'Commands' | 'Keyboard shortcuts';
 
 export interface PaletteEntry {
-  /** The command's primary name. */
+  /** A command row: the command's primary name. A shortcut row: `key:<n>`, never run. */
   readonly id: string;
-  /** Human title for the row. */
+  /** A command to run, or a keyboard shortcut to read. */
+  readonly kind: 'command' | 'shortcut';
+  /** Human title for the row: the command's plain title, or what the key does. */
   readonly title: string;
+  /** One sentence: what the command is for (the detail pane, and the narrow screen's line under the list). */
+  readonly summary: string;
   readonly description: string;
   readonly category: string;
   readonly group: Exclude<PaletteGroup, 'Suggested'>;
   readonly aliases: readonly string[];
   /** Extra search words (former view names and the like). */
   readonly keywords: readonly string[];
+  /** What the command can do, by its actions' labels (a described command); empty otherwise. */
+  readonly actions: readonly string[];
   readonly argsHint?: string;
   /** True when the command has required arguments: Enter fills the composer. */
   readonly needsArgs: boolean;
-  /** Right column; defaults to the slash command. */
-  readonly right?: string;
+  /** Right column: the slash command, or a shortcut's key. */
+  readonly right: string;
 }
 
 export type PaletteRunMode = 'run' | 'fill';

@@ -1057,8 +1057,8 @@ The daemon can buy things for the owner with a stored card, inside budgets the o
 Purchases are off, and every budget is `0`. With the defaults, a checkout that adds any tax, fee or paid delivery is refused outright (the daily overage budget of 0 cannot cover it), and one that adds nothing asks you first (the daily item budget and the per-purchase ceiling of 0 send every purchase to you). Set the amounts below before the first purchase.
 
 1. Turn purchases on: `/config set payments.enabled true`.
-2. Add a card (masked entry, sent to the daemon after the last field): `/payments card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments card remove <id> confirm`) and add it again. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
-3. Set the addresses. In the Agent: `/payments address billing` and `/payments address shipping`. In the terminal app: the settings workspace (`/settings payments.shippingAddress`) or `/config set payments.shippingAddress.line1 "1 Main St"` and the other fields (`name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`).
+2. Add a card (each field hidden, sent to the daemon after the last field): `/payments add-card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments remove-card <card>`) and add it again. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
+3. Set the addresses: `/payments address` in either program (it asks which, then the fields: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`), or the settings workspace (`/settings payments.shippingAddress`).
 4. Set the currency and budgets:
 
    ```text
@@ -1071,49 +1071,52 @@ Purchases are off, and every budget is `0`. With the defaults, a checkout that a
 
    Amounts are written as you would say them (`19.99`). The day resets at midnight in `daemon.timezone` (UTC when empty). Every hold and spend records its currency: changing `payments.currency` starts new daily pools in the new currency for the rest of the day, and `payments.budget.status` lists what was spent earlier that day in the old currency (`earlierSpend`), in that currency, never converted.
 5. Say where approval and veto prompts also go: `/config set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (`/questions`, the web UI) whatever this says.
-6. Check: `/payments status`.
+6. Check: `/payments cards`.
 
 ### `/payments`
 
+`/payments` alone opens its list of actions (in a script or for a model it prints the cards, as "See your cards" does). Each action is also a typed line; a line with something missing opens the step that asks for it.
+
+| Action | Line | Risk |
+| --- | --- | --- |
+| See your cards | `/payments cards` (the cards on the daemon and the addresses purchases use) | |
+| See what is waiting for your answer | `/payments pending` (answer a purchase window, stop a checkout, type a security code) | |
+| Approve one purchase ahead of time | `/payments approve <shop> --most <amount> <item...>` | spends money |
+| Allow a repeat purchase | `/payments repeat --shop <shop> [--shop <shop>]... --item <item> --each <amount> --per-period <amount> [--days 7\|30\|90\|365] [--until YYYY-MM-DD]` | spends money |
+| See repeat purchases you have allowed | `/payments repeats` | |
+| Stop a repeat purchase | `/payments stop-repeat <repeat purchase>` (picked from the ones you allowed) | |
+| Add a card | `/payments add-card` (asks each field, hidden) | |
+| Remove a card | `/payments remove-card <card>` (picked from the daemon's cards) | cannot be undone |
+| Set your billing or shipping address | `/payments address <billing\|shipping> [--name ...] [--line1 ...] [--line2 ...] [--city ...] [--region ...] [--postal-code ...] [--country ...]` (blank keeps what is set) | |
+
+Every action is the owner's own: a line a model runs is refused, naming the action. Each needs a paired owner credential with the `read:payments` and `write:payments` scopes. An action marked "spends money" or "cannot be undone" asks first, with the sentence that says what it does. `/payments address` in the terminal app writes this machine's settings; in the Agent it writes the connected host's settings.
+
+`/payments approve <shop> --most <amount> <item...>`: the shop's domain, the most it may cost (in `payments.currency`), and the item in your words. The approval is used once, for a purchase matching all three that begins within five minutes; such a purchase needs no further answer up to that amount. Approving the same shop, item and amount again while the first approval is unused returns that approval rather than making a second. When recording an approval cannot be confirmed, the answer is `OUTCOME_UNKNOWN` ("The approval may have been recorded ..."), and the web UI says it may have been approved instead of "Nothing was approved". The approval is for that amount in the currency `payments.currency` named when it was given (the reply names it): a begin after `payments.currency` changed is a different purchase, does not spend it, and with `payments.confirmEveryPurchase` on is refused saying the merchant, item, amount or currency differs.
+
 ```text
-/payments status
-/payments card
-/payments card remove <id> confirm
-/payments address <billing|shipping>          (Agent only)
-/payments pending                             answer open purchase windows and security-code requests
-/payments approve <merchant> <item> <maximum> approve a purchase in advance
-/payments standing list
-/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]
-/payments standing remove <id>
+/payments approve shop.example --most 25.00 USB-C cable
+Approved ahead of time: "USB-C cable" from shop.example, at most 25.00.
+It ends 11/18/2026, 10:20:00 AM; the amount is in USD.
 ```
 
-Only the owner typing at the terminal can run `approve` and `standing`; both need a paired owner credential with the `read:payments` and `write:payments` scopes and show a picker to confirm. A surface without a picker refuses them and points to the terminal app or the web UI Purchases panel.
+"Allow a repeat purchase" lets a scheduled routine or trigger buy one thing without asking, within limits. Its blanks:
 
-`/payments approve <merchant> <item> <maximum>`: the first word is the shop's domain, the last word is the most it may cost (in `payments.currency`), and every word between is the item. The approval is used once, for a purchase matching all three that begins within five minutes; such a purchase needs no further answer up to that amount. Approving the same merchant, item and amount again while the first approval is unused returns that approval rather than making a second. When recording an approval cannot be confirmed, the answer is `OUTCOME_UNKNOWN` ("The approval may have been recorded ..."), and the web UI says it may have been approved instead of "Nothing was approved". The approval is for that amount in the currency `payments.currency` named when it was given (the reply names it): a begin after `payments.currency` changed is a different purchase, does not spend it, and with `payments.confirmEveryPurchase` on is refused saying the merchant, item, amount or currency differs.
+| Blank | Option | Rule |
+| --- | --- | --- |
+| Shop | `--shop` (again for each further shop) | 1 to 8 shop domains, each with a dot; picked from the shops you have bought from, or typed. |
+| What may be bought | `--item` | Your words, 1 to 200 characters. |
+| Most per purchase | `--each` | Above zero. |
+| Most in any period | `--per-period` | At least the per-purchase amount. |
+| Period | `--days` | 7, 30 (the usual), 90 or 365 days; typed, any whole number 1 to 366. |
+| Last day | `--until` | Optional, `YYYY-MM-DD`. Without it the authorisation lasts until you stop it. |
 
-```text
-/payments approve shop.example USB-C cable 25.00
-[payments] Approved in advance: USB-C cable from shop.example, at most 25.00, until 11/18/2026, 10:20:00 AM.
-```
-
-`/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]` lets a scheduled routine or trigger buy one thing without asking, within limits:
-
-| Argument | Rule |
-| --- | --- |
-| `<shops>` | The first word: 1 to 8 shop domains, comma separated, no spaces (each must contain a dot). |
-| `<item>` | Every word between the shops and the three numbers: your words for what may be bought, 1 to 200 characters. |
-| `<per-purchase>` | The most one purchase may cost, above zero. |
-| `<per-period>` | The most all purchases under it may cost in one period; at least the per-purchase amount. |
-| `<days>` | The period length, a whole number 1 to 366 (a trailing `d`, `day` or `days` is accepted, for example `30d`). |
-| `<last day>` | Optional, last; `YYYY-MM-DD`. Without it the authorisation lasts until removed. |
-
-At most 32 standing authorisations are kept.
+At most 32 repeat purchases are kept.
 
 ```text
-/payments standing add shop.example,pets.example dog food 60.00 120.00 30 2027-06-30
-[payments] Added standing-1a2b3c4d: ... A scheduled run names it as standingId; every other purchase limit still applies.
-/payments standing list
-/payments standing remove standing-1a2b3c4d
+/payments repeat --shop shop.example --shop pets.example --item "dog food" --each 60.00 --per-period 120.00 --days 30 --until 2027-06-30
+Allowed: "dog food" from shop.example, pets.example. Stop it any time: Stop a repeat purchase.
+/payments repeats
+/payments stop-repeat standing-1a2b3c4d
 ```
 
 The example lets a scheduled run buy "dog food" from either shop, at most 60.00 a purchase and 120.00 every 30 days, until 30 June 2027. A routine's purchase names the authorisation as `standingId` when it calls `payments.checkout.begin`. Every budget, ceiling and purchase window still applies to each purchase under it. A refusal names the field and ends with `Nothing was added.`, for example `maxPerPeriod must be one amount in USD, at least the per-purchase maximum.`
@@ -1314,7 +1317,7 @@ Some settings hold a whole list. Each is read and written as one JSON value; a m
 | `worktree.setup.commands` | Commands run in a new worktree before an isolated agent starts in it. `[]` (auto, the default) runs the install command each lockfile names; `{"mode":"none"}` runs nothing. | `["bun install"]` |
 | `worktree.setup.carryOverGlobs` | Untracked files copied from the main checkout into a new worktree. `[]` (auto) copies `.env` and `.env.*`; `{"mode":"none"}` copies nothing. | `[".env","config/*.local.json"]` |
 
-These are settings only; "lists" in this section means these list-valued settings. GoodVibes has no shopping-list feature. Both apps have a to-do list. The Agent has a local, non-executing to-do list: `/workplan` (`show`, `markdown`, `add <title> [--owner <label>] [--source <label>] [--notes <text>]`, `pending|start|blocked|done|failed|cancelled <id>`, `remove <id> --yes`, `clear-completed --yes`), and its model reads and changes the same list with the `agent_work_plan` tool. The terminal app has a workspace-scoped work plan: `/work-plan` (aliases `/wp`, `/todo`, `/workplan`), and its model uses the `work_plan` tool. Both are described in full in "The terminal app (`goodvibes`)" and "The Agent (`goodvibes-agent`)".
+These are settings only; "lists" in this section means these list-valued settings. GoodVibes has no shopping-list feature. Both apps have the same to-do list, the project's work plan, kept with `/todo` (`list`, `markdown`, `export`, `add <title>`, `edit <item> <title>`, `mark <item> <state>`, `next <item>`, `remove <item>`, `clear-done`; `/todo` alone opens these as a list to choose from). The Agent's model reads and changes it with the `agent_work_plan` tool, the terminal app's with the `work_plan` tool. Both are described in full in "The terminal app (`goodvibes`)" and "The Agent (`goodvibes-agent`)".
 
 How to edit one, from each surface:
 

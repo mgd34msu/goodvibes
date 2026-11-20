@@ -64,7 +64,7 @@ export async function resolveNotificationWebhook(entry: string, secrets: Pick<Se
     diagnosticMode: 'structural',
     resolveLocalSecret: (key) => secrets.get(key),
     homeDirectory: secrets.getGlobalHome(),
-  });
+  }, 'dispatch');
 }
 
 /**

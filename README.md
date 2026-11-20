@@ -122,7 +122,7 @@ goodvibes
   The assistant keeps its own store: `goodvibes-agent search "release checklist"`.
   ([knowledge](products/tui/docs/knowledge-artifacts-and-multimodal.md))
 - **Buy something within limits.** Purchases are off until you set
-  `payments.enabled`. Add a card with `/payments card`, then set your limits:
+  `payments.enabled`. Add a card with `/payments add-card`, then set your limits:
   a daily budget for item prices (`payments.budget.dailyItem`), a ceiling per
   purchase (`payments.budget.perPurchaseCeiling`) and a daily allowance for
   tax, fees and delivery (`payments.budget.dailyOverage`). All three start at

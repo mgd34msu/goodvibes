@@ -101,10 +101,11 @@ window reference; changing the connection requires reopening it. Escape closes
 the local view. An answer already sent may still complete on the host.
 
 This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments card` asks for the card through masked input and
-sends it to the selected daemon in one `payments.cards.create` request;
-`/payments address billing|shipping` configures addresses, and `/payments status`
-lists the cards the daemon holds (never the number, CVV or name) and the addresses.
+`write:payments`. `/payments` opens its list of actions. "Add a card" asks for
+the card field by field, each hidden, and sends it to the selected daemon in one
+`payments.cards.create` request; "Set your billing or shipping address" writes
+the addresses, and "See your cards" (`/payments cards`) lists the cards the
+daemon holds (never the number, CVV or name) and the addresses.
 
 ### Native work controls (local Jev implementation)
 

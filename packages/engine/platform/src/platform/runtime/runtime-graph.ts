@@ -328,7 +328,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     storePath: resolveStatePath('watchers.json'),
     featureFlags,
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')),
-    resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
+    resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }, 'dispatch'),
     privateDeliveryHosts,
   });
   scope.ownUntilRegistered('watcher registry', () => watcherRegistry.dispose());
@@ -551,7 +551,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     workingDirectory,
     homeDirectory,
     credentials: {
-      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
+      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }, 'dispatch'),
     },
     logger,
     isPairedPeer: (peerId) => distributedRuntime.getPeer(peerId) !== null,

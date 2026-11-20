@@ -63,7 +63,7 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     changeTracker: services.sessionChangeTracker,
     // state mode=memory reads and writes the one memory store, through the connected host while it serves memory.
     memoryAccess: services.memorySpine,
-    // The model keeps the same work plan /work-plan shows.
+    // The model keeps the same work plan /todo shows.
     workPlan: services.workPlan,
     // Register context_accounting against OUR holder (the Orchestrator-backed source bootstrap.ts binds with bindSessionContextAccounting).
     contextAccountingHolder: services.contextAccountingHolder,

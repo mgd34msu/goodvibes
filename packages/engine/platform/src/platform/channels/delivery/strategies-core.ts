@@ -105,7 +105,7 @@ export function createWebhookDeliveryStrategy(
           diagnosticMode: 'structural',
           resolveLocalSecret: (key) => secretsManager.get(key),
           homeDirectory: secretsManager.getGlobalHome?.() ?? undefined,
-        })
+        }, 'dispatch')
         ?? '';
       if (!address) throw new Error('Missing webhook delivery target');
       const outsideAddress = boundUrls.includes(address);

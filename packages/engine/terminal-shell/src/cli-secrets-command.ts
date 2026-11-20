@@ -61,7 +61,7 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
         return usageError(`Usage: ${policy.binary(runtime)} secrets test goodvibes://secrets/<source>/...`);
       }
       const resolved = await resolveSecretRef(ref, { resolveLocalSecret: (key) => secrets.get(key) });
-      const value = { ref: describeSecretRef(ref), resolved: Boolean(resolved.value) };
+      const value = { ref: describeSecretRef(ref), resolved: resolved.value !== null && !resolved.value.empty };
       // A ref that does not resolve is a failed test, in text and in JSON alike.
       return { ...ok(formatJsonOrText(runtime.cli)(
         value,

@@ -54,7 +54,7 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 | `/project-plan history` | Inspect saved historical planning records without evaluating or starting an interview |
 | `/project-plan <goal>` | Submit the exact original terminal request through native conversation intake |
 | `/project-plan list` and `/project-plan show <id>` | Show the project work plan, which is the active plan: its open items reach the model once per request turn, and a contract unit that passes marks its agents' items done |
-| `/project-plan dismiss` | Changes nothing: the active plan is the project work plan. It names `/work-plan clear-done`, `/work-plan cancel <id>` and `/work-plan remove <id>` |
+| `/project-plan dismiss` | Changes nothing: the active plan is the project work plan. It names `/todo clear-done`, `/todo mark <item> cancelled` and `/todo remove <item>` |
 | `/project-plan mode\|explain\|override\|status\|clear` | Route to the existing adaptive runtime controls |
 
 `/project-plan approve` and `/project-plan answer` are retired. They change nothing, say so, and point at the work plan and `/workstream`; `/project-plan -- approve ...` submits the words as a goal instead.
@@ -65,24 +65,24 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 
 GoodVibes also has a lightweight persistent work-plan tracker for concrete implementation tasks. It is separate from the saved historical planning records and is intended for visible, durable checklists while work is in progress.
 
-The command surface (aliases `/wp`, `/todo`, `/workplan`):
+The command is `/todo`, the same in the Agent. `/todo` alone opens its list of actions ("See your to-do list" first); each action asks for what it needs and picks items from the list.
 
 | Command | Does |
 | --- | --- |
-| `/work-plan` or `/work-plan panel` | Open the Work Plan modal |
-| `/work-plan add <title> [--owner name] [--source label] [--notes text]` | Add an item; `/work-plan add` alone puts `/work-plan add ` back in an empty composer to finish |
-| `/work-plan edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Edit an item's title or fields; `/work-plan edit <id>` alone puts the command with the item's current title back in an empty composer |
-| `/work-plan list` | Print the plan as a list |
-| `/work-plan show` (alias `markdown`) | Print the plan rendered as Markdown |
-| `/work-plan export` | Write that same Markdown rendering to a file under `~/.goodvibes/tui/work-plans/` and print its path |
-| `/work-plan done\|start\|in_progress\|block\|fail\|cancel\|pending <id>` | Set an item's status directly |
-| `/work-plan cycle <id>` (alias `toggle`) | Advance the item to its next status |
-| `/work-plan remove <id>` | Remove an item |
-| `/work-plan clear-done` | Clear completed (done/cancelled) items |
+| `/todo open` | Open the to-do panel |
+| `/todo add <title> [--owner <for whom>] [--notes <notes>] [--source <where it came from>]` | Add an item; `/todo add` alone opens the form |
+| `/todo edit <item> <title> [--owner ...] [--notes ...] [--source ...]` | Change an item; `/todo edit <item>` alone opens the form with the item chosen |
+| `/todo list` | Print the list |
+| `/todo markdown` | Print the list rendered as Markdown |
+| `/todo export` | Write that same Markdown rendering to a file under `~/.goodvibes/tui/work-plans/` and print its path |
+| `/todo mark <item> pending\|in_progress\|blocked\|done\|failed\|cancelled` | Set an item's state |
+| `/todo next <item>` | Advance the item to its next state |
+| `/todo remove <item>` | Remove an item (asks first) |
+| `/todo clear-done` | Clear finished (done/cancelled) items (asks first) |
 
 The work plan is the project's task list, kept in one file for all your GoodVibes programs: `~/.goodvibes/work-plans.sqlite`. The terminal app, the Agent and the daemon all open it, so a project has one plan whichever of them edits it, alone or together, attached to a daemon or not; the web UI shows the same plan through the daemon. Each item is its own row, the same rows the model keeps with the `work_plan` tool, a spawned worker keeps with its own `work_plan`, contracts link their units to, and the daemon serves through the `projectPlanning.workPlan.*` methods. An edit writes only the item it changes, in one transaction, so two GoodVibes programs editing the same project's plan never overwrite each other, and each edit prints one line on where the plan stands. An item can be named by its id or by a unique start of it. A plan an earlier build kept in this program's knowledge database is moved into the shared file the first time the plan is opened. Plan files written by older builds under `~/.goodvibes/tui/work-plans/` are not read; their items do not appear in the plan.
 
-Finished (done or cancelled) items are removed automatically once they have been untouched for 30 days, or when they fall outside the 200 most recently touched finished items. The removal happens as part of the edit that finishes an item, and that edit's line says how many it removed. Pending, in-progress, blocked and failed items are never removed this way. `/work-plan clear-done` (or `c` in the modal) clears all finished items at once; failed and blocked items are never cleared by it.
+Finished (done or cancelled) items are removed automatically once they have been untouched for 30 days, or when they fall outside the 200 most recently touched finished items. The removal happens as part of the edit that finishes an item, and that edit's line says how many it removed. Pending, in-progress, blocked and failed items are never removed this way. `/todo clear-done` (or `c` in the panel) clears all finished items at once; failed and blocked items are never cleared by it.
 
 The open Work Plan modal follows the plan: an edit made here, in the Agent, by the daemon or in the web UI shows up without pressing `r`.
 
@@ -93,12 +93,12 @@ The modal's keys:
 | Up/Down | Navigate items |
 | `Enter` | Cycle the selected item's status |
 | `1`-`6` | Set status directly (pending/active/blocked/done/failed/cancelled) |
-| `a` | Close the modal and put `/work-plan add ` in the composer; type the title and press Enter |
-| `e` | Close the modal and put `/work-plan edit <id> <current title>` in the composer; change it and press Enter |
+| `a` | Close the panel and open the form of `/todo add` |
+| `e` | Close the panel and open the form of `/todo edit` for the selected item |
 | `d` | Remove the selected item |
 | `c` | Clear completed (done/cancelled) items |
 | `r` | Read the plan again |
-| `x` | Close the modal and export to a Markdown file under `~/.goodvibes/tui/work-plans/`, the same rendering `/work-plan show` prints; the path is printed |
+| `x` | Close the modal and export to a Markdown file under `~/.goodvibes/tui/work-plans/`, the same rendering `/todo markdown` prints; the path is printed |
 | `i` / `w` | On an item with a linked agent or contract, open the Agents modal on it |
 
 `a` and `e` leave a draft already in the composer untouched; the usage line is printed instead. Each row starts with its status: `[ ]` pending, `[>]` in progress, `[!]` blocked, `[x]` done, `[✕]` failed, `[-]` cancelled. Linked ids (`agent:`, `contract:`, `task:`, `session:`) are shown on the row.

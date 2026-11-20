@@ -320,17 +320,10 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         action: 'No action needed unless this is not the arrangement you intended.',
       });
     }
-    for (const issue of options.service.issues) {
-      if (findings.some((finding) => finding.summary === issue)) continue;
-      findings.push({
-        id: `runtime-connection-${findingSlug(issue)}`,
-        area: 'runtime',
-        severity: 'warning',
-        summary: issue,
-        cause: 'The connected-host inspection found a mismatch between configured endpoint state and observed host state.',
-        impact: 'Companion chat, Agent Knowledge, approvals, automation status, or build delegation may be unavailable.',
-        action: 'Use Agent status and doctor diagnostics here, then repair the connected GoodVibes host outside Agent.',
-      });
+    // Whole records from the posture builder, the same words the terminal app's doctor prints.
+    for (const issue of options.service.findings) {
+      if (findings.some((finding) => finding.summary === issue.summary)) continue;
+      findings.push({ ...issue, area: 'runtime', severity: 'warning' });
     }
   }
 

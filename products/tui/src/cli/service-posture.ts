@@ -2,7 +2,9 @@ import {
   readServiceLogPosture,
   retainServicePostureInput,
   readServiceEndpoints,
-  serviceEndpointIssues,
+  serviceEndpointFindings,
+  serviceLogUnreadableFinding,
+  type ServiceFinding,
   type CliServiceRuntime,
   type CliServiceEndpointPosture,
   type CliServiceLogPosture,
@@ -55,10 +57,8 @@ export interface CliServicePosture {
   readonly findings: readonly CliServiceIssue[];
 }
 
-export interface CliServiceIssue {
-  readonly id: string;
-  readonly summary: string;
-}
+/** One service finding with its cause, impact and one remedy (terminal-shell/service-posture.ts). */
+export type CliServiceIssue = ServiceFinding;
 
 /** The service settings and the observed facts the setting rules depend on. */
 export interface CliServiceSettingsFacts {
@@ -90,34 +90,44 @@ export function serviceSettingsIssues(facts: CliServiceSettingsFacts): CliServic
   if (!facts.enabled) return issues;
   const unit = facts.serviceName ?? 'goodvibes';
   if (facts.installed === false && facts.serverBackedEnabled) {
-    issues.push({ id: 'service-not-installed', summary: 'No daemon service is installed, so the daemon runs only while something starts it. Install it with: goodvibes-daemon install-service (or record that this machine runs without one: goodvibes-daemon config set service.enabled false).' });
+    issues.push({
+      id: 'service-not-installed',
+      summary: 'No daemon service is installed, so the daemon runs only while something starts it.',
+      cause: 'This machine has no daemon service, and service.enabled does not record that it should run without one.',
+      impact: 'The daemon runs only while it is started by hand or by a program that needs it, and not after a reboot.',
+      action: 'Install the service: goodvibes-daemon install-service. To keep this machine without one: goodvibes-daemon config set service.enabled false',
+    });
   }
   if (facts.installed === true && facts.running === false) {
-    issues.push({ id: 'service-not-running', summary: 'The daemon service is installed but not running. Start it with: goodvibes-daemon start-service' });
+    issues.push({
+      id: 'service-not-running',
+      summary: 'The daemon service is installed but not running.',
+      cause: 'The service manager reports the daemon service installed but stopped.',
+      impact: 'The terminal app, the Agent and the web UI have no daemon to connect to until it starts.',
+      action: 'Start it: goodvibes-daemon start-service. If it stops again, read its log: goodvibes-daemon service-status',
+    });
   }
   if (facts.installed === true && !facts.autostart) {
-    issues.push({ id: 'service-autostart-disabled', summary: `The daemon service is installed but does not start at login. Turn that on with: goodvibes-daemon install-service (it re-enables ${unit}).` });
+    issues.push({
+      id: 'service-autostart-disabled',
+      summary: 'The daemon service is installed but does not start at login.',
+      cause: 'The service manager reports the daemon service installed but not set to start at login.',
+      impact: 'The daemon does not come back after a login or reboot.',
+      action: `Enable it again: goodvibes-daemon install-service (it re-enables ${unit})`,
+    });
   }
   if (facts.installed === true && !facts.restartOnFailure) {
-    issues.push({ id: 'service-restart-disabled', summary: 'The daemon service is not restarted after a failure. Turn that on with: goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service' });
+    issues.push({
+      id: 'service-restart-disabled',
+      summary: 'The daemon service is not restarted after a failure.',
+      cause: 'service.restartOnFailure is false.',
+      impact: 'A daemon that crashes stays down until it is started again.',
+      action: 'goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service',
+    });
   }
   return issues;
 }
 
-/** Endpoint issues from the shared rule, each under an id naming its endpoint(s). */
-function endpointIssues(endpoints: readonly CliServiceEndpointPosture[], probe: boolean | undefined): CliServiceIssue[] {
-  const issues: CliServiceIssue[] = [];
-  for (const endpoint of endpoints) {
-    for (const summary of serviceEndpointIssues([endpoint], probe)) issues.push({ id: `endpoint-unreachable-${endpoint.id}`, summary });
-  }
-  const enabled = endpoints.filter((endpoint) => endpoint.enabled);
-  for (const [index, left] of enabled.entries()) {
-    for (const right of enabled.slice(index + 1)) {
-      for (const summary of serviceEndpointIssues([left, right], false)) issues.push({ id: `endpoint-conflict-${left.id}-${right.id}`, summary });
-    }
-  }
-  return issues;
-}
 
 type EndpointDefinition = {
   readonly id: RuntimeEndpointId;
@@ -433,12 +443,18 @@ export async function buildCliServicePosture(
     serviceName: status.serviceName,
   });
   if (status.actionError && config.enabled) {
-    findings.push({ id: 'service-manager-error', summary: `The ${status.platform} service manager could not be asked about the daemon service (${status.actionError}). Run goodvibes doctor from a logged-in session, or record that this machine runs without a service: goodvibes-daemon config set service.enabled false` });
+    findings.push({
+      id: 'service-manager-error',
+      summary: `The ${status.platform} service manager could not be asked about the daemon service (${status.actionError}).`,
+      cause: 'The user service manager (systemd --user or launchd) did not answer from this session.',
+      impact: 'Nothing can be said about the daemon service from here; the daemon itself may be running.',
+      action: 'Run goodvibes doctor from a logged-in desktop or SSH session with a user manager. To keep this machine without a service: goodvibes-daemon config set service.enabled false',
+    });
   }
-  findings.push(...endpointIssues(endpoints, options.probe));
+  findings.push(...serviceEndpointFindings(endpoints, options.probe));
   const log = await readServiceLogPosture(status.logPath, options.logTailBytes ?? 4096, { ...options, assertCurrent });
   if (log.readError) {
-    findings.push({ id: 'service-log-unreadable', summary: `Service log exists but could not be read: ${log.readError}` });
+    findings.push(serviceLogUnreadableFinding(log.readError));
   }
 
   assertCurrent();
@@ -500,7 +516,8 @@ export function formatCliServicePosture(posture: CliServicePosture, json = false
         `  ${endpoint.label}: enabled=${yesNo(endpoint.enabled)}${endpoint.servesOtherMachines === undefined ? '' : ` servesOtherMachines=${yesNo(endpoint.servesOtherMachines)}`} ${formatRuntimeEndpointBinding(endpoint.binding)} posture=${endpoint.binding.recognized ? endpoint.bindPosture.label : 'unknown'}${endpoint.reachable === undefined ? '' : ` reachable=${yesNo(endpoint.reachable)}`}`,
     ),
     '',
-    posture.issues.length === 0 ? 'Readiness: ready' : 'Readiness: needs attention',
-    ...posture.issues.map((issue) => `  - ${issue}`),
+    posture.findings.length === 0 ? 'Readiness: ready' : 'Readiness: needs attention',
+    // Each finding with its one remedy, the same words doctor prints.
+    ...posture.findings.flatMap((finding) => [`  - ${finding.summary}`, `    Fix: ${finding.action}`]),
   ].join('\n');
 }

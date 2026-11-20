@@ -1,4 +1,4 @@
-import { isSecret, type Secret } from '../security/secret.js';
+import { isSecret, Secret } from '../security/secret.js';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
@@ -170,7 +170,8 @@ export interface SecretRefResolutionOptions {
 
 export interface SecretRefResolution {
   readonly source: SecretProviderSource;
-  readonly value: string | null;
+  /** The resolved credential; its text comes out only through `reveal(purpose)` at the sink it is for. */
+  readonly value: Secret | null;
 }
 
 export const BUILTIN_SECRET_PROVIDER_SOURCES: readonly SecretProviderSource[] = [
@@ -840,33 +841,34 @@ export async function resolveSecretRef(
 ): Promise<SecretRefResolution> {
   const ref = normalizeSecretRef(input);
   if (!ref) throw new Error('Invalid secret reference');
+  const held = (text: string | null | undefined): Secret | null => (text === null || text === undefined ? null : Secret.of(text, `${ref.source} reference`));
 
   switch (ref.source) {
     case 'env':
-      return { source: ref.source, value: process.env[ref.id] ?? null };
+      return { source: ref.source, value: held(process.env[ref.id]) };
     case 'goodvibes':
       if (!options.resolveLocalSecret) throw new Error('GoodVibes secret ref requires a local secret resolver');
       const local = await options.resolveLocalSecret(ref.id);
-      return { source: ref.source, value: isSecret(local) ? local.reveal('dispatch') : local };
+      return { source: ref.source, value: isSecret(local) ? local : held(local) };
     case 'file':
-      return { source: ref.source, value: resolveFileRef(ref, options) };
+      return { source: ref.source, value: held(resolveFileRef(ref, options)) };
     case 'exec': {
       const output = await runChecked(ref, ref.command, ref.args ?? [], options, {
         env: ref.env,
         stdin: ref.stdin,
         timeoutMs: ref.timeoutMs ?? 10_000,
       });
-      return { source: ref.source, value: output.length > 0 ? output : null };
+      return { source: ref.source, value: output.length > 0 ? held(output) : null };
     }
     case '1password':
     case 'onepassword':
-      return { source: ref.source, value: await resolveOnePasswordRef(ref, options) };
+      return { source: ref.source, value: held(await resolveOnePasswordRef(ref, options)) };
     case 'bitwarden':
     case 'vaultwarden':
-      return { source: ref.source, value: await resolveBitwardenRef(ref, options) };
+      return { source: ref.source, value: held(await resolveBitwardenRef(ref, options)) };
     case 'bitwarden-secrets-manager':
     case 'bws':
-      return { source: ref.source, value: await resolveBitwardenSecretsManagerRef(ref, options) };
+      return { source: ref.source, value: held(await resolveBitwardenSecretsManagerRef(ref, options)) };
   }
 }
 

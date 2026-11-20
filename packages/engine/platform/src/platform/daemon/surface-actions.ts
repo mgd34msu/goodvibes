@@ -1097,7 +1097,7 @@ export class DaemonSurfaceActionHelper {
       || await resolveSecretInput(this.context.configManager.get('surfaces.ntfy.token'), {
         resolveLocalSecret: (key) => this.context.secretsManager.get(key),
         homeDirectory: this.context.secretsManager.getGlobalHome?.() ?? undefined,
-      })
+      }, 'dispatch')
       || process.env.NTFY_ACCESS_TOKEN
       || null;
   }

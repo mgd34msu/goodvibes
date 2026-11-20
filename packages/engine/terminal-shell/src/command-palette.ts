@@ -1,15 +1,17 @@
 /**
- * command-palette.ts, the command palette both terminal apps open.
+ * command-palette.ts, the one help list both terminal apps open: `?`, `/help`,
+ * `/commands` and Ctrl+P all open it.
  *
- * One entry point for everything: every registered slash command, built live
- * from the registry so it can never drift from the real command set. With no
- * query the palette shows four curated groups (Suggested, Session, Views,
- * Settings) and then every other command; typing filters across names,
- * aliases, titles, descriptions, categories and search words (an app adds its
- * own, such as the TUI's former view names "fleet", "tokens" and "git", which
- * find the modal that holds them now). A curated name the app does not
- * register is skipped. The slash command sits right-aligned on every row, so
- * the palette also teaches it.
+ * Every registered slash command, built live from the registry so it can never
+ * drift from the real command set, and then the keyboard shortcuts as the last
+ * group, read from the app's live key table. With no query the palette shows
+ * four curated groups (Suggested, Session, Views, Settings), every other
+ * command, and the shortcuts; typing filters across names, aliases, titles,
+ * descriptions, categories and search words (an app adds its own, such as the
+ * TUI's former view names "fleet", "tokens" and "git", which find the modal
+ * that holds them now). A curated name the app does not register is skipped.
+ * Each row is a plain title with the slash command (or the key) right-aligned
+ * and dim, so the palette also teaches it.
  *
  * Suggested learns from what you use (per process); until it has something
  * to learn from it offers a sensible starting set.
@@ -37,7 +39,22 @@ export interface PaletteCommand {
   readonly argsHint?: string | undefined;
   readonly usage?: string | undefined;
   /** Present on a command built with `defineCommand`: Enter opens its guided path. */
-  readonly described?: unknown;
+  readonly described?: PaletteDescribed | undefined;
+}
+
+/** What the palette reads from a command's description (command-actions/types.ts `CommandDescription`). */
+export interface PaletteDescribed {
+  readonly title: string;
+  readonly summary: string;
+  readonly actions: readonly { readonly label: string }[];
+}
+
+/** One keyboard shortcut as the app's key table states it. */
+export interface PaletteShortcut {
+  /** The key or chord as the person presses it ("Ctrl+P", "Shift+Tab"). */
+  readonly key: string;
+  /** What it does, in a sentence. */
+  readonly description: string;
 }
 
 interface CuratedEntry {
@@ -70,7 +87,7 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['settings', { title: 'Settings', group: 'Settings', keywords: ['preferences', 'options', 'theme'] }],
   ['model', { title: 'Switch model', group: 'Settings', keywords: ['provider', 'llm'] }],
   ['effort', { title: 'Reasoning effort', group: 'Settings', keywords: ['thinking'] }],
-  ['shortcuts', { title: 'Keyboard shortcuts', group: 'Settings', keywords: ['keys', 'help'], right: '?' }],
+  ['shortcuts', { title: 'Keyboard shortcuts', group: 'Settings', keywords: ['keys', 'help'] }],
   ['keybindings', { title: 'Keybindings', group: 'Settings', keywords: ['keys'] }],
   ['mode', { title: 'Approval mode', group: 'Settings', keywords: ['permissions', 'hitl'] }],
   ['profiles', { title: 'Profiles', group: 'Settings' }],
@@ -101,22 +118,36 @@ function hasRequiredArgs(command: PaletteCommand): boolean {
   return /<[^>]+>/.test(hint.replace(/\[[^\]]*\]/g, ''));
 }
 
-/** Title for a command outside the curated table: its description's first clause. */
-function titleFromDescription(command: PaletteCommand): string {
-  const text = command.description.trim();
-  if (!text) return `/${command.name}`;
+/** The first clause of a text, for a title. */
+function firstClause(text: string): string {
   const first = text.split(/(?<=[.;])\s/)[0]!.replace(/[.;]$/, '');
   return first.length > 0 ? first : text;
 }
 
+/** Title for a command outside the curated table: its description's title, else its description's first clause. */
+function titleOf(command: PaletteCommand): string {
+  if (command.described?.title) return command.described.title;
+  const text = command.description.trim();
+  return text ? firstClause(text) : `/${command.name}`;
+}
+
+/** The one sentence the detail pane and the narrow screen show: the description's summary, else its first sentence. */
+function summaryOf(command: PaletteCommand): string {
+  if (command.described?.summary) return command.described.summary;
+  const text = command.description.trim();
+  return text.split(/(?<=[.;])\s/)[0] ?? text;
+}
+
 /**
- * Build the palette's entries from the registered commands. `extraKeywords`
- * adds an app's own search words to a command (the TUI's former view names).
+ * Build the palette's entries from the registered commands and the app's
+ * keyboard shortcuts. `extraKeywords` adds an app's own search words to a
+ * command (the TUI's former view names).
  */
 export function buildPaletteEntries(
   commands: readonly PaletteCommand[],
   categories: ReadonlyMap<string, string>,
   extraKeywords: ReadonlyMap<string, readonly string[]> = new Map(),
+  shortcuts: readonly PaletteShortcut[] = [],
 ): PaletteEntry[] {
   const curated = new Map(CURATED);
   const entries: PaletteEntry[] = [];
@@ -125,20 +156,23 @@ export function buildPaletteEntries(
     const extra = extraKeywords.get(command.name) ?? [];
     entries.push({
       id: command.name,
-      title: c?.title ?? titleFromDescription(command),
+      kind: 'command',
+      title: c?.title ?? titleOf(command),
+      summary: summaryOf(command),
       description: command.description,
       category: categories.get(command.name) ?? 'Other',
       group: c?.group ?? 'Commands',
       aliases: command.aliases ?? [],
       keywords: [...extra, ...(c?.keywords ?? [])],
-      argsHint: command.argsHint ?? command.usage,
+      actions: command.described?.actions.map((action) => action.label) ?? [],
+      ...(command.argsHint ?? command.usage ? { argsHint: command.argsHint ?? command.usage } : {}),
       needsArgs: hasRequiredArgs(command),
-      right: c?.right,
+      right: c?.right ?? `/${command.name}`,
     });
   }
   // Curated entries in table order, the rest alphabetically by name.
   const order = new Map(CURATED.map(([name], index) => [name, index]));
-  return entries.sort((a, b) => {
+  entries.sort((a, b) => {
     const oa = order.get(a.id);
     const ob = order.get(b.id);
     if (oa !== undefined && ob !== undefined) return oa - ob;
@@ -146,6 +180,24 @@ export function buildPaletteEntries(
     if (ob !== undefined) return 1;
     return a.id.localeCompare(b.id);
   });
+  // The keyboard shortcuts, last, in the app's own order.
+  shortcuts.forEach((shortcut, index) => {
+    entries.push({
+      id: `key:${index}`,
+      kind: 'shortcut',
+      title: shortcut.description,
+      summary: shortcut.description,
+      description: shortcut.description,
+      category: 'Keyboard shortcuts',
+      group: 'Keyboard shortcuts',
+      aliases: [],
+      keywords: [shortcut.key],
+      actions: [],
+      needsArgs: false,
+      right: shortcut.key,
+    });
+  });
+  return entries;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +205,14 @@ export function buildPaletteEntries(
 // ---------------------------------------------------------------------------
 
 function wordScore(entry: PaletteEntry, word: string): number {
+  if (entry.kind === 'shortcut') {
+    const title = entry.title.toLowerCase();
+    const key = entry.right.toLowerCase();
+    if (key === word) return 90;
+    if (title.split(/[\s/-]+/).some((w) => w.startsWith(word))) return 30;
+    if (key.includes(word) || title.includes(word)) return 15;
+    return 0;
+  }
   const name = entry.id.toLowerCase();
   const title = entry.title.toLowerCase();
   if (name === word) return 100;
@@ -233,7 +293,7 @@ export class CommandPalette implements SurfaceModal, PaletteView {
         if (suggested.length >= SUGGESTED_COUNT) break;
       }
       if (suggested.length > 0) sections.push({ group: 'Suggested', entries: suggested });
-      for (const group of ['Session', 'Views', 'Settings', 'Commands'] as const) {
+      for (const group of ['Session', 'Views', 'Settings', 'Commands', 'Keyboard shortcuts'] as const) {
         const entries = this.entries.filter((e) => e.group === group && !suggested.includes(e));
         if (entries.length > 0) sections.push({ group, entries });
       }
@@ -243,8 +303,11 @@ export class CommandPalette implements SurfaceModal, PaletteView {
         .filter((r) => r.score > 0)
         .sort((a, b) => b.score - a.score || a.index - b.index)
         .map((r) => r.entry);
-      const entries = ranked.length ? ranked : this.semantic?.ids.flatMap(id => this.entries.filter(entry => entry.id === id)) ?? [];
+      const commands = ranked.filter((entry) => entry.kind === 'command');
+      const keys = ranked.filter((entry) => entry.kind === 'shortcut');
+      const entries = commands.length ? commands : this.semantic?.ids.flatMap(id => this.entries.filter(entry => entry.kind === 'command' && entry.id === id)) ?? [];
       if (entries.length > 0) sections.push({ group: 'Commands', entries });
+      if (keys.length > 0) sections.push({ group: 'Keyboard shortcuts', entries: keys });
     }
     this.sectionsCache = { query: this.query, sections };
     return sections;
@@ -267,7 +330,7 @@ export class CommandPalette implements SurfaceModal, PaletteView {
     this.selectedIndex = 0;
     this.sectionsCache = null;
     this.semantic = undefined;
-    if (!query.trim() || this.entries.some(entry => paletteScore(entry, query) > 0)) return;
+    if (!query.trim() || this.entries.some(entry => entry.kind === 'command' && paletteScore(entry, query) > 0)) return;
     this.searching = true;
     const controller = new AbortController();
     this.searchController = controller;
@@ -289,7 +352,7 @@ export class CommandPalette implements SurfaceModal, PaletteView {
       if (this.closed || this.query !== query || this.searchController !== controller) throw new Error('Command search changed.');
     };
     try {
-      const commands = this.entries.map(({ id, title, description, aliases, keywords }) => ({ id, title, description, aliases, keywords }));
+      const commands = this.entries.filter((entry) => entry.kind === 'command').map(({ id, title, description, aliases, keywords }) => ({ id, title, description, aliases, keywords }));
       const reading = await readCommandDiscovery({ query, commands }, { signal: controller.signal, assertCurrent: current });
       current();
       this.semantic = reading;
@@ -343,7 +406,8 @@ export class CommandPalette implements SurfaceModal, PaletteView {
     else if (isTextBackspace(key)) this.setQuery(this.query.slice(0, -1));
     else if (key === 'enter' || key === 'tab') {
       const entry = this.getSelected();
-      if (!entry) return;
+      // A shortcut row is read, not run: its key is pressed where it applies.
+      if (!entry || entry.kind === 'shortcut') return;
       host.close(this, 'done');
       recordPaletteUse(entry.id);
       this.options.onRun(entry, key === 'tab' || entry.needsArgs ? 'fill' : 'run');
@@ -362,6 +426,8 @@ export interface CommandPaletteHost {
   readonly commands: () => readonly PaletteCommand[] | undefined;
   readonly categories: () => ReadonlyMap<string, string>;
   readonly extraKeywords?: ReadonlyMap<string, readonly string[]> | undefined;
+  /** The app's keyboard shortcuts from its live key table: the list's last group. */
+  readonly shortcuts?: (() => readonly PaletteShortcut[]) | undefined;
   readonly describe?: ((id: string) => string | undefined) | undefined;
   /** Runs the command as if typed bare: a described command opens its guided path. */
   readonly run: (name: string) => Promise<void>;
@@ -376,7 +442,7 @@ export function openCommandPaletteOn(host: CommandPaletteHost): void {
   if (!commands) return;
   if (host.modals.top() instanceof CommandPalette) return;
   const palette = new CommandPalette({
-    entries: buildPaletteEntries(commands, host.categories(), host.extraKeywords),
+    entries: buildPaletteEntries(commands, host.categories(), host.extraKeywords, host.shortcuts?.() ?? []),
     onChanged: host.render,
     ...(host.describe ? { describe: host.describe } : {}),
     onRun: (entry, mode) => {

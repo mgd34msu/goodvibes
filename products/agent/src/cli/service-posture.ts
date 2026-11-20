@@ -2,7 +2,9 @@ import {
   readServiceLogPosture,
   retainServicePostureInput,
   readServiceEndpoints,
-  serviceEndpointIssues,
+  serviceEndpointFindings,
+  serviceLogUnreadableFinding,
+  type ServiceFinding,
   type CliServiceRuntime,
   type CliServiceEndpointPosture,
   type CliServiceLogPosture,
@@ -41,6 +43,8 @@ export interface CliServicePosture {
   readonly endpoints: readonly CliServiceEndpointPosture[];
   readonly log: CliServiceLogPosture;
   readonly issues: readonly string[];
+  /** The same issues as whole records (summary, cause, impact, one remedy): what doctor prints. */
+  readonly findings: readonly ServiceFinding[];
   /**
    * Observations that describe the INTENDED arrangement rather than a fault.
    *
@@ -116,7 +120,7 @@ export async function buildCliServicePosture(
   // not adopt a daemon but does dial a connected one is server-backed, which
   // is exactly the topology this product is designed for.
   const serverBackedEnabled = config.daemonEnabled || config.connectedHostDialEnabled || endpoints.some((endpoint) => endpoint.enabled);
-  const issues: string[] = [];
+  const findings: ServiceFinding[] = [];
   const advisories: string[] = [];
 
   if (serverBackedEnabled && !config.enabled) {
@@ -125,7 +129,7 @@ export async function buildCliServicePosture(
     // visible here only once the Agent began reading the shared daemon tier.
     advisories.push('Connected-host settings are present, but Agent host ownership is disabled by design.');
   }
-  issues.push(...serviceEndpointIssues(endpoints, options.probe));
+  findings.push(...serviceEndpointFindings(endpoints, options.probe));
   const configuredLogPath = resolveConfiguredLogPath(runtime);
   let logOwner: JudgmentPortCapture | undefined;
   const logReading = {
@@ -139,7 +143,7 @@ export async function buildCliServicePosture(
     logOwner = captureJudgmentPort('agent.cli.service-log', reading);
   });
   if (log.readError) {
-    issues.push(`Service log exists but could not be read: ${log.readError}`);
+    findings.push(serviceLogUnreadableFinding(log.readError));
   }
 
   assertCurrent();
@@ -148,7 +152,8 @@ export async function buildCliServicePosture(
     config,
     endpoints,
     log,
-    issues,
+    issues: findings.map((finding) => finding.summary),
+    findings,
     advisories,
   };
 }

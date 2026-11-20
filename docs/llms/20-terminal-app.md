@@ -91,7 +91,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
 | `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.3.1`. |
+| `-v, --version` | Prints `goodvibes 3.3.2`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -622,7 +622,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.3.1`.
+`goodvibes version` prints `goodvibes 3.3.2`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface

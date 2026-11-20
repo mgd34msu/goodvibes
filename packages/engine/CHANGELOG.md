@@ -1,5 +1,106 @@
 # Changelog
 
+## [3.3.2] - 2026-11-20
+
+The full write-up, with upgrade notes and the list of removed and renamed
+commands, is in
+[docs/releases/3.3.2.md](https://github.com/mgd34msu/goodvibes/blob/v3.3.2/docs/releases/3.3.2.md).
+
+### Added
+
+- Add the setting `browser.network.pinned` (off by default): the agent's
+  browser fetches every page request from the address that passed the
+  destination check.
+- Add the installer options `--no-auto-update` (`GOODVIBES_AUTO_UPDATE=0`) and
+  `--from-dir <dir>` (`GOODVIBES_RELEASE_DIR`), which installs from a directory
+  holding the release files with no request to GitHub.
+- Add the operator methods `mcp.servers.trust.set`, `mcp.servers.role.set`,
+  `mcp.servers.quarantine.accept`, `automation.schedules.preview`,
+  `watchers.triggers.preview`, `authority.status`, `relay.codes.list`,
+  `relay.codes.revoke`, `sessions.hosted.history` and `sessions.hosted.share`,
+  and the browser sign-in endpoints under `/api/browser-session`.
+- Add `/permissions never`, a rule that a command is never run in any mode.
+
+### Changed
+
+- Make the first run of `goodvibes` and `goodvibes-agent` three steps: pick the
+  model, sign in or paste the key (checked with one request), then the
+  conversation. It opens only when the session's model is not ready.
+- Word every ask once in the daemon and draw it as the same card in the
+  terminal app, the Agent, the web UI and chat channels: the question in a
+  sentence, what the call acts on, and `No` as the selected button for anything
+  that cannot be undone, money spent or a message sent as you. Refusing a call
+  no longer cancels the turn.
+- Open a short list of actions, and a form for the blanks, for every slash
+  command; many commands were folded into others and every short alias is gone.
+  `/config` is `/settings`. In the Agent, `Ctrl+P` opens the list of everything
+  you can do and the workspace is `Ctrl+G`.
+- Show the permission mode in force first on the status bar, and collect
+  notices as a count that `Ctrl+N` opens. `Shift+Tab` changes the mode in both
+  programs.
+- Show agents, schedules and approvals waiting for you in one panel, Your
+  agents (`F2`, `Ctrl+O`, `/agents`), and the web UI's Work view the same way.
+- Show a failed turn as one row saying who failed, how often it was tried and
+  what was changed, with keys to try again, use another model or see details.
+  With a backup model set, a server error is retried once after 2 seconds and
+  then moves to the backup; nine model calls made outside a turn fail over the
+  same way.
+- Show every setting by a name that says what it does.
+- Give every approval a revision: approve, deny, claim and cancel require
+  `expectedRevision`, and a stale or late answer is refused with the current
+  state. In a group of daemons an approval can be answered from any node.
+- Keep members, device tokens, grants, peer tokens, passkeys, spend, schedules
+  and watchers of a group of daemons in one shared authority record; a revoke
+  on any machine applies everywhere.
+- Keep an answer owed to a chat, and channel messages, webhook messages and
+  scheduled deliveries, across a restart; hold all new work during an update
+  and run what arrived once afterwards. Lists are paged instead of cut off at a
+  count.
+- Page `inbox.list`, `companion.chat.sessions.list`, `knowledge.sources.list`,
+  `knowledge.nodes.list`, `knowledge.issues.list`, `automation.jobs.list` and
+  `automation.runs.list` with a cursor; `email.inbox.update` requires
+  `uidValidity`.
+- Rename `automation.schedules.enable` and `disable` to `resume` and `pause`,
+  `mcp.config.reload` to `mcp.servers.reload`, and `mcp.servers.tools.deny`,
+  `allow` and `clear` to `block`, `exempt`, and `unblock` or `unexempt`.
+- Name the currency of every purchase, budget and spend, and mark a purchase
+  bought only with evidence from the merchant.
+- Write 1.5 KB instead of 121 KB to raise and answer an approval, one write
+  fewer per chat message, and one database statement instead of sixteen to
+  open the Agent workspace.
+
+### Removed
+
+- Remove many slash commands and every short alias; the 3.3.2 notes list each
+  removed or renamed command with what to type now.
+- Remove the help and shortcuts overlays, the long `/setup` wizard, the Agent's
+  Activity panel, and LM Studio's stateful chat continuation.
+
+### Security
+
+- Sign in to the web UI with an HttpOnly, SameSite=Strict cookie; nothing
+  token-shaped is written to browser storage, and the page is served with a
+  content security policy. The web UI asks you to sign in once more.
+- Keep notification webhook addresses and ntfy topics in the secret store, and
+  print every stored value as `[secret NAME]`.
+- Refuse card details over a plain network connection.
+- Check every request the agent's browser makes, not only the first.
+- Never grant ownership from a chat set up for review; a model can no longer
+  run `/managed apply`, `/settings-sync pull` or `/services trust`.
+- Check a method called through the generic invoke route or the WebSocket
+  against the same caller as its REST route.
+
+### Known limits
+
+- Plugins run inside the program; a plugin's trust tier is not a sandbox.
+- The patched `picomatch` is not bundled for npm consumers of the engine
+  package (GHSA-fc5q-39xc-vjpf).
+- Benchmark verification is not isolated on macOS, native Windows, or Linux
+  without bubblewrap.
+- No kept test covers the browser tool's per-request checks.
+- On Apple Silicon Macs, stopping or restarting the daemon can occasionally end
+  in a crash, unchanged from 3.3.1.
+
 ## [3.3.1] - 2026-11-18
 
 The full write-up is in

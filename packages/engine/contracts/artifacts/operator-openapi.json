@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GoodVibes Operator API",
-    "version": "3.3.1",
+    "version": "3.3.2",
     "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 648 cataloged methods: 534 with dedicated REST bindings, 114 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [

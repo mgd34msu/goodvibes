@@ -49,7 +49,7 @@ and adds `~/.local/bin` to your `PATH` when it is missing. It needs no Bun,
 Node, Git or compiler. When it finishes, it prints the command to start with
 and the web app's address.
 
-- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.1 sh`
+- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.2 sh`
 - **Skip the service:** add `GOODVIBES_DAEMON_SERVICE=0` the same way.
 - **Updates** install themselves: the daemon checks hourly and waits until no
   work is running, and the terminal apps check when they start. Running the

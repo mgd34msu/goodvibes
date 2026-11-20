@@ -89,9 +89,9 @@ goodvibes-daemon
 What it prints on a normal start (the exact host and port follow your settings):
 
 ```text
-goodvibes-daemon 3.3.1 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
-goodvibes-daemon 3.3.1 bound: host="127.0.0.1" port=3421
-goodvibes-daemon 3.3.1 host started (ready)
+goodvibes-daemon 3.3.2 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
+goodvibes-daemon 3.3.2 bound: host="127.0.0.1" port=3421
+goodvibes-daemon 3.3.2 host started (ready)
 ```
 
 When standard output is an interactive terminal, the daemon also prints the device pairing block once, after `bound`. When standard output is not a terminal (a service, a redirect to a file), it never prints the pairing block, because the block contains a credential. Run `goodvibes-daemon pair` to see it at any time.
@@ -242,7 +242,7 @@ goodvibes-daemon status
 
 ```text
 goodvibes daemon on this machine
-  version:  3.3.1
+  version:  3.3.2
   state:    running
   health:   healthy
   bound:    http://127.0.0.1:3421
@@ -295,7 +295,7 @@ It reprints the existing operator token in the link; it does not mint a new one.
 Example output for a daemon served over plain HTTP on the local network (QR code shortened):
 
 ```text
-GoodVibes daemon 3.3.1: scan to pair a device (opens the web app signed in):
+GoodVibes daemon 3.3.2: scan to pair a device (opens the web app signed in):
 
   http://desktop.local:3421
 
@@ -428,7 +428,7 @@ goodvibes-daemon update --check
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.3.1
+  version:  3.3.2
   updates:  off: update.auto is not true, so this daemon will not update itself
   receipts: none written
 ```
@@ -497,7 +497,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.3.1`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.3.2`.
 
 ## Network exposure
 
@@ -577,7 +577,7 @@ lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS, also Linux
 
 Binding decides who can connect; `controlPlane.enabled` decides whether a connection from another machine is served. A request from another machine to a daemon with `controlPlane.enabled` `false` gets `403` with code `CONTROL_PLANE_LOCAL_ONLY` and the body `{"error":"This daemon serves only its own machine","code":"CONTROL_PLANE_LOCAL_ONLY","state":"controlPlane.enabled is off, so a request from <address> is not served","next":[...],"status":403}`. Either answer proves the bind; no answer within a few seconds means the address is not bound or a firewall drops it.
 
-`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.3.1 bound: host="0.0.0.0" port=3421`, is right for that start.
+`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.3.2 bound: host="0.0.0.0" port=3421`, is right for that start.
 
 ### How a running daemon moves to a new address
 
@@ -1257,7 +1257,7 @@ Join failures:
 ```text
 $ goodvibes-daemon cluster groups
 GROUP       ID                  MACHINES  VERSION  SEEN
-home        gG9JJ1P6CHMSME4AK   1         3.3.1    8s ago
+home        gG9JJ1P6CHMSME4AK   1         3.3.2    8s ago
 ```
 
 With nothing heard it prints `no goodvibes groups are advertising themselves on this network`, with advice to check multicast or join by id, and exits `0`.
@@ -1285,7 +1285,7 @@ goodvibes-daemon cluster status --json
 ```text
 this machine is not in a group
 machine: machine 9b16a341 (9b16a341-3555-4d53-b094-4d32f8937dc8)
-version: 3.3.1
+version: 3.3.2
 
 sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`
 ```
@@ -1296,7 +1296,7 @@ A member's `status`:
 group:    home  [gG9JJ1P6CHMSME4AK]
 machine:  bravo (86462aea-850a-4eea-a537-0b0e1e549cf9)
 members:  3
-version:  3.3.1
+version:  3.3.2
 surfaces: none held by this machine right now
 
 group key: generation 0, rotates every 24h
@@ -1364,7 +1364,7 @@ The removed machine is told. A running one takes the removal with the change its
 ```text
 this machine is not in a group: another member told it the group removed it 2m ago
 machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
-version: 3.3.1
+version: 3.3.2
 
 this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN --key <key>` here
 ```

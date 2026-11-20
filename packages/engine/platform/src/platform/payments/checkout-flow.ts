@@ -851,7 +851,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const windowKind: 'approval' | 'veto' = windowForPurchase({
     aboveBudget,
     aboveRequestedMaximum: exceedsRequestedMaximum,
-    merchantIsMajor: true,
+    merchantIsMajor: merchantVerdict.isMajor,
     notChecked: notChecked.length > 0,
   });
   // A veto reply that was not a go-ahead turned this window into an explicit

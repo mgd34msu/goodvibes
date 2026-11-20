@@ -70,7 +70,8 @@ function buildOperation(method: OperatorMethodContract): OpenApiOperation {
     description: notes.join('\n\n'),
     tags: [method.category],
     responses: {
-      '200': SSE_METHODS.has(method.id)
+      // The success status is the one the method declares (201 created, 202 accepted), else 200.
+      [String(method.http?.successStatus ?? 200)]: SSE_METHODS.has(method.id)
         ? { ...SSE_RESPONSE }
         : {
             description: 'Success',

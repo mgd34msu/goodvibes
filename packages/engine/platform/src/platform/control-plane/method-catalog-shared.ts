@@ -23,6 +23,11 @@ export type GatewayMethodRepeat = 'safe' | 'keyed' | 'unsafe';
 export interface GatewayHttpBinding {
   readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   readonly path: string;
+  /**
+   * The status a success answers with, declared once here: the daemon's router
+   * answers a success with it and the generated specs list it. Absent: 200.
+   */
+  readonly successStatus?: 201 | 202 | undefined;
 }
 
 export interface GatewayMethodDescriptor {

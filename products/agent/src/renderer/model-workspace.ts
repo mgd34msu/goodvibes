@@ -319,7 +319,8 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
       lastGroup = group;
     }
     const synthetic = isProviderSignInRow(model) || isLocalFitRecommendation(model);
-    const right = synthetic ? undefined : [formatContext(model.contextWindow), model.tier ?? 'paid'].join(' · ');
+    // A tier the catalog has not published (the catalog not loaded yet, say) is not shown: it is not known to be paid.
+    const right = synthetic ? undefined : [formatContext(model.contextWindow), model.tier].filter((part): part is string => Boolean(part)).join(' · ');
     rows.push({
       label: model.displayName,
       desc: synthetic ? undefined : [modelKey(model), capabilityText(model)].filter(Boolean).join(' · '),

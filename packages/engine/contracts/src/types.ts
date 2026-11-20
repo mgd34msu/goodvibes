@@ -20,6 +20,8 @@ export type DistributedWorkStatus = 'queued' | 'claimed' | 'completed' | 'failed
 export interface ContractHttpDefinition {
   readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   readonly path: string;
+  /** The status a success answers with (201 created, 202 accepted); absent: 200. */
+  readonly successStatus?: 201 | 202 | undefined;
 }
 
 /**

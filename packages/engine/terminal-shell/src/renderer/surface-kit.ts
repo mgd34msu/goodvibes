@@ -450,8 +450,9 @@ export function beginModal(screenW: number, screenH: number, options: ModalOptio
     canvas.put(tx + 1, titleRow, '›', { fg: t.textFaint });
     tx = canvas.put(tx + 3, titleRow, clipText(crumb, r - escW - tx - 3), { fg: t.textMuted });
   }
-  if (options.sub && tx + 3 < r - escW) {
-    tx = canvas.put(tx + 2, titleRow, clipText(options.sub, r - escW - tx - 2), { fg: t.textMuted });
+  // The sub label is shown whole or not at all: a word cut at the edge reads as a different word.
+  if (options.sub && tx + 2 + getDisplayWidth(options.sub) <= r - escW) {
+    tx = canvas.put(tx + 2, titleRow, options.sub, { fg: t.textMuted });
   }
   if (options.escKey !== false) {
     const x = r - keycapWidth('esc') + 1;

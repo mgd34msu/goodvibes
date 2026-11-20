@@ -25,7 +25,7 @@ export function getModelGroupKey(model: ModelDefinition, groupBy: GroupByMode, p
         case 'family':
             return detectFamily(model) ?? 'Ungrouped';
         case 'pricingTier':
-            return tierToCategoryFilter(model.tier);
+            return model.tier === undefined ? 'price not known yet' : tierToCategoryFilter(model.tier);
         case 'qualityTier': {
             if (model.provider === 'synthetic') {
                 const info = providerRegistry.getSyntheticModelInfoFromCatalog(model.id);

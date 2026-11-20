@@ -266,6 +266,7 @@ export class AgentWorkspace {
     this.focusPane = 'actions';
     this.clampSelection();
     this.status = `Agent workspace category: ${this.selectedCategory.label}.`;
+    this.lastActionResult = null;
   }
 
   selectedLocalLibraryItem(kind: AgentWorkspaceLocalEditorKind): AgentWorkspaceLocalLibraryItem | null {

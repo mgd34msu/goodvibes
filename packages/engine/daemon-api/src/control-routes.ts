@@ -3,7 +3,7 @@ import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
-import type { AuthenticatedPrincipal, CredentialKind } from './http-policy.js';
+import type { AuthenticatedPrincipal, CredentialKind, RequestPrincipal } from './http-policy.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -62,7 +62,7 @@ export interface ControlRouteContext {
   readonly controlPlaneGateway: ControlPlaneGatewayLike;
   readonly extractAuthToken: (req: Request) => string;
   /** `expiresAt`: when a sign-in session ends unless it is used again (the daemon extends it on use). */
-  readonly resolveAuthenticatedPrincipal: (req: Request) => (AuthenticatedPrincipal & { readonly expiresAt?: number | undefined }) | null;
+  readonly resolveAuthenticatedPrincipal: (req: Request) => RequestPrincipal | null;
   readonly gatewayMethods: GatewayMethodCatalogLike;
   readonly getOperatorContract: () => unknown;
   readonly invokeGatewayMethodCall: (input: {
@@ -85,7 +85,7 @@ export interface ControlRouteContext {
      * credential kind included, so the dispatch does not authenticate the
      * token again and handlers read who called from it.
      */
-    readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
+    readonly principal?: RequestPrincipal | undefined;
     /** The caller's retry key, for a method that takes the shared Idempotency-Key. */
     readonly idempotencyKey?: string | undefined;
   }) => Promise<{ status: number; ok: boolean; body: unknown; readonly replayed?: boolean }>;

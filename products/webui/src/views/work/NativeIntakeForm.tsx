@@ -15,6 +15,7 @@ import type { NativeExecutionObservation } from "../../lib/native-execution";
 import type { NativeTurnObservation } from "../../lib/native-turn";
 import { NativeExecutionStatus } from "./NativeExecutionStatus";
 import { NativeTurnStatus } from "./NativeTurnStatus";
+import { NativeReply } from "./NativeReply";
 import {
   requestIsMoving,
   requestIsSettled,
@@ -850,6 +851,9 @@ function ScopedNativeIntakeForm({
             </ul>
           )}
           <p role="status">{requestStatusLine(result, turn, execution)}</p>
+          {turnSnapshot?.state === "completed" && turnSnapshot.sessionId && (
+            <NativeReply sessionId={turnSnapshot.sessionId} turnKey={turnSnapshot.correlationId ?? turnSnapshot.inputId} />
+          )}
           {need && (
             <div className="native-intake__needs">
               <p role="alert">Needs you: {need.reason}</p>

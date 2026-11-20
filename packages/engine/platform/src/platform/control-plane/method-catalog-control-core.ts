@@ -408,7 +408,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     description: 'Create a shared session for a surface, route, or web client.',
     category: 'sessions',
     effects: ['sessions.administer'],
-    http: { method: 'POST', path: '/api/sessions' },
+    http: { method: 'POST', path: '/api/sessions', successStatus: 201 },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
       title: STRING_SCHEMA,
@@ -593,7 +593,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'Post Shared Session Message',
     description: 'Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: "task"` to request agent or contract task continuation.',
     category: 'sessions',
-    http: { method: 'POST', path: '/api/sessions/{sessionId}/messages' },
+    http: { method: 'POST', path: '/api/sessions/{sessionId}/messages', successStatus: 202 },
     errorCodes: [INVALID_KIND, INVALID_MESSAGE_ID, ...SUBMISSION_ERROR_CODES],
     replay: {
       in: 'body',
@@ -634,7 +634,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'Steer Shared Session',
     description: 'Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.',
     category: 'sessions',
-    http: { method: 'POST', path: '/api/sessions/{sessionId}/steer' },
+    http: { method: 'POST', path: '/api/sessions/{sessionId}/steer', successStatus: 202 },
     errorCodes: [INVALID_MESSAGE_ID, ...SUBMISSION_ERROR_CODES],
     replay: {
       in: 'body',
@@ -659,7 +659,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'Queue Shared Session Follow-Up',
     description: 'Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.',
     category: 'sessions',
-    http: { method: 'POST', path: '/api/sessions/{sessionId}/follow-up' },
+    http: { method: 'POST', path: '/api/sessions/{sessionId}/follow-up', successStatus: 202 },
     errorCodes: [INVALID_MESSAGE_ID, ...SUBMISSION_ERROR_CODES],
     replay: {
       in: 'body',
@@ -782,7 +782,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     title: 'Create Task',
     description: 'Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), or 409 with `mode` `rejected` and `acknowledged: false`. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing\'s `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.',
     category: 'tasks',
-    http: { method: 'POST', path: '/task' },
+    http: { method: 'POST', path: '/task', successStatus: 202 },
     errorCodes: [...SUBMISSION_ERROR_CODES, INVALID_ARGUMENT, { code: 'INVALID_JSON', status: 400, meaning: 'The body is not JSON; nothing was started.' }, ...AGENT_START_ERROR_CODES],
     events: [runtimeEventId('tasks')],
     inputSchema: TASK_CREATE_INPUT_SCHEMA,

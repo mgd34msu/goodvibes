@@ -44,7 +44,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../runtime/tools/output-policy.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { withCostOriginAsync, mcpServerOfToolName } from '../runtime/cost/cost-origin.js';
-import { DEFAULT_MAX_PARALLEL_TOOL_CALLS, planToolBatch, runBounded, toolCallLane } from './tool-batch.js';
+import { AdmittedLanes, DEFAULT_MAX_PARALLEL_TOOL_CALLS, planToolBatch, runBounded, toolCallLane, type ToolCallLane } from './tool-batch.js';
 
 /** Event payloads leave the process; hook and permission messages can quote secrets from arguments. */
 function redactedErrorResult<T extends { readonly error?: string | undefined }>(result: T): T {
@@ -387,6 +387,16 @@ async function fireObservingHook(dispatcher: HookDispatcherLike, event: HookEven
   if (hookPointBlocks(event.path)) await fired;
 }
 
+/** The lanes of the batch running for these deps, while one of its groups runs calls side by side. */
+const ADMITTED_LANES = new WeakMap<ToolExecutionDeps, AdmittedLanes>();
+
+/** The lane of a call as admitted: its final tool and arguments, after Pre hooks and revisions. */
+function admittedLane(deps: ToolExecutionDeps, name: string, args: Record<string, unknown>): ToolCallLane {
+  if (typeof deps.toolRegistry.list !== 'function') return { kind: 'alone', reason: 'the registry cannot list its tools' };
+  const tool = deps.toolRegistry.list().find((candidate) => candidate.definition.name === name);
+  return toolCallLane(tool?.definition, args, deps.workingDirectory, tool);
+}
+
 /** How each call of a batch may run beside the others, from the registry's declarations; every call runs alone when the registry cannot list them. */
 function batchLanes(deps: ToolExecutionDeps, calls: readonly ToolCall[]): number[][] {
   if (calls.length < 2 || typeof deps.toolRegistry.list !== 'function') return calls.map((_, index) => [index]);
@@ -423,9 +433,17 @@ export async function executeToolCalls(
     slots[index] = result;
   };
   const limit = deps.maxParallel?.() ?? DEFAULT_MAX_PARALLEL_TOOL_CALLS;
-  for (const group of batchLanes(deps, calls)) {
-    if (group.length === 1) await runOne(group[0]!);
-    else await runBounded(group, limit, undefined, (index) => runOne(index));
+  const groups = batchLanes(deps, calls);
+  // A group that runs side by side re-checks each call's lane once it is admitted (hooks and revisions may move it).
+  const admitted = groups.some((group) => group.length > 1) ? new AdmittedLanes() : undefined;
+  if (admitted) ADMITTED_LANES.set(deps, admitted);
+  try {
+    for (const group of groups) {
+      if (group.length === 1) await runOne(group[0]!);
+      else await runBounded(group, limit, undefined, (index) => runOne(index));
+    }
+  } finally {
+    if (admitted && ADMITTED_LANES.get(deps) === admitted) ADMITTED_LANES.delete(deps);
   }
   return slots.filter((result): result is ToolResult => result !== undefined);
 }
@@ -719,6 +737,10 @@ async function executeToolCallsInMode(
           reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason,
           detail: checkResult.detail, decision: checkResult.decision, approved: true,
         }, call.name);
+        // In a group that runs side by side, the call waits for any running call its admitted lane conflicts with.
+        const lanes = ADMITTED_LANES.get(deps);
+        const leaveLane = lanes ? await lanes.enter(admittedLane(deps, prepared?.name ?? call.name, prepared?.args ?? checkResult.modifiedArgs ?? call.arguments)) : undefined;
+        try {
         result = await withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {
           sourceOf, signal: callSignal, assertCurrent: () => { assertTurnActive(); callSignal?.throwIfAborted(); },
           inputFacts: [prepared?.args ?? call.arguments],
@@ -740,6 +762,9 @@ async function executeToolCallsInMode(
             return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
         )));
+        } finally {
+          leaveLane?.();
+        }
         if (stoppedByBudget()) {
           // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.
           const elapsedMs = Math.max(performance.now() - executeStartedAt, (budget!.maxMs ?? 0) + 1);

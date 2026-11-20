@@ -1406,11 +1406,12 @@ export class ConfigManager {
         return refuse(index, fileError);
       }
     };
-    const outcome: Promise<readonly DaemonWriteRefusal[]> = (changes.length > 1 && !reset && route.writeMany
+    const settled: Promise<readonly (DaemonWriteRefusal | null)[]> = changes.length > 1 && !reset && route.writeMany
       ? route.writeMany(changes).then(() => [], (error: unknown) => changes.map((_, index) => settle(index, error)))
       : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key) : route.write(change.key, change.value))
-        .then(() => null, (error: unknown) => settle(index, error)))))
-        .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
+        .then(() => null, (error: unknown) => settle(index, error))));
+    const outcome: Promise<readonly DaemonWriteRefusal[]> = settled
+      .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
     this.#forwarding.add(outcome);
     for (const watch of this.#forwardWatches) watch.push(outcome);
     void outcome.finally(() => { this.#forwarding.delete(outcome); });

@@ -1458,6 +1458,8 @@ export class DaemonServer {
       /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
       readonly connectionId?: string | undefined;
     };
+    /** The principal the request was authenticated as where it entered, with its actor; not authenticated again. */
+    readonly principal?: Parameters<DaemonControlPlaneHelper['invokeGatewayMethodCall']>[0]['principal'];
   }): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
     return await this.controlPlaneHelper.invokeGatewayMethodCall(input);
   }

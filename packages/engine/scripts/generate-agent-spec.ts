@@ -158,6 +158,16 @@ function errorResponses(method: OperatorMethodContract): Record<string, unknown>
   if (method.scopes.length > 0) out['403'] = { $ref: '#/components/responses/MissingScope' };
   if (pathParamNames(http.path).length > 0) out['404'] = { $ref: '#/components/responses/NotFound' };
   if (http.method !== 'GET' && pathParamNames(http.path).length > 0) out['409'] = { $ref: '#/components/responses/Conflict' };
+  // Every status the method declares an error code for (x-error-codes) is listed, with its codes.
+  const NAMED: Readonly<Record<number, string>> = { 400: 'BadRequest', 401: 'Unauthorized', 404: 'NotFound', 409: 'Conflict' };
+  for (const status of [...new Set((method.errorCodes ?? []).map((entry) => entry.status))].sort((a, b) => a - b)) {
+    const key = String(status);
+    if (out[key] !== undefined) continue;
+    const codes = (method.errorCodes ?? []).filter((entry) => entry.status === status).map((entry) => entry.code).join(', ');
+    out[key] = NAMED[status]
+      ? { $ref: `#/components/responses/${NAMED[status]}` }
+      : { description: `Codes declared: ${codes}.`, content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorBody' } } } };
+  }
   out['default'] = { $ref: '#/components/responses/Error' };
   return out;
 }
@@ -173,7 +183,8 @@ function operationFor(method: OperatorMethodContract): Json {
     tags: [method.category === 'control-plane' ? 'events' : method.category],
     ...(params.length > 0 ? { parameters: params } : {}),
     responses: {
-      '200': SSE_METHODS.has(method.id)
+      // The success status is the one the method declares (201 created, 202 accepted), else 200.
+      [String(http.successStatus ?? 200)]: SSE_METHODS.has(method.id)
         ? { ...SSE_RESPONSE }
         : {
             description: 'Success',

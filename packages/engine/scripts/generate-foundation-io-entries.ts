@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 import { descriptorSchemas, parseMethodIds } from './foundation-io-catalog.ts';
 import { renderType } from './foundation-io-render.ts';
+import { COMPANION_CHAT_MESSAGE_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-runtime.ts';
+import { RUNTIME_EVENT_DOMAINS } from '../contracts/src/generated/runtime-event-domains.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -43,6 +45,31 @@ function replaceMapBody(fileText: string, mapName: string, body: string): string
   const end = fileText.indexOf('\n}', start);
   if (end === -1) throw new Error(`${mapName} block is unterminated in foundation-client-types.ts`);
   return `${fileText.slice(0, start)}${header}\n${body}${fileText.slice(end + 1)}`;
+}
+
+/** Replace the right-hand side of one `export type <name> = ...;` line. */
+function replaceNamedType(fileText: string, name: string, rendered: string): string {
+  const head = `export type ${name} = `;
+  const start = fileText.indexOf(head);
+  if (start === -1) throw new Error(`${name} not found in foundation-client-types.ts`);
+  const end = fileText.indexOf(';\n', start);
+  return `${fileText.slice(0, start)}${head}${rendered}${fileText.slice(end)}`;
+}
+
+/** OperatorEventPayloadMap's `runtime.<domain>` entries, one per runtime event domain. */
+function replaceRuntimeEventEntries(fileText: string): string {
+  const header = 'export interface OperatorEventPayloadMap {';
+  const start = fileText.indexOf(header);
+  if (start === -1) throw new Error('OperatorEventPayloadMap not found in foundation-client-types.ts');
+  const end = fileText.indexOf('\n}', start);
+  const lines = fileText.slice(start + header.length + 1, end + 1).split('\n').filter(Boolean);
+  const runtimeLine = lines.find((line) => line.startsWith('  "runtime.'));
+  if (!runtimeLine) throw new Error('OperatorEventPayloadMap has no runtime entry to read the payload type from');
+  const payload = runtimeLine.slice(runtimeLine.indexOf(':') + 2);
+  const kept = lines.filter((line) => !line.startsWith('  "runtime.'));
+  const runtime = [...RUNTIME_EVENT_DOMAINS].sort().map((domain) => `  "runtime.${domain}": ${payload}`);
+  const body = [...kept, ...runtime].sort((a, b) => a.localeCompare(b));
+  return `${fileText.slice(0, start)}${header}\n${body.join('\n')}\n${fileText.slice(end + 1)}`;
 }
 
 export function generateFoundationIoEntries(options: { readonly check: boolean }): boolean {
@@ -62,6 +89,10 @@ export function generateFoundationIoEntries(options: { readonly check: boolean }
   const original = readFileSync(FOUNDATION_TYPES_PATH, 'utf8');
   let next = replaceMapBody(original, 'OperatorMethodInputMap', `${inputLines.join('\n')}\n`);
   next = replaceMapBody(next, 'OperatorMethodOutputMap', `${outputLines.join('\n')}\n`);
+  // The named companion message type is the wire schema's own rendering, so it carries every delivery state the runtime writes.
+  next = replaceNamedType(next, 'CompanionChatMessage', renderType(COMPANION_CHAT_MESSAGE_SCHEMA as unknown as Record<string, unknown>));
+  // The runtime event entries are exactly the domains the runtime emits (RUNTIME_EVENT_DOMAINS); control.* entries stay as written.
+  next = replaceRuntimeEventEntries(next);
 
   if (next === original) {
     console.log(
@@ -73,9 +104,9 @@ export function generateFoundationIoEntries(options: { readonly check: boolean }
 
   if (options.check) {
     console.error(
-      '[generate-foundation-io-entries] FAIL: OperatorMethodInputMap/OperatorMethodOutputMap in ' +
-        'contracts/src/generated/foundation-client-types.ts do not match the method-catalog ' +
-        'schemas they are rendered from, run `bun run scripts/generate-foundation-io-entries.ts`.',
+      '[generate-foundation-io-entries] FAIL: OperatorMethodInputMap/OperatorMethodOutputMap, the named ' +
+        'CompanionChatMessage type or the runtime event entries in contracts/src/generated/foundation-client-types.ts ' +
+        'do not match the schemas and domain list they are rendered from, run `bun run scripts/generate-foundation-io-entries.ts`.',
     );
     return true;
   }

@@ -105,6 +105,43 @@ function anyOverlap(a: readonly TouchedPath[], b: readonly TouchedPath[]): boole
   return false;
 }
 
+/** True when two calls' lanes may not run at the same time (a write beside anything touching its paths, or a call that runs alone). */
+export function lanesConflict(a: ToolCallLane, b: ToolCallLane): boolean {
+  if (a.kind === 'alone' || b.kind === 'alone') return true;
+  if (a.kind === 'read' && b.kind === 'read') return false;
+  const aPaths = a.paths, bPaths = b.paths;
+  if (aPaths === undefined || bPaths === undefined) return true;
+  return anyOverlap(aPaths, bPaths);
+}
+
+/**
+ * The lanes of the calls of one batch as they are admitted. A batch is planned
+ * from the model's arguments; a Pre hook or an admission revision can change
+ * what a call touches before it runs. Each call enters with the lane of its
+ * admitted arguments and waits for every running call it conflicts with, so
+ * two writes never reach the same file at once whatever rewrote them.
+ */
+export class AdmittedLanes {
+  private readonly running: { readonly lane: ToolCallLane; readonly done: Promise<void> }[] = [];
+
+  async enter(lane: ToolCallLane): Promise<() => void> {
+    for (;;) {
+      const blockers = this.running.filter((entry) => lanesConflict(entry.lane, lane));
+      if (blockers.length === 0) break;
+      await Promise.all(blockers.map((entry) => entry.done));
+    }
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => { release = resolve; });
+    const entry = { lane, done };
+    this.running.push(entry);
+    return () => {
+      const at = this.running.indexOf(entry);
+      if (at >= 0) this.running.splice(at, 1);
+      release();
+    };
+  }
+}
+
 interface OpenGroup {
   readonly indices: number[];
   readonly written: TouchedPath[];

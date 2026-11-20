@@ -87,7 +87,8 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
         result = result.filter(m => m.tier === 'free');
     }
     else if (categoryFilter === 'paid') {
-        result = result.filter(m => m.tier === 'standard' || m.tier === 'premium' || m.tier == null);
+        // Only a model the catalog prices: one whose tier is not published yet is not known to be paid.
+        result = result.filter(m => m.tier === 'standard' || m.tier === 'premium');
     }
     else if (categoryFilter === 'subscription') {
         result = result.filter(m => tierToCategoryFilter(m.tier) === 'subscription');

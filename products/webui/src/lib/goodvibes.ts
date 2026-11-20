@@ -1783,6 +1783,9 @@ export const client = {
         kill: (sessionId: string) =>
           invokeGatewayMethod<'sessions.hosted.kill', SessionsHostedKillResult>('sessions.hosted.kill', { sessionId }),
         workspaces: () => invokeGatewayMethod('sessions.hosted.workspaces', {}),
+        // The transcript of a live or ended hosted session, read without attaching.
+        history: (sessionId: string, signal?: AbortSignal) =>
+          invokeGatewayMethod('sessions.hosted.history', { sessionId }, signal),
       },
     },
     // watchers.stop: the fleet-node stop action for a watcher (fleet is a live-process

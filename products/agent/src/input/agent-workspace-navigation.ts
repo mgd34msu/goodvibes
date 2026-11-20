@@ -6,7 +6,17 @@ interface AgentWorkspaceNavigationHost {
   focusPane: AgentWorkspaceFocusPane;
   selectedCategoryIndex: number;
   selectedActionIndex: number;
+  /** The status line and the last action's result, which belong to the category they were made in. */
+  status: string;
+  lastActionResult: unknown;
   clampSelection(): void;
+}
+
+/** Moving to another category starts it with its own status line, not the last category's result. */
+function enterCategory(host: AgentWorkspaceNavigationHost, previousIndex: number): void {
+  if (host.selectedCategoryIndex === previousIndex) return;
+  host.lastActionResult = null;
+  host.status = `Agent workspace category: ${host.categories[host.selectedCategoryIndex]?.label ?? 'none'}.`;
 }
 
 const AGENT_WORKSPACE_CATEGORY_ALIASES = {
@@ -54,8 +64,10 @@ function normalizeAgentWorkspaceCategoryRequest(categoryIdOrLabel: string): stri
 
 export function moveAgentWorkspaceSelection(host: AgentWorkspaceNavigationHost, delta: -1 | 1): void {
   if (host.focusPane === 'categories') {
+    const previous = host.selectedCategoryIndex;
     host.selectedCategoryIndex = Math.max(0, Math.min(host.categories.length - 1, host.selectedCategoryIndex + delta));
     host.selectedActionIndex = 0;
+    enterCategory(host, previous);
   } else {
     host.selectedActionIndex = Math.max(0, Math.min(host.actions.length - 1, host.selectedActionIndex + delta));
   }
@@ -64,7 +76,9 @@ export function moveAgentWorkspaceSelection(host: AgentWorkspaceNavigationHost, 
 
 export function jumpAgentWorkspaceSelection(host: AgentWorkspaceNavigationHost, target: 'home' | 'end'): void {
   if (host.focusPane === 'categories') {
+    const previous = host.selectedCategoryIndex;
     host.selectedCategoryIndex = target === 'home' ? 0 : host.categories.length - 1;
+    enterCategory(host, previous);
   } else {
     host.selectedActionIndex = target === 'home' ? 0 : host.actions.length - 1;
   }

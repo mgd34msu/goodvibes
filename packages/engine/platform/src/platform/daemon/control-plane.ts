@@ -81,6 +81,8 @@ export interface ControlPlaneWebSocketData {
   ownerDevice?: true | undefined;
   /** Who the socket's principal is as a cause of effects; null before in-band auth. */
   actor?: Actor | null | undefined;
+  /** The principal the socket authenticated as, actor included: every call on the socket is admitted as it. */
+  principal?: RequestPrincipal | undefined;
   admin: boolean;
   scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
@@ -260,7 +262,7 @@ interface GatewayMethodCallInput {
    * call (a socket compares its authentication revision first). Absent: the
    * call authenticates the token once itself.
    */
-  readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined; readonly actor: Actor }) | undefined;
+  readonly principal?: RequestPrincipal | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -618,8 +620,10 @@ export class DaemonControlPlaneHelper {
    * narrowed to the admin flag and scopes the call's context carries (a
    * context never widens it).
    */
-  private callActor(principal: { readonly principalId: string; readonly principalKind: AuthenticatedPrincipal['principalKind'] | 'remote-peer'; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined },
+  private callActor(principal: { readonly principalId: string; readonly principalKind: AuthenticatedPrincipal['principalKind'] | 'remote-peer'; readonly credentialKind?: CredentialKind | null | undefined; readonly ownerDevice?: true | undefined; readonly admin: boolean; readonly scopes: readonly string[]; readonly actor?: Actor | undefined },
     admin: boolean, scopes: readonly string[]): Actor {
+    // The actor built when the credential was authenticated, unless the call's context narrowed it.
+    if (principal.actor !== undefined && admin === principal.admin && scopes.length === principal.scopes.length) return principal.actor;
     return actorFromPrincipal({ ...principal, admin, scopes }, this.ownerIdentity());
   }
 
@@ -802,6 +806,7 @@ export class DaemonControlPlaneHelper {
         credentialKind: principal.credentialKind,
         ...(principal.ownerDevice === true ? { ownerDevice: true as const } : {}),
         actor: principal.actor,
+        principal,
         scopes: principal.scopes,
         admin: principal.admin,
         domains,
@@ -866,6 +871,10 @@ export class DaemonControlPlaneHelper {
     data.admin = data.admin && fresh.admin;
     data.authRevision = fresh.authRevision;
     data.expiresAt = fresh.expiresAt;
+    // The socket keeps the fresh principal, and its actor unless the socket's own rights are narrower.
+    data.principal = fresh;
+    data.actor = data.admin === fresh.admin && data.scopes.length === fresh.scopes.length
+      ? fresh.actor : actorFromPrincipal({ ...fresh, admin: data.admin, scopes: data.scopes }, this.ownerIdentity());
     // Narrower rights narrow what the socket is sent from now on.
     if (data.clientId && (data.admin !== wasAdmin || data.scopes.length !== heldCount)) {
       this.context.controlPlaneGateway.regrantClient(data.clientId, { admin: data.admin, scopes: data.scopes });
@@ -968,6 +977,7 @@ export class DaemonControlPlaneHelper {
       ws.data.credentialKind = principal.credentialKind;
       ws.data.ownerDevice = principal.ownerDevice;
       ws.data.actor = principal.actor;
+      ws.data.principal = principal;
       ws.data.scopes = principal.scopes;
       ws.data.admin = principal.admin;
       ws.data.authRevision = principal.authRevision;
@@ -1039,9 +1049,7 @@ export class DaemonControlPlaneHelper {
       const response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
-            ...(ws.data.principalId !== null && ws.data.principalKind !== null && ws.data.actor
-              ? { principal: { principalId: ws.data.principalId, principalKind: ws.data.principalKind, credentialKind: ws.data.credentialKind, ...(ws.data.ownerDevice === true ? { ownerDevice: true as const } : {}), admin: ws.data.admin, scopes: ws.data.scopes, actor: ws.data.actor } }
-              : {}),
+            ...(ws.data.principal ? { principal: ws.data.principal } : {}),
             signal: this.socketSignal(ws),
             methodId,
             ...(typeof frame.idempotencyKey === 'string' ? { idempotencyKey: frame.idempotencyKey } : {}),
@@ -1074,6 +1082,7 @@ export class DaemonControlPlaneHelper {
               scopes: ws.data.scopes,
               actor: ws.data.actor,
             },
+            ...(ws.data.principal ? { principal: ws.data.principal } : {}),
             caller: callerKey(ws.data.clientId, ws.data.principalId ?? undefined),
           });
       this.sendFrame(ws, JSON.stringify({
@@ -1114,6 +1123,12 @@ export class DaemonControlPlaneHelper {
       /** Who the call is admitted as (the socket's or the dispatched call's actor). */
       readonly actor?: Actor | null | undefined;
     };
+    /**
+     * The principal the call was authenticated as. The request this builds is
+     * bound to it when the call's actor is the principal's own, so the route's
+     * gate admits the very same actor instead of authenticating again.
+     */
+    readonly principal?: RequestPrincipal | undefined;
     /** Whose in-flight budget the call uses (see {@link callerKey}); a caller that names none shares one budget. */
     readonly caller?: string | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
@@ -1160,6 +1175,12 @@ export class DaemonControlPlaneHelper {
         ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
         signal,
       });
+      const bound = input.principal;
+      if (bound && bound.actor === input.context?.actor && isPrincipalCurrent(bound, this.authRevision())) {
+        const gateway = this.context.controlPlaneGateway;
+        bindRequestContext(request, createRequestContext(bound, signal,
+          typeof gateway?.principalSignal === 'function' ? () => gateway.principalSignal(bound.principalId) : undefined));
+      }
       const response = await this.context.dispatchApiRoutes(request) ?? Response.json({ error: 'Not found' }, { status: 404 });
       // A streaming response cannot be delivered over the request/response call
       // frame, refuse honestly (and tear the producer down) instead of
@@ -1442,7 +1463,10 @@ export class DaemonControlPlaneHelper {
         principalKind: context?.principalKind,
         admin: context?.admin,
         scopes: context?.scopes,
+        // The route this synthesizes is admitted for the same actor the call was.
+        actor: context?.actor,
       },
+      ...(authenticated ? { principal: authenticated } : {}),
     });
   }
 }

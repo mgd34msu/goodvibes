@@ -437,7 +437,14 @@ export class DaemonHttpRouter {
             }, { status });
         });
         if (response.status === 101) return response;
-        const observed = new Response(response.body, response);
+        // A success answers with the status its method declares (201 created, 202 accepted):
+        // one declaration, read here and by the generated specs.
+        const declared = response.ok && !asset
+          ? this.context.gatewayMethods.findByHttpBinding(req.method, new URL(req.url).pathname)?.http?.successStatus
+          : undefined;
+        const observed = declared !== undefined && declared !== response.status
+          ? new Response(response.body, { status: declared, headers: response.headers })
+          : new Response(response.body, response);
         // Every answer to a host's identity challenge carries the proof, whatever its
         // status, so a host never takes a proof-less answer (a 200 included) for the daemon.
         if (req.headers.has(DAEMON_CHALLENGE_HEADER)) {

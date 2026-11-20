@@ -70,6 +70,21 @@ const EXECUTION_RISK_CLASS_SCHEMA = enumSchema(['safe', 'elevated', 'dangerous']
 const EXECUTION_NETWORK_POLICY_SCHEMA = enumSchema(['inherit', 'allow', 'deny', 'scoped']);
 const EXECUTION_FILESYSTEM_POLICY_SCHEMA = enumSchema(['inherit', 'workspace-write', 'read-only', 'isolated']);
 
+/** A failed reply's failure reading (core/turn-failure.ts TurnFailureReading). */
+const TURN_FAILURE_READING_SCHEMA = objectSchema({
+  turnId: STRING_SCHEMA,
+  headline: STRING_SCHEMA,
+  cause: STRING_SCHEMA,
+  changed: objectSchema({ text: STRING_SCHEMA, files: STRING_LIST_SCHEMA }, ['text', 'files']),
+  next: arraySchema(objectSchema({
+    action: enumSchema(['retry', 'other-model', 'details', 'sign-in', 'choose-model', 'start-daemon']),
+    label: STRING_SCHEMA,
+  }, ['action', 'label'])),
+  also: STRING_SCHEMA,
+  tip: objectSchema({ text: STRING_SCHEMA, command: STRING_SCHEMA }, ['text', 'command']),
+  details: arraySchema(objectSchema({ label: STRING_SCHEMA, value: STRING_SCHEMA }, ['label', 'value'])),
+}, ['turnId', 'headline', 'cause', 'changed', 'next', 'details']);
+
 const COMPANION_CHAT_ATTACHMENT_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   artifactId: STRING_SCHEMA,
@@ -188,8 +203,8 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   // cut off by a daemon stop (content is the partial, possibly empty).
   // Absent = normally delivered.
   deliveryState: enumSchema(['cancelled', 'queued', 'unanswered', 'failed']),
-  // On a 'failed' reply: why it failed.
-  failureReason: STRING_SCHEMA,
+  // On a 'failed' reply: why it failed, as the failure reading every program draws its row from.
+  failureReason: TURN_FAILURE_READING_SCHEMA,
   // On assistant messages: the user message this reply answers (the
   // transcript is append-ordered, so pairing needs an explicit link).
   inReplyTo: STRING_SCHEMA,

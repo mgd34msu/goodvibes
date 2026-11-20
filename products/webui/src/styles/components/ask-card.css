@@ -1,0 +1,247 @@
+/* One ask as a card (views/work/AskCard.tsx; ux A2.4, A2.5). Amber says "this needs you";
+   --bad only for what can't be undone, and the words always say so too. */
+.ask-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ask-card--inline {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--surface);
+  max-width: 720px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ask-card--inline.ask-card--question {
+  border-color: var(--info);
+}
+
+.ask-card--undo.ask-card--inline {
+  border-color: var(--bad);
+}
+
+.ask-card__lead {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.ask-card__question {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  color: var(--text);
+}
+
+.ask-card__body {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ask-card__subject {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ask-card__subject--text p {
+  margin: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.ask-card__code {
+  align-self: flex-start;
+  max-width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--code);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-card__output {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--code);
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-card__consequence,
+.ask-card__dim {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+.ask-card__consequence--undo {
+  color: var(--bad);
+}
+
+.ask-card__choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.ask-card__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ask-card__note {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+.ask-card__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ask-card__tiers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-card__tier {
+  color: var(--text);
+}
+
+.ask-card__tier-detail {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask-card__hunks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ask-card__hunk {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask-card__links {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+.ask-card__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ask-card__link:hover,
+.ask-card__link[aria-expanded='true'] {
+  color: var(--text-2);
+  text-decoration: underline;
+}
+
+.ask-card__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+.ask-card__why {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.ask-card__details {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+}
+
+.ask-card__detail {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) 1fr;
+  gap: var(--space-3);
+}
+
+.ask-card__detail dt {
+  color: var(--text-3);
+}
+
+.ask-card__detail dd {
+  margin: 0;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.ask-card-decided {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+/* The chat's inline asks sit below the last message, in the message column. */
+.chat-asks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.chat-asks-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-full);
+  background: var(--warn-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-asks-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

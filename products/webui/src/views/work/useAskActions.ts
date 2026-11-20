@@ -55,7 +55,7 @@ export function useAskActions(approvals: ApprovalActions) {
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.ownerInbox }); },
   });
 
-  /** Carry out `choice` on `ask`. Returns false when the choice needs more from the person first. */
+  /** Carry out `choice` on `ask`, with what the person added (a reason, a tier, the hunks kept). */
   function choose(ask: OpenAsk, choice: AskChoice, input: ChoiceInput = {}): void {
     const record = ask.approval;
     if (record) {

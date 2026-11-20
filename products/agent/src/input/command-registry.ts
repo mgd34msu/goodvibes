@@ -116,6 +116,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openCommandPalette?: () => void;
 
   openAgentWorkspace?: (categoryId?: string) => void;
+  /** Opens the form of one `/setup` topic: these rows of the setup category, and nothing else. */
+  openAgentSetupRows?: (actionIds: readonly string[]) => void;
   dismissAgentWorkspace?: () => boolean;
   openSecurityWorkspace?: () => void;
   openKnowledgeWorkspace?: () => void;

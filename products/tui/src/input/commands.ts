@@ -28,7 +28,6 @@ import { registerReplayRuntimeCommands } from './commands/replay-runtime.ts';
 import { registerShareRuntimeCommands } from './commands/share-runtime.ts';
 import { registerChannelRuntimeCommands } from './commands/channel-runtime.ts';
 import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
-import { registerLocalSetupCommands } from './commands/local-setup.ts';
 import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
 import { registerPlatformRuntimeCommands } from './commands/platform-runtime.ts';
 import { registerProfileSyncRuntimeCommands } from './commands/profile-sync-runtime.ts';
@@ -126,7 +125,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Sharing', register: registerShareRuntimeCommands },
   { category: 'Channels', register: registerChannelRuntimeCommands },
   { category: 'Channels', register: registerTelegramIntakeCommands },
-  { category: 'Local Setup', register: registerLocalSetupCommands },
   { category: 'Product', register: registerProductRuntimeCommands },
   { category: 'Platform', register: registerPlatformRuntimeCommands },
   { category: 'Profiles', register: registerProfileSyncRuntimeCommands },

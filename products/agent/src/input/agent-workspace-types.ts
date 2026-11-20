@@ -11,7 +11,7 @@ export type { AgentWorkspaceLocalLibraryItem };
 
 export const AGENT_WORKSPACE_MODAL_NAME = 'agentWorkspace';
 
-export type AgentWorkspaceCategoryGroup = 'START' | 'ONBOARDING' | 'DAY-TO-DAY' | 'CAPABILITIES' | 'LOCAL BEHAVIOR' | 'OPERATIONS' | 'FINISH';
+export type AgentWorkspaceCategoryGroup = 'START' | 'SETUP' | 'ONBOARDING' | 'DAY-TO-DAY' | 'CAPABILITIES' | 'LOCAL BEHAVIOR' | 'OPERATIONS' | 'FINISH';
 
 export type AgentWorkspaceFocusPane = 'categories' | 'actions';
 

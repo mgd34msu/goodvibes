@@ -366,6 +366,12 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
+  commandContext.openAgentSetupRows = (actionIds) => {
+    input.openAgentWorkspace(commandContext, 'setup', 'SETUP');
+    input.agentWorkspace.showOnlyActions(actionIds);
+    render();
+  };
+
   commandContext.dismissAgentWorkspace = () => input.dismissAgentWorkspace();
 
   commandContext.openWorkspacePicker = () => {

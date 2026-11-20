@@ -136,12 +136,13 @@ export class BrowserEngine {
   /** Credential-page verdicts, one per snapshot: the page is read for its purpose at most once per snapshot. */
   private readonly credentialVerdicts = new WeakMap<BrowserSnapshot, 'yes' | 'no'>();
   /**
-   * One host admission per browser context (`createHostAdmission`, purpose
-   * `browser-page`): each host is resolved once for the context's life and
-   * every request the context makes (navigation, redirect, frame, subresource,
+   * Each context's request guard, installed once and awaited by every page
+   * action: one host admission per context (`createHostAdmission`, purpose
+   * `browser-page`), so each host is resolved once for the context's life and
+   * every request it makes (navigation, redirect, frame, subresource,
    * WebSocket) is held to the answer before it leaves.
    */
-  private readonly hostAdmissions = new WeakMap<BrowserContext, (host: string) => Promise<'allowed' | DestinationRefusedError>>();
+  private readonly contextGuards = new WeakMap<BrowserContext, Promise<void>>();
   /** Origins whose requests were refused, per session, reported with the next page result and then cleared. */
   private readonly blockedOrigins = new Map<string, Set<string>>();
 
@@ -495,13 +496,13 @@ export class BrowserEngine {
    * page result; a private or loopback origin the owner allowed for a page of
    * this session (`localReach`) goes through.
    */
-  private guardContextRequests(sessionId: string, page: Page): void {
+  private guardContextRequests(sessionId: string, page: Page): Promise<void> {
     let context: BrowserContext;
-    try { context = page.context(); } catch { return; }
-    if (this.hostAdmissions.has(context)) return;
+    try { context = page.context(); } catch { return Promise.resolve(); }
+    const installing = this.contextGuards.get(context);
+    if (installing) return installing;
     const config = this.options.destinationConfig ?? NO_CONFIG;
     const admit = createHostAdmission('browser-page', config, this.resolverOption());
-    this.hostAdmissions.set(context, admit);
     const block = (url: string): void => {
       const origin = this.untrusted.originOf(url.replace(/^ws/, 'http'));
       const blocked = this.blockedOrigins.get(sessionId) ?? new Set<string>();
@@ -526,7 +527,7 @@ export class BrowserEngine {
     // HTTP request is resolved and checked afresh and fetched by this process
     // from the address that passed, so the browser never resolves a name itself.
     const pinned = config.get('browser.network.pinned') === true;
-    void context.route('**/*', async (route: Route) => {
+    const requests = context.route('**/*', async (route: Route) => {
       try {
         if (pinned && await this.fulfilPinned(sessionId, route, config, block)) return;
         if (await allowed(route.request().url())) await route.continue();
@@ -534,8 +535,8 @@ export class BrowserEngine {
       } catch {
         // The page or context went away while the request was held.
       }
-    }).catch(() => { this.hostAdmissions.delete(context); });
-    void context.routeWebSocket(/.*/, async (socket: WebSocketRoute) => {
+    });
+    const sockets = context.routeWebSocket(/.*/, async (socket: WebSocketRoute) => {
       try {
         if (await allowed(socket.url())) socket.connectToServer();
         else await socket.close({ code: 1008, reason: 'blocked by the browser destination rule' });
@@ -543,6 +544,13 @@ export class BrowserEngine {
         // The page or context went away while the connection was held.
       }
     }).catch(() => { /* a context that cannot intercept WebSockets still has its HTTP requests held */ });
+    // A context whose requests cannot be held is refused: nothing runs in it unchecked.
+    const guarded = Promise.all([requests, sockets]).then(() => undefined, (error: unknown) => {
+      this.contextGuards.delete(context);
+      throw new BrowserSessionError(`The browser's requests could not be held to the destination rule, so nothing is opened (${error instanceof Error ? error.message : String(error)}).`, 'Close the browser session and start a new one.');
+    });
+    this.contextGuards.set(context, guarded);
+    return guarded;
   }
 
   private resolverOption(): { readonly resolver?: NonNullable<BrowserEngineOptions['destinationResolver']> } {
@@ -630,10 +638,11 @@ export class BrowserEngine {
   }
 
   /** Observes every main-frame navigation of an in-process page, including ones between tool calls. */
-  private watchMainFrame(sessionId: string, pageId: string, page: Page): void {
+  private async watchMainFrame(sessionId: string, pageId: string, page: Page): Promise<void> {
+    // The request guard is in place before anything this engine asks of the page.
+    await this.guardContextRequests(sessionId, page);
     if (this.watchedPages.has(page)) return;
     this.watchedPages.add(page);
-    this.guardContextRequests(sessionId, page);
     page.on('framenavigated', (frame) => {
       if (frame.parentFrame() === null) this.observeMainFrame(sessionId, pageId, frame.url());
     });
@@ -693,7 +702,7 @@ export class BrowserEngine {
       if (page !== selected.page) throw new BrowserSessionError('The original browser page was replaced.', 'Select a live page before retrying.');
       const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
       current(); work?.bindPage(current, signal);
-      this.watchMainFrame(selected.sessionId, selected.pageId, page);
+      await this.watchMainFrame(selected.sessionId, selected.pageId, page); current();
       this.observeMainFrame(selected.sessionId, selected.pageId, page.url());
       const result = await perform({ ...selected, current, signal });
       this.observeMainFrame(selected.sessionId, selected.pageId, page.url());
@@ -1581,7 +1590,7 @@ export class BrowserEngine {
     return this.sessions.withPage(sessionId, pageId, async (original, current, pageSignal) => {
       if (original !== page) throw new BrowserSessionError('The original new browser tab was replaced.', 'Select a live tab before retrying.');
       current();
-      this.watchMainFrame(sessionId, pageId, page);
+      await this.watchMainFrame(sessionId, pageId, page); current();
       if (approvedOrigin !== null) this.rememberLocalReach(sessionId, pageId, approvedOrigin, approvedOrigin);
       if (startUrl) {
         const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;

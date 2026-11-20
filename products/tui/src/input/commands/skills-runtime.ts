@@ -1,211 +1,114 @@
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
-import { describeUncheckedCatalogEntries, installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosystemCatalog, removeEcosystemCatalogEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
+import { loadEcosystemCatalog, removeEcosystemCatalogEntry, upsertEcosystemCatalogEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { openModalCommand, requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
-import { parseScope } from './marketplace-runtime.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand, defineList, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+
+/**
+ * `/skills`, described once (command-actions/): the skill packs this app
+ * finds, where they come from, and publishing a skill folder into the local
+ * curated catalog. Installing from the catalog is /marketplace's.
+ */
+
+async function skillsOf(ctx: CommandContext) {
+  // The same discovery and inputs as the Skills modal, so marketplace provenance shows here too.
+  return discoverSkills(requireShellPaths(ctx), requireEcosystemCatalogPaths(ctx));
+}
+
+const SKILLS = defineList<CommandContext>({
+  name: 'skills',
+  async read(ctx) { return (await skillsOf(ctx)).map((skill): ListRow => ({ value: skill.name, label: skill.name, detail: skill.description || undefined, state: skill.origin })); },
+  operator: { terminalOnly: 'Skills are found in this project and on this machine.' },
+});
+const PUBLISHED = defineList<CommandContext>({
+  name: 'skills.catalog',
+  async read(ctx) { return loadEcosystemCatalog('skill', requireEcosystemCatalogPaths(ctx)).map((entry): ListRow => ({ value: entry.id, label: entry.name, detail: entry.summary })); },
+  operator: { terminalOnly: 'The curated catalog is on this machine.' },
+});
 
 export function registerSkillsRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'skills',
-    // A summary is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'publish-local' ? 3 : undefined),
-    aliases: ['skill'],
-    description: 'Inspect installed skill packs',
-    usage: '[open|list|show <name>|origins|browse [query]|installed|catalog-review <id>|publish-local <id> <path> <summary...>|unpublish <id>|install-hint <catalog-id>|install <id> [project|user]|update <id> [project|user]|uninstall <id> [project|user]]',
-    async handler(args, ctx) {
-      const sub = args[0] ?? 'open';
-      if (sub === 'open' || sub === 'panel') {
-        openModalCommand(ctx, 'skills-modal');
-        return;
-      }
-      // Read before anything is discovered, so a mistyped scope changes nothing.
-      const scope = (sub === 'install' || sub === 'update' || sub === 'uninstall') && args[1]
-        ? parseScope(args[2], ctx, `/skills ${sub} <catalog-id> [project|user]`)
-        : 'project';
-      if (scope === null) return;
-      // The same discovery and inputs as the Skills modal, so marketplace provenance shows here too.
-      const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
-      const skills = await discoverSkills(requireShellPaths(ctx), ecosystemPaths);
-      if (sub === 'list') {
-        if (skills.length === 0) {
-          ctx.print('No skills discovered.');
-          return;
-        }
-        ctx.print([
-          `Skills (${skills.length})`,
-          ...skills.map((skill) => `  ${skill.name}  [${skill.origin}]  ${skill.description || 'No description provided.'}${skill.marketplaceProvenance ? `  (${skill.marketplaceProvenance})` : ''}`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'origins') {
-        const counts = new Map<string, number>();
-        for (const skill of skills) counts.set(skill.origin, (counts.get(skill.origin) ?? 0) + 1);
-        ctx.print([
-          'Skill Origins',
-          ...[...counts.entries()].map(([origin, count]) => `  ${origin}: ${count}`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'show') {
-        const name = args[1];
-        if (!name) {
-          ctx.print('Usage: /skills show <name>');
-          return;
-        }
-        const skill = skills.find((entry) => entry.name === name);
-        if (!skill) {
-          ctx.print(`Unknown skill: ${name}`);
-          return;
-        }
-        ctx.print([
-          `Skill ${skill.name}`,
-          `  origin: ${skill.origin}`,
-          `  path: ${skill.path}`,
-          `  description: ${skill.description || 'No description provided.'}`,
-          `  dependencies: ${skill.dependencies.join(', ') || '(none)'}`,
-          `  includes: ${skill.includes.join(', ') || '(none)'}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'browse' || sub === 'catalog') {
-        const query = args.slice(1).join(' ');
-        const search = query ? await searchEcosystemCatalog('skill', query, ecosystemPaths) : { entries: loadEcosystemCatalog('skill', ecosystemPaths), unchecked: 0 };
-        const { entries } = search;
-        const unchecked = describeUncheckedCatalogEntries(search);
-        if (entries.length === 0) {
-          ctx.print(query
-            ? [`No curated skill catalog entries matched "${query}".`, ...(unchecked ? [unchecked] : [])].join('\n')
-            : 'No curated skill catalog entries found. Add .goodvibes/tui/ecosystem/skills.json to publish a local-first skill catalog.');
-          return;
-        }
-        ctx.print([
-          `Curated Skill Catalog (${entries.length})`,
-          ...entries.map((entry) => `  ${entry.id}  ${entry.name}  [${entry.tags.join(', ') || 'untagged'}]  ${entry.summary}`),
-          ...(unchecked ? [`  ${unchecked}`] : []),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'installed') {
-        const receipts = listInstalledEcosystemEntries('skill', ecosystemPaths);
-        if (receipts.length === 0) {
-          ctx.print('No curated skills installed from local catalogs yet.');
-          return;
-        }
-        ctx.print([
-          `Installed Curated Skills (${receipts.length})`,
-          ...receipts.map((receipt) => `  ${receipt.entry.id}  ${receipt.scope}  ${receipt.targetPath}`),
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'catalog-review') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills catalog-review <catalog-id>');
-          return;
-        }
-        const entry = loadEcosystemCatalog('skill', ecosystemPaths).find((candidate) => candidate.id === entryId);
-        if (!entry) {
-          ctx.print(`Unknown curated skill entry: ${entryId}`);
-          return;
-        }
-        const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
-        ctx.print([
-          `Skill Catalog Review: ${entry.name}`,
-          `  id: ${entry.id}`,
-          `  source: ${entry.source}`,
-          `  sourceKind: ${review.sourceKind}`,
-          `  sourceExists: ${review.sourceExists ? 'yes' : 'no'}`,
-          `  recommendedScope: ${review.recommendedScope}`,
-          `  risk: ${review.riskLevel}`,
-          `  trust notes: ${entry.trustNotes ?? '(none)'}`,
-          `  provenance: ${entry.provenance ?? '(none)'}`,
-          `  update hint: ${entry.updateHint ?? '(none)'}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'publish-local') {
-        const entryId = args[1];
-        const sourcePath = args[2];
-        const summary = args.slice(3).join(' ').trim();
-        if (!entryId || !sourcePath || !summary) {
-          ctx.print('Usage: /skills publish-local <catalog-id> <path> <summary...>');
-          return;
-        }
-        const result = upsertEcosystemCatalogEntry({
-          id: entryId,
-          kind: 'skill',
-          name: entryId.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
-          summary,
-          source: sourcePath,
-          tags: ['local-first', 'published'],
-          provenance: 'operator-published',
-          updateHint: 'Use /skills publish-local again to refresh catalog metadata after edits.',
-        }, ecosystemPaths);
-        ctx.print(result.ok ? `Published curated skill ${entryId} into ${result.path}` : `Error: ${result.error}`);
-        return;
-      }
-      if (sub === 'unpublish') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills unpublish <catalog-id>');
-          return;
-        }
-        const result = removeEcosystemCatalogEntry('skill', entryId, ecosystemPaths);
-        ctx.print(result.ok ? `Removed curated skill ${entryId} from ${result.path}` : `Error: ${result.error}`);
-        return;
-      }
-      if (sub === 'install-hint') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills install-hint <catalog-id>');
-          return;
-        }
-        const entry = loadEcosystemCatalog('skill', ecosystemPaths).find((candidate) => candidate.id === entryId);
-        if (!entry) {
-          ctx.print(`Unknown curated skill entry: ${entryId}`);
-          return;
-        }
-        ctx.print([
-          `Skill Install Guidance: ${entry.name}`,
-          `  id: ${entry.id}`,
-          `  source: ${entry.source}`,
-          `  tags: ${entry.tags.join(', ') || '(none)'}`,
-          `  trust notes: ${entry.trustNotes ?? '(none)'}`,
-          `  install hint: ${entry.installHint ?? 'Place the skill pack under a configured skill directory and refresh the skills modal.'}`,
-        ].join('\n'));
-        return;
-      }
-      if (sub === 'install') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills install <catalog-id> [project|user] (default: project)');
-          return;
-        }
-        const result = installEcosystemCatalogEntry('skill', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok ? `Installed curated skill ${entryId} into ${result.receipt.targetPath}` : `Error: ${result.error}`);
-        return;
-      }
-      if (sub === 'update') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills update <catalog-id> [project|user] (default: project)');
-          return;
-        }
-        const result = updateInstalledEcosystemEntry('skill', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok ? `Updated curated skill ${entryId} in ${result.receipt.targetPath}` : `Error: ${result.error}`);
-        return;
-      }
-      if (sub === 'uninstall') {
-        const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /skills uninstall <catalog-id> [project|user] (default: project)');
-          return;
-        }
-        const result = uninstallEcosystemCatalogEntry('skill', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok ? `Uninstalled curated skill ${entryId} from ${result.removedPath}` : `Error: ${result.error}`);
-        return;
-      }
-      ctx.print('Usage: /skills [open|list|show <name>|origins|browse [query]|installed|catalog-review <id>|publish-local <id> <path> <summary...>|unpublish <id>|install-hint <catalog-id>|install <id> [project|user]|update <id> [project|user]|uninstall <id> [project|user]]');
-    },
-  });
+    title: 'Skills',
+    summary: 'See the skill packs the model can use, and publish your own',
+    group: 'Extensions',
+    report: 'list',
+    firstScreenRows: ['list', 'show', 'origins', { label: 'Publish your own skill', actions: ['publish-local', 'unpublish'] }, 'open'],
+    actions: [
+      readAction<CommandContext>({
+        id: 'list', label: 'See your skills', word: 'list',
+        sentence: 'Lists every skill pack found, where it comes from, and what it is for.',
+        async run(_values, ctx) {
+          const skills = await skillsOf(ctx);
+          if (skills.length === 0) return 'No skills discovered.';
+          return [`Skills (${skills.length})`, ...skills.map((skill) => `  ${skill.name}  [${skill.origin}]  ${skill.description || 'No description provided.'}${skill.marketplaceProvenance ? `  (${skill.marketplaceProvenance})` : ''}`)].join('\n');
+        },
+      }),
+      doAction<CommandContext>({
+        id: 'open', label: 'Open the skills screen', word: 'open', touches: 'reads',
+        sentence: 'Opens the full-screen view of your skills.', operator: { terminalOnly: 'It is a terminal screen.' },
+        async run(_values, ctx) { openModalCommand(ctx, 'skills-modal'); },
+      }),
+      readAction<CommandContext>({
+        id: 'show', label: 'See one skill', word: 'show', inputs: [listInput({ id: 'skill', label: 'Skill', help: 'The skills found', list: SKILLS })],
+        sentence: 'Shows {skill}\'s origin, path, description, dependencies and what it includes.', example: { skill: 'release-notes' },
+        async run(values, ctx) {
+          const skill = (await skillsOf(ctx)).find((entry) => entry.name === values.skill);
+          if (!skill) throw commandRefusal(`Unknown skill: ${values.skill}`, '/skills list shows them.');
+          return [
+            `Skill ${skill.name}`, `  origin: ${skill.origin}`, `  path: ${skill.path}`, `  description: ${skill.description || 'No description provided.'}`,
+            `  dependencies: ${skill.dependencies.join(', ') || '(none)'}`, `  includes: ${skill.includes.join(', ') || '(none)'}`,
+          ].join('\n');
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'origins', label: 'See where your skills come from', word: 'origins',
+        sentence: 'Counts your skills by where they were found.',
+        async run(_values, ctx) {
+          const counts = new Map<string, number>();
+          for (const skill of await skillsOf(ctx)) counts.set(skill.origin, (counts.get(skill.origin) ?? 0) + 1);
+          return ['Skill Origins', ...[...counts.entries()].map(([origin, count]) => `  ${origin}: ${count}`)].join('\n');
+        },
+      }),
+      {
+        id: 'publish-local', label: 'Publish a skill folder to the local catalog', word: 'publish-local',
+        inputs: [
+          textInput({ id: 'id', label: 'Catalog id', help: 'A short id you choose', why: 'a new id you choose', typed: { position: 1 } }),
+          textInput({ id: 'path', label: 'Skill folder', help: 'The folder with its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }),
+          textInput({ id: 'summary', label: 'Summary', help: 'One line on what it does', why: 'your own words', typed: { tail: true } }),
+        ],
+        sentence: 'The skill in {path} is listed in the local curated catalog as {id} ("{summary}"), until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'unpublish',
+        operator: { terminalOnly: 'The curated catalog is on this machine.' }, example: { id: 'release-notes', path: 'skills/release-notes', summary: 'Write release notes from merged changes' },
+        async run(values, ctx) {
+          const result = upsertEcosystemCatalogEntry({
+            id: values.id!,
+            kind: 'skill',
+            name: values.id!.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+            summary: values.summary!,
+            source: values.path!,
+            tags: ['local-first', 'published'],
+            provenance: 'operator-published',
+            updateHint: 'Use /skills publish-local again to refresh catalog metadata after edits.',
+          }, requireEcosystemCatalogPaths(ctx));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Published curated skill ${values.id} into ${result.path}`;
+        },
+      },
+      {
+        id: 'unpublish', label: 'Take a skill out of the local catalog', word: 'unpublish',
+        inputs: [listInput({ id: 'id', label: 'Catalog entry', help: 'Skills in the local curated catalog', list: PUBLISHED })],
+        sentence: '{id} is removed from the local curated catalog; installs of it stay.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
+        operator: { terminalOnly: 'The curated catalog is on this machine.' }, example: { id: 'release-notes' },
+        async run(values, ctx) {
+          const result = removeEcosystemCatalogEntry('skill', values.id!, requireEcosystemCatalogPaths(ctx));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Removed curated skill ${values.id} from ${result.path}`;
+        },
+      },
+    ],
+  }));
 }

@@ -1,20 +1,17 @@
 /**
- * Ambient autonomy surfacing: the launch "While you were away" digest, the
- * Activity view's "Coming up", and the skill-draft pass that follows a digest
- * which found completed work.
+ * Ambient autonomy surfacing: the launch "While you were away" digest and the
+ * skill-draft pass that follows a digest which found completed work.
  *
- * Both halves of the Activity view read the connected host, where schedules
- * live and run: Coming up lists its enabled schedules, the digest its run
- * outcomes. Local calendar events are merged into Coming up.
+ * The digest reads the connected host, where schedules live and run, for its
+ * run outcomes. What is scheduled next is in Your agents (Ctrl+O), read from
+ * the same host's fleet.
  */
 
-import { buildAwayDigest, formatDigestTime, formatRelativeTime } from '../core/away-digest.ts';
+import { buildAwayDigest } from '../core/away-digest.ts';
 import type { AwayDigestScheduleItem } from '../core/away-digest.ts';
 import { LastSeenStore } from '../core/last-seen-store.ts';
 import type { AutomationRunsSinceResult } from '../agent/automation-runs-source.ts';
-import type { UpcomingSchedulesResult } from '../agent/automation-schedules-source.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { AgentCalendarRegistry } from '../agent/calendar-registry.ts';
 import { executeToolCalls, toolBudgetFromConfig } from '@goodvibes-jev/engine/platform/platform/core';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -32,12 +29,6 @@ interface AutonomyMessageRouter {
 
 export interface AutonomySurfacingOptions {
   readonly shellPaths: Parameters<typeof LastSeenStore.fromShellPaths>[0];
-  /**
-   * Coming up: the connected host's enabled schedules with a next run after
-   * `now` (automation.schedules.list), the same host the digest reads run
-   * outcomes from. Never throws; an unreadable host is named in the result.
-   */
-  readonly listUpcomingSchedules: (now: number, signal: AbortSignal) => Promise<UpcomingSchedulesResult>;
   /**
    * The away digest's automation source of truth: connected-host runs
    * (completed/failed/missed) since the given epoch-ms timestamp, read over
@@ -60,12 +51,6 @@ export interface AutonomySurfacingOptions {
   readonly router: AutonomyMessageRouter;
   readonly render: () => void;
   /**
-   * Optional callback to list upcoming local calendar events.
-   * Each item carries a formatted label and a numeric sort key (ms since epoch)
-   * so the Coming up section merges calendar and schedule entries chronologically.
-   */
-  readonly listCalendarEvents?: () => readonly { label: string; start: number }[];
-  /**
    * The skill-draft pass: returns the count of drafts created; when > 0 a feed
    * line says so. Run at most once per launch, only when the digest found
    * completed work since the person was last here, and only once the shell is idle.
@@ -80,7 +65,6 @@ export interface AutonomySurfacingOptions {
   readonly scheduleIdle?: ((run: () => Promise<void>) => void) | undefined;
 }
 
-const COMING_UP_TTL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 2500;
 const LAST_SEEN_REFRESH_MS = 5 * 60_000;
 const IDLE_CHECK_MS = 20_000;
@@ -132,55 +116,8 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
   const lastSeenRefreshInterval = setInterval(saveLastSeen, LAST_SEEN_REFRESH_MS);
   lastSeenRefreshInterval.unref();
 
-  const comingUpCache: { items: string[]; fetchedAt: number | null; fetching: boolean } = {
-    items: [],
-    fetchedAt: null,
-    fetching: false,
-  };
 
   const readSignal = (): AbortSignal => AbortSignal.any([lifetime.signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]);
-
-  async function fillComingUp(now: number): Promise<void> {
-    let upcoming: UpcomingSchedulesResult;
-    try {
-      upcoming = await options.listUpcomingSchedules(now, readSignal());
-    } catch (error) {
-      upcoming = { schedules: [], unavailable: describeError(error), unavailableKind: 'no_answer' };
-    }
-    if (lifetime.signal.aborted) return;
-    const items: Array<{ label: string; sortKey: number }> = upcoming.schedules.map((schedule) => {
-      const name = schedule.name.length > 22 ? `${schedule.name.slice(0, 20)}…` : schedule.name;
-      return { label: `${name}, ${formatRelativeTime(schedule.nextRunAt, now)}`, sortKey: schedule.nextRunAt };
-    });
-    if (options.listCalendarEvents) {
-      try {
-        for (const ev of options.listCalendarEvents()) items.push({ label: ev.label, sortKey: ev.start });
-      } catch (error) {
-        logger.debug('coming-up calendar read failed (non-fatal)', { error: describeError(error) });
-      }
-    }
-    const soonest = items.sort((a, b) => a.sortKey - b.sortKey).slice(0, 3).map((item) => item.label);
-    // A configured host that could not be read is said, not shown as an empty plan.
-    comingUpCache.items = upcoming.unavailableKind === 'no_answer'
-      ? [`Schedules unavailable: ${upcoming.unavailable ?? 'the connected host did not answer'}`, ...soonest]
-      : soonest;
-    comingUpCache.fetchedAt = Date.now();
-  }
-
-  /** Refill Coming up when its 60 s cache has lapsed; one host request per minute while it is wanted. */
-  function refreshComingUp(): void {
-    if (comingUpCache.fetching || lifetime.signal.aborted) return;
-    const now = Date.now();
-    if (comingUpCache.fetchedAt !== null && now - comingUpCache.fetchedAt < COMING_UP_TTL_MS) return;
-    comingUpCache.fetching = true;
-    void fillComingUp(now).then(() => {
-      comingUpCache.fetching = false;
-      if (!lifetime.signal.aborted) options.render();
-    }, (error: unknown) => {
-      comingUpCache.fetching = false;
-      logger.debug('coming-up refresh failed (non-fatal)', { error: describeError(error) });
-    });
-  }
 
   async function runDraftPass(): Promise<void> {
     const propose = options.onAwayDigest;
@@ -296,9 +233,6 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
           ? [...digest.lines, `Tasks could not be read, so finished tasks may be missing above: ${tasksUnavailableReason}`]
           : digest.lines;
         options.router.high(`[Status] ${[digest.headline, ...lines].join('\n  ')}`);
-        for (const line of lines) {
-          options.router.getFeed()?.push(`[Status] ${line}`, 'low', 'schedule');
-        }
         options.render();
       }
 
@@ -323,11 +257,8 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
   }
 
   return {
-    refreshComingUp,
     announceAwayDigest,
     stop,
-    // Return a defensive copy so callers cannot mutate internal cache state.
-    comingUpItems: (): readonly string[] => [...comingUpCache.items],
   };
 }
 
@@ -388,45 +319,5 @@ export function buildSkillDraftProposer(
     if (!output || typeof output !== 'object' || !('proposed' in output) || typeof output.proposed !== 'number'
       || !Number.isSafeInteger(output.proposed) || output.proposed < 0) throw new ToolInputProjectionError('held');
     return output.proposed;
-  };
-}
-
-/**
- * Build the listCalendarEvents callback for the given shellPaths.
- * Extracts the closure that was previously inlined in main.ts so that
- * file stays under the 800-line cap.
- *
- * The optional `upcomingEvents` parameter is a testability seam: when provided,
- * it replaces the `registry.upcoming(7)` call so unit tests can inject a
- * deterministic event set without mocking the module. Production callers omit
- * this parameter; the default is the real registry lookup.
- */
-export function buildCalendarEventsLister(
-  shellPaths: Parameters<typeof LastSeenStore.fromShellPaths>[0],
-  upcomingEvents?: () => readonly import('../agent/calendar-registry.ts').AgentCalendarEvent[],
-): () => readonly { label: string; start: number }[] {
-  return () => {
-    const now = Date.now();
-    const registry = AgentCalendarRegistry.fromShellPaths(shellPaths);
-    return (upcomingEvents ?? (() => registry.upcoming(7)))()
-      .map((e) => {
-        const allDay = e.allDay;
-        // Sort key: use local midnight for all-day events so they sort at the
-        // correct local calendar date rather than UTC midnight (which would land
-        // the previous day for timezones east of UTC).
-        // Timed events: parse the ISO string directly; Date.parse handles
-        // offset-bearing strings correctly.
-        const startMs = allDay
-          ? new Date(`${e.start}T00:00:00`).getTime()   // no tz suffix ⇒ local time
-          : Date.parse(e.start);
-        const sortMs = isNaN(startMs) ? now : startMs;
-        // Display: format via local Date methods so the user sees their own
-        // timezone, never a raw stored offset or UTC-shifted string.
-        const label = e.title.length > 22 ? `${e.title.slice(0, 20)}…` : e.title;
-        const when = allDay
-          ? e.start   // date-only string, no time component to misformat
-          : formatDigestTime(startMs, now);
-        return { label: `${label}, ${when}`, start: sortMs };
-      });
   };
 }

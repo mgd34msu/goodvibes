@@ -13,7 +13,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Pick the lane that matches what you want, or just close this and type. Every page here is also reachable later.',
     actions: [
       { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling. Typing any letter here does the same, and the letter lands in the composer.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
-      { id: 'assistant-setup-lane', label: 'Finish setting up', detail: 'Sign in, pick a model, and connect the basics.', targetCategoryId: 'setup', kind: 'workspace', safety: 'safe' },
+      { id: 'assistant-setup-lane', label: 'Finish setting up', detail: 'Opens /setup: sign in, pick a model, and connect the basics, one topic at a time.', command: '/setup', kind: 'command', safety: 'safe' },
       { id: 'assistant-personal-ops-lane', label: 'Inbox, calendar & reminders', detail: 'Daily personal operations in one place.', targetCategoryId: 'personal-ops', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-research-docs-lane', label: 'Research something', detail: 'Web research with visible runs, sources, and saved reports.', targetCategoryId: 'research', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-documents-lane', label: 'Documents & files', detail: 'Drafts, exports, saved files, and model comparisons.', targetCategoryId: 'documents', kind: 'workspace', safety: 'safe' },
@@ -25,31 +25,26 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     ],
   },
   {
+    // The forms `/setup` opens, a topic at a time (AGENT_SETUP_TOPIC_ROWS). Not
+    // listed in the workspace: `/setup` is where they are found.
     id: 'setup',
-    group: 'ONBOARDING',
-    label: 'Start',
-    summary: 'Pick a model to start, use a local one or sign in to a provider.',
-    detail: 'Start here on a fresh install. Every row either saves state, opens the shared model picker, or opens a confirmed in-modal form.',
+    group: 'SETUP',
+    label: 'Setup',
+    summary: 'The form for one /setup topic.',
+    detail: 'Each row saves state, opens the shared model picker, or opens a confirmed in-modal form. Esc goes back to the conversation.',
     actions: [
-      // Working-path choices first, local (no sign-in needed) then provider sign-in.
       { id: 'use-local-model', label: 'Use a local model (no sign-in)', detail: 'Opens the model picker, which recommends models that fit this computer. No account or subscription needed.', kind: 'model-picker', modelPickerFlow: 'model', modelPickerTarget: 'main', safety: 'safe' },
+      { id: 'setup-provider-model', label: 'Choose main model', detail: 'Open the shared provider/model picker for normal assistant turns.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
+      settingAction({ id: 'setup-reasoning-effort', label: 'Reasoning effort', detail: 'Cycle reasoning level when the selected model supports it.', key: 'provider.reasoningEffort' }),
       { id: 'subscription-login-start', label: 'Sign in to a provider', detail: 'Start one provider sign-in flow, save pending state, and return here.', editorKind: 'subscription-login-start', kind: 'editor', safety: 'safe' },
       { id: 'subscription-login-finish', label: 'Finish provider sign-in', detail: 'Exchange a code or redirect URL and save the provider subscription session.', editorKind: 'subscription-login-finish', kind: 'editor', safety: 'safe' },
-      { id: 'setup-provider-model', label: 'Choose main model', detail: 'Open the shared provider/model picker for normal assistant turns.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
-      { id: 'import-goodvibes-tui-settings', label: 'Import GoodVibes settings', detail: 'Import compatible shared GoodVibes display, provider, subscription, behavior, permission, TTS, channel, helper, tool, release, and automation values into Agent-owned state.', kind: 'settings-import', safety: 'safe' },
-      settingAction({ id: 'setup-reasoning-effort', label: 'Reasoning effort', detail: 'Cycle reasoning level when the selected model supports it.', key: 'provider.reasoningEffort' }),
-      settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
-      // Less common controls
       { id: 'subscription-logout', label: 'Sign out of a provider', detail: 'Remove one stored or pending provider subscription session after confirmation.', editorKind: 'subscription-logout', kind: 'editor', safety: 'safe' },
-      { id: 'subscription-inspect', label: 'Inspect a provider sign-in', detail: 'Show one provider subscription session: whether it is active or pending, its token type and expiry, and whether it overrides API keys. Never prints a token.', editorKind: 'subscription-inspect', kind: 'editor', safety: 'read-only' },
+      { id: 'subscription-inspect', label: 'See a sign-in', detail: 'Show one provider subscription session: whether it is active or pending, its token type and expiry, and whether it overrides API keys. Never prints a token.', editorKind: 'subscription-inspect', kind: 'editor', safety: 'read-only' },
       { id: 'provider-add', label: 'Add a custom provider', detail: 'Add one OpenAI-compatible provider for Agent model routing.', editorKind: 'provider-add', kind: 'editor', safety: 'safe' },
       { id: 'secret-set-provider', label: 'Store a credential', detail: 'Store a provider or channel credential through the Agent secret manager.', editorKind: 'secret-set', kind: 'editor', safety: 'safe' },
       settingAction({ id: 'setup-secret-policy', label: 'Secret storage policy', detail: 'Choose how strongly Agent prefers secure secret storage.', key: 'storage.secretPolicy' }),
-      // Resume-point controls (rare; only matters when onboarding is split across sessions)
-      { id: 'setup-checkpoint-show', label: 'Show saved resume point', detail: 'Inspect the saved setup wizard resume point without writing setup state.', setupCheckpointOperation: 'show', kind: 'setup-checkpoint', safety: 'read-only' },
-      { id: 'setup-checkpoint-mark-current', label: 'Save resume point', detail: 'Save the current setup wizard step as the Agent-owned resume point for the next launch.', setupCheckpointOperation: 'mark-current', kind: 'setup-checkpoint', safety: 'safe' },
-      { id: 'setup-checkpoint-clear', label: 'Clear saved resume point', detail: 'Clear the saved setup wizard resume point after setup is complete or no longer useful.', setupCheckpointOperation: 'clear', kind: 'setup-checkpoint', safety: 'safe' },
-      { id: 'setup-skip-to-chat', label: 'Just start chatting (set up later)', detail: 'Close setup and go to the conversation. You can finish setup anytime with /agent.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
+      settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
+      { id: 'import-goodvibes-tui-settings', label: 'Import GoodVibes settings', detail: 'Import compatible shared GoodVibes display, provider, subscription, behavior, permission, TTS, channel, helper, tool, release, and automation values into Agent-owned state.', kind: 'settings-import', safety: 'safe' },
     ],
   },
   {
@@ -598,3 +593,17 @@ function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
   for (const child of Object.values(value)) freezeDeclaration(child, visited);
   return Object.freeze(value);
 }
+
+/**
+ * Where each former Start row lives now: the `/setup` topic whose form shows it
+ * (terminal-shell/setup-command.ts). Every row of the `setup` category is in
+ * exactly one topic.
+ */
+export const AGENT_SETUP_TOPIC_ROWS = {
+  'model': ['use-local-model', 'setup-provider-model', 'setup-reasoning-effort'],
+  'sign-in': ['subscription-login-start', 'subscription-login-finish', 'subscription-logout', 'subscription-inspect'],
+  'add-provider': ['provider-add'],
+  'store-key': ['secret-set-provider', 'setup-secret-policy'],
+  'history': ['setup-save-history'],
+  'import-settings': ['import-goodvibes-tui-settings'],
+} as const satisfies Readonly<Partial<Record<import('@goodvibes-jev/engine/terminal-shell/setup-command').SetupTopicId, readonly string[]>>>;

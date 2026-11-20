@@ -15,7 +15,6 @@ import { CommandRegistry } from '../input/command-registry.ts';
 import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';
 import { UserPermissionRuleStore, type PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { ActivityFeed } from '../core/activity-feed.ts';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
 import { getConfigSnapshot } from '../config/index.ts';
@@ -128,13 +127,10 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   // history through fromJSON. Bind once so no path can leave stale counters.
   conversation.setUsageHydrator(hydrateSessionUsage);
 
-  const activityFeed = new ActivityFeed();
-
   let commandContextRef: CommandContext | null = null;
 
   const systemMessageRouter = createSystemMessageRouter(
     conversation,
-    activityFeed,
     configuredSystemMessageTarget(() => getConfigSnapshot(configManager).ui),
     {},
     chosenSystemMessageTarget((key) => configManager.isExplicitlySet(key)),

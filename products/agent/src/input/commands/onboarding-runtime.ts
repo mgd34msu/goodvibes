@@ -71,7 +71,6 @@ export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescripti
       ],
       sentence: 'This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.',
       example: {},
-      ownerOnly: OWNER_TYPED,
       run: async (values, ctx) => { await pair(values, ctx); },
     }),
     doAction<CommandContext>({

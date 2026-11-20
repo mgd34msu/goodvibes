@@ -104,13 +104,17 @@ try {
   const hookSecond = await hook('RTJ14HOOK what changed?');
   const hookSecondText = await hookSecond.text();
   const callsAfter = modelCalls('RTJ14HOOK');
+  const hookSession = String((JSON.parse(hookFirstText) as { sessionId?: string }).sessionId ?? '');
+  const hookInputs = await api(daemon, token, 'GET', `/api/sessions/${hookSession}/inputs`);
+  const hookRows = ((hookInputs.body as { inputs?: Array<{ body?: string }> }).inputs ?? []).filter((input) => input.body?.includes('RTJ14HOOK')).length;
   journey.check('a generic webhook message keyed by correlationId is acknowledged once saved, and its repeat after a SIGKILL starts nothing',
     'POST /webhook/generic correlationId rt-corr-1; SIGKILL; restart; the same POST again',
-    `first ${hookFirst.status} ${short(hookFirstText, 140)}; repeat ${hookSecond.status} ${short(hookSecondText, 140)}; model turns for it before/after the repeat ${callsBefore}/${callsAfter}`,
-    hookFirst.status === 200 && hookSecond.status === 200 && /duplicate/i.test(hookSecondText) && callsAfter === callsBefore);
+    `first ${hookFirst.status} ${short(hookFirstText, 140)}; repeat ${hookSecond.status} ${short(hookSecondText, 140)}; inputs stored for it ${hookRows}; model turns before/after the repeat ${callsBefore}/${callsAfter}`,
+    hookFirst.status === 200 && hookSecond.status === 200 && hookRows === 1 && callsAfter === callsBefore);
 
   // F70: a Slack slash command is acknowledged only once saved: its input row is there after a SIGKILL right after the answer.
-  await api(daemon, token, 'POST', '/api/channels/policies/slack', { allowlistUserIds: ['U-SLACK'], allowChannelIds: [], requireMention: false });
+  const slackPolicy = await api(daemon, token, 'POST', '/api/channels/policies/slack', { allowlistUserIds: ['U-SLACK'], allowGroupMessages: true, groupPolicy: 'allow', requireMention: false });
+  if (slackPolicy.status !== 200) throw new Error(`slack policy ${slackPolicy.status} ${slackPolicy.text}`);
   s.model.scriptWrapped('RTJ14SLASH', [{ text: 'RTJ14SLASH answered.' }]);
   const slash = (trigger: string) => {
     const raw = new URLSearchParams({ command: '/goodvibes', text: 'RTJ14SLASH status please', user_id: 'U-SLACK', user_name: 'owner', channel_id: 'C-SLASH',
@@ -171,7 +175,7 @@ try {
   // F21: a scheduled run's answer owed when the daemon died in its delivery is delivered once after the restart.
   s.model.scriptWrapped('RTJ14AUTO', [{ text: 'RTJ14AUTO the run result.' }]);
   const job = await api(daemon, token, 'POST', '/api/automation/jobs', { name: 'rt owed run', prompt: 'RTJ14AUTO summarise today', every: '24h',
-    delivery: { mode: 'surface', targets: [{ kind: 'surface', surfaceKind: 'mattermost', address: 'ch-auto' }] } });
+    delivery: { mode: 'surface', targets: [{ kind: 'surface', surfaceKind: 'mattermost', address: 'ch-auto' }], fallbackTargets: [] } });
   const jobId = String((job.body as { job?: { id?: string }; id?: string }).job?.id ?? (job.body as { id?: string }).id ?? '');
   holdChannelOnce.add('ch-auto');
   const runHeld = new Promise<void>((resolve) => { reachedChannelHold = resolve; });

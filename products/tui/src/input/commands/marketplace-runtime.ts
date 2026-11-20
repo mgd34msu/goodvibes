@@ -21,24 +21,6 @@ function formatCompatibility(review: Awaited<ReturnType<typeof reviewEcosystemCa
   return review.compatibility.reasons.join('; ');
 }
 
-/**
- * The one reading of the scope word of /marketplace, /plugin and /skills. An
- * omitted scope means the project, so an install and its uninstall through
- * different commands hit the same target; any other word is refused, never
- * read as the project, because a typo must not install into or remove from
- * the wrong place. A refused word throws the refusal, so a modal that ran the
- * command shows it failed.
- */
-export function parseScope(
-  token: string | undefined,
-  _ctx: Pick<CommandContext, 'print'>,
-  usage = '/marketplace <verb> <kind> <id> [project|user] (rollback: <kind> <id> [project|user] [backupId])',
-): 'project' | 'user' {
-  if (token === undefined || token === 'project') return 'project';
-  if (token === 'user') return 'user';
-  throw commandRefusal(`Unknown scope "${token}": nothing was changed. The scope is project (the default) or user.`, `Usage: ${usage}`, 'USAGE');
-}
-
 function unknownEntry(kind: string | undefined, entryId: string | undefined): Error {
   return commandRefusal(`Unknown curated ${kind} entry: ${entryId}`, '/marketplace browse lists the catalog entries', 'NOT_FOUND');
 }

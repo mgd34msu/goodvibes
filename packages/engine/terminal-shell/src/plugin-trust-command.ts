@@ -260,7 +260,7 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
     {
       id: 'quarantine', label: 'Quarantine a plugin', word: 'quarantine',
       inputs: [PLUGIN, textInput({ id: 'reason', label: 'Why', help: 'A note you will see when you look at it', why: 'your own words', typed: { tail: true }, optional: { default: 'quarantined by operator', means: 'no note' } })],
-      sentence: '{plugin} is stopped and blocked from loading until you lift the quarantine.', done: '',
+      sentence: '{plugin} is stopped and blocked from loading until you change it (lift the quarantine).', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'lift', operator: TERMINAL_ONLY, example: { plugin: 'jira', reason: 'it changed unexpectedly' },
       async run(values, ctx) { return quarantinePlugin(controlsOf(manager, ctx), values.plugin!, values.reason || 'quarantined by operator'); },
     },

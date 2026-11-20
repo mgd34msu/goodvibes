@@ -84,6 +84,8 @@ export class AgentWorkspace {
   private dispatchCommand: AgentWorkspaceCommandDispatcher | null = null;
   private dispatchPrompt: AgentWorkspacePromptDispatcher | null = null;
   private _onlyGroup: AgentWorkspaceCategoryGroup | null = null;
+  /** The rows a `/setup` topic shows; null shows every row. */
+  private _onlyActionIds: ReadonlySet<string> | null = null;
   private _onboardingState: OnboardingState | null = null;
   private _revealedOnboardingCategoryIds = new Set<string>(); // monotonic reveal set
   private _awaitingRecapDismiss = false; // true while showing recap before final close
@@ -98,6 +100,7 @@ export class AgentWorkspace {
     this.dispatchCommand = dispatchCommand;
     this.dispatchPrompt = dispatchPrompt ?? null;
     this._onlyGroup = onlyGroup ?? null;
+    this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
     this.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
     const shellPaths = context.workspace?.shellPaths;
@@ -194,6 +197,7 @@ export class AgentWorkspace {
     this.actionSearchActive = false;
     this.actionSearchQuery = '';
     this._onlyGroup = null;
+    this._onlyActionIds = null;
     this._onboardingState = null;
     this._awaitingRecapDismiss = false;
   }
@@ -223,7 +227,15 @@ export class AgentWorkspace {
     if (this._onlyGroup) {
       return AGENT_WORKSPACE_CATEGORIES.filter((category) => category.group === this._onlyGroup);
     }
-    return AGENT_WORKSPACE_CATEGORIES;
+    // The setup forms are found through /setup, one topic at a time, never listed here.
+    return AGENT_WORKSPACE_CATEGORIES.filter((category) => category.group !== 'SETUP');
+  }
+
+  /** Show only these rows of the open category (a `/setup` topic's form). */
+  showOnlyActions(actionIds: readonly string[]): void {
+    this._onlyActionIds = new Set(actionIds);
+    this.selectedActionIndex = 0;
+    this.clampSelection();
   }
 
   get selectedCategory(): AgentWorkspaceCategory {
@@ -232,7 +244,8 @@ export class AgentWorkspace {
 
   get actions(): readonly AgentWorkspaceAction[] {
     if (this.actionSearchActive) return this.actionSearchResults.map((result) => result.action);
-    const base = this.selectedCategory.actions.filter((action) => isAgentWorkspaceActionVisible(this.context, action));
+    const base = this.selectedCategory.actions.filter((action) => isAgentWorkspaceActionVisible(this.context, action)
+      && (!this._onlyActionIds || this._onlyActionIds.has(action.id)));
     if (shouldShowOnboardingFinishFooter(this.selectedCategory, base, this._onlyGroup === 'ONBOARDING' ? this._onboardingState?.readyToChat : undefined)) {
       return [...base, ONBOARDING_COMPLETE_SYNTHETIC_ACTION];
     }

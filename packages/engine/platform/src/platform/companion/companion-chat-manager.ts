@@ -85,6 +85,8 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
+import { readTurnFailure, turnFailureText } from '../core/turn-failure.js';
+import { providerDisplayLabel } from '../providers/provider-labels.js';
 import { createTurnFailover, describeFailoverCost, readFallbackOrder, type TurnFailoverModel } from '../providers/failover.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { attachToolResultImages } from '../core/tool-result-images.js';
@@ -1615,7 +1617,7 @@ export class CompanionChatManager {
       fallbackOrderSet: readFallbackOrder(this.configManager?.get('provider.fallbackModels')).some((entry) => entry.trim().length > 0),
       ...(stopped ? { fallbackNote: stopped } : {}),
     });
-    const reason = providerFailed ? turnFailureText(failure) : personFacingTurnFailure(turn.error, raw) + (stopped ? ` ${stopped}` : '');
+    const reason = turnFailureText(failure);
     if (turn.writer) {
       turn.writer.dropHeld();
       turn.writer.addAssistantMessage(turn.uncommittedContent + turnFailureNote(modelReason));
@@ -2017,32 +2019,3 @@ export class CompanionChatManager {
   }
 }
 
-/** What a provider's failure means, by its category, for a reply that failed on it. */
-const PROVIDER_FAILURE_WORDS: Readonly<Record<string, string>> = {
-  service: 'had a server error and did not answer',
-  rate_limit: 'is limiting requests right now',
-  authentication: 'did not accept the key or sign-in it was sent',
-  authorization: 'does not let this account use the model',
-  billing: 'reported a billing or quota problem',
-  timeout: 'took too long to answer',
-  network: 'could not be reached',
-  bad_request: 'refused the request',
-  not_found: 'does not have the model asked for',
-  protocol: 'sent back an answer that could not be read',
-};
-
-/**
- * A failed reply's reason as a person reads it: a provider failure in words
- * ("The model provider sample had a server error and did not answer (500)"),
- * anything else as its own message. The provider's raw text stays in the logs
- * and in the note the model reads.
- */
-function personFacingTurnFailure(error: unknown, fallback: string): string {
-  const normalized = normalizeError(error);
-  const words = normalized.provider !== undefined || normalized.source === 'provider'
-    ? PROVIDER_FAILURE_WORDS[normalized.category]
-    : undefined;
-  if (!words) return fallback;
-  const who = normalized.provider ? `The model provider ${normalized.provider}` : 'The model provider';
-  return `${who} ${words}${normalized.statusCode !== undefined ? ` (${normalized.statusCode})` : ''}.`;
-}

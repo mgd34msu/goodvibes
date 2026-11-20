@@ -16,6 +16,7 @@ import type { ChannelDelivery } from '../windows.js';
 import type { OwnerItem } from '../../control-plane/owner-inbox.js';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
 import { inboxAnswer, purchaseInboxItem, unreadableAnswer, type PaymentOwnerInbox } from './notifier.js';
+import { formatMinorUnits } from '../message.js';
 
 interface OriginalRecipient {
   readonly receipt: ChannelDeliveryReceipt;
@@ -108,7 +109,11 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
    */
   const inboxWait = (deadlineMs: number): Promise<WindowAnswer | null> => {
     if (!inbox) return new Promise<never>(() => {});
-    const item = inbox.port.postNow(purchaseInboxItem(kind, notice, deadlineMs + 60_000, purchaseId)).item;
+    // The window's facts live with the purchase record, so a re-post after the first item closed is worded the same.
+    const record = checkpoint.record;
+    const facts = record.totalMinorUnits === null ? undefined
+      : { item: record.item, shop: record.merchantDomain, amount: formatMinorUnits(record.totalMinorUnits, record.currency) };
+    const item = inbox.port.postNow(purchaseInboxItem(kind, notice, deadlineMs + 60_000, purchaseId, facts)).item;
     inboxItemId = item.id;
     return new Promise<WindowAnswer | null>((resolve, reject) => {
       const stop = new AbortController();

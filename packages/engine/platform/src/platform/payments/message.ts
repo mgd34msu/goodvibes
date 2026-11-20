@@ -110,11 +110,29 @@ export function formatMinorUnits(amount: MinorUnits, currency: CurrencyCode): st
     throw new RangeError(`Refusing to render a non-integer or negative amount: ${String(amount)}`);
   }
   const exponent = minorUnitExponent(currency);
-  if (exponent === 0) return `${currency} ${amount.toLocaleString('en-US')}`;
   const divisor = 10 ** exponent;
   const major = Math.floor(amount / divisor);
-  const minor = String(amount % divisor).padStart(exponent, '0');
-  return `${currency} ${major.toLocaleString('en-US')}.${minor}`;
+  const digits = exponent === 0 ? amount.toLocaleString('en-US') : `${major.toLocaleString('en-US')}.${String(amount % divisor).padStart(exponent, '0')}`;
+  // The currency's own symbol where it has one that names it alone ($38.40, €12.00, £5.00), else its code (CHF 12.00).
+  const symbol = currencySymbol(currency);
+  return symbol ? `${symbol}${digits}` : `${currency} ${digits}`;
+}
+
+const symbols = new Map<string, string | null>();
+
+/** The symbol `en-US` writes for a currency when it differs from the code ("$", "€", "CA$"); null otherwise. Computed once per currency. */
+function currencySymbol(currency: string): string | null {
+  let symbol = symbols.get(currency);
+  if (symbol === undefined) {
+    try {
+      const part = new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'symbol' }).formatToParts(0).find((p) => p.type === 'currency')?.value;
+      symbol = part && part !== currency ? part : null;
+    } catch {
+      symbol = null;
+    }
+    symbols.set(currency, symbol);
+  }
+  return symbol;
 }
 
 /**

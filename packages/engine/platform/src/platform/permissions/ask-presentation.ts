@@ -27,6 +27,8 @@ import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import type { ModeInForceWords } from './decision-model-readiness.js';
 import { PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA } from '../payments/payment-ports.js';
+import { formatMinorUnits } from '../payments/message.js';
+import { minorUnitExponent } from '../payments/money-parsing.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
@@ -234,6 +236,30 @@ function descriptionQuestion(tool: string): string | undefined {
   return `${capitalize(sentence.replace(/\b(and|or|with|using|through|to|of|the|a|an)$/i, '').trim())}?`;
 }
 
+/**
+ * A call's amount in the one payments formatter's words (payments/message.ts
+ * formatMinorUnits: "$64.00", "CHF 12.00"): from minor units, or a plain or
+ * code-prefixed decimal with its currency; an amount already written with a
+ * symbol is shown as written.
+ */
+function moneyWords(args: Record<string, unknown>): string | undefined {
+  const minor = [args['totalMinorUnits'], args['amountMinorUnits'], args['priceMinorUnits']].find((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) as number | undefined;
+  const raw = textArg(args, 'amount', 'price', 'total', 'cost');
+  const coded = raw !== undefined ? /^([A-Z]{3})\s*([\d,]+(?:\.\d+)?)$/.exec(raw) : null;
+  const currency = (coded?.[1] ?? textArg(args, 'currency'))?.toUpperCase();
+  if (currency && /^[A-Z]{3}$/.test(currency)) {
+    try {
+      if (minor !== undefined) return formatMinorUnits(minor as never, currency as never);
+      const decimal = coded?.[2] ?? (raw !== undefined && /^[\d,]+(?:\.\d+)?$/.test(raw) ? raw : undefined);
+      if (decimal !== undefined) {
+        const units = Math.round(Number(decimal.replace(/,/g, '')) * 10 ** minorUnitExponent(currency as never));
+        if (Number.isSafeInteger(units)) return formatMinorUnits(units as never, currency as never);
+      }
+    } catch { /* an unknown currency is shown as written */ }
+  }
+  return raw;
+}
+
 /** "a, b and 2 more" for a list a sentence names. */
 function listShort(items: readonly string[]): string {
   if (items.length <= 2) return items.join(' and ');
@@ -396,9 +422,7 @@ function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick
     case 'purchase': {
       const item = textArg(args, 'item', 'product', 'title', 'description');
       const shop = textArg(args, 'merchant', 'shop', 'store', 'merchantName', 'merchantDomain', 'site');
-      const amount = textArg(args, 'amount', 'price', 'total', 'cost');
-      const currency = textArg(args, 'currency');
-      const money = amount !== undefined ? (currency && !amount.includes(currency) && /^[\d.,]+$/.test(amount) ? `${amount} ${currency}` : amount) : undefined;
+      const money = moneyWords(args);
       const question = item ? `Buy ${item}${shop ? ` from ${shop}` : ''}${money ? ` for ${money}` : ''}?`
         : shop && money ? `Pay ${shop} ${money}?` : shop ? `Pay ${shop}?` : money ? `Pay ${money}?` : 'Make this payment?';
       return { question, title: question };

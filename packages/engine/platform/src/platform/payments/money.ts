@@ -54,7 +54,7 @@ export function compareMoney(a: Money, b: Money): -1 | 0 | 1 {
   return a.minor < b.minor ? -1 : a.minor > b.minor ? 1 : 0;
 }
 
-/** The amount as the owner reads it (`USD 25.00`); the one payments formatter (message.ts) renders it. */
+/** The amount as the owner reads it (`$25.00`, `CHF 12.00`); the one payments formatter (message.ts formatMinorUnits) renders it. */
 export function formatMoney(value: Money): string {
   return formatMinorUnits(value.minor, value.currency);
 }

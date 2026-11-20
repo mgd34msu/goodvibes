@@ -49,7 +49,7 @@ export const PURCHASE_ITEM_METADATA = 'purchaseItem';
 export const PURCHASE_SHOP_METADATA = 'purchaseShop';
 export const PURCHASE_AMOUNT_METADATA = 'purchaseAmount';
 
-/** A purchase window's subject as facts: the item, the shop and the amount with its currency ("USD 64.00"). */
+/** A purchase window's subject as facts: the item, the shop and the amount with its currency ("$64.00"). */
 export interface PurchaseNoticeFacts {
   readonly item: string;
   readonly shop: string;

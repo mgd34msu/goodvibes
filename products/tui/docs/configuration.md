@@ -22,7 +22,7 @@ choices, judgment settings, destinations and the update feed, is skipped with a
 notice naming it; set those in your own `~/.goodvibes/tui/settings.json`.
 
 Most settings live under the schema owned by the platform config system and
-are editable live from the fullscreen `/config` workspace or `/settings`. See
+are editable live from the fullscreen `/settings` workspace or `/settings`. See
 [Key settings](#key-settings) below for a curated reference table of the most
 commonly used ones. This page also documents the additional TUI-owned
 namespaces you can add by hand to your settings file (further down). Those are
@@ -45,14 +45,14 @@ Settings sit next to several other stores that follow the same global-versus-pro
 
 These settings live in the platform-owned config schema, not in the
 TUI-extension namespaces documented further down this page. Edit them from the
-fullscreen `/config` workspace or `/settings`; the table below is listed here
+fullscreen `/settings` workspace or `/settings`; the table below is listed here
 for reference.
 
 Settings the daemon acts on (`surfaces.*`, `controlPlane.*`, `watchers.*`,
 `automation.*`, `device.*` and the rest of its domains) have one writer, the
 daemon. While a daemon is reachable, changing one from the terminal sends it to
 the daemon: the settings row shows "Saving to the daemon…" until it answers, a
-value it refuses is written nowhere, and `/config set` waits for the answer.
+value it refuses is written nowhere, and `/settings set` waits for the answer.
 With no daemon running, the change is written to the daemon's settings file
 for it to read when it starts.
 
@@ -137,7 +137,7 @@ started them, and their asks reach the owner through the same approval prompt
 with the subagent named. A saved `permissions.backgroundAgents` is reported as
 an unknown key and has no effect.
 
-Changing `service.autostart` or `service.enabled` from `/config` reconciles
+Changing `service.autostart` or `service.enabled` from `/settings` reconciles
 the OS service where supported. On Linux this installs/enables, disables, or
 rewrites the user `systemd` service so the daemon state matches the setting
 instead of only changing JSON.
@@ -183,7 +183,7 @@ in the status area (just above the prompt). The command runs as a POSIX shell
 command (`/bin/sh -c <command>`) in your working directory at each turn
 boundary, when a turn completes, errors, or is cancelled, and once at
 startup. Both keys are listed in Settings under UI and can be set with
-`/config set statusline.command <command>`.
+`/settings set statusline.command <command>`.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -218,7 +218,7 @@ Example (`~/.goodvibes/tui/settings.json`):
 
 These keys are read directly by the TUI's notifier modules rather than by
 the platform schema, so they do not appear in the Key Settings table above.
-They are still editable from `/config open behavior`, which injects them into the
+They are still editable from `/settings open behavior`, which injects them into the
 behavior group alongside the schema-owned keys.
 
 `behavior.notifyAfterSeconds` gates the long-running-turn notification, and
@@ -242,7 +242,7 @@ Listed in Settings under Behavior.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the helper model when `helper.enabled` is on and a helper route is set, otherwise the configured tool LLM (`/config` → tools), after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. |
+| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the helper model when `helper.enabled` is on and a helper route is set, otherwise the configured tool LLM (`/settings` → tools), after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. |
 
 ```json
 {

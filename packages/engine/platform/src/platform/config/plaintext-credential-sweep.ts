@@ -12,7 +12,7 @@
  *     `surfaces.email.password` and `surfaces.calendar.caldavPassword` were
  *     both missing, and both have schema descriptions reading "Stored in the
  *     daemon secret tier, never in config";
- *   - the generic `/config set <key> <value>`, which had no detection at all;
+ *   - the generic `/settings set <key> <value>`, which had no detection at all;
  *   - the web UI's settings editor, which wrote every value through one
  *     untyped `config.set`.
  *

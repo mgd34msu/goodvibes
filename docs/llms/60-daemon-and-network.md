@@ -792,7 +792,7 @@ Four screens are drawn from one command each. Each sits where it belongs (Schedu
 | Screen | Rows | Actions on a row | At the top |
 | --- | --- | --- | --- |
 | Schedules | Each schedule: name, when it runs in words, its next run, `(paused)`, a failed last run. | Run, Pause or Resume, Change (the schedule editor: blanks left empty keep what it has, shown as `Now: ...`), and Remove a schedule in More. The Work view opens this screen from the Scheduled group's `See your schedules` and from New (`Schedule something to run…`, `See your schedules`). | Schedule something to run. |
-| MCP servers and tools | Each server: connected or not, tools held back, trust level, role, the config file that keeps it; `Tools (n)` opens its tools, each with its rule (`follows github's limits`, `blocked, kept`, a rule for one terminal's session, changed only there). | Accept a server's changed tools (when held back); More: set its trust level or role, remove it. A tool: Block or Stop blocking; More: let it go beyond its server's limits, or make it follow them again. | Add a server, Reconnect every server from its config. |
+| MCP servers and tools | Each server: connected or not, not started because a project file of a folder not yet trusted names it (`heldForTrust` in `mcp.config.get`; trusting the folder starts it), tools held back, trust level, role, the config file that keeps it; `Tools (n)` opens its tools, each with its rule (`follows github's limits`, `blocked, kept`, a rule for one terminal's session, changed only there). | Accept a server's changed tools (when held back); More: set its trust level or role, remove it. A tool: Block or Stop blocking; More: let it go beyond its server's limits, or make it follow them again. | Add a server, Reconnect every server from its config. |
 | Repeat purchases | Each allowance in the daemon's words (shops, item, limits, what is left this period, its last day). | Stop. | Allow a repeat purchase. |
 | Triggers | Who supervises them, then each trigger: what it watches, its state, how often it fired, its last error; `Runs` shows its newest runs. Under it, the commands triggers may run. | Start a trigger that gave up (when its breaker is open); More: Stop. | Watch for something; Let triggers run a command. |
 
@@ -972,7 +972,7 @@ End to end:
      chmod 600 ~/.goodvibes/tui/connected-daemons.json
      ```
 
-     and set `daemon.connectedHost.url` to `http://server.lan:3421` in the terminal app (`/config` in the app, or the `daemon.connectedHost.url` line of `~/.goodvibes/tui/settings.json`). The key in `tokens` must be exactly the origin: scheme, host and port, with no path; the default port of the scheme is left out (`https://server.example`, not `https://server.example:443`).
+     and set `daemon.connectedHost.url` to `http://server.lan:3421` in the terminal app (`/settings` in the app, or the `daemon.connectedHost.url` line of `~/.goodvibes/tui/settings.json`). The key in `tokens` must be exactly the origin: scheme, host and port, with no path; the default port of the scheme is left out (`https://server.example`, not `https://server.example:443`).
 4. **Check** the server and the token from the laptop: `goodvibes-daemon status --host http://server.lan:3421 --token <the device token>` must print the server's status. (`goodvibes control-plane status` describes only the laptop's own control-plane binding, not the connected daemon.)
 5. To go back to a daemon on the laptop, clear `daemon.connectedHost.url`; the token for the server stays in `connected-daemons.json` for next time.
 

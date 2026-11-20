@@ -7,11 +7,11 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 ```text
 /tts <prompt>
 /tts stop
-/config open tts
-/config open tts.provider
-/config open tts.voice
-/config open tts.llmProvider
-/config open tts.llmModel
+/settings open tts
+/settings open tts.provider
+/settings open tts.voice
+/settings open tts.llmProvider
+/settings open tts.llmModel
 ```
 
 `/tts <prompt>` submits the prompt through the normal Agent conversation path. It uses the active chat provider/model unless a separate spoken-turn model override is configured.
@@ -20,7 +20,7 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 
 `ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice enable` and `/voice disable`; turning it on needs live TTS in this runtime) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off. `/voice bundle export <path> --yes` writes the voice settings you changed (always-speak, `tts.*`, `voice.wake.*`) to a file, `/voice bundle inspect <path>` lists them, and `/voice bundle import <path> --yes` applies them as one update.
 
-`/config open tts` opens the fullscreen configuration workspace for streaming provider, voice, and spoken-turn model routing.
+`/settings open tts` opens the fullscreen configuration workspace for streaming provider, voice, and spoken-turn model routing.
 
 The model can inspect the same settings through `settings action:"list|get"`, use `device action:"voice|provider"` for voice/media posture and provider inspection, open the visible TTS provider or voice picker through `device action:"open_tts_provider|open_tts_voice"` with confirmation, and change Agent-owned TTS settings with `settings action:"set"` plus explicit confirmation.
 
@@ -38,7 +38,7 @@ feature on, and `voice.wake.surfaces.agent` delivers it here, off by default bec
 two terminal surfaces both acting on one spoken utterance is a confusing default.
 Nothing about this is implicit. A configuration that is off never opens a device and
 never produces a microphone permission prompt. Switching `voice.wake.enabled` on (in
-settings, with `/config`, or through the model's settings call) runs the same setup as
+settings, with `/settings`, or through the model's settings call) runs the same setup as
 `/voice wake setup --yes`: this surface's row is set, missing wake models are fetched,
 and the plan is shown, proposing speech-to-text when it is missing.
 
@@ -152,10 +152,10 @@ Voice uses providers that advertise streaming TTS capability through the runtime
 Useful setup path:
 
 ```text
-/config open tts.provider
-/config open tts.voice
-/config open tts.llmProvider
-/config open tts.llmModel
+/settings open tts.provider
+/settings open tts.voice
+/settings open tts.llmProvider
+/settings open tts.llmModel
 ```
 
 Leaving `tts.voice` empty lets the provider choose its default voice.
@@ -181,9 +181,9 @@ and read identically by every surface, including Agent, the TUI, and the daemon:
 
 Agent does not define its own voice-config schema and does not read `tts.*` through
 any path other than the standard `ConfigManager.get`/`set` API that every other Agent
-setting uses. Changing `tts.provider` through `/config open tts.provider` or
+setting uses. Changing `tts.provider` through `/settings open tts.provider` or
 `settings action:"set"` changes the exact same key a TUI user would change through
-its own `/config` surface. The key name, type, and default are one contract, not two
+its own `/settings` surface. The key name, type, and default are one contract, not two
 independently-maintained ones, and a regression test fails if Agent ever reads a
 `tts.*` key outside the shared schema or stops reading it through the shared
 `ConfigManager`.

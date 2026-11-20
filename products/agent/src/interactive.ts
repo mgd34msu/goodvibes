@@ -964,7 +964,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
     render: () => render(),
   });
-  // Turning wake detection on from anywhere (settings, /config, a model's settings
+  // Turning wake detection on from anywhere (settings, /settings, a model's settings
   // call) runs the same voice setup as /voice wake setup and shows its plan.
   unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
     if (enabled !== true || wakeSetupRunning()) return;

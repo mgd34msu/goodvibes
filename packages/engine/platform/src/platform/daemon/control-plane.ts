@@ -12,6 +12,7 @@ import {
   authenticateOperatorToken,
   credentialKindOf,
   extractOperatorAuthToken,
+  extractRemotePeerToken,
   matchesSharedToken,
   type AuthenticatedOperatorRequest,
   type PairingTokenAuthenticator,
@@ -566,7 +567,15 @@ export class DaemonControlPlaneHelper {
   }
 
   async requireRemotePeer(req: Request, scope?: string): Promise<import('../runtime/remote/index.js').DistributedPeerAuth | Response> {
-    const token = this.extractAuthToken(req);
+    const { token, viaNodeCookie } = extractRemotePeerToken(req);
+    // The web UI's phone node presents its peer token as an HttpOnly cookie; a page on
+    // another origin (another port of the same host carries the cookie) may not use it.
+    if (viaNodeCookie) {
+      const origin = req.headers.get('origin');
+      if (origin === null || !browserOriginAllowed(req, origin, this.context.allowedBrowserOrigins?.() ?? [])) {
+        return originNotAllowedResponse(origin, 'act as this device node');
+      }
+    }
     const auth = await this.context.distributedRuntime.authenticatePeerToken(
       token,
       extractForwardedClientIp(req, this.trustProxyEnabled()),

@@ -206,7 +206,7 @@ When a turn or agent task runs longer than the configured threshold, GoodVibes f
 
 ### Configuration
 
-Set `behavior.notifyAfterSeconds` in `/config open behavior` (or `settings.json`):
+Set `behavior.notifyAfterSeconds` in `/settings open behavior` (or `settings.json`):
 
 ```json
 {

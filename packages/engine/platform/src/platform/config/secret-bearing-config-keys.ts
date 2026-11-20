@@ -21,7 +21,7 @@
  * missing from the set that routes a write, so their own schema descriptions,
  * which read "Stored in the daemon secret tier, never in config", were
  * aspirational: the settings modal wrote both as plain strings into a config
- * JSON file, and the generic `/config set` had no detection at all.
+ * JSON file, and the generic `/settings set` had no detection at all.
  *
  * This is the one list: `isSecretConfigKey` and `SECRET_CONFIG_KEYS`
  * (secret-backed-config.ts), which route a settings write into the store, are

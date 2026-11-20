@@ -4,7 +4,7 @@ This part explains who decides whether a tool call runs, what always comes to th
 
 ## Terms used in this part
 
-How settings are written in this part: the examples use the terminal app's `/config set <key> <value>`, where the value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `"text"`) and as text otherwise. In the Agent `/config set` is refused and names the settings screen (`/config open <key>` opens it); there the same change is `/settings set <key> <value>`, which takes text, numbers, `true`/`false` and the allowed words of an enum, but not a JSON list or object: set a list or object setting in the Agent's settings workspace (`/settings <key>`).
+How settings are written in this part: the examples use the terminal app's `/settings set <key> <value>`, where the value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `"text"`) and as text otherwise. In the Agent `/settings set <key> <value>` takes text, numbers, `true`/`false` and the allowed words of an enum, but not a JSON list or object: set a list or object setting in the Agent's settings workspace (`/settings <key>`).
 
 | Term | Meaning |
 | --- | --- |
@@ -126,12 +126,12 @@ What the reports show: every report shows the mode in force, read by the same ru
 | How | Scope | Example |
 | --- | --- | --- |
 | `/settings permissions.mode` in either terminal app | Saved default | Opens the settings workspace at the key; choose the value. |
-| `/config set permissions.mode <mode>` | Saved default | `/config set permissions.mode ask-me` |
+| `/settings set permissions.mode <mode>` | Saved default | `/settings set permissions.mode ask-me` |
 | `-c permissions.mode=<mode>` on the command line | This launch only | `goodvibes -c permissions.mode=ask-me` |
 | `--just-vibes` | This launch only | `goodvibes --just-vibes` |
 | `--yolo` (alias `--no-worries-just-vibes`) | This launch only | `goodvibes-agent --yolo` |
 | Shift+Tab in the terminal app | This session only | Cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`. |
-| `/plan on`, `/plan off`, `/plan` | This session only | See "Plan mode". |
+| `/plan on`, `/plan off`, `/plan status` | This session only | See "Plan mode". |
 | Channel profile `--permission-mode` | Sessions started from that channel | See "Per-channel and per-session modes". |
 
 Shift+Tab details (terminal app `goodvibes` only; the Agent has no mode cycle key):
@@ -141,7 +141,7 @@ Shift+Tab details (terminal app `goodvibes` only; the Agent has no mode cycle ke
 - Before entering `yolo`, a dialog asks "Switch this session to YOLO?" with the default No. Declining skips `yolo` and moves to the next mode.
 - From `plan` (or an unknown value), Shift+Tab enters `ask-me`.
 - When a managed setting locks `permissions.mode`, the key prints `[Permissions] Mode stays <mode>: <reason>` and changes nothing.
-- The confirmation line reads `[Permissions] Mode for this session: <label> (the saved default is set in /settings; /permissions shows it)`, where `<label>` is `Ask me`, `Jev decides`, `Just vibes` or `YOLO`. When the YOLO dialog was declined, the line starts `[Permissions] YOLO skipped. Mode for this session: ...`. The saved default is changed in `/settings` or with `/config set`; `/permissions` only displays it.
+- The confirmation line reads `[Permissions] Mode for this session: <label> (the saved default is set in /settings; /permissions shows it)`, where `<label>` is `Ask me`, `Jev decides`, `Just vibes` or `YOLO`. When the YOLO dialog was declined, the line starts `[Permissions] YOLO skipped. Mode for this session: ...`. The saved default is changed in `/settings` or with `/settings set`; `/permissions` only displays it.
 
 Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` load as `ask-me`; `safe-jev` and `auto` as `jev-decides`; `just-work` as `just-vibes`; `allow-all` as `yolo`. For a saved `prompt`, `normal`, `accept-edits` or `custom` the app says: `permissions.mode "<value>" is retired and now runs as ask-me: with a working decision model ordinary actions run without asking and only critical actions ask; without one, every action asks except a read inside the workspace and a change to files inside it that can be undone. To be asked less, choose jev-decides, just-vibes or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.` An unknown value runs as `ask-me`.
 
@@ -301,9 +301,9 @@ A deny rule reads `deny ...` and an "always ask me" rule `ask ...`.
 
 Worked example: allow `bun test` in this project only.
 
-1. Make the call reach you. With a working decision model in `jev-decides`, Jev may run it without asking; then use `/decisions always <id>` on that decision instead (it saves the same `exact` rule). Otherwise switch to `ask-me` for this session only (Shift+Tab in the terminal app) without a working decision model, or turn decision models off: `/config set judgment.policy No Decision Model`. `judgment.policy` is a daemon-file key: that write changes it for every program and the daemon until you put it back. With `permissions.tools.exec` at its default `prompt` and no decision model, the `exec` call is asked.
+1. Make the call reach you. With a working decision model in `jev-decides`, Jev may run it without asking; then use `/decisions always <id>` on that decision instead (it saves the same `exact` rule). Otherwise switch to `ask-me` for this session only (Shift+Tab in the terminal app) without a working decision model, or turn decision models off: `/settings set judgment.policy No Decision Model`. `judgment.policy` is a daemon-file key: that write changes it for every program and the daemon until you put it back. With `permissions.tools.exec` at its default `prompt` and no decision model, the `exec` call is asked.
 2. Ask the model to run `bun test`. On the card, choose the tier "This exact command" and press Enter.
-3. If you changed it, put the policy back: `/config set judgment.policy Hybrid`.
+3. If you changed it, put the policy back: `/settings set judgment.policy Hybrid`.
 4. `/permissions rules` lists `exec: allow exactly: bun test`.
 
 ### Where rules are kept
@@ -388,7 +388,7 @@ The refusal the model receives: `Your never-run rule "<rule>" refuses this call:
 - They do not change facts: a recoverable edit inside the working directory runs whatever `permissions.tools.edit` says, unless it says `deny`.
 
 ```text
-/config set permissions.tools.fetch deny
+/settings set permissions.tools.fetch deny
 ```
 
 ### `/permissions` output
@@ -477,15 +477,16 @@ For an item with options, the first word of the answer is the choice and the res
 Plan mode is a separate read-only posture. Reads run; every write, command, network call and other change is refused with the reason `plan mode is on and <tool> would change something` and the next step "present the plan of changes and wait for the owner to approve it".
 
 ```text
-/plan          toggle plan mode (same as /plan toggle)
+/plan          the list: see whether plan mode is on, turn it on, turn it off
+/plan status   say whether plan mode is on
 /plan on       enter plan mode
-/plan off      leave plan mode and restore the mode you were in
+/plan off      leave plan mode and restore the mode you were in (asks first; a model cannot)
 ```
 
 - `/plan on` sets plan mode for this session only, as Shift+Tab does, and remembers the mode you were in; `/plan off` restores that mode. Neither changes the saved `permissions.mode` in your settings file, and plan mode ends with the session.
 - Leaving plan mode another way (Shift+Tab, which moves from `plan` to `ask-me`) forgets the remembered mode.
-- Plan mode entered another way (for example `/config set permissions.mode plan`, or a channel profile) has no remembered mode; `/plan off` then returns to `ask-me`.
-- Outputs: `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).` and `[Permissions] Plan mode OFF; mode: <mode>.`
+- Plan mode entered another way (for example `/settings set permissions.mode plan`, or a channel profile) has no remembered mode; `/plan off` then returns to `ask-me`.
+- Outputs: `Plan mode is on: writes, commands and network calls are blocked until /plan off or Shift+Tab.` and `Plan mode is off; the mode is <mode>.`
 - `/plan` is a terminal-app command. In the Agent and for channels, set `plan` through `permissions.mode` or a channel profile.
 - A read outside the working directory is refused in plan mode.
 
@@ -522,8 +523,8 @@ All `judgment.*` settings are kept in the daemon's settings file (`~/.goodvibes/
 Only a failure of the set model downgrades `Hybrid`. An answer, an abstention, a privacy refusal, a limit or a cancellation does not. A setting value outside the three is reported by name with the valid values, and the product runs on `Hybrid`.
 
 ```text
-/config set judgment.policy No Decision Model
-/config set judgment.policy Hybrid
+/settings set judgment.policy No Decision Model
+/settings set judgment.policy Hybrid
 ```
 
 ### Setting up the hosted decision model (Jev)
@@ -534,8 +535,8 @@ Prerequisite: a TypeSafe API key for the hosted endpoint.
 
    ```text
    /secrets set TYPESAFE_API_KEY <your-api-key> --scope user
-   /config set judgment.keySource secret
-   /config set judgment.keyName TYPESAFE_API_KEY
+   /settings set judgment.keySource secret
+   /settings set judgment.keyName TYPESAFE_API_KEY
    ```
 
 2. Leave `judgment.endpoint` and `judgment.model` empty to use `https://api.typesafe.ai` and `jev-latest`.
@@ -598,20 +599,20 @@ The named models (starting configurations, not a closed list):
 Prerequisite: a server speaking the protocol above, for example Kev-9B listening on `http://127.0.0.1:8080`.
 
 ```text
-/config set judgment.keySource none
-/config set judgment.endpoint http://127.0.0.1:8080
-/config set judgment.model kev-latest
-/config set judgment.backend {"adapter":"system-one"}
-/config set judgment.fallbacks []
-/config set judgment.policy Decision Model Only
-/config set permissions.mode jev-decides
+/settings set judgment.keySource none
+/settings set judgment.endpoint http://127.0.0.1:8080
+/settings set judgment.model kev-latest
+/settings set judgment.backend {"adapter":"system-one"}
+/settings set judgment.fallbacks []
+/settings set judgment.policy Decision Model Only
+/settings set permissions.mode jev-decides
 ```
 
 - `judgment.fallbacks []` makes sure no hosted model answers in its place.
 - `judgment.keySource none` comes first: while a credential is configured, `judgment.endpoint` changes only together with it (see below).
 - `Decision Model Only` makes an outage stop work instead of falling back: a call that needs the model fails with the model's error (`System One could not be reached`, `System One answered HTTP <status>`), and the gate does not ask you instead. With `Hybrid` an outage would fall back silently after one notice.
 - `permissions.mode jev-decides` is set explicitly: the unchosen default would behave as `ask-me` on a model the shipped calibration did not measure.
-- With an authenticated server: `/secrets set KEV_API_KEY <your-api-key> --scope user`, `/config set judgment.keySource secret`, `/config set judgment.keyName KEV_API_KEY`.
+- With an authenticated server: `/secrets set KEV_API_KEY <your-api-key> --scope user`, `/settings set judgment.keySource secret`, `/settings set judgment.keyName KEV_API_KEY`.
 - Check with `goodvibes status`. While the model answers, the `Decision model:` block reads `A decision model is in use (judgment.policy Decision Model Only).` After it has failed, the block and the one notice in the conversation read `The decision model <model> is unavailable (<what failed>); work that needs it stops (judgment.policy is Decision Model Only; Hybrid would continue without it). Next: <step>`. Under `Hybrid` the same line ends `continuing without it. Next: <step>`. Then ask for a change in the conversation: with the server stopped, the call fails with the error above.
 - What stops and what does not: facts (reads and recoverable edits inside the project, matching rules, owner-only asks) never ask the model and keep working; only judgment calls and other work that needs the model fail.
 
@@ -638,7 +639,7 @@ Without a decision model, conversation, tools, editing, commands, tests and sess
 `judgment.volumeMonitor` raises local alerts when decision traffic passes a budget. Alerts go to the runtime log; they never call a model or stop work.
 
 ```text
-/config set judgment.volumeMonitor {"enabled":true,"budgets":[{"name":"All decisions","maxLogicalDecisions":1000,"maxWireAttempts":2000}]}
+/settings set judgment.volumeMonitor {"enabled":true,"budgets":[{"name":"All decisions","maxLogicalDecisions":1000,"maxWireAttempts":2000}]}
 ```
 
 Enabled monitoring needs 1 to 100 budgets. Optional per budget: `battery` or `site` to restrict it. Optional: `windowMs` (default one hour, 1 second to 30 days), `intervalMs` (default one minute, 1 second to 1 day), `limit` (default 10000 log entries, 1 to 100000). The environment variable `GOODVIBES_JUDGMENT_MONITOR` names a budget file that applies even when the setting is disabled.
@@ -709,8 +710,8 @@ Example (`/home/me/policy/team.json`):
 Loading and promoting it:
 
 ```text
-/config set permissions.engine policy-engine
-/config set policy.registryEnabled true
+/settings set permissions.engine policy-engine
+/settings set policy.registryEnabled true
 (restart the app)
 /security load-policy /home/me/policy/team.json
 /security simulate-policy
@@ -890,10 +891,10 @@ Which program runs a password-manager reference, and which token variables it ge
 
 ### Credential settings
 
-A setting that holds a credential (channel tokens, `surfaces.email.password`, `cluster.secret`, webhook URLs and the rest of the declared list) takes only a `goodvibes://secrets/` reference. `/config set <credential-key> <value>` and the settings workspace store the value in the secret store and write the reference for you:
+A setting that holds a credential (channel tokens, `surfaces.email.password`, `cluster.secret`, webhook URLs and the rest of the declared list) takes only a `goodvibes://secrets/` reference. `/settings set <credential-key> <value>` and the settings workspace store the value in the secret store and write the reference for you:
 
 ```text
-/config set surfaces.slack.botToken <your-bot-token>
+/settings set surfaces.slack.botToken <your-bot-token>
 Set surfaces.slack.botToken: stored in the daemon secret tier as GOODVIBES_SURFACES_SLACK_BOT_TOKEN (value hidden).
 ```
 
@@ -907,8 +908,8 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Every command asks even in `jev-decides`. | No working decision model, or the default `jev-decides` on an endpoint or model the calibration did not measure. | Check `goodvibes status`. Set `TYPESAFE_API_KEY`, or choose `jev-decides` explicitly: `/config set permissions.mode jev-decides`. |
-| A tool never runs, in any mode except `yolo`: "refused by the setting permissions.tools.<x> = deny". | A per-tool deny. | `/config set permissions.tools.<x> prompt`. |
+| Every command asks even in `jev-decides`. | No working decision model, or the default `jev-decides` on an endpoint or model the calibration did not measure. | Check `goodvibes status`. Set `TYPESAFE_API_KEY`, or choose `jev-decides` explicitly: `/settings set permissions.mode jev-decides`. |
+| A tool never runs, in any mode except `yolo`: "refused by the setting permissions.tools.<x> = deny". | A per-tool deny. | `/settings set permissions.tools.<x> prompt`. |
 | "refused by the saved rule ..." | A remembered deny rule. | `/permissions rules`, then revoke it. |
 | "plan mode is on and <tool> would change something". | Plan mode. | `/plan off` or Shift+Tab. |
 | Writes refused in a new directory with "Workspace trust ... is undecided". | Trust question unanswered. | `/security trust-folder`. |
@@ -917,7 +918,7 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | A request from email, a webhook or ntfy is refused. | Those surfaces cannot direct changes. | Ask from the terminal, Telegram or another owned surface. |
 | `just-vibes` finished without doing some steps. | They were held. | `/held`, `/held approve <id>`, then ask to carry on. |
 | "Decision model ... failing" once, then work continues. | `Hybrid` fell back. | Fix the endpoint or key named in the notice; the app says when it answers again. |
-| Work stops with a decision-model error. | `Decision Model Only` and the model failed. | Fix the model, or `/config set judgment.policy Hybrid`. |
+| Work stops with a decision-model error. | `Decision Model Only` and the model failed. | Fix the model, or `/settings set judgment.policy Hybrid`. |
 | Commands have no network. | The exec sandbox turns it off. | Add every command of the line to `sandbox.egressAllowlist`, and have a working decision model: without one the sandbox never opens the network. |
 | A contained MCP server does not start. | `sandbox.mcpIsolation` is `contained` and bubblewrap is missing. | Install bubblewrap, or `/security host-mcp`. |
 

@@ -90,6 +90,8 @@ export const MCP_RELOAD_RESULT_SCHEMA = objectSchema({
 export const MCP_CONFIG_RESPONSE_SCHEMA = objectSchema({
   locations: arraySchema(MCP_CONFIG_SOURCE_SCHEMA),
   servers: arraySchema(MCP_CONFIG_SERVER_SCHEMA),
+  /** Servers a project file names that are kept but not started until the owner trusts this workspace (/security trust-folder). */
+  heldForTrust: arraySchema(STRING_SCHEMA),
 }, ['locations', 'servers']);
 /** The redacted server record plus its env and header VALUES. Admin-only, see mcp.servers.reveal. */
 export const MCP_REVEALED_SERVER_SCHEMA = objectSchema({

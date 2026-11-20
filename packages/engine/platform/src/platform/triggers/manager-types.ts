@@ -118,7 +118,7 @@ export class TriggerDisabledError extends RefusalError {
       code: 'TRIGGERS_OFF',
       state: 'triggers are off (watchers.triggers.enabled is false)',
       reason: `Cannot ${operation}: the trigger family is off (watchers.triggers.enabled is false)`,
-      next: ['Set watchers.triggers.enabled to true (/config set watchers.triggers.enabled true), then try again'],
+      next: ['Set watchers.triggers.enabled to true (/settings set watchers.triggers.enabled true), then try again'],
       status: 409,
     }));
     this.name = 'TriggerDisabledError';

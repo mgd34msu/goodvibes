@@ -251,7 +251,7 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
         // Enabled is not working: name what the channel still lacks.
         const missing = missingSurfaceKeys(config, resolved.id);
         if (missing.length > 0) {
-          lines.push(`  still needs: ${missing.join(', ')}. Set each in the TUI with /config set <key> <value> (a token may be a goodvibes://secrets/ reference), then run goodvibes surfaces check ${resolved.id}.`);
+          lines.push(`  still needs: ${missing.join(', ')}. Set each in the TUI with /settings set <key> <value> (a token may be a goodvibes://secrets/ reference), then run goodvibes surfaces check ${resolved.id}.`);
         }
       }
     } else if (resolved.kind === 'external') {

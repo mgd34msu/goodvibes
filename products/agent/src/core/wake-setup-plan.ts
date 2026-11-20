@@ -3,7 +3,7 @@
  * voice setup (VoiceSetupService.setup): the plan is decided from this host's
  * facts, the wake rows are set and missing wake models fetched, and
  * speech-to-text is proposed. `/voice wake setup` and turning
- * `voice.wake.enabled` on anywhere (settings, /config, a model's settings
+ * `voice.wake.enabled` on anywhere (settings, /settings, a model's settings
  * call) both go through here, so they print the same plan.
  */
 import type { VoiceSetupOutcome, VoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';

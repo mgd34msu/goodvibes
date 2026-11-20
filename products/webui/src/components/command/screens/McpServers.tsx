@@ -29,6 +29,8 @@ interface ServerView {
   readonly trust: string;
   readonly role: string;
   readonly heldBack: string | undefined;
+  /** Named in a project file of a folder the owner has not trusted: kept, not started. */
+  readonly waitsForTrust: boolean;
   readonly where: string;
   readonly tools: readonly ToolView[];
 }
@@ -40,6 +42,7 @@ function readServers(config: unknown, servers: unknown, tools: unknown): readonl
     if (typeof record.name === 'string') security.set(record.name, record);
   }
   const listed = asArray(asRecord(tools).tools).map(asRecord);
+  const waiting = new Set(asArray(asRecord(config).heldForTrust).map(String));
   return asArray(asRecord(config).servers).map((value) => {
     const server = asRecord(value);
     const name = String(server.name ?? '');
@@ -62,6 +65,7 @@ function readServers(config: unknown, servers: unknown, tools: unknown): readonl
       connected: record.connected === true,
       trust: String(record.trustMode ?? server.trustMode ?? ''),
       role: String(record.role ?? server.role ?? ''),
+      waitsForTrust: waiting.has(name),
       heldBack: record.schemaFreshness === 'quarantined' ? String(record.quarantineReason ?? 'its tools changed') : undefined,
       where: [source.scope ? `${String(source.scope)} config` : '', typeof source.path === 'string' ? source.path : ''].filter(Boolean).join(' · '),
       tools: [...names].filter(Boolean).sort((a, b) => a.localeCompare(b)).map((toolName) => ({
@@ -80,7 +84,7 @@ function ruleWords(rule: ToolView['rule'], server: string): string {
 }
 
 function ServerTools({ server, onDone }: { readonly server: ServerView; readonly onDone: () => void }) {
-  if (server.tools.length === 0) return <p className="gv-command-screen__state">{server.connected ? 'This server offers no tools.' : 'Its tools show once it connects.'}</p>;
+  if (server.tools.length === 0) return <p className="gv-command-screen__state">{server.connected ? 'This server offers no tools.' : server.waitsForTrust ? 'Its tools show once this folder is trusted and it connects.' : 'Its tools show once it connects.'}</p>;
   return (
     <RowList aria-label={`Tools of ${server.name}`}>
       {server.tools.map((tool) => {
@@ -129,10 +133,11 @@ export function McpServers() {
             <li key={server.name} className="gv-command-screen__group">
               <ul className="gv-rows">
                 <Row
-                  leading={<StatusDot tone={server.heldBack ? 'warn' : server.connected ? 'ok' : 'idle'} srLabel={server.heldBack ? 'Tools held back' : server.connected ? 'Connected' : 'Not connected'} />}
+                  leading={<StatusDot tone={server.heldBack || server.waitsForTrust ? 'warn' : server.connected ? 'ok' : 'idle'} srLabel={server.waitsForTrust ? 'Waits for this folder to be trusted' : server.heldBack ? 'Tools held back' : server.connected ? 'Connected' : 'Not connected'} />}
                   title={server.name}
                   meta={[
-                    server.heldBack ? `tools held back: ${server.heldBack}` : server.connected ? 'connected' : 'not connected',
+                    server.waitsForTrust ? 'not started: this folder is not trusted yet (Trust this folder, /security trust-folder, in the app that opened it)'
+                      : server.heldBack ? `tools held back: ${server.heldBack}` : server.connected ? 'connected' : 'not connected',
                     server.trust ? `trust: ${server.trust}` : '',
                     server.role ? `role: ${server.role}` : '',
                     server.where,

@@ -28,7 +28,7 @@ GoodVibes is four programs. They share one engine and one set of files on the ma
 | Program | Command | What it is |
 | --- | --- | --- |
 | terminal app | `goodvibes` | The terminal coding app: a full-screen interface for working in a project with a model. Also a command line (`goodvibes run`, `goodvibes status`, `goodvibes service`, and more). |
-| Agent | `goodvibes-agent` | The personal-assistant app: a terminal interface and command line for knowledge, memory, routines, reminders, channels and personal operations. It hands coding work to the terminal app (`/delegate`). |
+| Agent | `goodvibes-agent` | The personal-assistant app: a terminal interface and command line for knowledge, memory, routines, reminders, channels and personal operations. It hands coding work to the terminal app (`/agents hand-off`). |
 | daemon | `goodvibes-daemon` | The one long-running background program on a machine. It hosts the control plane (the HTTP operator API), the chat channels, cluster membership, scheduled work, the knowledge and memory stores, hosted sessions and the web UI. |
 | web UI | none (a page in a browser) | The browser interface, served by the daemon at the same address as the operator API (by default `http://127.0.0.1:3421`). |
 
@@ -207,7 +207,7 @@ Each setting key is stored in one of three ways, decided by the key. The "Stored
 | --- | --- | --- | --- | --- |
 | the daemon file (keys the daemon acts on) | `~/.goodvibes/daemon/settings.json` | the same file | the same file | `goodvibes-daemon config set`; a change made in an app is sent to the running daemon, which writes it, or written by the app itself when no daemon is running |
 | the shared file (only `tts.provider`, `tts.voice`, `tts.speed`, `tts.llmProvider`, `tts.llmModel`) | `~/.goodvibes/shared/settings.json` | the same file | the same file | any program that changes one of these keys |
-| each program's own file (every other key) | `~/.goodvibes/tui/settings.json` | `~/.goodvibes/agent/settings.json` | `~/.goodvibes/daemon-host/settings.json` | the terminal app's `/settings` and `/config set`; Agent's `/settings`; `goodvibes-daemon config set` |
+| each program's own file (every other key) | `~/.goodvibes/tui/settings.json` | `~/.goodvibes/agent/settings.json` | `~/.goodvibes/daemon-host/settings.json` | the terminal app's `/settings` and `/settings set`; Agent's `/settings`; `goodvibes-daemon config set` |
 
 Keys stored in each program's own file have one value per program. `provider.model` set with `/model` in the terminal app does not change Agent's model, and `service.enabled` set with `goodvibes-daemon config set` changes the daemon's own value, not the one `goodvibes doctor` reads in the terminal app. To change such a key for a program, change it in that program or in its file. `GOODVIBES_DAEMON_HOME` moves the daemon file to `<GOODVIBES_DAEMON_HOME>/settings.json`.
 
@@ -269,7 +269,7 @@ When the terminal app or Agent writes a daemon-owned key while a daemon runs, th
 Inside the terminal app:
 
 - `/settings` lists what it does; `/settings open [topic|key|words]` opens the settings screen there, and `/settings list`, `get <key>`, `set <key> <value>` and `reset <key>` read and change settings without the screen, as in the Agent.
-- `/config set <key> <value>` sets a key directly.
+- `/settings set <key> <value>` sets a key directly.
 
 Inside Agent:
 

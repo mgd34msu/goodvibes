@@ -400,7 +400,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'TTS Provider Picker',
     kind: 'picker',
     summary: 'Streaming TTS provider picker from Agent settings.',
-    command: '/config open tts.provider',
+    command: '/settings open tts.provider',
     preferredModelRoute: `Use ${settingsActions('get', 'set')} for tts.provider when a concrete provider id is known; use mode:"open_ui_surface" only to visibly navigate.`,
     available: (context) => typeof context.openSelection === 'function' && Boolean(context.platform.voiceProviderRegistry),
     open: (context, _args, assertCurrent) => {
@@ -416,7 +416,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'TTS Voice Picker',
     kind: 'picker',
     summary: 'TTS voice picker for the selected or supplied provider.',
-    command: '/config open tts.voice',
+    command: '/settings open tts.voice',
     preferredModelRoute: `Use ${settingsActions('get', 'set', 'reset')} for tts.voice when a concrete voice id is known; use mode:"open_ui_surface" only to visibly navigate.`,
     parameters: ['target'],
     available: (context) => typeof context.openSelection === 'function' && Boolean(context.platform.voiceService),

@@ -27,6 +27,7 @@ interface McpRouteContext {
     | 'listServerSecurity'
     | 'listServerSandboxBindings'
     | 'listAllTools'
+    | 'heldForWorkspaceTrust'
   >;
   readonly roots: McpConfigRoots;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
@@ -207,6 +208,19 @@ function serializeEffectiveConfig(config: McpEffectiveConfig): Record<string, un
   };
 }
 
+/**
+ * The effective config as the operator reads it, with the servers a project
+ * file names that wait on the owner's trust of this workspace (`heldForTrust`):
+ * kept, but not started until the folder is trusted, so a screen can say why
+ * one is not connected instead of showing it as merely down.
+ */
+async function configView(context: McpRouteContext): Promise<Record<string, unknown>> {
+  return {
+    ...serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+    heldForTrust: await context.mcpRegistry.heldForWorkspaceTrust(context.roots),
+  };
+}
+
 function serializeRevealedConfig(config: McpEffectiveConfig): Record<string, unknown> {
   return {
     locations: config.locations,
@@ -253,7 +267,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
   const { pathname } = url;
 
   if (pathname === '/api/mcp/config' && req.method === 'GET') {
-    return Response.json(serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)));
+    return Response.json(await configView(context));
   }
 
   if (pathname === '/api/mcp/servers' && req.method === 'GET') {
@@ -279,7 +293,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     if (admin) return admin;
     return Response.json({
       reload: await context.mcpRegistry.reload(context.roots),
-      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+      config: await configView(context),
     });
   }
 
@@ -297,7 +311,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
       path: result.path,
       removed: false,
       reload: result.reload,
-      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+      config: await configView(context),
     });
   }
 
@@ -324,7 +338,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
         return Response.json({
           serverName, toolName, rule, scope: entry?.source.scope === 'global' ? 'global' : 'project', path: entry?.source.path ?? '',
           changed: sessionLifted, reload: { added: 0, changed: 0, removed: 0, unchanged: 0, servers: [] },
-          config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+          config: await configView(context),
         });
       }
     }
@@ -346,7 +360,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
       path: result.path,
       changed: result.changed || sessionLifted,
       reload: result.reload,
-      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+      config: await configView(context),
     });
   }
 
@@ -381,7 +395,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
       path: result.path,
       changed: result.changed,
       reload: result.reload,
-      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+      config: await configView(context),
     });
   }
 
@@ -413,7 +427,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
       path: result.path,
       removed: result.removed,
       reload: result.reload,
-      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+      config: await configView(context),
     });
   }
 

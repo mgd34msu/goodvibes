@@ -8,9 +8,9 @@ Every setting key the programs accept, grouped by its first segment. Each entry 
 
 How to read an entry. "Stored in" names one of three places, decided by the key:
 
-- **The daemon file**: `~/.goodvibes/daemon/settings.json` (`<GOODVIBES_DAEMON_HOME>/settings.json` when that variable is set). There is one value, and the terminal app, Agent and the daemon all read it. `goodvibes-daemon config set <key> <value>` writes it. A change made in an app (`/settings`, `/config set`) is sent to the running daemon, which writes it; with no daemon running the app writes the file itself.
+- **The daemon file**: `~/.goodvibes/daemon/settings.json` (`<GOODVIBES_DAEMON_HOME>/settings.json` when that variable is set). There is one value, and the terminal app, Agent and the daemon all read it. `goodvibes-daemon config set <key> <value>` writes it. A change made in an app (`/settings`, `/settings set`) is sent to the running daemon, which writes it; with no daemon running the app writes the file itself.
 - **The shared file**: `~/.goodvibes/shared/settings.json`. Only the five keys `tts.provider`, `tts.voice`, `tts.speed`, `tts.llmProvider` and `tts.llmModel` are read from it. A value there wins over each program's own file, and a change made in any program is written there.
-- **Each program's own file**: every other key. Each program keeps its own value: the terminal app reads `~/.goodvibes/tui/settings.json` (its `/settings` and `/config set` write it), Agent reads `~/.goodvibes/agent/settings.json` (its `/settings` writes it), and the daemon reads `~/.goodvibes/daemon-host/settings.json` (`goodvibes-daemon config set` writes it). Setting a key in one program does not change it in the others.
+- **Each program's own file**: every other key. Each program keeps its own value: the terminal app reads `~/.goodvibes/tui/settings.json` (its `/settings` and `/settings set` write it), Agent reads `~/.goodvibes/agent/settings.json` (its `/settings` writes it), and the daemon reads `~/.goodvibes/daemon-host/settings.json` (`goodvibes-daemon config set` writes it). Setting a key in one program does not change it in the others.
 
 A few keys exist in one app only; their entries say so.
 

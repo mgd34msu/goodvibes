@@ -1,8 +1,7 @@
-import { createConfigCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
 // The same text reader `--config key=value` and the daemon's `config set` use, so one line stores one value everywhere.
 import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
@@ -15,9 +14,6 @@ import {
 } from '../../config/secret-config.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
-export function registerConfigCommand(registry: CommandRegistry): void {
-  registry.register(configWorkspaceCommand);
-}
 
 /**
  * Store a credential-bearing config key through the secret manager instead of
@@ -54,8 +50,12 @@ async function handleSecretConfigSet(ctx: CommandContext, key: ConfigKey, value:
   }
 }
 
-const configWorkspaceCommand = createConfigCommand<CommandContext>({
-  async set(key, value, ctx) {
+/**
+ * `/settings set` in the terminal app: one value stored everywhere it is read.
+ * A credential key goes to the secret store, the key keeping only a reference.
+ */
+export async function setSettingValue(key: string, value: string, ctx: CommandContext): Promise<void> {
+  {
     // A credential key must never take the generic path below: setDynamic
     // writes the value it is handed straight into a settings JSON file. The
     // settings modal routes these keys through the secret manager
@@ -107,5 +107,5 @@ const configWorkspaceCommand = createConfigCommand<CommandContext>({
       if (readRefusal(e)) throw e;
       throw commandRefusal(`Could not set ${key}; nothing was changed: ${e instanceof Error ? e.message : String(e)}`);
     }
-  },
-});
+  }
+}

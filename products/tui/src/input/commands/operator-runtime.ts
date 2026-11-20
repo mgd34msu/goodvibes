@@ -11,6 +11,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
+import { setSettingValue } from './setting-write.ts';
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
   registry.register(SETTINGS_COMMAND);
@@ -63,8 +64,8 @@ const SETTINGS_COMMAND = defineCommand<CommandContext>(settingsCommandDescriptio
     return [setting.label, settingLine(setting, config.get(setting.key)), `  set in: ${config.sourceOf(setting.key)}`, `  ${setting.description}`].join('\n');
   },
   async set(key, value, ctx) {
-    // The one line that stores a value everywhere, a credential key going to the secret store (/config set).
-    await ctx.executeCommand?.('config', ['set', key, value]);
+    // One value stored everywhere it is read; a credential key goes to the secret store (setting-write.ts).
+    await setSettingValue(key, value, ctx);
   },
   async reset(key, ctx) {
     const setting = findSetting(ctx, key);

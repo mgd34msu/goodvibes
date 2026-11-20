@@ -524,7 +524,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'service.autostart',
     label: 'Start the daemon at login',
     type: 'boolean',
-    description: 'Whether the daemon\'s service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /config set, the Agent\'s /settings set, goodvibes-daemon config set, the API, or an edit of the daemon\'s settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon\'s settings file.',
+    description: 'Whether the daemon\'s service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /settings set in either terminal program, goodvibes-daemon config set, the API, or an edit of the daemon\'s settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon\'s settings file.',
   },
   {
     key: 'service.restartOnFailure',

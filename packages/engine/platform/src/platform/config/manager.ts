@@ -326,7 +326,7 @@ function shippedDefaultsDigest(): string {
 /** Refused write of a daemon-owned setting from a process that does not own the daemon's file. */
 function daemonOwnedRefusal(key: string): ConfigError {
   return new ConfigError(`${key} is a daemon setting, and only the daemon writes its settings file. `
-    + `Change it with \`goodvibes-daemon config set ${key} <value>\`, or with /config or the settings screen in a terminal app, `
+    + `Change it with \`goodvibes-daemon config set ${key} <value>\`, or with /settings or the settings screen in a terminal app, `
     + 'which send it to the daemon (or, with no daemon running, write it for the daemon to read when it starts).');
 }
 

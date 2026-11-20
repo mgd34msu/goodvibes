@@ -860,7 +860,7 @@ export class DaemonLifecycleRuntime {
 
   /**
    * service.autostart acts here and only here, however it was set (a settings
-   * screen, /config set, /settings set, goodvibes-daemon config set, the API, a
+   * screen, /settings set, goodvibes-daemon config set, the API, a
    * hand edit of the daemon's settings file, which the config watcher reports):
    * each change is applied to the service manager, and once at start, to an
    * installed service, so a value set while no daemon ran is applied too. A

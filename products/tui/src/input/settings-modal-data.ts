@@ -289,7 +289,7 @@ export function buildSettingGroups(
     uiEntries.sort((a, b) => priorityOf(a.setting.key) - priorityOf(b.setting.key));
   }
 
-  // Cross-list ui.voiceEnabled into the 'tts' category so that /config tts
+  // Cross-list ui.voiceEnabled into the 'tts' category so that /settings open tts
   // shows the always-speak toggle alongside the other TTS settings.
   const ttsEntries = groups.get('tts');
   if (ttsEntries && uiEntries) {
@@ -306,11 +306,11 @@ export function buildSettingGroups(
   }
 
   // Synthetic behavior.budgetAlertUsd (TUI-local): no schema surface previously,
-  // never in /config; /settings-sync show rejects any key not
+  // never in /settings; /settings-sync show rejects any key not
   // in CONFIG_KEYS. The Usage modal's 'b' key and /cost budget <usd> remain
   // the primary way to change it; this entry makes the current effective
   // value (and whether it's still the "no budget configured" default)
-  // visible from /config behavior too, same rationale as notifyAfterSeconds.
+  // visible from /settings open behavior too, same rationale as notifyAfterSeconds.
   if (behaviorEntries && !behaviorEntries.some((e) => e.setting.key === (BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey))) {
     behaviorEntries.push(buildBudgetAlertUsdSyntheticEntry(configManager));
   }
@@ -424,7 +424,7 @@ export const NOTIFY_AFTER_SECONDS_DEFAULT_SETTING = 60;
  *
  * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field). The
  * descriptor is injected into the behavior settings group so users can
- * configure the long-task push notification threshold from /config behavior.
+ * configure the long-task push notification threshold from /settings open behavior.
  *
  * 0 = off (no notifications). Any positive integer = threshold in seconds.
  * Default 60s matches the default in long-task-notifier.ts.
@@ -467,9 +467,9 @@ export function buildNotifyAfterSecondsSyntheticEntry(configManager: Pick<Config
  *
  * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field), it never
  * appeared in CONFIG_SCHEMA, so it was invisible to every schema-driven
- * inspection surface (/config, /settings-sync show <key>) even though the
+ * inspection surface (/settings, /settings-sync show <key>) even though the
  * value round-trips correctly through configManager.get/set. The descriptor
- * is injected into the behavior settings group so /config behavior shows the
+ * is injected into the behavior settings group so /settings open behavior shows the
  * real current threshold, not just the behavior.notifyOnBudgetBreach gate.
  *
  * 0 = no budget configured (disabled). Any positive number = the USD

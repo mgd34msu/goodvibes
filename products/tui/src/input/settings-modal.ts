@@ -8,7 +8,7 @@ import type {
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
 import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 /**
- * SettingsModal, state management for the /settings and /config fullscreen workspace.
+ * SettingsModal, state management for the /settings fullscreen workspace.
  *
  * Loads CONFIG_SCHEMA, groups settings by category, and tracks UI state:
  *   - Active category (Tab to cycle)

@@ -74,7 +74,7 @@ export const CONNECTION_PROBE_METHOD = {
  * The setup steps each daemon failure code implies.
  *
  * The `surfaces.*` settings are daemon-owned by prefix (see the platform's
- * `config-ownership`), so `/config set` on them lands in the daemon's own
+ * `config-ownership`), so `/settings set` on them lands in the daemon's own
  * store and keeps working with this client closed, which is the requirement.
  *
  * The PASSWORDS now have it too, and these steps changed the round the platform
@@ -102,16 +102,16 @@ const DAEMON_TIER_NOTE =
 
 const SETUP_STEPS: Readonly<Record<string, readonly string[]>> = {
   EMAIL_NOT_CONFIGURED: [
-    '/config set surfaces.email.host imap.example.com',
-    '/config set surfaces.email.user you@example.com',
+    '/settings set surfaces.email.host imap.example.com',
+    '/settings set surfaces.email.user you@example.com',
     `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
   ],
   EMAIL_CREDENTIALS_MISSING: [
     `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
   ],
   CALENDAR_NOT_CONFIGURED: [
-    '/config set surfaces.calendar.caldavUrl https://example.com/dav/',
-    '/config set surfaces.calendar.caldavUser you@example.com',
+    '/settings set surfaces.calendar.caldavUrl https://example.com/dav/',
+    '/settings set surfaces.calendar.caldavUser you@example.com',
     `/secrets set GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
   ],
 };

@@ -12,6 +12,14 @@ export const OPERATOR_SESSION_COOKIE_NAME = 'goodvibes_session';
  * the credential. It authenticates nothing.
  */
 export const IDENTITY_MARKER_COOKIE_NAME = 'goodvibes_identity';
+/**
+ * The web UI's phone-as-device-node credential (a remote peer token): HttpOnly and
+ * SameSite=Strict like the sign-in cookie, but its own cookie with Path=/api/remote, so
+ * it is sent only to the peer routes and is read only as a peer token
+ * ({@link extractRemotePeerToken}), never as an operator credential.
+ */
+export const REMOTE_NODE_COOKIE_NAME = 'goodvibes_node';
+const REMOTE_NODE_COOKIE_PATH = '/api/remote';
 /** How long a browser keeps a credential that does not expire by itself (a device or operator token): the longest a browser keeps a cookie. */
 export const NON_EXPIRING_BROWSER_CREDENTIAL_MS = 400 * 24 * 60 * 60 * 1_000;
 
@@ -316,11 +324,33 @@ export function readIdentityMarker(req: Request): string | null {
   return marker && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(marker) ? marker : null;
 }
 
-function browserCookie(name: string, value: string, options: SessionCookieOptions, httpOnly: boolean): string {
+/** The phone node's peer-token cookie, scoped to the peer routes. */
+export function buildRemoteNodeCookie(token: string, options: SessionCookieOptions): string {
+  return browserCookie(REMOTE_NODE_COOKIE_NAME, encodeURIComponent(token), options, true, REMOTE_NODE_COOKIE_PATH);
+}
+
+export function buildExpiredRemoteNodeCookie(req: Request, trustProxy = false): string {
+  return expiredBrowserCookie(REMOTE_NODE_COOKIE_NAME, req, trustProxy, true, REMOTE_NODE_COOKIE_PATH);
+}
+
+/**
+ * The credential a remote peer request presents: its bearer, else the phone node's
+ * cookie, else the sign-in cookie (an operator credential, which no peer route accepts,
+ * kept so a refusal is audited as before). `viaCookie` says the node cookie carried it.
+ */
+export function extractRemotePeerToken(req: Request): { readonly token: string; readonly viaNodeCookie: boolean } {
+  const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (bearer) return { token: bearer, viaNodeCookie: false };
+  const node = parseCookies(req.headers.get('cookie')).get(REMOTE_NODE_COOKIE_NAME)?.trim();
+  if (node) return { token: node, viaNodeCookie: true };
+  return { token: extractOperatorAuthToken(req), viaNodeCookie: false };
+}
+
+function browserCookie(name: string, value: string, options: SessionCookieOptions, httpOnly: boolean, path = '/'): string {
   const maxAgeSeconds = Math.max(0, Math.floor((options.expiresAt - Date.now()) / 1_000));
   const parts = [
     `${name}=${value}`,
-    'Path=/',
+    `Path=${path}`,
     ...(httpOnly ? ['HttpOnly'] : []),
     'SameSite=Strict',
     `Expires=${new Date(options.expiresAt).toUTCString()}`,
@@ -330,10 +360,10 @@ function browserCookie(name: string, value: string, options: SessionCookieOption
   return parts.join('; ');
 }
 
-function expiredBrowserCookie(name: string, req: Request, trustProxy: boolean, httpOnly: boolean): string {
+function expiredBrowserCookie(name: string, req: Request, trustProxy: boolean, httpOnly: boolean, path = '/'): string {
   const parts = [
     `${name}=`,
-    'Path=/',
+    `Path=${path}`,
     ...(httpOnly ? ['HttpOnly'] : []),
     'SameSite=Strict',
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',

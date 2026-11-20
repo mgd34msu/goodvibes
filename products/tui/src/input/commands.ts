@@ -6,7 +6,6 @@ import { sessionCommand, resumeCommand, saveCommand } from './commands/session.t
 import { memoryCommand } from './commands/memory.ts';
 import { registerKnowledgeRuntimeCommands } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
-import { registerConfigCommand } from './commands/config.ts';
 import { registerDiscoveryRuntimeCommands } from './commands/discovery-runtime.ts';
 import { registerPlanningRuntimeCommands } from './commands/planning-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
@@ -97,7 +96,6 @@ export interface BuiltinCommandGroup {
 export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Automation', register: registerTriggerCommands },
   { category: 'Shell & Session', register: registerShellCoreCommands },
-  { category: 'Configuration', register: registerConfigCommand },
   { category: 'Operator', register: registerOperatorRuntimeCommands },
   { category: 'Plugins', register: registerPluginRuntimeCommands },
   { category: 'Diff & Review', register: registerDiffRuntimeCommands },

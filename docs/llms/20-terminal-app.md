@@ -726,7 +726,7 @@ The default table of the terminal app:
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
-The change lasts for the session only. The saved default is changed in `/settings` (or `/config set permissions.mode <mode>`); `/permissions` shows it but does not change it.
+The change lasts for the session only. The saved default is changed in `/settings` (or `/settings set permissions.mode <mode>`); `/permissions` shows it but does not change it.
 Plan mode is outside the cycle; `/plan` turns it on and off for this session, also without changing the saved default.
 Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment says so and why: `Asks: Jev decides · asking you for now · no decision model chosen`.
 A managed lock on `permissions.mode` stops the change, and a notice says so: `The mode stays <mode>: <reason>`.
@@ -764,7 +764,7 @@ Every view opens as a modal over the dimmed conversation; `Esc` closes one level
 | Changes | `/changes`, `/diff`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
 | Notifications | `/notifications` | Every notice, newest first; `Enter` goes to its subject. |
 | Sessions | `/session`, `/resume` | Saved sessions, with hosted sessions in a Hosted group. |
-| Settings | `/settings`, `/config open` | Every setting by category, searchable. |
+| Settings | `/settings`, `/settings open` | Every setting by category, searchable. |
 | Model picker | `/model`, `/provider` | Providers and models for each route. |
 
 An opened helper agent shows its work as the spine of the transcript; the composer then steers that agent while the main conversation keeps running. In a contract, workflow or hosted agent opened inside Your agents, `s` opens the line that steers it.
@@ -820,7 +820,7 @@ A backslash outside quotes is an ordinary character (`C:\dir`).
 An unclosed quote refuses the whole line instead of being guessed.
 A command that would change or delete something important asks for confirmation in a dialog; some take `--yes` instead.
 A command that needs the daemon says `[<command>] <reason>` and changes nothing when no daemon answers.
-A command the model runs on the owner's behalf passes the permission gate like any tool call; a few commands (`/devices pair host`, `/remote dispatch`, `/project-plan <goal>`, `/workstream start`) refuse unless the owner typed them.
+A command the model runs on the owner's behalf passes the permission gate like any tool call; a few commands (`/devices pair host`, `/remote dispatch`, `/work request <goal>`, `/workstream start`) refuse unless the owner typed them.
 
 The complete list of the terminal app's slash commands, with usage, aliases and descriptions, is under "Slash commands: terminal app" in the reference part.
 
@@ -840,8 +840,8 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 `/notifications` opens the notification history.
 `/conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]` (aliases `/transcript`, `/composer`) reviews the transcript's structure: event kinds, groups, the busiest regions, the composer's state, and jumps between events of one kind. A wrong form prints its usage.
 
-`/guidance [review|dismiss <id>|reset [id]]` lists contextual guidance items, dismisses one for its current occurrence, or resets dismissals.
-`/guidance dismiss g1` on an item that is not showing prints `Guidance item g1 is not showing now, so there is nothing to dismiss. /guidance lists the items that are.`
+`/guidance` lists contextual guidance (`review`, the report), dismisses one item for what it reports now (`dismiss <item>`, picked from what is showing), or shows dismissed items again (`reset [<item>]`, every one when none is named).
+`/guidance dismiss g1` on an item that is not showing is refused with `Guidance g1 is not showing now, so there is nothing to dismiss.`
 
 `/deeplink` lists (`review`, what `/deeplink` alone gives a model or script), opens (`open <view|goodvibes://open/...> [target]`) and saves (`export <path>`, read back with `inspect <path>`) `goodvibes://open/<view>` links. `/deeplink open agents` opens Your agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
 
@@ -885,10 +885,10 @@ The app also compacts on its own when context use reaches `behavior.autoCompactT
 `/image <path> [prompt text]` (alias `/img`) attaches an image file (PNG, JPEG, WebP, GIF) to the next message, optionally with the prompt. Without a path it refuses with `Usage: /image <path> [prompt text]`.
 `/editor` opens the composer draft in `$VISUAL` or `$EDITOR`, suspends the interface while the editor runs, and puts the saved text back in the composer. Set `export EDITOR=nvim` first.
 
-`/template save <name> | use <name> [args] | list | show <name> | edit <name> | delete <name> [--global]` (alias `/tmpl`) manages prompt templates.
-Project templates live in `<project>/.goodvibes/templates/`; global templates live in `~/.goodvibes/templates/`.
-`/template save review` saves the composer draft as `review`; `/template use review src/api.ts` sends it with arguments filled in.
-A missing template prints `Template not found: <name>. Run /template list to see the templates, or /template save <name> to create it.`
+`/template` manages prompt templates: `list` (the report; picking one sends it, Del deletes, Ctrl+E edits), `use <template> [name=value ...]`, `save <name>` (your last message), `show <template>`, `edit <template>` and `delete <template> [--everywhere]` (asks first; `--everywhere` deletes the one every project shares).
+Project templates live in `<project>/.goodvibes/templates/`; templates for every project live in `~/.goodvibes/templates/`.
+`/template save review` saves your last message as `review`; `/template use review file=src/api.ts` sends it with its blanks filled in.
+A missing template is refused with `No template <name>.` and the line that lists them.
 
 ### Sessions
 
@@ -1063,7 +1063,7 @@ Provider subscriptions are signed in and out with `/provider sign-in` and `/prov
 `/secrets` (both programs) keeps passwords and keys where programs can read them, without showing them. Bare, it opens its actions with "See your secrets" first; the actions are `list`, `set <name> [<value>] [--scope project|user] [--storage secure|plaintext]` (without the value it asks on a hidden line; `project` and `secure` are the defaults, `plaintext` loosens a protection), `link <name> <reference>` (a `goodvibes://secrets/...` address in a password manager), `get <name>` (says whether it is stored, never its value), `test <reference>`, `providers` (where a secret can be read from, with an example line for each), `storage` (the storage rule, how many are encrypted or plain text, and where each store is), `trust <name>` (use a secret from this project's store; it loosens a protection, so it asks and a model cannot run it), `delete <name> [--scope project|user] [--storage secure|plaintext]` (asks first; it cannot be undone) and `use <name> [<value>]`, which keeps a value as an environment variable for this session only: `$<NAME> is set for this session only.` with `(N characters, value not shown.)`.
 In the Agent a credential the daemon reads is filed in the daemon's tier whatever scope is asked, and `set` says so.
 
-While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <name> <value>` and `/secrets use <name> <value>`, `/local-auth add` and `password` with `--password`, `/accounts sign-in` with `--password`, `/config set` and the Agent's `/settings set` for a credential key, `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`. The line a guided action shows ("This will run", "The command for this is") leaves a secret out, so typing it back asks for the secret on a hidden line.
+While a value is asked for with masked input (the same in both programs), the composer shows a bullet per character and holds the value apart from the prompt: typing, a terminal paste, the paste key (`Ctrl+V`), the cursor keys, `Home`, `End`, `Backspace` and `Delete` edit it, `Enter` hands it over, `Esc` or `Ctrl+C` cancels; undo, redo, the kill ring, history search, the command line and the other editor shortcuts are not offered, so the value never reaches them. A command line that carries a credential is kept in the input history with `<redacted>` in its place: `/secrets set <name> <value>` and `/secrets use <name> <value>`, `/local-auth add` and `password` with `--password`, `/accounts sign-in` with `--password`, `/settings set` for a credential key (in either program), `/notify add <url>`, the Agent's `/channels send --webhook <url>` and `/calendar connect <provider> --code <code-or-address>`. The line a guided action shows ("This will run", "The command for this is") leaves a secret out, so typing it back asks for the secret on a hidden line.
 
 `/usage [turns|agents]` opens the Usage view on a tab.
 `/cost [panel|budget <usd>|attribution [24h|7d] [--json]]` opens Usage, sets the session budget alert (`/cost budget 5` prints `Cost budget alert set to $5.00.`; `0` disables it), or prints cost attributed per agent over the last 24 hours or 7 days from the daemon.
@@ -1071,23 +1071,21 @@ While a value is asked for with masked input (the same in both programs), the co
 
 ### Settings and configuration
 
-`/settings [category|key]` (alias `/cfg-ui`) opens the full-screen configuration workspace, at a category or a setting when one is named. A name that matches nothing prints which names exist.
-`/config open [<setting or topic>]` opens the same workspace (bare `/config` lists its two actions), and `/config set <key> <value>` sets one key directly; the value is hidden as it is typed and in the input history, since a setting may hold a credential. A model cannot run `/config set`:
+`/settings set <key> <value>` sets one key directly; the value is hidden as it is typed and in the input history, since a setting may hold a credential, and a credential key goes to the secret store with only its reference in the setting. A model cannot run `/settings set`:
 
 ```text
-/config set display.themeMode light
+/settings set display.themeMode light
 Set display.themeMode: "auto" → "light"
 Theme applied: light.
 ```
 
-`/config set` with a missing value asks for it; where nothing can be asked (a script) it is refused naming the blank.
+`/settings set` with a missing value asks for it; where nothing can be asked (a script) it is refused naming the blank.
 A value the daemon refuses for a daemon-owned key prints `Not set: the daemon refused <key>, and nothing was changed: <reason>`.
 An invalid value prints `Could not set <key>: <reason>`.
 
-`/profiles` opens the config profile picker; press `s` there to save the current settings as a profile. Without the interface it lists saved profiles or prints `No profiles saved.`
-`/profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]` (alias `/profilesync`) moves config profiles between machines. `import` refuses a file that is not a profile bundle and changes nothing.
+`/presets` works with presets (saved sets of display, model and behaviour settings): `open` ("Pick a preset": Enter loads one, Ctrl+S saves the current settings as one, Ctrl+D deletes one), `list` (the report), `export <file> [--overwrite]` (an existing file is kept unless `--overwrite`), `inspect <file>` and `import <file> [--prefix <word>] [--overwrite]` (a file that is not a presets file is refused and nothing changes; a name already taken is refused unless `--overwrite`).
 `/settings-sync` works with settings sync bundles: `review` (what it alone gives a model or script), `export <file>`, `pull <file>` (changes that touch security are shown and asked about first), `conflicts`, `resolve <setting> local|synced`, `inspect <file>`, `show <setting>`, `failures` and `open` (the settings sync screen). The staged bundle, rollbacks and locks are `/managed`'s.
-`/managed` applies a managed settings bundle (settings an administrator sets for a machine): `review`, `staged`, `history`, `inspect <file>`, `stage <file>`, `export <profile> <file>`, `apply <file> [--key <setting>]...`, `apply-staged [--key <setting>]...`, `rollback <apply>`, `lock <setting> <who> <reason>` and `unlock <setting>` (the owner's only; it asks first). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A bundle that changes a setting that touches security shows those changes and asks first, and what is applied is exactly what was shown: `apply <file>` stages the bundle it read once and applies that stage, `apply-staged` applies the stage it showed; a different stage put there since by another window or process is refused and nothing is applied. A locked key cannot be changed from Settings or `/config` until `/managed unlock <setting>`.
+`/managed` applies a managed settings bundle (settings an administrator sets for a machine): `review`, `staged`, `history`, `inspect <file>`, `stage <file>`, `export <profile> <file>`, `apply <file> [--key <setting>]...`, `apply-staged [--key <setting>]...`, `rollback <apply>`, `lock <setting> <who> <reason>` and `unlock <setting>` (the owner's only; it asks first). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. A bundle that changes a setting that touches security shows those changes and asks first, and what is applied is exactly what was shown: `apply <file>` stages the bundle it read once and applies that stage, `apply-staged` applies the stage it showed; a different stage put there since by another window or process is refused and nothing is applied. A locked key cannot be changed from Settings or `/settings` until `/managed unlock <setting>`.
 
 `/setup` is a guided command. Bare, it lists topics; each opens one form for that topic, and the form's `Save` writes only what changed on it, then checks it. The topics: `Choose a model` (`/setup model`), `Sign in or out of a provider` (`sign-in`), `Add a provider of your own` (`add-provider <name> <address>`), `Store a password or key` (`store-key`), under `Reach GoodVibes from elsewhere…` the topics `Keep everything on this computer` (`local-only`), `Open GoodVibes in a browser` (`browser`), `Use it from other devices` (`other-devices`), `Receive webhooks` (`webhooks`) and `Use Cloudflare` (`cloudflare`), then `Connect chat apps and services` (`chat-apps`), `Who can sign in here` (`who-signs-in`), `How GoodVibes works with you` (`how-it-works`), under `Features and switches…` the topics `Safety and sandboxing` (`safety`), `Memory and context` (`memory`), `Telemetry`, `Automation`, `Paired devices and voice` (`devices-voice`), `Provider behaviour` (`provider-behaviour`) and `Advanced switches` (`advanced`), then `History and privacy` (`history`, opens the setting), `Bring over settings from the terminal app`, `Pair the Agent with a GoodVibes host` (`pair`) and `Unpair the Agent from the GoodVibes host` (`unpair`) (each shown with `Agent only`; in the terminal app they say where to do them) and `Run first-run again` (`first-run`). The Agent lists the same topics. A form that opens the computer to the network also asks for the account that signs in from other devices. Esc closes a form without saving.
 `/startup` is the setup checks and transfers, a guided command of its own (bare, it lists them; without an interface it runs `review`): `/startup review`, `doctor`, `services`, `hooks`, `remote` and `sandbox` show what this setup has; `/startup support-bundle <dir> [--overwrite]` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential, and `/startup support-bundle-inspect <dir>` reads one back; `/startup export <path> [--overwrite]` writes the setup review as JSON; `/startup transfer-export <path> [--overwrite]` writes a setup transfer bundle, `/startup transfer-inspect <path>` reads one, and `/startup transfer-import <path>` shows the plan (every changed setting and replaced file) and applies it on Yes, reporting `N setting(s) changed, M file(s) replaced`; `/startup link <view> [item]` prints a `goodvibes://` link and `/startup open-link <link>` opens one.
@@ -1108,9 +1106,9 @@ An existing target is not overwritten without `--overwrite`.
 `/security trust-folder` prints `This folder is trusted: every tool may run here, subject to your permission settings.` and loads the folder's hooks and MCP servers.
 An untrusted folder does not load its hooks file or its project MCP servers.
 
-`/permissions` (`show`, `rules`, `revoke <rule>`, `never <command>`, `add <allow|deny|ask> <command|class|path|tool> <target>`), `/plan [on|off|toggle]`, `/questions`, `/decisions`, `/held`, `/approval` (alias `/approvals`), `/security` belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
+`/permissions` (`show`, `rules`, `revoke <rule>`, `never <command>`, `add <allow|deny|ask> <command|class|path|tool> <target>`), `/plan` (`status`, `on`, `off`), `/questions`, `/decisions`, `/held`, `/approval` (`kinds [<kind>]`: what each kind of approval asks about; `waiting`: opens the approvals waiting on you), `/security` belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
 
-- `/plan on` prints `[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).`; `/plan off` restores the previous mode.
+- `/plan on` prints `Plan mode is on: writes, commands and network calls are blocked until /plan off or Shift+Tab.`; `/plan off` restores the previous mode (it loosens a protection, so it asks first and a model cannot run it); `/plan status` says whether it is on.
 - `/questions` lists what waits on the owner; `/questions answer <id> <choice|text> [note]` answers one.
 - `/decisions` lists what was decided for the owner (`/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` or `"since <30m|2h|3d|1w|day>"` for one period); `/decisions undo <decision>` reverses one.
 - `/held` lists calls `just-vibes` held; `/held approve <id...|all>` runs them; `/held dismiss <id...|all>` sets them aside.
@@ -1124,60 +1122,56 @@ Outside a repository: `Not a git repository: <dir>. Nothing was changed. Run /gi
 
 `/diff [session|head|working|staged]` (alias `/d`) opens Changes on this session's file changes (the default), everything against `HEAD`, the working tree or the staged set. The session view holds only files this session's tools wrote; before the first one it is empty (`this session · no files changed yet`), and `v` switches to the other views.
 `/changes [session|working|staged|head]` opens the same view.
-`/review` opens this session's diff hunk by hunk to comment for the model or revert a hunk.
+`/review` (one action, "Review this session's changes") opens this session's diff hunk by hunk to comment for the model or revert a hunk.
 
 `/git` (terminal app) is described: `status` ("See what changed", the report: staged, changed, new and deleted files, then what committing every change would include), `log` (the last ten commits), `diff` (counts the changes not yet staged and opens them in Changes), `init` ("Start a repository here"; never done implicitly) and `commit` ("Commit every change": stages every change, new files included, and commits it; a set already staged by hand is committed as it is; a model cannot run it).
 A clean tree prints `<root>: nothing to commit, the working tree is clean.`; a commit prints `Committed N files in <root>: <hash> <message>`.
 
-`/test [pattern]` runs the project's test command (the configured test gate, else the `package.json` `test` script) and shows pass and fail results; `Esc` stops it. The script runs with the project's package manager: the `packageManager` field, else the one lockfile present; with neither, the manager the script itself calls (`bun test` runs with bun), else the first of npm, bun, pnpm and yarn that is installed.
+`/test [pattern]` (one action) runs the project's test command (the configured test gate, else the `package.json` `test` script) and shows pass and fail results; `Esc` stops it. The script runs with the project's package manager: the `packageManager` field, else the one lockfile present; with neither, the manager the script itself calls (`bun test` runs with bun), else the first of npm, bun, pnpm and yarn that is installed.
 It prints `Running: <command> (<source>, limit Ns; Esc stops it)` first.
 A run past the limit is killed: `Test run timed out after Ns and was killed. Raise contract.gateTimeoutMs (0 for no limit) or pass a pattern to run fewer tests.` (`contract.gateTimeoutMs` defaults to 900000 ms.)
 A second `/test` while one runs prints `A test run is already going; Esc stops it, then run /test again.`
 
-`/codebase build | status | search <query...> [--limit n]` builds and searches the source-tree code index. `build` schedules the build (`Build scheduled: track progress with /codebase status, or in Your agents (F2) under Background services (b).`); `search` prints matching symbols and files.
-`/intelligence [review|panel|diagnostics [file]|symbols <file>|outline <file>|definition <file> <line> <column>|references <file> <line> <column>|hover <file> <line> <column>|install <file|language>|repair]` (alias `/intel`) uses language servers: `/intelligence definition src/app.ts 42 10` prints the definition location; `/intelligence install typescript` installs the language server for that language. A missing position prints `Usage: /intelligence definition <file> <line> <column>`.
+`/codebase` works with the source-tree code index: `status` (the report), `build` (`Build started: /codebase status, or Your agents (F2) under Background services (b), shows how it goes.`) and `search <words...> [--limit <n>]` (matching code, each result labelled semantic or lexical).
+`/intelligence` uses language servers, in both programs: `review` (the report: what is ready, the language servers, the problems tracked, and what to run when something is not ready; the terminal app only), `diagnostics [<file>]` (the terminal app only), `symbols <file>`, `outline <file>`, `definition <file> <line> --column <n>`, `references <file> <line> --column <n>`, `hover <file> <line> --column <n>`, and `install <language|file>`. `/intelligence definition src/app.ts 42 --column 10` prints the definition location; `/intelligence install typescript` installs the language server for that language. A line missing its column asks for it (or, from a model, is refused naming it).
 
-`/tools [review|panel]` (alias `/t`) lists the model's tools; `/tool verify <name> | verify-all | contract show <name>` checks a tool's contract. An unknown tool prints `[tool verify] Tool '<name>' is not registered.`
+`/tools` works with the model's tools: `list` (the report; a picker shows what each does), `contract <tool>`, `verify <tool>`, `verify-all` and `activity` (opens Your agents, where each agent's tool calls show). An unknown tool is refused with `No tool <name> is registered.`
 
 `/search <query> [--limit <n>]` runs a web search and prints ranked results with source labels. A failed search prints `Search failed: <detail>`.
 `/imagine [--out <path>] <prompt>` generates an image with the first configured image provider, writes it to `generated/<prompt words>-<time>.<ext>` (or `--out`), and opens it where a desktop exists. A file already at the path is never replaced. A job the provider has not finished is reported with the command that collects it: `/imagine --collect <provider> <task-id> [key=value ...]`. With no image provider configured it lists each generation provider's status and the key it needs.
 
-`/eval <subcommand>` evaluates the product on real tasks:
+`/eval` evaluates the product on real tasks:
 
-| Subcommand | Effect |
+| Action | Effect |
 | --- | --- |
-| `list` (alias `ls`) | List the tasks of the suite. |
-| `run [suite-dir]` (alias `tasks`) | Run each task through `goodvibes run`, then the task's `verify.sh`. |
-| `compare [suite-dir]` (alias `cmp`) | Compare the last results with the baseline. |
-| `gate [suite-dir]` | Run the suite and fail on a failed or regressed task; it creates the baseline when none exists. |
+| `list [suite-dir]` | List the tasks of the suite (the report). |
+| `run [suite-dir]` | Run each task through `goodvibes run`, then the task's `verify.sh`. |
+| `compare [baseline-file]` | Compare the last results with the baseline. |
+| `gate [suite-dir] [--baseline <file>] [--save-baseline]` | Run the suite and fail on a failed or regressed task; it creates the baseline when none exists. |
 
 A suite is a directory (default `.goodvibes/eval/tasks`) with one directory per task holding `task.json` (the instruction) and `verify.sh` (exits `0` on pass).
 The run works in a copy of the suite. Before a task's session starts, its `verify.sh` (or the script `task.json` names in `verify`) and any files listed in `task.json` `verifyFiles` are copied out of the task directory and checked against the suite's own files by sha256; a task whose files differ, or are missing, fails without running. The verdict comes from that copy, never from the task directory the session worked in, so a session that edits `verify.sh` cannot change its result. The script runs with the task directory as its working directory, read-only inside a bubblewrap boundary, the only sandbox the product has (Linux with bubblewrap and user namespaces); on macOS, native Windows or a Linux without bubblewrap there is none, so it runs on the host with the task directory writable and the task's output begins its note with `verification was NOT isolated`, and finds its listed files under `$GOODVIBES_EVAL_VERIFY_DIR`.
-`/eval compare` without a baseline prints `[eval] Baseline file not found: <file>` and `[eval] Tip: run /eval gate [suite-dir] to create a baseline.`
+`/eval compare` without a baseline prints `[eval] Baseline file not found: <file>` and `[eval] /eval gate [suite-dir] makes one.`
 
 Failure reports are actions of `/health` (see above).
 
 ### Helper agents, tasks and orchestration
 
-`/agents [--target <id>[:<kind>]] | list | host <agentId> [directory]` (alias `/acp`) opens Your agents.
-`/agents list` lists third-party coding agents found on `PATH` that can be hosted over ACP (Claude Code, Codex, opencode).
-`/agents host <agentId> [directory]` starts one as a row in Your agents that can be steered and stopped like any agent (`n` in the panel does the same with a picker). With none installed: `[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.`
+`/agents` is your agents in one place, in both programs. Alone it opens its actions; `/agents open [--target <id>[:<kind>]]` opens Your agents. Its actions, grouped:
+
+- Start agents: `team` (the team modes and recipes, agent templates, and the tasks running now), `start <mode> <what to do>` (one agent in a team mode: `local-engineer`, `local-shell`, `remote-engineer`, `teammate`, `research`, `dream`, `review`, `verifier`, `integration`), `recipe <recipe> <what to do>` (agents one after another, each handed the last one's report: `research-implement-review`, `remote-certification`, `triage-delegate-integrate`, `dream-then-certify`; a step whose agent fails stops the recipe and lists the steps not started), `archetypes` (built-in and project archetypes, with any problems), `archetype <name>` and `start-archetype <name> <what to do>`.
+- Host a coding agent: `hostable` lists third-party coding agents found on `PATH` (Claude Code, Codex, opencode); `host <agent> [folder]` starts one as a row in Your agents that can be steered and stopped like any agent (`n` in the panel does the same). With none installed: `No third-party coding agents found. Install Claude Code, Codex or opencode on PATH to host one.`
+- Work contracts and stopping agents: `contract [<contract>]`, `contracts-view` (the full-screen view), `stop-group <group>` and `stop-branch <agent>` (an agent and every agent it started); both stops ask first.
+- `hand-off` and `handed-off` are the Agent's (handing coding work to the terminal app); here they are refused with the reason.
 `/communication` opens the view of agent communication routes and recent activity.
-`/orchestration [show [contractId] | cancel graph <graphId> | cancel subtree <agentId>]` (alias `/orch`) shows contracts and cancels agent graphs or subtrees. An unknown contract prints `Unknown contract: <id>`.
+`/tasks` works with runtime tasks (this terminal's and the daemon's), in both programs: `list [--status <state>] [--kind <kind>]` (the report), `open` (Your agents), `show <task>`, `output <task>`, `create <kind> <owner> <title...>`, `start <task>`, `update <task> <title|description|result> <text...>`, `complete <task> [result]`, `fail <task> <error...>`, `pause <task> [note]`, `resume <task> [note]`, `cancel <task> [note]` (asks first) and `retry <task> [note]`. Tasks are picked from lists. A daemon task takes only cancel and retry; the Agent only reads tasks and refuses a change with the reason.
 
-`/tasks [list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]` (alias `/task`) inspects and controls runtime tasks. Bare `/tasks` opens Your agents.
-
-`/teamwork [review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id> [title...]|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]` (alias `/teammates`) starts packaged task modes and recipes.
-
-- Modes: `local-engineer`, `local-shell`, `remote-engineer`, `teammate`, `research`, `dream`, `review`, `verifier`, `integration`.
-- Recipes: `research-implement-review`, `remote-certification`, `triage-delegate-integrate`, `dream-then-certify`.
-- `/teamwork create-mode research "map the auth flow"` starts a research agent with that title.
-- `/teamwork recipe research-implement-review "add rate limiting"` runs the recipe's steps in order and prints a line per step: `[Teamwork research-implement-review] step 1/3 research: agent <id> (researcher) started.`; a step whose agent fails stops the recipe and lists the steps not started.
-- `/teamwork create-archetype <name> <title...>` starts an agent from a custom archetype; `/teamwork validate` lists archetype problems.
+- `/agents start research "map the auth flow"` starts a research agent on that task.
+- `/agents recipe research-implement-review "add rate limiting"` runs the recipe's steps in order and prints a line per step: `[Recipe research-implement-review] step 1/4 research: agent <id> (researcher) started.`
 
 `/worktree` manages the git worktrees helper agents work in (see "Helper agents and worktrees").
 
-`/workstream`, `/graph`, `/todo` and `/project-plan` are described under "Contracts, workstreams and work plans" below.
+`/workstream`, `/graph`, `/todo` and `/work` are described under "Contracts, workstreams and work plans" below.
 
 `/remote` works with self-hosted remote runners. `/remote` alone opens its actions ("See remote runners at a glance" first; a model or script running it alone gets that overview), grouped as: start a runner (`dispatch <task> [--template <kind>]`, `dispatch-pool <pool> <task>`); follow and stop runners (`show [connection]`, `contract <runner>`, `supervisor [runner]`, `capabilities [runner]`, `recover [runner]`, `stop <connection>`, which asks first); review what runners handed back (`artifacts`, `review <artifact>`, `export <runner> [--to <file>]`, `artifact-export <artifact> [--to <file>]`, `rerun-local <artifact>`, `import <file>`); runner pools (`pools`, `pool <pool>`, `create-pool <id> [label]`, `assign <pool> <runner>`, `unassign <pool> <runner>`); set up another machine (`setup`, `setup-export <file>`, `env`, `env-export <file>`, `tunnel`, `tunnel-export <file>`, `bootstrap-export <file>`, `bootstrap-inspect <file>`); move runners between sessions (`session-export`, `session-inspect`, `session-import`); and `open` for the full-screen view. Each action picks runners, pools and artifacts from lists.
 
@@ -1188,7 +1182,7 @@ Failure reports are actions of `/health` (see above).
 
 `/remote env` prints the shell lines (including `ACP_AGENT_CMD`) a remote machine needs.
 `/release` shows release readiness (`review`, its report), a checklist (`checklist`), and keeps the evidence as a file (`save <file> [--replace]`, `read <file>`).
-`/helpers [review]` (alias `/integration-api`) lists the local helper APIs remote clients can use.
+`/helpers` (one action) lists the local helper interfaces remote clients can use.
 
 ### Memory and knowledge
 
@@ -1231,14 +1225,14 @@ With no daemon: `Schedules are kept and run by the GoodVibes daemon, so each run
 `/mail` is one command in both apps: `status` (what `/mail` alone gives a model or script), `list [n]`, `read <message>`, `draft <to> --subject <subject> <message>`, `send <to> --subject <subject> <message>` (asks first). A repeated identical send is refused unless `--again`. The mailbox settings (`settings`, `set`, `password`) are the Agent's; here they are in `/settings`.
 `/calendar` is one command in both apps; here it works on the daemon's calendar: `upcoming [--days N]` (what `/calendar` alone gives a model or script), `get <event>`, `add --title Standup --start 2026-12-01T09:00 --end 2026-12-01T09:15`, `change <event> [--title|--start|--end ...]` and `delete <event>` (both ask first), `status`.
 `/ci` checks CI per job and manages standing watches, the same command in both apps: `watches` (what `/ci` alone gives a model or script), `status <repo>`, `watch <repo> <channel> [--fix-session]`, `run <watch>`, `unwatch <watch>` (asks first). For example `/ci status my-org/my-repo#42`, `/ci watch my-org/my-repo@main slack:C123`.
-`/checkin [run]` shows the proactive check-in configuration and recent receipts, or runs one now.
+`/checkin` shows the proactive check-in settings and the last ten check-ins (`status`, the report), or runs one now (`run`; it may send a message to the check-in channel, so it asks first).
 `/principals` maps channel identities to named people, the same command in both apps: `list`, `get <who>`, `resolve <channel> <identity>`, `create <name> <kind> [--identity channel:value]...`, `update <who> [--name ...] [--kind ...] [--identities c:v,c:v|none]`, `delete <who>` (asks first). For example `/principals create "Sam Lee" user --identity slack:U123 --identity email:sam@example.com`.
-`/profile [show|where <field>|set <field> <value>|note [--section <name>] <text>|forget <field>|forget --section <name> <text>|undo <field>|status]` reads and corrects the owner profile: `/profile where location.timezone` says where a fact came from.
+`/about-me` reads and corrects what the platform knows about you, the same command in both apps: `show` (the report), `field <fact>`, `person <name>`, `where <fact>`, `status`, `set <fact> <value...>`, `note [<section>] <line...>`, `undo <fact>`, `forget <fact>` and `forget-line <section> <line...>` (both forgets ask first). A fact is picked from the ones recorded, or given by its id or label. `/about-me where location.timezone` says where a fact came from; a write counts only when you type it.
 `/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]` sets up payment cards and purchase approvals.
 `/devices` is one command in both apps: what is paired with the daemon, and "Pair something". `list` (what `/devices` alone gives a model or script), `pair <what>`, `rename <device> <name>`, `revoke <device>` (asks first), `migrate-shared [name]`, `revoke-shared` (asks first), `host-status`, `unpair-host`, `relay-status`, `relay-codes`, `relay-revoke <code>` (asks first), `nodes`, `grants`, `revoke-grant <grant>`, `captures`, `delete-capture <capture>` (asks first).
 `list`, `rename`, `revoke` and `migrate-shared` act on the devices of the daemon this terminal talks to, through its operator API, so with `daemon.connectedHost.url` set they change that daemon (`Paired devices on the daemon at <origin>:`). Only when the selected daemon is this machine's and does not answer do they use this machine's pairing file, which the daemon reads when it starts.
 `/payments add-card` fixes the daemon before the first field; if the selection changes while the card is typed, it is not sent (`The selected daemon changed while the card was being entered ... Nothing was sent.`).
-`/devices pair` asks what to pair. `/devices pair device` opens the device-pairing view (a QR of an offer; `r` there shows a new one). `/devices pair host [--bootstrap-shared] [--name <name>] [--apply]` pairs this terminal with a daemon on another machine; only the owner typing it counts, and `--apply` reviews and confirms. `/devices pair relay [--name <name>]` mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name); with `relay.enabled` off it answers `Relay is disabled: turn on relay.enabled in /config open relay first.` `/devices pair channel <channel>` asks for each of a channel's required values with masked input, then switches it on. `/devices unpair-host` forgets this terminal's host credential (the owner's only); `/devices relay-revoke <code>` refuses that device through the relay from its next request while every other keeps working.
+`/devices pair` asks what to pair. `/devices pair device` opens the device-pairing view (a QR of an offer; `r` there shows a new one). `/devices pair host [--bootstrap-shared] [--name <name>] [--apply]` pairs this terminal with a daemon on another machine; only the owner typing it counts, and `--apply` reviews and confirms. `/devices pair relay [--name <name>]` mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name); with `relay.enabled` off it answers `Relay is disabled: turn on relay.enabled in /settings open relay first.` `/devices pair channel <channel>` asks for each of a channel's required values with masked input, then switches it on. `/devices unpair-host` forgets this terminal's host credential (the owner's only); `/devices relay-revoke <code>` refuses that device through the relay from its next request while every other keeps working.
 `/cluster` shares inbound channel work with other machines: `status` (what `/cluster` alone shows a model or script), `groups`, `join <group> --key <key>`, `create [--name ...]`, `nodes`, `key [--qr]`, `rename <name>`, `rotate [--now]`, `forget <machine>`, `leave`, `publish <setting>`, `accept <setting>`. Every action takes "Which machine" (`--host https://host:port`, this machine when left out) and, for another machine whose token is not stored, `--token`. `forget`, `leave`, `publish`, `accept` and `rotate --now` ask first.
 `/cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]` (alias `/cf`) manages the optional Cloudflare integration: `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]`.
 `/voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]` manages always-speak mode and installs the managed local voice runtime and wake-word models.
@@ -1476,13 +1470,13 @@ What writes the default:
 | `/model use <id>`, picking a model in the model picker, `@model:<id>` in a prompt | `provider.model` in the running program's own file. |
 | `/effort set <level>` or picking a level in `/effort` | `provider.reasoningEffort` in the running program's own file. |
 | `goodvibes models use <id>` / `goodvibes-agent models use <id>` | `provider.model` in that program's own file. |
-| `/config set provider.reasoningEffort high` (terminal app), `/settings set provider.reasoningEffort high` (Agent) | That key in that program's own file. |
+| `/settings set provider.reasoningEffort high` (in either program) | That key in that program's own file. |
 | `-m <id>`, `--provider`, `-c provider.reasoningEffort=high` on the command line | Nothing: this launch only. |
 
 Procedure for the terminal app:
 
 1. `goodvibes models use openai:gpt-5.4` (or `/model use openai:gpt-5.4` inside the app).
-2. Inside the app, `/effort set high`. Without opening the app, add `"reasoningEffort": "high"` inside the `"provider"` object of `~/.goodvibes/tui/settings.json`, or run the app once with `/config set provider.reasoningEffort high`.
+2. Inside the app, `/effort set high`. Without opening the app, add `"reasoningEffort": "high"` inside the `"provider"` object of `~/.goodvibes/tui/settings.json`, or run the app once with `/settings set provider.reasoningEffort high`.
 3. Check: `goodvibes models current` and `goodvibes status` (the `provider`, `model` and `reasoning` lines).
 
 Procedure for the Agent: the same with `goodvibes-agent models use openai:gpt-5.4`, then `/effort set high` or `/settings set provider.reasoningEffort high` inside the Agent; check with `goodvibes-agent models current` and `goodvibes-agent status`.
@@ -1514,7 +1508,7 @@ Set a fallback order (it applies from the next failure, in every program that re
 ```text
 /model backup anthropic:claude-sonnet-5
 /model backup groq:llama-3.3-70b-versatile
-/config set provider.fallbackModels ["anthropic:claude-sonnet-5","groq:llama-3.3-70b-versatile"]
+/settings set provider.fallbackModels ["anthropic:claude-sonnet-5","groq:llama-3.3-70b-versatile"]
 ```
 
 ### Synthetic failover
@@ -1599,7 +1593,7 @@ Facts about individual tools that change how the owner works with them:
 
 ## Helper agents and worktrees
 
-A helper agent is a subagent the model starts with the `agent` tool, or the owner starts with `/teamwork`, `/remote dispatch` or `/agents host`.
+A helper agent is a subagent the model starts with the `agent` tool, or the owner starts with `/agents start`, `/agents recipe`, `/remote dispatch` or `/agents host`.
 It has its own conversation and a tool set narrowed by its archetype; an agent that runs a contract unit in worktree mode also has its own git worktree (see "Worktrees").
 Helper agents run beside the main conversation and report back through the agent message bus.
 Ask for one in plain words (`spawn an engineer agent to refactor src/utils.ts`) or let the model decide.
@@ -1640,7 +1634,7 @@ You are a technical documentation specialist. Focus on clarity and completeness.
 ```
 
 Optional front matter keys: `model`, `provider`, `family` (`implement`, `review`, `test`, `research`, `general`).
-`/teamwork archetypes` lists archetypes; `/teamwork validate` lists problems; `/teamwork create-archetype documenter "document the billing API"` starts one.
+`/agents archetypes` lists archetypes and their problems; `/agents archetype <name>` shows one; `/agents start-archetype documenter "document the billing API"` starts one.
 
 ### Watching and steering helper agents
 
@@ -1651,7 +1645,7 @@ Optional front matter keys: `model`, `provider`, `family` (`implement`, `review`
 
 ### Worktrees
 
-Only contract work runs in git worktrees. A helper agent started outside a contract (`outsideContract: true`, `/teamwork`, `/agents host`, `/remote dispatch`) works in the main working tree; no tool input or command gives it a worktree.
+Only contract work runs in git worktrees. A helper agent started outside a contract (`outsideContract: true`, `/agents start`, `/agents host`, `/remote dispatch`) works in the main working tree; no tool input or command gives it a worktree.
 
 Who gets a worktree:
 
@@ -1662,14 +1656,14 @@ Who gets a worktree:
 
 How to ask for parallel work in worktrees:
 
-1. Make sure the project is a git repository with a commit (`/git init`, then commit once), or set `/config set contract.isolation worktree`.
+1. Make sure the project is a git repository with a commit (`/git init`, then commit once), or set `/settings set contract.isolation worktree`.
 2. Ask in plain words for the work and name its parts, for example: `Add rate limiting to the API, a health endpoint, and retry logic in the client, as three independent pieces of work.` The model starts a contract; the planner decides how many units there are. The owner cannot force exactly N units or N worktrees; naming independent parts is what leads the planner to separate units.
 3. Or plan first: `/workstream plan <goal>`, check the steps with `/workstream show <plan>`, change them, then `/workstream approve <plan>` and `/workstream launch <plan>` (see "Workstreams").
 
 How to watch:
 
 - `F2` or `Ctrl+O` opens Your agents, with each unit's agent; `Enter` opens one (its composer steers it), `s` stops it (asks first).
-- `/orchestration show [contractId]` and `/workstream status <workstream>` show units and their states; `/graph <workstream>` draws the task graph.
+- `/agents contract [<contract>]` and `/workstream status <workstream>` show units and their states; `/graph <workstream>` draws the task graph.
 - `/worktree` lists each worktree with its age, size and why it is kept.
 - In a headless run, the `AGENT_*` and `CONTRACT_*` frames report progress.
 
@@ -1718,7 +1712,7 @@ What is left behind:
 
 A contract is a tracked piece of delegated work: a goal, units of work, acceptance criteria checked when the work ends, a budget, and an owner who answers its questions.
 The planner arranges a contract's units in groups. A group is a set of units that may run at the same time; a group starts once every group it depends on has passed, its units run side by side (up to `contract.maxParallelUnits` in worktree mode, one at a time in shared mode), and when all of them have passed the group as a whole is checked before the groups that depend on it start. The contract passes when its last group and the whole deliverable pass their checks.
-Contracts show in Your agents and in `/orchestration`.
+Contracts show in Your agents and in `/agents contracts-view`.
 A contract that needs the owner raises a question (an escalation) in `/questions`; the work continues after the answer.
 `contract.*` settings control gates, budgets and limits; `contract.gateTimeoutMs` (default 900000) bounds the test gate.
 At start the daemon resumes the contracts that had not ended. One it cannot run is held, not run, and its status (`contracts.status`) carries `held` with the code and reason: `input-unavailable` when its recorded input could not be restored (cancelling it ends it as cancelled), `claim-unavailable` when no run claim could be taken in the project's `.goodvibes/contracts` directory (another process may be running it, so it is not cancelled from here: `CONTRACT_HELD`).
@@ -1783,14 +1777,18 @@ Changes are the owner's: a model running a `/todo` change is refused and keeps i
 | Remove an item | `/todo remove <item>` | Asks first, then deletes it. |
 | Remove the finished items | `/todo clear-done` | Asks first, then removes done and cancelled items: `Removed N finished items.` |
 
-### Project planning
+### Native work and work requests
 
-`/project-plan` (alias `/planning`) opens native work and its recovery.
-`/project-plan <goal>` submits the exact request, as the owner typed it, through native conversation intake on the daemon. When intake is unavailable it says so and starts nothing.
-`/project-plan -- <goal>` submits a goal whose first word is a subcommand name.
-`/project-plan history` opens saved historical planning records, read only.
-`/project-plan list` and `show <id>` print the work plan; `dismiss`, `mode`, `explain`, `override <strategy>`, `status` and `clear` report on historical planning state and change nothing.
-`/project-plan` is different from `/plan`, which only toggles plan mode.
+`/work` is native work on the host, the same command in both apps (the work view is the Agent's Work section there). Alone it opens its actions; `/work open [<project>]` opens the work view at a daemon project. Its actions, grouped:
+
+- `request <what you want done...>`: submits the exact request, as you typed it, through native conversation intake on the daemon (the terminal app's; only the owner typing it counts). When intake is unavailable it says so and starts nothing.
+- Work: `start <work>`, `status <work>`, `cancel <work>` (asks first), `resume <work>`.
+- From a file: `submit-file <JSON-file>`, `submission`, `submission-retry`, `submission-discard` (asks first).
+- Input waiting to be admitted: `intake`, `intake-retry`, `intake-resume`, `intake-cancel` (asks first).
+- Old planning records: `import-preview <project>`, `import <project>`, `import-status <project>`, `import-reconsider <project> [request]`, `import-recover <project> [request]` (resends a request whose answer was lost; the host applies it once), `import-cancel <project> [request]` (asks first), `import-restart <project> [request]`. The host decides whether an import is admitted.
+- The planner and past plans (the terminal app's): `planner` (its mode, any forced way and its latest choice), `planner-explain`, `planner-mode <auto|single|cohort|background|remote>`, `planner-override <strategy>`, `planner-reset`, `history` (saved planning records, read only), `plans` and `plan <id>`.
+
+`/work` is different from `/plan`, which only turns plan mode on and off.
 
 ## Memory and knowledge
 
@@ -1848,21 +1846,21 @@ The command for this is: /memory add decision Use Postgres advisory locks for th
 ### Knowledge
 
 Knowledge is a source-backed graph of ingested pages, bookmarks and notes, kept by the daemon.
-`/knowledge <subcommand>` (alias `/know`):
+`/knowledge` is one command in both apps; alone it opens its actions, and from a model or script it prints `status`. Here it works on the terminal app's own knowledge:
 
-| Form | Effect |
+| Action | Effect |
 | --- | --- |
-| `status` | Store status. |
-| `ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise\|standard\|detailed>]` | A source-backed answer with sources, facts, gaps and confidence. |
-| `ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]` | Ingest one page. |
-| `import-bookmarks <path> [--allow-private-hosts]`, `import-urls <path> [--allow-private-hosts]` | Ingest a browser bookmarks export, or a file with one URL per line. |
-| `list [--kind <sources\|nodes\|issues>] [--limit <n>]`, `search <query> [--limit <n>]`, `get <id>` | Read the store. |
-| `queue [limit]`, `review-issue <issueId> <accept\|reject\|resolve\|reopen\|edit\|forget> [--reviewer <name>] [--value <json-object>]` | Review issues the store raised. |
-| `candidates [limit]`, `reports [limit]`, `schedules`, `lint` | Consolidation candidates, reports, schedules and a consistency check. |
-| `packet <task...> [--scope <path> ...]`, `explain <task...> [--scope <path> ...]` | A compact prompt packet for a task, and why each item is in it. |
-| `reindex`, `consolidate [light\|deep]`, `cancel-run [runId]` | Rebuild the index, run consolidation, cancel a run. |
+| `status` | Store status (the report). `open` opens the knowledge view. |
+| `ask <question...> [--space <knowledge space>] [--limit <n>] [--mode <concise\|standard\|detailed>]` | A source-backed answer with sources, facts and confidence. |
+| `ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]` | Add one page. |
+| `import-bookmarks <file> [--allow-private-hosts]`, `import-urls <file> [--allow-private-hosts]` | Add a browser bookmarks export, or a file with one URL per line. |
+| `list [--kind <sources\|nodes\|issues>] [--limit <n>]`, `search <words...> [--limit <n>]`, `get <id>` | Read the store. |
+| `queue [limit]`, `review-issue <issue> <accept\|reject\|resolve\|reopen\|edit\|forget> [--reviewer <name>] [--value <json-object>]` | Review issues the store raised (`forget` asks first). |
+| `candidates [limit]`, `reports [limit]`, `schedules`, `lint` | What tidying could merge, its reports, its schedules and a consistency check. |
+| `packet <task...> [--scope <path> ...]` | The compact knowledge a model would be given for a task. |
+| `reindex`, `consolidate [light\|deep]`, `cancel-run <run>` | Rebuild the index, tidy (merge and fill gaps), stop a job (asks first). |
 
-A private-network URL is refused unless `--allow-private-hosts` is given.
+Files, artifacts, browser history, connectors and the map are Agent Knowledge's; here they are refused with the reason. A private-network URL is refused unless `--allow-private-hosts` is given, which loosens a protection: it asks first and a model cannot use it.
 
 <!-- generated: settings:memory -->
 

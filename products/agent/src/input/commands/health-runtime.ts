@@ -134,7 +134,7 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
     for (const issue of provider.issues) items.push({ sentence: `${provider.providerId}: ${issue}.`, fix: { label: 'Fix the account', line: `/accounts repair ${provider.providerId}` } });
   }
   for (const issue of collectSettingsHealthIssues(readModels.settings.getSnapshot(), 'a pending managed settings bundle is waiting to be applied or rolled back')) {
-    items.push({ sentence: `Settings: ${issue}.`, fix: { label: 'See the setting', line: '/config open' } });
+    items.push({ sentence: `Settings: ${issue}.`, fix: { label: 'See the setting', line: '/settings open' } });
   }
   const mcp = readModels.mcp.getSnapshot();
   for (const issue of collectMcpLifecycleIssues(mcp.servers, (id, kind, value) => `${id}: ${kind === 'error' ? value : `${kind === 'schema' ? 'tool-definition review' : kind} ${formatHealthStatusValue(value)}`}`)) {
@@ -247,7 +247,7 @@ async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string>
           (cache) => `    ${cache.id} ${cache.entries} entries${cache.estimatedBytes !== undefined ? ` (~${Math.round(cache.estimatedBytes / 1024)} KiB)` : ''}, ${cache.name}`,
         ),
         `  paused background jobs ${snapshot.pausedJobs.length === 0 ? 'none' : snapshot.pausedJobs.join(', ')}`,
-        '  The budget is the setting memory.budgetMb (/config open memory.budgetMb).',
+        '  The budget is the setting memory.budgetMb (/settings open memory.budgetMb).',
       ].join('\n');
     }
     case 'mcp': {

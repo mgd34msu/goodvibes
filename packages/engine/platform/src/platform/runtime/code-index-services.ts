@@ -45,7 +45,7 @@ import { readBooleanConfig } from './alert-gating.js';
 /**
  * Host-local synthetic config key (no GoodVibesConfig field, so not a ConfigKey) that
  * gates the code index's auto-build on construction. Default OFF, see this
- * module's header doc. Surfaced in /config via a synthetic entry
+ * module's header doc. Surfaced in /settings via a synthetic entry
  * (settings-modal-data.ts) exactly like behavior.notifyAfterSeconds.
  */
 export const CODE_INDEX_ENABLED_CONFIG_KEY = 'storage.codeIndexEnabled';
@@ -86,7 +86,7 @@ export interface CodeIndexServicesDeps {
 /**
  * Whether code auto-injection / tool-site reindex may run: the SAME
  * storage.codeIndexEnabled switch that gates auto-build. Read live so a runtime
- * /config toggle takes effect without restart. (The separate, default-off
+ * /settings toggle takes effect without restart. (The separate, default-off
  * `agent-passive-code-injection` feature flag gates injection additionally; this
  * is only the storage-side setting the platform asks embedders to respect.)
  */

@@ -8,15 +8,15 @@ This part covers work that runs without a conversation (scheduled routines, supe
 - The daemon is on when `daemon.enabled` is `true` (the default). `goodvibes status` shows the service state under `Service:`.
 - Settings under `surfaces.`, `payments.`, `occasions.` and the other daemon-owned prefixes are written to the daemon's settings file, `~/.goodvibes/daemon/settings.json`, whichever app writes them.
 - How to change a setting:
-  - Terminal app: `/settings <key>` opens the settings workspace at that key, and `/config set <key> <value>` writes it directly. The value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `{"k":1}`, `"quoted text"`); otherwise it is taken as text.
-  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. In the Agent `/config set` is refused and names the settings screen (`/config open <key>` opens it), and `/settings set` takes no JSON list or object: set those in the workspace.
+  - Terminal app: `/settings <key>` opens the settings workspace at that key, and `/settings set <key> <value>` writes it directly. The value is read as JSON when it parses (`true`, `5`, `["a","b"]`, `{"k":1}`, `"quoted text"`); otherwise it is taken as text.
+  - Agent: `/settings <key>` opens the workspace, and `/settings set <key> <value>` writes text, numbers, `true`/`false` and enum words. The Agent's `/settings set` takes no JSON list or object: set those in the workspace.
   - Daemon command line: `goodvibes-daemon config set <key> <value>` (JSON or text, as the terminal app).
 
-  The examples in this part use the terminal app's `/config set`; in the Agent type `/settings set` with the same key and value.
-- A credential setting (a token, a password, a webhook URL) is never written into a settings file. `/config set <key> <value>` (or the Agent's `/settings set`) stores the value in the secret store and writes a `goodvibes://secrets/...` reference into the key. A daemon-owned credential lands in the daemon's store, `~/.goodvibes/daemon/secrets.enc`. Example:
+  The examples in this part use `/settings set`, the same line in both programs.
+- A credential setting (a token, a password, a webhook URL) is never written into a settings file. `/settings set <key> <value>` stores the value in the secret store and writes a `goodvibes://secrets/...` reference into the key. A daemon-owned credential lands in the daemon's store, `~/.goodvibes/daemon/secrets.enc`. Example:
 
   ```text
-  /config set surfaces.telegram.botToken <your-bot-token>
+  /settings set surfaces.telegram.botToken <your-bot-token>
   Set surfaces.telegram.botToken: stored in the daemon secret tier as GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN (value hidden).
     surfaces.telegram.botToken now holds the reference goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN; the value itself is never written to a config file.
     The daemon reads that tier, so this keeps working with this client closed.
@@ -101,14 +101,11 @@ Failures:
 | `Not kept: the timing is <reason>; give it as a date (--at), an interval (--every) or a pattern (--cron) instead.` | The decision model could not read the words, or none is set. Use `--at`, `--every` or `--cron`. |
 | `/schedule add has no option --x.` | Use one of the listed options. |
 
-### The Agent: `/routines promote` and `/automation`
+### The Agent: `/routines promote`, and a schedule's runs
 
-An Agent routine becomes a schedule on the connected host with `/routines promote <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <name>] [--delivery-channel <channel[:route]>|--delivery-route <route>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes`; `/routines receipts`, `/routines receipt <id>` and `/routines reconcile` read what promotion recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
+An Agent routine becomes a schedule on the connected host with `/routines promote <routine> --how <cron|every|at> --when <pattern, interval or time> [--timezone <tz>] [--name <name>] [--delivery-channel <channel[:route]>]... [--delivery-route <route>]... [--delivery-webhook <url>]... [--delivery-link <name>]... [--provider <id>] [--model <id>] [--disabled]` (or the guided form, "Run a routine on a schedule"); `/routines receipts`, `/routines receipt <receipt>` and `/routines reconcile` read what promotion recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
 
-```text
-/automation job <run|pause|resume> <job-id> --yes
-/automation run <cancel|retry> <run-id> --yes
-```
+A schedule's runs, in both programs, are `/schedule` actions: `run <schedule>`, `pause <schedule>`, `resume <schedule>`, `stop-run <run>` (asks first) and `retry-run <run>`.
 
 ### The model's `schedule` tool
 
@@ -140,7 +137,7 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 ### A daily 8 am summary of mail and calendar delivered to Telegram
 
 1. Connect the mail and calendar to the daemon: in the Agent, `/google connect` (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. `/google status` shows the connection.
-2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/config set surfaces.telegram.defaultChatId <your-numeric-id>`.
+2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/settings set surfaces.telegram.defaultChatId <your-numeric-id>`.
 3. Create the schedule (either program):
 
    ```text
@@ -172,7 +169,7 @@ A trigger watches something and starts an agent turn when it happens, without ho
 Triggers are off by default. Nothing runs and nothing is written until they are on and a trigger exists.
 
 ```text
-/config set watchers.triggers.enabled true
+/settings set watchers.triggers.enabled true
 ```
 
 Stored triggers start being supervised at once. Triggers are saved in `triggers.db` inside the project tree of the process that supervises them: `<working directory>/.goodvibes/<surface>/triggers.db` (for the daemon, its own working directory and `tui`). `/triggers` reads and changes the triggers of the daemon the terminal app is connected to. A trigger's agent turn is started by that process's agent manager, so it runs in the daemon under the daemon's own settings. One process supervises a store at a time; another window can list them and reports `another process supervises them`; a change from that window is refused and names the process to use.
@@ -319,10 +316,10 @@ The answer is the watcher record: `id`, `label`, `kind`, `state`, `source`, `las
 On a cadence, the daemon assembles a briefing and the decision model judges whether anything needs the owner now; only then is a message delivered. The briefing holds: approvals and questions waiting in the owner inbox (and for how long), contracts waiting for the owner's decision (with their question), automation runs that failed since the last check-in, and messages a session has not picked up yet. It does not read mail, calendar or channels. With no decision model in use (none set, `No Decision Model`, or `Hybrid` after the set model failed), the check-in takes its fallback without a model request for the decision: when something waits for the owner (an approval, question or report in the owner inbox, a contract waiting for his decision, a failed run) it contacts him with the note the conversation model writes, sent as written and marked `(Not independently checked: no decision model is in use.)`, and its receipt's reason reads `Decided from the current state (no decision model is in use): <n> items are waiting for you; the note was not independently checked`; when nothing waits it records `quiet` (`Nothing needs the owner: ...`) and sends nothing. With none set or `No Decision Model` chosen this is silent; under `Hybrid` with a set model failing, the same fallback runs and the model's failure is reported as everywhere else. The outcome `skipped-decision-models-disabled` ("Decision models are unavailable; automatic check-in contact and note verification were not completed.") is recorded only when a decision the check-in needs has no fallback and fails with decision models off. Inside quiet hours it is recorded as `skipped-quiet-hours`. A note too long for one message on its channel goes out as several; when only some of them arrive, the receipt is `partial` with `partsSent` and `partsTotal` and says how many did not arrive (the run reports `partly delivered`; it is not sent again, since the owner already has the start). Each receipt's summary states how many items wait for the owner (the same count the decision reads), then only the counts that are not zero: sessions running, sessions with messages not yet picked up, channel messages not yet picked up, runs finished recently (`11 items waiting for you.`).
 
 ```text
-/config set checkin.enabled true
-/config set checkin.cadence "0 */4 * * *"
-/config set checkin.deliveryChannel telegram
-/config set checkin.quietHours 22:00-07:00
+/settings set checkin.enabled true
+/settings set checkin.cadence "0 */4 * * *"
+/settings set checkin.deliveryChannel telegram
+/settings set checkin.quietHours 22:00-07:00
 /checkin            view the settings and recent receipts
 /checkin run        run one now
 ```
@@ -367,9 +364,9 @@ Mail is read and sent by the daemon over IMAP and SMTP (or Gmail through Google,
 1. Set the mail server and user:
 
    ```text
-   /config set surfaces.email.host imap.example.com
-   /config set surfaces.email.user you@example.com
-   /config set surfaces.email.from you@example.com
+   /settings set surfaces.email.host imap.example.com
+   /settings set surfaces.email.user you@example.com
+   /settings set surfaces.email.from you@example.com
    ```
 
    `surfaces.email.host` is the IMAP host. Optional: `surfaces.email.imap.host`, `.port` (default `993`), `.secure` (default `true`), `.mailbox` (default `INBOX`), `.draftsMailbox`, `.user`, `.password`; `surfaces.email.smtp.host`, `.port` (default `465`), `.secure` (default `true`), `.password`. Separate IMAP and SMTP values override the shared ones.
@@ -460,9 +457,9 @@ Worked example (Fastmail):
 The daemon can watch mailboxes and tell the owner when mail arrives. Arrival is untrusted input: it never starts an agent or a session by itself, and a change asked for in an email is refused (email cannot direct changes).
 
 ```text
-/config set surfaces.email.inbound.enabled true
-/config set surfaces.email.inbound.accounts "[\"main\",\"signups\"]"
-/config set surfaces.email.inbound.mailboxes "{\"signups\":{\"host\":\"imap.example.com\",\"user\":\"signups@example.com\"}}"
+/settings set surfaces.email.inbound.enabled true
+/settings set surfaces.email.inbound.accounts "[\"main\",\"signups\"]"
+/settings set surfaces.email.inbound.mailboxes "{\"signups\":{\"host\":\"imap.example.com\",\"user\":\"signups@example.com\"}}"
 /secrets set GOODVIBES_EMAIL_INBOUND_SIGNUPS_PASSWORD <password>
 ```
 
@@ -490,8 +487,8 @@ Prerequisites: a CalDAV server URL, user and password (or an app password).
 1. Configure:
 
    ```text
-   /config set surfaces.calendar.caldavUrl https://caldav.example.com/dav/
-   /config set surfaces.calendar.caldavUser you@example.com
+   /settings set surfaces.calendar.caldavUrl https://caldav.example.com/dav/
+   /settings set surfaces.calendar.caldavUser you@example.com
    /secrets set GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD <your-password>
    ```
 
@@ -634,8 +631,8 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
 ### General setup procedure
 
 1. Get the credentials from the provider (each surface below says which).
-2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/channel pair` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/config set` as below.
-   - Alternatively set each key with `/config set surfaces.<surface>.<field> <value>` and switch it on with `/config set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
+2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/channel pair` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
+   - Alternatively set each key with `/settings set surfaces.<surface>.<field> <value>` and switch it on with `/settings set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
    - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
 3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
 4. Send a first message from your own account. On a surface whose allowlists are empty it is not answered: it raises an owner claim (see "Who may talk to the assistant"). Accept it with `/questions`, then `/questions answer <id> accept` (or in the web UI inbox). You are then the surface's owner; send your message again and it is answered.
@@ -762,9 +759,9 @@ From nothing to the first answered message (Socket Mode, no public address neede
 8. In the terminal app (set both tokens before switching the surface on; `/devices pair channel slack` would switch it on with nothing entered):
 
    ```text
-   /config set surfaces.slack.botToken <your-bot-token>
-   /config set surfaces.slack.appToken <your-app-token>
-   /config set surfaces.slack.enabled true
+   /settings set surfaces.slack.botToken <your-bot-token>
+   /settings set surfaces.slack.appToken <your-app-token>
+   /settings set surfaces.slack.enabled true
    goodvibes surfaces check slack
    ```
 
@@ -797,10 +794,10 @@ From nothing to the first answered message:
 2. Choose the mode and store the token. Use `polling` unless the daemon is published at a public HTTPS address: the setting's default is `webhook`, which cannot start without one.
 
    ```text
-   /config set surfaces.telegram.mode polling
-   /config set surfaces.telegram.botToken <your-bot-token>
-   /config set surfaces.telegram.botUsername @<your_bot>
-   /config set surfaces.telegram.enabled true
+   /settings set surfaces.telegram.mode polling
+   /settings set surfaces.telegram.botToken <your-bot-token>
+   /settings set surfaces.telegram.botUsername @<your_bot>
+   /settings set surfaces.telegram.enabled true
    goodvibes surfaces check telegram
    ```
 
@@ -809,7 +806,7 @@ From nothing to the first answered message:
 4. In Telegram, open a chat with your bot and send any message (tapping Start sends `/start`). It is not answered and binds nothing: it raises an owner claim, `Make <your-numeric-id> (<your-username>) the owner of telegram?`.
 5. In the terminal app: `/questions`, then `/questions answer <id> accept`. You are the owner, and only you are on the user list: the bot answers nobody else until you admit them.
 6. Send `/start` again: the bot replies with how to use it. Then send a request. A conversation gets a reply; a request for work is proposed back, and `yes` (or `go ahead`) starts it.
-7. Optional, for deliveries (routines, notices) with no conversation to answer: `/config set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/devices pair channel telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
+7. Optional, for deliveries (routines, notices) with no conversation to answer: `/settings set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/devices pair channel telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
 
 The bot's own commands (answered by the adapter, never sent to an agent): `/start` and `/help` reply with usage; `/stop` explains that it does not cancel work (its reply says to send `cancel <id>`; with no decision model in use send `/cancel <id>`) and that the surface is switched off with `surfaces.telegram.enabled false`. In a group, the bot acts only on `/goodvibes <message>` or `@<your_bot> <message>` and ignores other text; the group's other members are answered only if they are admitted (each raises a "reach you" claim). While work runs, the owner can send `status <id>`, `cancel <id>`, `retry <id>` (`/status <id>` and so on without a decision model; see "Run control"). A message with only a photo, voice note or file is answered "I cannot read <kind>s yet. Send the request as text." Edits of a message already sent are not read.
 
@@ -853,7 +850,7 @@ Settings:
 Setup from nothing:
 
 1. In Home Assistant, create a long-lived access token.
-2. In a terminal app: `/devices pair channel homeassistant` and enter the instance URL, the access token and a webhook secret you choose (or use `/config set` for each key), then switch the surface on.
+2. In a terminal app: `/devices pair channel homeassistant` and enter the instance URL, the access token and a webhook secret you choose (or use `/settings set` for each key), then switch the surface on.
 3. Make the daemon reachable from Home Assistant: Home Assistant calls the daemon's control plane, which listens on `127.0.0.1:3421` by default, so a Home Assistant on another machine needs the daemon exposed on the network (see "Network exposure" in "The daemon, the web UI and networking").
 4. Send a prompt. Two routes:
    - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.
@@ -931,9 +928,9 @@ Required: `surfaces.matrix.homeserverUrl`, `surfaces.matrix.accessToken` (secret
 When a request names no provider, a configured `local` provider is used first, then the first other configured provider.
 
 ```text
-/config set tts.provider openai
-/config set tts.voice <voice-id>
-/config set tts.speed 1.1
+/settings set tts.provider openai
+/settings set tts.voice <voice-id>
+/settings set tts.speed 1.1
 /tts <prompt>          speak the answer to a prompt
 /tts stop
 /tts on                speak every answer (always-speak)
@@ -964,13 +961,13 @@ When a request names no provider, a configured `local` provider is used first, t
 Managed install: `/voice setup` asks the daemon to download and set up piper (text to speech) with the `en_US-lessac-medium` voice, and whisper.cpp 1.8.2 with the `base.en` model (speech to text, about 148 MB). Every download is checksum-verified and resumable; re-run `/voice setup` to retry a failed part. `/voice status` shows what is installed. The managed install has pinned builds for Linux x86_64 only; on any other platform it reports the engine unsupported, and you install the engine yourself and set the `voice.local.*` keys:
 
 ```text
-/config set voice.local.ttsEngine piper
-/config set voice.local.ttsBinary ~/.local/opt/piper/piper
-/config set voice.local.ttsModelPath ~/.local/opt/piper-voices/en_US-lessac-low.onnx
-/config set voice.local.sttEngine whisper-cpp
-/config set voice.local.sttBinary ~/.local/opt/whisper.cpp/build/bin/whisper-cli
-/config set voice.local.sttModelPath ~/.local/opt/whisper.cpp/ggml-tiny.en.bin
-/config set tts.provider local
+/settings set voice.local.ttsEngine piper
+/settings set voice.local.ttsBinary ~/.local/opt/piper/piper
+/settings set voice.local.ttsModelPath ~/.local/opt/piper-voices/en_US-lessac-low.onnx
+/settings set voice.local.sttEngine whisper-cpp
+/settings set voice.local.sttBinary ~/.local/opt/whisper.cpp/build/bin/whisper-cli
+/settings set voice.local.sttModelPath ~/.local/opt/whisper.cpp/ggml-tiny.en.bin
+/settings set tts.provider local
 ```
 
 A leading `~/` is expanded. The provider runs `whisper-cpp` as `<binary> -m <model> -f <wav> --no-timestamps --no-prints`, `faster-whisper` as `<binary> <model> <wav>`, and `piper` and `kokoro` as `<binary> --model <onnx> --output_file <wav>` with the text on standard input.
@@ -991,10 +988,10 @@ Turning it on from nothing (terminal app):
 /voice wake status          what is installed and what blocks wake
 /voice wake setup           fetch missing wake models, turn on the wake rows for this terminal, and propose speech to text
 /voice wake setup yes       the same, and install the proposed local speech to text through the daemon
-/config set voice.wake.enabled true
+/settings set voice.wake.enabled true
 ```
 
-In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/config set` or `/settings set`, a model's settings call) runs the same setup plan as `/voice wake setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake setup --yes yes installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
+In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake setup --yes yes installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
 
 The `voice.wake.*` settings, by group:
 
@@ -1059,21 +1056,21 @@ The daemon can buy things for the owner with a stored card, inside budgets the o
 
 Purchases are off, and every budget is `0`. With the defaults, a checkout that adds any tax, fee or paid delivery is refused outright (the daily overage budget of 0 cannot cover it), and one that adds nothing asks you first (the daily item budget and the per-purchase ceiling of 0 send every purchase to you). Set the amounts below before the first purchase.
 
-1. Turn purchases on: `/config set payments.enabled true`.
+1. Turn purchases on: `/settings set payments.enabled true`.
 2. Add a card (each field hidden, sent to the daemon after the last field): `/payments add-card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments remove-card <card>`) and add it again. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
 3. Set the addresses: `/payments address` in either program (it asks which, then the fields: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`), or the settings workspace (`/settings payments.shippingAddress`).
 4. Set the currency and budgets:
 
    ```text
-   /config set payments.currency USD
-   /config set payments.budget.dailyItem 100
-   /config set payments.budget.dailyOverage 25
-   /config set payments.budget.perPurchaseCeiling 150
-   /config set daemon.timezone America/Chicago
+   /settings set payments.currency USD
+   /settings set payments.budget.dailyItem 100
+   /settings set payments.budget.dailyOverage 25
+   /settings set payments.budget.perPurchaseCeiling 150
+   /settings set daemon.timezone America/Chicago
    ```
 
    Amounts are written as you would say them (`19.99`). The day resets at midnight in `daemon.timezone` (UTC when empty). Every hold and spend records its currency: changing `payments.currency` starts new daily pools in the new currency for the rest of the day, and `payments.budget.status` lists what was spent earlier that day in the old currency (`earlierSpend`), in that currency, never converted.
-5. Say where approval and veto prompts also go: `/config set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (`/questions`, the web UI) whatever this says.
+5. Say where approval and veto prompts also go: `/settings set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (`/questions`, the web UI) whatever this says.
 6. Check: `/payments cards`.
 
 ### `/payments`
@@ -1328,7 +1325,7 @@ How to edit one, from each surface:
 
 | Surface | How |
 | --- | --- |
-| Terminal app | `/config set <key> <JSON list>`, for example `/config set sandbox.egressAllowlist ["git","npm"]`; `[]` empties it. `/settings <key>` opens the settings workspace at the key. `-c <key>=<JSON list>` sets it for one launch. |
+| Terminal app | `/settings set <key> <JSON list>`, for example `/settings set sandbox.egressAllowlist ["git","npm"]`; `[]` empties it. `/settings <key>` opens the settings workspace at the key. `-c <key>=<JSON list>` sets it for one launch. |
 | Agent | `/settings <key>` opens the settings workspace at the key, where the list is edited. `/settings set` does not take a list. `-c <key>=<JSON list>` sets it for one launch. |
 | Daemon command line | `goodvibes-daemon config get <key>`, `goodvibes-daemon config set <key> '<JSON list>'`, `goodvibes-daemon config unset <key>`, `goodvibes-daemon config list`. Quote the JSON for the shell. |
 | Web UI | Settings: the key's field is a JSON editor that checks the list before it saves. |

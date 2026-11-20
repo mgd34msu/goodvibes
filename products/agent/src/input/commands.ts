@@ -7,7 +7,6 @@ import { resumeCommand, saveCommand, sessionCommand } from './commands/session.t
 import { memoryCommand } from './commands/memory.ts';
 import { registerKnowledgeRuntimeCommands } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
-import { registerConfigCommand } from './commands/config.ts';
 import { registerScheduleRuntimeCommands } from './commands/schedule-runtime.ts';
 import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts';
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
@@ -84,7 +83,6 @@ export function registerBuiltinCommands(
   registerEmailRuntimeCommands(registry);
   registerGoogleRuntimeCommands(registry);
   registerDelegationRuntimeCommands(registry);
-  registerConfigCommand(registry);
   registerOperatorRuntimeCommands(registry);
   registerNotifyRuntimeCommands(registry);
   registerPlatformAccessRuntimeCommands(registry);

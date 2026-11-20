@@ -7,7 +7,7 @@
  * in-process OperatorClient facade). Off by default; every run, scheduled
  * or manual, leaves a receipt (`checkin.receipts.list`) recording whether it
  * stayed quiet, delivered a message, or was skipped, so the config surface
- * in /config's Automation group is never the only place this feature's
+ * in /settings's Automation group is never the only place this feature's
  * behavior is visible.
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';

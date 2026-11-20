@@ -262,8 +262,7 @@ Representative slash-command families, with a one-line summary of each:
 | Command | Summary |
 | --- | --- |
 | `/model` | Select or display the current LLM model |
-| `/settings` | Open the fullscreen configuration workspace |
-| `/config` | Open the settings screen at a setting (`/config open <setting>`), or change one setting (`/config set <key> <value>`) |
+| `/settings` | Open the settings screen at a setting (`/settings open <setting>`), see one (`get`), change one (`set <key> <value>`; a credential goes to the secret store) or put it back (`reset`) |
 | `/memory` | Project memory: remember decisions, constraints, incidents and patterns with where each came from; bare opens the list of actions |
 | `/knowledge` | Structured knowledge graph: ingest URLs and bookmarks, inspect issues, and build compact prompt packets |
 | `/remote` | Inspect, dispatch, and review self-hosted remote runners and artifacts |
@@ -801,7 +800,7 @@ The TUI displays the platform-returned answer text, sources, facts, linked objec
 
 `/tts stop` cancels active playback and pending TTS requests without deleting the text response.
 
-`/config open tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
+`/settings open tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
 
 | Key | What its row does |
 | --- | --- |

@@ -35,7 +35,7 @@ High-signal TUI routes:
 | `/approval`, `/automation`, `/schedule` | Read posture and run exact confirmed operator actions. |
 | `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice`, `/tts` | Inspect media/voice readiness, generate media, and run spoken turns. |
-| `/mcp`, `/secrets`, `/settings`, `/config` | Inspect or update Agent-local configuration. |
+| `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
 | `/delegate` | Hand explicit build/fix/review work to GoodVibes TUI with a confirmed handoff brief. Each hand-off is recorded in the Agent home; `/delegate status` lists them and `/delegate status <session-id>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
 An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in the Activity modal) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Tab` / `Shift+Tab` switch between them when the composer is empty.
@@ -409,7 +409,6 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. Also `/cls` and `/reset`. |
 | `/collapse` | Collapse rendered blocks by type. |
 | `/compact` | Summarize the conversation to free context window. |
-| `/config` | Opens its list: open the settings screen at a setting (`/config open <setting>`), or change one setting (`/config set`, refused here: the Agent changes settings on its settings screen). |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/conversation` | Review conversation structure, transcript hotspots, and composer posture. |
 | `/delegate` | Explicitly delegate build/fix/review work to GoodVibes TUI with reason, success criteria, workspace hint, priority, and explicit review intent. |

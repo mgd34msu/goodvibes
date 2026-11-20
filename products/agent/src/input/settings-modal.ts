@@ -4,7 +4,7 @@ import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
 import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
-/** SettingsModal state for the /settings and /config fullscreen workspace. */
+/** SettingsModal state for the /settings fullscreen workspace. */
 
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { ConfigManager, ConfigKey, HostManagedSettingLocks } from '@goodvibes-jev/engine/platform/platform/config';

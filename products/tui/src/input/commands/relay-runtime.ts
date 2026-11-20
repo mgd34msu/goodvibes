@@ -46,7 +46,7 @@ export async function relayStatus(ctx: CommandContext): Promise<string> {
       'Relay: disabled',
       `  relay.enabled: ${cfg.enabled ? 'yes' : 'no'}`,
       `  relay-connect flag: ${cfg.flagOn ? 'on' : 'off'}`,
-      '  Both must be on for outbound relay reachability. See /config open relay.',
+      '  Both must be on for outbound relay reachability. See /settings open relay.',
     ].join('\n');
   }
   const reading: RelayStatusReading = ctx.platform.externalServices
@@ -69,7 +69,7 @@ export async function relayStatus(ctx: CommandContext): Promise<string> {
 
 export async function pairRelay(ctx: CommandContext, name: string | undefined): Promise<string> {
   const cfg = relayConfigured(ctx);
-  if (!cfg.enabled || !cfg.flagOn) throw commandRefusal('Relay is disabled: turn on relay.enabled in /config open relay first.');
+  if (!cfg.enabled || !cfg.flagOn) throw commandRefusal('Relay is disabled: turn on relay.enabled in /settings open relay first.');
   const externalServices = ctx.platform.externalServices;
   if (!externalServices) throw commandRefusal('Relay pairing is unavailable: background service controller is not running in this build.');
   const reading = await externalServices.mintRelayPairing(name);

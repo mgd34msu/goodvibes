@@ -211,7 +211,7 @@ function promptMissingFields(
   }
   const configKey = field.configKey as ConfigKey;
   if (!ctx.beginConcealedInput) {
-    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /config, then run /devices pair channel ${schema.surface} again.`);
+    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /settings, then run /devices pair channel ${schema.surface} again.`);
     return;
   }
   const what = field.required ? 'required' : 'optional, Enter to skip';

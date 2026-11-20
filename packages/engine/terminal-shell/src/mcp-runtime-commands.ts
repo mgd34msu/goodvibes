@@ -57,7 +57,7 @@ const TRUST_MODES: readonly FixedChoice[] = [
   { value: 'allow-all', label: 'Allow every call', help: 'Every call runs, inside its limits or not.', risk: 'loosens-a-protection' },
 ];
 const SCOPES: readonly FixedChoice[] = [
-  { value: 'project', label: 'This project', help: 'Kept in this project\'s .goodvibes/mcp.json.' },
+  { value: 'project', label: 'This project', help: 'Kept in this project\'s .goodvibes/mcp.json; it starts once this folder is trusted.' },
   { value: 'global', label: 'All your projects', help: 'Kept in ~/.config/mcp/mcp.json.' },
 ];
 

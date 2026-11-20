@@ -162,7 +162,7 @@ export function createModelSelectionAction(
     requestRender();
   };
   /**
-   * Every other writer of the model setting (`/config set`, `/managed apply`,
+   * Every other writer of the model setting (`/settings set`, `/managed apply`,
    * settings sync, a reset in Settings, `/setup transfer import`) changes only
    * the setting. The session follows it here, through the same steps as the
    * picker, so the footer, the saved session and the turns name one model.

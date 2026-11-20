@@ -83,7 +83,7 @@ GOODVIBES_DAEMON_TOKEN=gv_shared_token bun run dev \
 
 ## Background service and autostart
 
-The fullscreen `/config` workspace exposes service settings under `Service`:
+The fullscreen `/settings` workspace exposes service settings under `Service`:
 
 | Key | Default | What it does |
 | --- | --- | --- |

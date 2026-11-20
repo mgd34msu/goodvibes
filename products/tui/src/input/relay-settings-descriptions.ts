@@ -1,6 +1,6 @@
 /**
  * relay-settings-descriptions.ts, appends the relay threat-model one-liner to
- * the `relay.*` CONFIG_SCHEMA descriptions shown in /config and the settings
+ * the `relay.*` CONFIG_SCHEMA descriptions shown in /settings and the settings
  * modal.
  *
  * `relay.*` is a real platform CONFIG_SCHEMA domain (schema-domain-runtime.ts),

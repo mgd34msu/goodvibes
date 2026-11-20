@@ -245,6 +245,6 @@ export async function removeGoogleCredentials(
     confirmed: true,
     removed,
     wouldRemove: [],
-    detail: `Removed ${removed.join(', ')} from the encrypted store. Nothing else was touched.${unclearedRefs.length > 0 ? ` The setting${unclearedRefs.length === 1 ? '' : 's'} ${unclearedRefs.join(', ')} still point${unclearedRefs.length === 1 ? 's' : ''} at the removed value and could not be cleared; clear ${unclearedRefs.length === 1 ? 'it' : 'them'} with /config.` : ''}${keptNote}`,
+    detail: `Removed ${removed.join(', ')} from the encrypted store. Nothing else was touched.${unclearedRefs.length > 0 ? ` The setting${unclearedRefs.length === 1 ? '' : 's'} ${unclearedRefs.join(', ')} still point${unclearedRefs.length === 1 ? 's' : ''} at the removed value and could not be cleared; clear ${unclearedRefs.length === 1 ? 'it' : 'them'} with /settings.` : ''}${keptNote}`,
   };
 }

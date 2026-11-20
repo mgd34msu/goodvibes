@@ -784,7 +784,7 @@ The `service.*` keys are daemon settings: one value for the machine, kept in the
 | Command | What it writes |
 | --- | --- |
 | `goodvibes-daemon config set service.<key> <value>` | the daemon's settings file |
-| `/config set service.<key> <value>` inside `goodvibes` | the same file (through the running daemon when one answers) |
+| `/settings set service.<key> <value>` inside `goodvibes` | the same file (through the running daemon when one answers) |
 | `goodvibes-daemon install-service` / `uninstall-service` (and `goodvibes service install` / `uninstall`) | `service.enabled` and `service.autostart` `true` / `false` |
 | The release installer's `--no-service` (no service installed) and the checkout installer | `service.enabled` |
 | `/setup` Save with a server-backed choice (browser, other devices, webhooks, chat apps) | `service.enabled`, `service.autostart` and `service.restartOnFailure` `true`; "Local TUI Only" leaves them as they are |
@@ -794,7 +794,7 @@ Editing a file by hand works too; each is plain JSON such as `{"service":{"enabl
 Notes on how they behave:
 
 - `service.enabled` (default `true`): whether this machine runs the daemon as a service. On, a hand-started daemon on Linux promotes itself to the service, and `goodvibes doctor` reports a missing or stopped service. Off (the installer's `--no-service`, `uninstall-service`), nothing installs one and doctor asks for none. It also decides whether the daemon's own service routes (used by the web UI and remote clients) are available. The command-line service commands work whatever its value.
-- `service.autostart` (default `false`): whether the service starts on its own at login. The running daemon applies every change, however it was set (a settings screen, `/config set`, the Agent's `/settings set`, `goodvibes-daemon config set`, the API, or a hand edit of the daemon's settings file): on installs the service if it is not installed and enables it at login (systemd `enable`; a LaunchAgent with `RunAtLoad`); off disables it at login and leaves it installed and running (systemd `disable`; the LaunchAgent rewritten without `RunAtLoad`, restarted only after a failure). A value set while no daemon runs is applied when the daemon next starts, to an installed service. `install-service` turns it on and `uninstall-service` off; a hand-started daemon that promotes itself to the service turns it on. `goodvibes service start` enables the unit at login only when it is on. A Windows logon task starts at login while installed whatever its value, and the daemon says so when it is turned off. When the daemon could not apply a change, it tells you on the attached surfaces with the reason. At boot on Linux, lingering decides whether the daemon starts before anyone logs in. A daemon under an overridden home (`GOODVIBES_DAEMON_HOME`, `--daemon-home`) never changes the machine's service.
+- `service.autostart` (default `false`): whether the service starts on its own at login. The running daemon applies every change, however it was set (a settings screen, `/settings set` in either program, `goodvibes-daemon config set`, the API, or a hand edit of the daemon's settings file): on installs the service if it is not installed and enables it at login (systemd `enable`; a LaunchAgent with `RunAtLoad`); off disables it at login and leaves it installed and running (systemd `disable`; the LaunchAgent rewritten without `RunAtLoad`, restarted only after a failure). A value set while no daemon runs is applied when the daemon next starts, to an installed service. `install-service` turns it on and `uninstall-service` off; a hand-started daemon that promotes itself to the service turns it on. `goodvibes service start` enables the unit at login only when it is on. A Windows logon task starts at login while installed whatever its value, and the daemon says so when it is turned off. When the daemon could not apply a change, it tells you on the attached surfaces with the reason. At boot on Linux, lingering decides whether the daemon starts before anyone logs in. A daemon under an overridden home (`GOODVIBES_DAEMON_HOME`, `--daemon-home`) never changes the machine's service.
 - `service.platform` (default `auto`) forces `systemd`, `launchd`, `windows` or `manual`. Leave it `auto`.
 - `service.logPath` (default empty) names a log file for the `manual` platform. Empty uses `~/.goodvibes/daemon/service/<platform>.log`.
 
@@ -949,7 +949,7 @@ A launch or Agent update replaces the daemon program on disk too, but the runnin
 
 <!-- generated: settings:update -->
 
-`update.auto` and `update.autoUpdateAtLaunch`, the two switches that let an installation replace its own programs, are daemon settings: one value for the machine's installation, kept in the daemon's settings file `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent alike. An update replaces the whole suite, so this is one choice, made once (by the installer's `--no-auto-update`, `goodvibes-daemon config set`, `/config set` in the terminal app or `/settings set` in the Agent). A copy in a program's own file or in a project's `.goodvibes/` settings file is left out with a notice, so a repository's settings file cannot turn updates back on. The other `update.*` keys are each program's own, read from its own file.
+`update.auto` and `update.autoUpdateAtLaunch`, the two switches that let an installation replace its own programs, are daemon settings: one value for the machine's installation, kept in the daemon's settings file `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent alike. An update replaces the whole suite, so this is one choice, made once (by the installer's `--no-auto-update`, `goodvibes-daemon config set`, `/settings set` in either terminal program). A copy in a program's own file or in a project's `.goodvibes/` settings file is left out with a notice, so a repository's settings file cannot turn updates back on. The other `update.*` keys are each program's own, read from its own file.
 
 The Agent writes why its while-running updater is off to its activity log (`<working directory>/.goodvibes/logs/activity.md`): `agent periodic update: off, update.auto is false; this agent will not update itself while running`, `agent periodic update: off, update.autoUpdateAtLaunch is false, so this install does not replace its own binary unattended; set update.auto to true to keep only the while-running updates`, or `agent periodic update: off, only a compiled release binary can be swapped in place`. When it is on, it writes `agent periodic update: armed`.
 
@@ -987,9 +987,9 @@ How to set an update setting for each program:
 
 | Program | Command | File written |
 | --- | --- | --- |
-| Any (`update.auto`, `update.autoUpdateAtLaunch`) | `goodvibes-daemon config set update.auto false`, `/config set update.autoUpdateAtLaunch false` inside `goodvibes`, or `/settings set ...` inside `goodvibes-agent` | `~/.goodvibes/daemon/settings.json`, the one file all three read |
+| Any (`update.auto`, `update.autoUpdateAtLaunch`) | `goodvibes-daemon config set update.auto false`, `/settings set update.autoUpdateAtLaunch false` inside `goodvibes`, or `/settings set ...` inside `goodvibes-agent` | `~/.goodvibes/daemon/settings.json`, the one file all three read |
 | The daemon (its other `update.*` keys) | `goodvibes-daemon config set update.intervalMinutes 120` | `~/.goodvibes/daemon-host/settings.json` |
-| The terminal app (its other `update.*` keys) | `/config set update.launchCheckTimeoutMs 5000` inside `goodvibes`, or the settings screen (`/settings update`) | `~/.goodvibes/tui/settings.json` |
+| The terminal app (its other `update.*` keys) | `/settings set update.launchCheckTimeoutMs 5000` inside `goodvibes`, or the settings screen (`/settings update`) | `~/.goodvibes/tui/settings.json` |
 | The Agent (its other `update.*` keys) | `/settings set update.intervalMinutes 120` inside `goodvibes-agent` | `~/.goodvibes/agent/settings.json` |
 
 `goodvibes-daemon config get update.auto` prints the daemon's current value. `goodvibes-daemon config set` prints `update.auto = false` and `written to disk.`; restart the daemon for an `update.*` change to apply.
@@ -1664,9 +1664,9 @@ All service findings use the terminal app's own `service.*` values, from `~/.goo
 | `network-http-listener-enabled` | warning | `danger.httpListener` is `true` and the listener is network-reachable. | Keep secrets or signature checks on every webhook surface, or bind it to loopback. |
 | `network-surface-without-local-users` | risk | At least one surface is network-reachable (the control plane counts only when it serves other machines) and `~/.goodvibes/tui/auth-users.json` does not exist. | Create a local admin user (the Access screen of the setup wizard), or make the control plane and web surface local again with `goodvibes-daemon webui enable --loopback` (the HTTP listener has its own `httpListener.hostMode`). |
 | `network-surface-with-bootstrap-credential` | risk | At least one surface is network-reachable and `~/.goodvibes/tui/auth-bootstrap.txt` exists. | Replace the bootstrap credential with a named admin user (the Access screen of the setup wizard removes the file). |
-| `auto-approve-enabled` | risk | `behavior.autoApprove` is `true`. | `/config set behavior.autoApprove false` inside `goodvibes`. |
+| `auto-approve-enabled` | risk | `behavior.autoApprove` is `true`. | `/settings set behavior.autoApprove false` inside `goodvibes`. |
 | `allow-all-permissions` | risk | `permissions.mode` is `yolo` (or the older name `allow-all`). | Choose `ask-me`, `jev-decides` or `just-vibes` in `/settings`, unless `yolo` is intended. |
-| `plaintext-secrets-allowed` | risk | `storage.secretPolicy` is `plaintext_allowed`. | `/config set storage.secretPolicy preferred_secure` (or `require_secure`). |
+| `plaintext-secrets-allowed` | risk | `storage.secretPolicy` is `plaintext_allowed`. | `/settings set storage.secretPolicy preferred_secure` (or `require_secure`). |
 | `control-plane-cors-wildcard-origin` | risk | The control plane serves other machines and is network-reachable, `controlPlane.cors.enabled` is `true`, and `controlPlane.cors.allowedOrigins` contains `*`. | List the exact trusted origins instead of `*`. |
 
 `goodvibes doctor` reads what the service manager reports, not the service settings, so it is clean both on a fresh release install with its service running and on an installation made without a service on purpose (`--no-service`, which records `service.enabled` `false`): with `service.enabled` `false` doctor reports no service finding at all.
@@ -1951,7 +1951,7 @@ The Agent picks the credential it sends to the daemon in this order; the first s
 ### Settings, models and providers after setup
 
 - `/setup` opens one topic's form with the current settings loaded.
-- `/model` changes the model; `/settings` opens every setting; `/config set <key> <value>` sets one in the terminal app.
+- `/model` changes the model; `/settings` opens every setting; `/settings set <key> <value>` sets one in the terminal app.
 - `/settings set <key> <value>` sets one in the Agent.
 - `goodvibes-daemon config set <key> <value>` sets one for the daemon.
 

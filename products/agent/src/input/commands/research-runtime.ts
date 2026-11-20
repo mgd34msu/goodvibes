@@ -4,7 +4,7 @@
  * research run, a source in the queue and a saved report are each one call of
  * an Agent research tool, run as the owner's own act (owner-tool-call.ts).
  */
-import { defineCommand, doAction, type ActionDescription, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { choiceInput, doAction as doNow, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
@@ -109,7 +109,7 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           opt('tags', 'Tags', 'Words to find it by, separated by commas', '--tags', 'research'),
           opt('note', 'Note', 'Why it is useful, risky, primary, outdated or disputed', '--note', 'none', 'long-text'),
         ],
-        sentence: 'Source "{title}" is kept in this project\'s research queue for "{question}", until you change it; no report is saved and nothing goes to Agent Knowledge.',
+        sentence: 'Source "{title}" ("{summary}") is kept in this project\'s research queue for "{question}", until you change it; no report is saved and nothing goes to Agent Knowledge.',
         example: { title: 'Range test 2026', question: 'E-bike range', summary: 'Measured range of twelve bikes.' },
       }, (values) => {
         const score = values.score?.trim() ? Math.max(0, Math.min(100, Math.round(Number(values.score)))) : undefined;
@@ -165,7 +165,3 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
     ],
   }));
 }
-
-/** Kept for the type of a one-step research action. */
-export type { ResearchAction };
-export { doAction };

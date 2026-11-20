@@ -72,7 +72,7 @@ export function registerArtifactsRuntimeCommands(registry: CommandRegistry): voi
           const limit = positiveNumber(values.limit);
           return runOwnerToolCall(ctx, TOOL, { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}) }, 'list saved artifacts');
         },
-      }),
+      })),
       ownerRead(TOOL, readAction<CommandContext>({
         id: 'show', label: 'Look at one artifact', word: 'show', operator: LOCAL_ONLY,
         inputs: [

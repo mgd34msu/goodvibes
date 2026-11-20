@@ -118,7 +118,7 @@ export function registerDocumentsRuntimeCommands(registry: CommandRegistry): voi
           text('tags', 'Tags', 'Words to find it by, separated by commas', '--tags', 'document'),
           VERSION_NOTE('"Initial draft."'),
         ],
-        sentence: 'A draft "{title}" is kept with its first version, until you change it.', example: { title: 'Launch plan', body: '# Launch plan' },
+        sentence: 'A draft "{title}" reading "{body}" is kept as its first version, until you change it.', example: { title: 'Launch plan', body: '# Launch plan' },
       }, 'create', (values) => ({ title: values.title, body: values.body, tags: values.tags ? splitWords(values.tags) : ['document'], changeSummary: values.note || 'Initial draft.' })),
       draftChange({
         id: 'revise', label: 'Revise a draft', word: 'revise',
@@ -157,7 +157,7 @@ export function registerDocumentsRuntimeCommands(registry: CommandRegistry): voi
           VERSION_NOTE('"Suggested revision."'),
           text('why', 'Why', 'Why this change helps', '--why', 'no reason given', 'long-text'),
         ],
-        sentence: 'A suggested new text for draft {document} is kept for you to take or leave, until you change it; the draft is unchanged.', example: { document: 'launch-plan', body: '# Launch plan\n\nShip in May.' },
+        sentence: 'The suggested text "{body}" for draft {document} is kept for you to take or leave, until you change it; the draft is unchanged.', example: { document: 'launch-plan', body: 'Ship in May.' },
       }, 'suggest', (values) => ({
         documentId: values.document, body: values.body, ...given(values, 'title', 'status'), ...(values.tags ? { tags: splitWords(values.tags) } : {}),
         changeSummary: values.note || 'Suggested revision.', ...(values.why ? { suggestionRationale: values.why } : {}),

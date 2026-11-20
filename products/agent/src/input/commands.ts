@@ -48,6 +48,11 @@ import { registerUpdateCommand } from './commands/update-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
 import { commandVerbPolicy, declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
+import { registerNotesRuntimeCommands } from './commands/notes-runtime.ts';
+import { registerDocumentsRuntimeCommands } from './commands/documents-runtime.ts';
+import { registerArtifactsRuntimeCommands } from './commands/artifacts-runtime.ts';
+import { registerCompareRuntimeCommands } from './commands/compare-runtime.ts';
+import { registerResearchRuntimeCommands } from './commands/research-runtime.ts';
 import type { RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 
 
@@ -63,6 +68,11 @@ export function registerBuiltinCommands(
   registerShellCoreCommands(registry);
   registerTriggerCommands(registry);
   registerAgentWorkspaceRuntimeCommands(registry);
+  registerNotesRuntimeCommands(registry);
+  registerDocumentsRuntimeCommands(registry);
+  registerArtifactsRuntimeCommands(registry);
+  registerCompareRuntimeCommands(registry);
+  registerResearchRuntimeCommands(registry);
   registerWorkPlanRuntimeCommands(registry);
   registerWorkstreamRuntimeCommands(registry);
   registerBriefRuntimeCommands(registry);

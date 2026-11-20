@@ -8,14 +8,6 @@ import { choiceInput, doAction } from '@goodvibes-jev/engine/terminal-shell/desc
 import { commandRefusal } from './confirmation.ts';
 
 export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry): void {
-  function openAgentWorkspace(ctx: CommandContext, categoryId: string | undefined): void {
-    if (!ctx.openAgentWorkspace) {
-      ctx.print('Agent operator workspace is not available in this runtime.');
-      return;
-    }
-    ctx.openAgentWorkspace(categoryId);
-  }
-
   // `/work` (terminal-shell/native/work-command.ts): the Agent's work view is a workspace section.
   registerWorkCommand<CommandContext>(registry, {
     view: (ctx) => ctx.nativeWorkLedger,
@@ -50,14 +42,4 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
       },
     })],
   }));
-  registry.register({
-    name: 'notes',
-    effect: 'ui-navigation',
-    aliases: ['scratchpad'],
-    description: 'Open Agent-local scratchpad notes in the operator workspace',
-    usage: '',
-    handler(_args, ctx) {
-      openAgentWorkspace(ctx, 'notes');
-    },
-  });
 }

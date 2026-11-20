@@ -16,7 +16,6 @@ export const COMMAND_ACTIONS_WAITING_LIST: readonly string[] = [
   'keep',
   'media',
   'note',
-  'notes',
   'paste',
   'pastes',
   'pin',

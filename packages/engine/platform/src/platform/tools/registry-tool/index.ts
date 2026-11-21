@@ -18,9 +18,11 @@ import type { RegistryInput } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ContractInputAuthority } from '../../contract/input-authority.js';
 import {
-  createLiveRegistrySource, liveRegistryScope, registryAgentDirectories, registryMarkdown, registrySkillDirectories,
+  createLiveRegistrySource, liveRegistryScope, registryAgentDirectories, registryMarkdown, registrySkillRoots,
   materializeRegistryMarkdown, type RegistryToolSource,
 } from './source.js';
+import { findSkill, listSkillIndex, listSkills } from '../../skills/discovery.js';
+import type { SkillFrontmatterValue } from '../../skills/model.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { rankClassicCatalog, type ClassicCatalogMatch } from '../../runtime/classic-catalog.js';
@@ -55,11 +57,29 @@ export interface RegistryToolRoots {
   readonly capturedInput?: CapturedRegistryContext | undefined;
 }
 
-async function scanDirectoryAll(
-  dir: string,
-  itemType: 'skill' | 'agent',
-  source: RegistryToolSource,
-): Promise<RegistryMatch[]> {
+/** A frontmatter list (`a, b` or `[a, b]`) as its entries. */
+function frontmatterList(value: SkillFrontmatterValue | undefined): string[] {
+  return normalizeFrontmatterList(typeof value === 'string' || value === undefined ? value : [...value]);
+}
+
+/**
+ * The skills a session loads, read through `source` by platform/skills: the
+ * same names, case rules, descriptions and project-over-global override.
+ */
+async function listRegistrySkills(roots: RegistryToolRoots, source: RegistryToolSource): Promise<RegistryMatch[]> {
+  return (await listSkills(registrySkillRoots(roots), source)).map((skill): RegistryMatch => ({
+    name: skill.name,
+    type: 'skill',
+    description: skill.description,
+    path: skill.path,
+    preview: extractMarkdownPreview(skill.body),
+    dependencies: frontmatterList(skill.metadata['depends_on']),
+    includes: collectMarkdownReferences(skill.body),
+  }));
+}
+
+/** The agents in one `.goodvibes/agents` directory: flat `<name>.md` files and `<folder>/AGENT.md`. */
+async function scanAgentDirectory(dir: string, source: RegistryToolSource): Promise<RegistryMatch[]> {
   if (!await source.exists(dir)) return [];
   const results: RegistryMatch[] = [];
   let entries: readonly string[];
@@ -69,67 +89,44 @@ async function scanDirectoryAll(
     return [];
   }
   for (const entry of entries) {
-    // Strategy 1: flat .md file (e.g., skills/foo.md)
-    if (entry.endsWith('.md')) {
-      const filePath = join(dir, entry);
-      let content = '';
-      try {
-        content = await source.read(filePath);
-      } catch {
-        continue;
-      }
-      const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
-      const name = typeof frontmatter['name'] === 'string' ? frontmatter['name'] : entry.replace(/\.md$/, '');
-      const description = typeof frontmatter['description'] === 'string' ? frontmatter['description'] : '';
-      const match: RegistryMatch = {
-        name,
-        type: itemType,
-        description,
-        path: filePath,
-        preview: extractMarkdownPreview(body),
-        dependencies: normalizeFrontmatterList(frontmatter['depends_on']),
-        includes: collectMarkdownReferences(body),
-      };
-      results.push(match);
+    const flat = entry.endsWith('.md');
+    const filePath = flat ? join(dir, entry) : join(dir, entry, 'AGENT.md');
+    if (!flat && !await source.exists(filePath)) continue;
+    let content = '';
+    try {
+      content = await source.read(filePath);
+    } catch {
       continue;
     }
-
-    // Strategy 2: directory with SKILL.md or AGENT.md (e.g., skills/foo/SKILL.md)
-    const markerFile = itemType === 'skill' ? 'SKILL.md' : 'AGENT.md';
-    const markerPath = join(dir, entry, markerFile);
-    if (await source.exists(markerPath)) {
-      let content = '';
-      try {
-        content = await source.read(markerPath);
-      } catch {
-        continue;
-      }
-      const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
-      const name = typeof frontmatter['name'] === 'string' ? frontmatter['name'] : entry;
-      const description = typeof frontmatter['description'] === 'string' ? frontmatter['description'] : '';
-      const match: RegistryMatch = {
-        name,
-        type: itemType,
-        description,
-        path: markerPath,
-        preview: extractMarkdownPreview(body),
-        dependencies: normalizeFrontmatterList(frontmatter['depends_on']),
-        includes: collectMarkdownReferences(body),
-      };
-      results.push(match);
-    }
+    const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
+    const fallbackName = flat ? entry.replace(/\.md$/, '') : entry;
+    results.push({
+      name: typeof frontmatter['name'] === 'string' ? frontmatter['name'] : fallbackName,
+      type: 'agent',
+      description: typeof frontmatter['description'] === 'string' ? frontmatter['description'] : '',
+      path: filePath,
+      preview: extractMarkdownPreview(body),
+      dependencies: normalizeFrontmatterList(frontmatter['depends_on']),
+      includes: collectMarkdownReferences(body),
+    });
   }
   return results;
+}
+
+async function listRegistryAgents(roots: RegistryToolRoots, source: RegistryToolSource): Promise<RegistryMatch[]> {
+  const agents: RegistryMatch[] = [];
+  for (const dir of registryAgentDirectories(roots)) agents.push(...await scanAgentDirectory(dir, source));
+  return dedupeAgents(agents);
 }
 
 /** The decision site the registry-rank reading is logged under. */
 export const REGISTRY_RANK_SITE = 'tools.registry-rank';
 
-/** Project-local entries override global ones of the same type and name (first seen wins). */
-function dedupe(items: readonly RegistryMatch[]): RegistryMatch[] {
+/** A project agent overrides a global one of the same name (first seen wins). */
+function dedupeAgents(items: readonly RegistryMatch[]): RegistryMatch[] {
   const seen = new Set<string>();
   return items.filter((item) => {
-    const key = `${item.type}:${item.name}`;
+    const key = item.name;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -310,16 +307,16 @@ async function runSearch(
   const all: RegistryMatch[] = [];
 
   if (typeFilter === 'skills' || typeFilter === 'all') {
-    for (const dir of registrySkillDirectories(roots)) all.push(...await scanDirectoryAll(dir, 'skill', source));
+    all.push(...await listRegistrySkills(roots, source));
   }
   if (typeFilter === 'agents' || typeFilter === 'all') {
-    for (const dir of registryAgentDirectories(roots)) all.push(...await scanDirectoryAll(dir, 'agent', source));
+    all.push(...await listRegistryAgents(roots, source));
   }
   if (typeFilter === 'tools' || typeFilter === 'all') {
     all.push(...listTools(toolRegistry));
   }
 
-  const candidates = dedupe(all);
+  const candidates = all;
   const ranking = query ? await rankAgainst(candidates, query, source) : undefined;
   const results = ranking ? ranking.matching : candidates;
 
@@ -349,11 +346,7 @@ async function runRecommend(
   if (scope === 'tools') {
     candidates = listTools(toolRegistry);
   } else {
-    candidates = [];
-    for (const dir of registrySkillDirectories(roots)) {
-      candidates.push(...await scanDirectoryAll(dir, 'skill', source));
-    }
-    candidates = dedupe(candidates);
+    candidates = await listRegistrySkills(roots, source);
   }
 
   // With a task: the candidates read as fitting it, best first, then the rest
@@ -395,18 +388,18 @@ async function runDependencies(
     });
   }
 
-  // Same scan as search, so a name that search returns (frontmatter name,
-  // file name, or the directory of a SKILL.md) resolves here too. The name is
-  // only compared with what the scan found, never joined into a path.
-  let found: RegistryMatch | undefined;
-  for (const dir of registrySkillDirectories(roots)) {
-    found = (await scanDirectoryAll(dir, 'skill', source)).find((match) => {
-      const file = basename(match.path);
-      const stem = file === 'SKILL.md' ? basename(dirname(match.path)) : file.replace(/\.md$/, '');
-      return match.name === skillName || stem === skillName || file === skillName;
+  // Resolved as the session resolves a skill (platform/skills findSkill: its
+  // name, case not mattering, the first root winning); else a listed skill
+  // whose file or folder carries the name. The name is only compared with
+  // what the listing found, never joined into a path by this tool.
+  const skillRoots = registrySkillRoots(roots);
+  const wanted = skillName.toLowerCase();
+  const found = await findSkill(skillRoots, skillName, source)
+    ?? (await listSkillIndex(skillRoots, source)).find((entry) => {
+      const file = basename(entry.path);
+      const stem = file === 'SKILL.md' ? basename(dirname(entry.path)) : file.replace(/\.md$/, '');
+      return stem.toLowerCase() === wanted || file.toLowerCase() === wanted;
     });
-    if (found) break;
-  }
 
   if (!found) {
     return {
@@ -415,14 +408,15 @@ async function runDependencies(
     };
   }
 
+  const disclosure = await registryMarkdown(source, found.path);
   return {
     success: true,
     output: JSON.stringify({
       mode: 'dependencies',
       skillName,
       path: found.path,
-      depends_on: found.dependencies ?? [],
-      includes: found.includes ?? [],
+      depends_on: frontmatterList(found.metadata['depends_on']),
+      includes: disclosure.includes,
     }),
   };
 }

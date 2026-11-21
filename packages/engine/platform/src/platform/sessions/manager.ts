@@ -11,6 +11,7 @@ import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
 import { digestNameStem, storedNameStem } from '../utils/stored-name.js';
 import { forgetVerificationJournal } from '../core/verification/store.js';
+import { CrossProcessLockBusyError, withCrossProcessLockSync } from '../workspace/checkpoint/cross-process-lock.js';
 
 /**
  * Metadata for a saved session (the first JSONL line).
@@ -454,84 +455,92 @@ export class SessionManager {
     mkdirSync(this.sessionsDir, { recursive: true });
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${sanitizedName}.jsonl`);
+    // The check of the file on disk, the write and the rename are one step no other terminal's save can enter:
+    // a save that finds another one in progress is refused at once, as one that finds it already landed is.
+    try {
+      return withCrossProcessLockSync(`${filePath}.lock`, () => {
+        // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
+        // that recorded the name it was saved under is never overwritten by a different name;
+        // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
+        // The file's own stem (what list() shows, what an opened session's id is) always
+        // addresses it, as it does for reads: such a save keeps the name the file recorded.
+        const onDisk: { value?: string | undefined } = {};
+        const existing = this._readExistingMetaRecord(filePath, onDisk);
+        // The file another terminal saved after this process last read or wrote it is not overwritten with this copy.
+        const known = knownSessionFiles.get(filePath);
+        if (!options.replace && known !== undefined && onDisk.value !== undefined && onDisk.value !== known) {
+          throw new SessionSavedElsewhereError(sanitizedName);
+        }
+        const existingName = existing?.name;
+        const addressedByStem = name === sanitizedName;
+        if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
+          throw new Error(
+            `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
+            + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
+          );
+        }
+        // The same name in another conversation would replace that conversation's save.
+        // A file saved before the conversation was recorded holds the conversation
+        // it is named after (an automatic save is named by its session id).
+        const saving = options.savingConversationId ?? meta.conversationId;
+        if (existing && !options.replace && saving !== undefined) {
+          const existingConversation = typeof existing.conversationId === 'string' ? existing.conversationId
+            : typeof existingName === 'string' ? existingName : sanitizedName;
+          if (existingConversation !== saving) {
+            throw new Error(this._describeOtherConversation(name, filePath));
+          }
+        }
 
-    // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
-    // that recorded the name it was saved under is never overwritten by a different name;
-    // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
-    // The file's own stem (what list() shows, what an opened session's id is) always
-    // addresses it, as it does for reads: such a save keeps the name the file recorded.
-    const onDisk: { value?: string | undefined } = {};
-    const existing = this._readExistingMetaRecord(filePath, onDisk);
-    // The file another terminal saved after this process last read or wrote it is not overwritten with this copy.
-    const known = knownSessionFiles.get(filePath);
-    if (!options.replace && known !== undefined && onDisk.value !== undefined && onDisk.value !== known) {
-      throw new SessionSavedElsewhereError(sanitizedName);
+        const lines: string[] = [];
+
+        // First line: meta record
+        const metaRecord = {
+          type: 'meta' as const,
+          name: addressedByStem && typeof existingName === 'string' ? existingName : name,
+          schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
+          timestamp: meta.timestamp,
+          title: meta.title,
+          model: meta.model,
+          provider: meta.provider,
+          titleSource: meta.titleSource ?? 'system',
+          returnContext: loadedReturnContext(meta.returnContext),
+          saveSource: this._resolveSaveSource(filePath, meta.saveSource),
+          ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
+          messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
+          ...(meta.mirroredFrom ? { mirroredFrom: { owner: meta.mirroredFrom.owner, revision: meta.mirroredFrom.revision } } : {}),
+        };
+        lines.push(JSON.stringify(metaRecord));
+
+        // Subsequent lines: one message per line
+        for (const msg of messages) {
+          const { type: _ignored, ...safeMsg } = msg as Record<string, unknown>;
+          const record = { ...safeMsg, type: 'message' as const };
+          lines.push(JSON.stringify(record));
+        }
+
+        // Agent records: one per line, after messages
+        if (agentRecords && agentRecords.length > 0) {
+          for (const agent of agentRecords) {
+            const record = { ...agent, type: 'agent_record' as const };
+            lines.push(JSON.stringify(record));
+          }
+        }
+
+        for (const contract of contracts ?? []) {
+          lines.push(JSON.stringify({ type: 'contract' as const, contract }));
+        }
+
+        if (branches && (Object.keys(branches.branches).length > 0 || branches.currentBranch !== 'main')) {
+          lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
+        }
+
+        this._atomicWrite(filePath, lines.join('\n') + '\n', true);
+        return { filePath, sanitizedName };
+      });
+    } catch (error) {
+      if (error instanceof CrossProcessLockBusyError) throw new SessionSavedElsewhereError(sanitizedName);
+      throw error;
     }
-    const existingName = existing?.name;
-    const addressedByStem = name === sanitizedName;
-    if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
-      throw new Error(
-        `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
-        + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
-      );
-    }
-    // The same name in another conversation would replace that conversation's save.
-    // A file saved before the conversation was recorded holds the conversation
-    // it is named after (an automatic save is named by its session id).
-    const saving = options.savingConversationId ?? meta.conversationId;
-    if (existing && !options.replace && saving !== undefined) {
-      const existingConversation = typeof existing.conversationId === 'string' ? existing.conversationId
-        : typeof existingName === 'string' ? existingName : sanitizedName;
-      if (existingConversation !== saving) {
-        throw new Error(this._describeOtherConversation(name, filePath));
-      }
-    }
-
-    const lines: string[] = [];
-
-    // First line: meta record
-    const metaRecord = {
-      type: 'meta' as const,
-      name: addressedByStem && typeof existingName === 'string' ? existingName : name,
-      schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
-      timestamp: meta.timestamp,
-      title: meta.title,
-      model: meta.model,
-      provider: meta.provider,
-      titleSource: meta.titleSource ?? 'system',
-      returnContext: loadedReturnContext(meta.returnContext),
-      saveSource: this._resolveSaveSource(filePath, meta.saveSource),
-      ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
-      messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
-      ...(meta.mirroredFrom ? { mirroredFrom: { owner: meta.mirroredFrom.owner, revision: meta.mirroredFrom.revision } } : {}),
-    };
-    lines.push(JSON.stringify(metaRecord));
-
-    // Subsequent lines: one message per line
-    for (const msg of messages) {
-      const { type: _ignored, ...safeMsg } = msg as Record<string, unknown>;
-      const record = { ...safeMsg, type: 'message' as const };
-      lines.push(JSON.stringify(record));
-    }
-
-    // Agent records: one per line, after messages
-    if (agentRecords && agentRecords.length > 0) {
-      for (const agent of agentRecords) {
-        const record = { ...agent, type: 'agent_record' as const };
-        lines.push(JSON.stringify(record));
-      }
-    }
-
-    for (const contract of contracts ?? []) {
-      lines.push(JSON.stringify({ type: 'contract' as const, contract }));
-    }
-
-    if (branches && (Object.keys(branches.branches).length > 0 || branches.currentBranch !== 'main')) {
-      lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
-    }
-
-    this._atomicWrite(filePath, lines.join('\n') + '\n', true);
-    return { filePath, sanitizedName };
   }
 
   /**

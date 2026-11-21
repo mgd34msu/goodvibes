@@ -15,12 +15,10 @@ import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes/eng
  * out of the shell-UI layers the architecture check bars src/audio from importing.
  */
 
-import '@goodvibes/engine/platform/platform/utils';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createTuiCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
-import './player.ts';
 import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { wireVoiceInputRuntime } from './voice-input-session.ts';

@@ -85,9 +85,11 @@ export class CalendarTokenStore {
    */
   private readonly inflightRefresh = new Map<CalendarProviderId, Promise<string>>();
   /**
-   * Bumped by `disconnect`. A refresh that was already on the wire when the
-   * owner disconnected must not write its result back and so reconnect an
-   * account the owner just removed.
+   * Bumped by `disconnect` and by `save`. A refresh that was already on the
+   * wire when the owner disconnected, or connected again (possibly another
+   * account), must not write its result back: it would reconnect an account
+   * the owner just removed, or put the old grant's tokens under the account
+   * just saved and overwrite the new grant's refresh token.
    */
   private readonly generations = new Map<CalendarProviderId, number>();
 
@@ -105,6 +107,10 @@ export class CalendarTokenStore {
    * listed with no token.
    */
   async save(provider: CalendarProviderId, tokens: StoredTokenSet, account: ConnectedAccount): Promise<void> {
+    // A refresh started from the earlier grant is now stale: it writes nothing,
+    // and callers waiting on it start a new one from the grant saved here.
+    this.generations.set(provider, (this.generations.get(provider) ?? 0) + 1);
+    this.inflightRefresh.delete(provider);
     await this.secrets.set(tokenKey(provider), JSON.stringify({ ...tokens, account } satisfies StoredConnection));
     await this.secrets.delete(statusKey(provider));
   }
@@ -235,11 +241,15 @@ export class CalendarTokenStore {
       throw new TokenRefreshError(provider, `Refreshing the ${provider} token failed: ${detail}`);
     }
     if ((this.generations.get(provider) ?? 0) !== generation) {
-      throw new TokenRefreshError(provider, `The ${provider} account was disconnected while its token was refreshing.`);
+      throw new TokenRefreshError(provider, `The ${provider} account was connected again or disconnected while its token was refreshing.`);
     }
     // The rotated token set goes first: it is the only copy of a refresh token
     // the provider has already invalidated the old one for.
     const account = (await this.loadAccount(provider)) ?? this.syntheticAccount(provider, refreshed);
+    // Checked again after the read: a save or disconnect during it supersedes this refresh.
+    if ((this.generations.get(provider) ?? 0) !== generation) {
+      throw new TokenRefreshError(provider, `The ${provider} account was connected again or disconnected while its token was refreshing.`);
+    }
     await this.secrets.set(tokenKey(provider), JSON.stringify({ ...refreshed, account } satisfies StoredConnection));
     await this.secrets.delete(statusKey(provider));
     return refreshed.accessToken;

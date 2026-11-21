@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { nativeSubmissionJournalPath } from '@goodvibes/engine/terminal-shell/native';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './config/surface.ts';
 import { announceSettingsIngestionNotices } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes/engine/terminal-shell/native-ingress';
@@ -17,26 +19,16 @@ import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
 import { runExitSequence } from './shell/exit-sequence.ts';
 import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
-import './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
 import { ThinkingStallClock, buildThinkingOverlay, createThrobberSource, mainPermissionAsk } from './core/thinking-overlay.ts';
 import { UIFactory } from './renderer/ui-factory.ts';
-import '@goodvibes/engine/platform/platform/core';
 import { conversationMessagesAsSessionRecords } from './core/conversation-message-snapshot.ts';
 import { createTranscriptNavigators } from './shell/transcript-navigation.ts';
 import { InputHandler } from './input/handler.ts';
 import { applyConfiguredHitlMode, createHerdrSessionReporter } from '@goodvibes/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
-import '@goodvibes/engine/platform/platform/tools';
-import '@goodvibes/engine/platform/platform/tools';
-import '@goodvibes/engine/platform/platform/state';
-import '@goodvibes/engine/platform/platform/permissions';
 import { PermissionPromptUI } from './permissions/prompt.ts';
-import './input/command-registry.ts';
 
-import './input/commands.ts';
-import '@goodvibes/engine/platform/platform/tools';
-import './input/input-history.ts';
 import { ShellContextHold, ShellPassthrough } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
@@ -53,8 +45,6 @@ import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
-import './tools/agent-harness-model-routing.ts';
-import './tools/agent-harness-setup-model-helpers.ts';
 import { deleteRecoveryFile, removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
@@ -97,12 +87,10 @@ import { bindOwnerInput } from '@goodvibes/engine/terminal-shell/companion-input
 import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import { allowTerminalWrite, createShellLayout, installFullScreenTerminalOutputGuard } from '@goodvibes/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
-import './config/surface.ts';
 import { createAutonomySurfacing, buildSkillDraftProposer } from './shell/autonomy-surfacing.ts';
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
 import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
-import './core/hardware-profile.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';
 import { applyAtModelSwitches } from './input/at-model-switch.ts';
@@ -348,7 +336,7 @@ async function main(prepared: PreparedShellCliRuntime) {
         : {
             ...host,
             workspace: ctx.services.workingDirectory,
-            journalPath: ctx.services.shellPaths.resolveUserPath('agent', 'native-work-submission.json'),
+            journalPath: nativeSubmissionJournalPath(ctx.services.shellPaths, GOODVIBES_AGENT_SURFACE_ROOT),
             readExecutionMode: () => readInitialExecutionMode(configManager),
           };
     },
@@ -511,6 +499,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       buildSnapshot: buildCurrentSessionSnapshot,
       buildMessagesSnapshot: () => ({ messages: conversationMessagesAsSessionRecords(conversation.getMessageSnapshot()), timestamp: Date.now(), title: conversation.title, ...conversation.branchState() }),
       shutdown: (saved) => ctx.shutdown(saved),
+      sessionSaved: () => ctx.sessionSaved(),
       // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
       // The clean save supersedes the live snapshot; a crash snapshot of this session still on offer is kept apart.
       removeRecoveryPoint: () => deleteRecoveryFile({ surface: ctx.services.surface }, runtime.sessionId),

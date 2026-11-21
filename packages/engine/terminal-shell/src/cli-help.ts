@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 export interface TerminalCommandHelp {
   readonly usage: readonly string[];
   readonly summary: string;
+  /** One line for a command list and shell completion; a command without one is listed by its summary. */
+  readonly line?: string | undefined;
   readonly subcommands?: readonly string[] | undefined;
   readonly examples?: readonly string[] | undefined;
 }

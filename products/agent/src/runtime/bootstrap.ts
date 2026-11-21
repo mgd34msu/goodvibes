@@ -24,7 +24,6 @@ import { factsFor } from '@goodvibes/engine/platform/platform/routing';
  *   - main.ts: terminal setup, render loop, stdin/stdout handlers
  *   - lifecycle.ts: save/shutdown helpers
  */
-import '@goodvibes/engine/platform/platform/core';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { collectStartupAnnouncements } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
@@ -34,12 +33,10 @@ import type { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
-import '@/runtime/index.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
 import { ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { emitSessionRecoveryFailed } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
-import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@/runtime/index.ts';
 import { scheduleMcpSuggestionScan } from './mcp-suggestion-scan.ts';
@@ -57,7 +54,6 @@ import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platfor
 import { createBootstrapShell } from './bootstrap-shell.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
-import '@goodvibes/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
 import { foldLegacySpineStore } from '@goodvibes/engine/platform/platform/runtime/session-spine';
@@ -131,6 +127,8 @@ export type BootstrapContext = RuntimeContext & {
    * stay out of the main conversation and go to the activity feed instead.
    */
   systemMessageRouter: SystemMessageRouter;
+  /** True once `shutdown` has saved the session durably, even while its releases are still running. */
+  sessionSaved: () => boolean;
 };
 
 // ── Bootstrap function ────────────────────────────────────────────────────
@@ -709,6 +707,27 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // ── Compose RuntimeContext ────────────────────────────────────────────────
 
+  const runtimeShutdown = createRuntimeShutdown({
+    get sessionId() { return runtime.sessionId; },
+    get model() { return runtime.model; },
+    get provider() { return runtime.provider; },
+    conversationTitle: () => conversation.title || '',
+    sessionSpineClient: services.sessionSpineClient,
+    takeMemorySpineTimer: () => memorySpineRecheck.take(),
+    bootstrapUnsubs,
+    runtimeUnsubs,
+    forensicsCollector,
+    executionLedger: services.executionLedger,
+    disposeRuntimeGraph: () => services.close(),
+    deferredStartup,
+    agentExternalServices,
+    scheduleManager: services.workflow.scheduleManager,
+    hookDispatcher: services.hookDispatcher,
+    providerRegistry: services.providerRegistry,
+    sessionOrchestration: services.sessionOrchestration,
+    shutdownOptions: { surface: services.surface },
+  });
+
   const ctx: BootstrapContext = {
     runtimeBus,
     store,
@@ -743,26 +762,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     commandRegistry,
     systemMessageRouter,
     daemonHost: agentExternalServices.daemon,
-    shutdown: createRuntimeShutdown({
-      get sessionId() { return runtime.sessionId; },
-      get model() { return runtime.model; },
-      get provider() { return runtime.provider; },
-      conversationTitle: () => conversation.title || '',
-      sessionSpineClient: services.sessionSpineClient,
-      takeMemorySpineTimer: () => memorySpineRecheck.take(),
-      bootstrapUnsubs,
-      runtimeUnsubs,
-      forensicsCollector,
-      executionLedger: services.executionLedger,
-      disposeRuntimeGraph: () => services.close(),
-      deferredStartup,
-      agentExternalServices,
-      scheduleManager: services.workflow.scheduleManager,
-      hookDispatcher: services.hookDispatcher,
-      providerRegistry: services.providerRegistry,
-      sessionOrchestration: services.sessionOrchestration,
-      shutdownOptions: { surface: services.surface },
-    }),
+    shutdown: runtimeShutdown,
+    sessionSaved: runtimeShutdown.sessionSaved,
   };
 
   // Wire exit from options if provided; otherwise main.ts binds the operator route.

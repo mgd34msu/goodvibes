@@ -284,7 +284,7 @@ interface TuiHelpModule {
   renderGoodVibesCommandHelp(topic: string, binary?: string): string;
 }
 interface TuiCompletionModule {
-  readonly COMPLETION_COMMANDS: readonly { readonly name: string; readonly aliases: readonly string[]; readonly description: string; readonly subcommands: readonly string[] }[];
+  tuiCompletionTable(binary?: string): { readonly commands: readonly { readonly name: string; readonly aliases: readonly string[]; readonly description: string; readonly subcommands: readonly string[] }[] };
 }
 interface AgentHelpModule extends TuiHelpModule {
   listGoodVibesHelpTopics(): readonly string[];
@@ -306,7 +306,7 @@ function commandBlock(binary: string, name: string, aliases: readonly string[], 
 
 async function cliTerminal(): Promise<string> {
   const help = await loadProductModule<TuiHelpModule>('products/tui/src/cli/help.ts');
-  const { COMPLETION_COMMANDS } = await loadProductModule<TuiCompletionModule>('products/tui/src/cli/completions/generate.ts');
+  const COMPLETION_COMMANDS = (await loadProductModule<TuiCompletionModule>('products/tui/src/cli/completions/generate.ts')).tuiCompletionTable('goodvibes').commands;
   const out = [`### \`goodvibes --help\``, '', fence(help.renderGoodVibesHelp('goodvibes'))];
   // Two command words can share one page (`remote` and `bridge`): print it once, under the first.
   const pages = new Map<string, { name: string; aliases: string[] }>();

@@ -1,3 +1,4 @@
+import { nativeIntakeJournalPath } from '@goodvibes/engine/terminal-shell/native';
 import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
 import type { ConversationMessageSnapshot } from '../core/conversation.ts';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes/engine/terminal-shell/headless-command';
@@ -20,7 +21,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   const credentialObservation = new OwnedSelectionObservation();
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
-  const journalPath = `${shellPaths.resolveUserPath('tui', 'native-work-submission.json')}.intake`;
+  const journalPath = nativeIntakeJournalPath(shellPaths, GOODVIBES_TUI_SURFACE_ROOT);
   const resolveHost = (): NativeHeadlessHost => {
     const credential = resolveNativeHostCredential({ configManager, homeDirectory, observation: credentialObservation });
     return credential.available
@@ -70,7 +71,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               // Called as a method: the provider API's selectModel reads `this`.
               selectModel: (model: string) => {
                 const api = ctx.commandContext.clients?.providerApi;
-                if (!api) throw new Error('No provider API in this run; the saved model id stands.');
+                if (!api) throw new Error('no provider API in this run');
                 return api.selectModel(model);
               },
               canResume: () => !ctx.commandContext.isGenerating?.(),

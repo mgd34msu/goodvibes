@@ -16,6 +16,7 @@
  */
 import { spawnSync } from 'node:child_process';
 
+import { PRODUCT_NAMES } from './product-workspace-contract.ts';
 import { engineSourcesBuild, REPO_ROOT, runTscStep, type TscStep } from './tsc-run.ts';
 
 // Checked against the declarations of the projects they reference. `tsc
@@ -40,8 +41,7 @@ const SCOPED_PROJECTS: Readonly<Record<string, TscStep>> = {
   'type-tests': { label: 'tsc -b packages/engine/tsconfig.type-tests.json', args: ['-b', 'packages/engine/tsconfig.type-tests.json'], emits: true },
   installer: CHECK_ONLY[3]!,
 };
-const PRODUCTS = ['agent', 'tui', 'daemon', 'webui'] as const;
-const PROJECT_NAMES = [...Object.keys(SCOPED_PROJECTS), ...PRODUCTS];
+const PROJECT_NAMES: readonly string[] = [...Object.keys(SCOPED_PROJECTS), ...PRODUCT_NAMES];
 
 interface Selection { readonly project?: string; readonly afterBuild: boolean }
 

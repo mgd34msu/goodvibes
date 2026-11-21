@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import {
   createHostPairingStore,
   HOST_PAIRING_MAX_RECORDS,
@@ -32,7 +33,7 @@ export const {
   removeHostPairing: removeTuiHostPairing,
 } = createHostPairingStore({
   unavailableReason: TUI_HOST_PAIRING_UNAVAILABLE_REASON,
-  surfaceRoot: 'tui',
+  surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   directory: 'connected-host-credentials',
   filename: 'credentials.json',
   strictOrigin: true,

@@ -84,6 +84,12 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
       sseSubscribers.set(input.getSubscriberCount(), { stream_type: 'telemetry' });
       const heartbeat = setInterval(() => {
         if (closed || !checkAccess()) return;
+        // The same rule as events: a client that stopped reading is closed
+        // rather than left to queue heartbeats when no event matches its filter.
+        if ((controller.desiredSize ?? 1) <= 0) {
+          stop();
+          return;
+        }
         controller.enqueue(encoder.encode(': heartbeat\n\n'));
       }, 15_000);
       (heartbeat as unknown as { unref?: () => void }).unref?.();

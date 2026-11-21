@@ -30,7 +30,7 @@ also uploads it as a secret GitHub Gist and prints the link.
 
 `upload` sends something outside this machine, so it always asks first, and it only counts when you type it (a model cannot run it).
 
-The result line says which happened: `(redacted before upload)`, `(uploaded unredacted, as stored)`, `(sensitive data redacted)` or `(not redacted)` for a local file.
+The result line says which happened: `(redacted before upload)` or `(uploaded unredacted, as stored)` when the upload returned a share link; otherwise `(sensitive data redacted)` or `(not redacted)` for the local file, after `(not uploaded)` or `(upload unconfirmed)` when an upload was asked for. `--then copy` adds `(path copied to clipboard)`, or `(could not copy the path)` when the copy failed.
 
 ## Cost summary
 

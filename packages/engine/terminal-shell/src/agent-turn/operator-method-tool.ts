@@ -53,7 +53,7 @@ interface PreparedOperatorRoute {
 
 type WatcherMethodId =
   | 'watchers.create'
-  | 'watchers.patch'
+  | 'watchers.update'
   | 'watchers.run'
   | 'watchers.start'
   | 'watchers.stop'
@@ -87,7 +87,7 @@ const PROFILE_QUOTE_METHOD_IDS = new Set([
 ]);
 const WATCHER_METHOD_IDS = new Set<string>([
   'watchers.create',
-  'watchers.patch',
+  'watchers.update',
   'watchers.run',
   'watchers.start',
   'watchers.stop',
@@ -150,7 +150,7 @@ function watcherSuccessCriteria(methodId: WatcherMethodId): readonly string[] {
 function watcherExpectedOutcome(methodId: WatcherMethodId): JsonRecord {
   const target = methodId === 'watchers.create'
     ? 'created-visible-watcher'
-    : methodId === 'watchers.patch'
+    : methodId === 'watchers.update'
       ? 'updated-visible-watcher'
       : methodId === 'watchers.run'
         ? 'triggered-watcher-run'

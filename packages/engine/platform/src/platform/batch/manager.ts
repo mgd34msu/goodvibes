@@ -293,7 +293,15 @@ class BatchJobFiles {
         }
         // The provider had answered and the daemon stopped before this row
         // said so: it joins its provider batch, and the row is written now.
+        // A queued row passes through submitting, which the submission file
+        // proves it reached, so the move is one the lifecycle table declares.
         const status = submittedStatus(record.providerBatchStatus);
+        const from = job.status === 'queued' ? 'submitting' : job.status;
+        if (!daemonBatchJobLifecycle.can(job.status, 'submitting') || !daemonBatchJobLifecycle.can(from, status)) {
+          keep = true;
+          logger.warn('A batch job row cannot move to the state its provider batch records; the submission file is kept and read again next start', { jobId: id, path, from: job.status, to: status });
+          continue;
+        }
         const timestamp = now();
         const joined: DaemonBatchJob = {
           ...job,
@@ -348,9 +356,17 @@ class BatchJobFiles {
       const result = JSON.parse(readFileSync(this.resultPath(job.id), 'utf-8')) as ChatResponse;
       this.resultsOnDisk.add(job.id);
       return { ...job, result };
-    } catch {
-      logger.warn('Batch job is completed but its result file is missing or unreadable', { jobId: job.id, path: this.resultPath(job.id) });
-      return job;
+    } catch (error) {
+      const path = this.resultPath(job.id);
+      logger.warn('Batch job is completed but its result file is missing or unreadable', { jobId: job.id, path });
+      // Still completed, so nothing resubmits it and pays again; the error says where the answer went.
+      return {
+        ...job,
+        error: {
+          code: 'RESULT_UNREADABLE',
+          message: `The job completed, but its result file ${path} is missing or not readable JSON: ${summarizeError(error)}. The provider batch ${job.providerBatchId ?? '(not recorded)'} may still hold it.`,
+        },
+      };
     }
   }
 
@@ -543,7 +559,10 @@ export class DaemonBatchManager {
    */
   async createJob(input: CreateDaemonBatchJobInput, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<DaemonBatchJob> {
     if (this.getMode() === 'off') {
-      throw new DaemonBatchError('Daemon batch mode is off.', 'BATCH_DISABLED', 409);
+      throw new DaemonBatchError('This daemon does not queue batch work: batch.mode is off.', 'BATCH_DISABLED', 409, {
+        state: 'nothing was queued',
+        next: ['Set batch.mode to explicit or eligible-by-default', 'Or send the request to the live chat route to run it now'],
+      });
     }
     if (input.executionMode === 'live') {
       throw new DaemonBatchError('This endpoint only accepts batch jobs. Use the live daemon route for immediate execution.', 'LIVE_REQUEST_NOT_ACCEPTED', 400);

@@ -211,6 +211,12 @@ interface StoredPeerRecord extends Omit<DistributedPeerRecord, 'tokens'> {
 
 interface StoredPairRequest extends DistributedRuntimePairRequest {
   readonly challengeHash: string;
+  /**
+   * The token the request's verify issued. While it is the peer's active token
+   * and has never authenticated, a verify sent again with the same challenge
+   * before the request's expiry issues a new token in its place.
+   */
+  readonly verifiedTokenId?: string | undefined;
 }
 
 /** Host-owned one-shot authority. Never written into a work record or accepted from a peer. */

@@ -380,8 +380,15 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
   }
   async function continueOwnedResumed(run: ContractRun): Promise<void> {
     const { contract } = run;
-    // A contract that waited queued while it waited on its owner goes back to that wait with its slot.
-    if (contract.status === 'queued' && contract.resumeFrom === 'awaiting-owner') run.moveContract('awaiting-owner');
+    // A contract that waited queued while it waited on its owner goes back to that wait with its slot, while a
+    // question to the owner is still open. One whose questions were all answered meanwhile resumes into its work.
+    if (contract.status === 'queued' && contract.resumeFrom === 'awaiting-owner') {
+      if (contract.escalations.some(item => item.resolvedAt === undefined)) run.moveContract('awaiting-owner');
+      else {
+        contract.resumeFrom = contract.statusBeforeOwner ?? (contract.groups.length > 0 ? 'running' : 'planning');
+        contract.statusBeforeOwner = undefined;
+      }
+    }
     const step = resumeStepOf(contract);
     const from = resumeStatus(contract);
     try {

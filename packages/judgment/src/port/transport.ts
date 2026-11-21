@@ -3,7 +3,7 @@ import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
 import { checkAnswers, markCheckedAnswers, projectAnswers } from './answers.ts';
 import { PreparedBody, toJudgmentError } from './client.ts';
 import { acceptsBackendModel, askBackend, judgmentAdapter, sharedContextForm, validateBackendInput } from './backends.ts';
-import { validateJudgmentConfig, type JudgmentConfig, type JudgmentEndpoint } from './config.ts';
+import { DEFAULT_ATTEMPT_TIMEOUT_MS, validateJudgmentConfig, type JudgmentConfig, type JudgmentEndpoint } from './config.ts';
 import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
 import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes, type SerializedInput } from './limits.ts';
@@ -35,7 +35,7 @@ function unavailableMessage(reason: JudgmentFailureReason | undefined, status: n
     : reason === 'unreachable' ? 'could not be reached'
     : reason === 'no-credential' ? 'has no API key' : undefined;
   if (what === undefined) return DECISION_MODELS_UNAVAILABLE_NOTICE;
-  const next = reason === 'no-credential' ? 'Set "Where the decision model key comes from" and "Decision model key name" in /settings open, then retry.'
+  const next = reason === 'no-credential' ? 'Set "Where the decision model key comes from" and "Decision model key name" in Settings, then retry.'
     : reason === 'unreachable' ? 'Check that the decision endpoint is running and its address is right, then retry.'
     : 'Retry in a moment.';
   return targets === 1 ? `The decision endpoint ${what}. ${next}` : `None of the ${targets} decision targets answered; the last ${what}. ${next}`;
@@ -49,7 +49,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   }));
   const fetch = config.fetch;
   const policy = retryPolicy(config.retry);
-  const timeoutMs = config.timeoutMs || 30_000;
+  const timeoutMs = config.timeoutMs || DEFAULT_ATTEMPT_TIMEOUT_MS;
   const startAttemptTimer = config.attemptTimer ?? ((ms: number, expire: () => void) => {
     const timer = setTimeout(expire, ms);
     return () => clearTimeout(timer);

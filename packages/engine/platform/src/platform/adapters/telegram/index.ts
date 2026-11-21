@@ -1,6 +1,6 @@
 import type { TelegramSourceAccountHandle, TelegramWebhookAccountLease } from '../../channels/telegram/source-account.js';
 import type { SurfaceAdapterContext } from '../types.js';
-import { constantTimeEquals, ingressAnswerResponse, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, ingressAnswerResponse, parseJsonRecord, readTextBodyWithinLimit, surfaceCredentialAbsent } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
 import { gateAnswerText, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -143,7 +143,7 @@ export async function handleTelegramSurfaceWebhook(
       { kind: 'env', name: 'TELEGRAM_WEBHOOK_SECRET' },
     );
     if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('telegram', credential);
-    if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+    if (credential.state === 'absent') return surfaceCredentialAbsent('telegram', credential.setting);
     if (credential.state === 'resolved') {
       if (!constantTimeEquals(credential.value, providedSecret)) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 });

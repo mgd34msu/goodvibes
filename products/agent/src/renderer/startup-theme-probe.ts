@@ -10,16 +10,17 @@
  * regenerated from the terminal's own colours (OSC 10 + OSC 4;0..15, read in
  * the same write on any TTY) and repainted once. The returned handle's
  * filterInput() must gate the stdin data handler so the replies never reach the
- * tokenizer.
+ * tokenizer. A subscription to display.theme and display.themeMode applies
+ * every later change of either through the shared theme-mode-config rules.
  */
 
 import { installBackgroundThemeProbe, type ThemeProbeHandle } from './terminal-bg-probe.ts';
 import { refreshForTerminalPalette, registerThemeRefresh, setActiveThemeMode, setActiveThemeName } from './theme.ts';
-import { resolveConfiguredThemeName } from './theme-mode-config.ts';
+import { resolveConfiguredThemeName, subscribeThemeSettings } from './theme-mode-config.ts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 export interface StartupThemeProbeDeps {
-  readonly configManager: Pick<ConfigManager, 'get'>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'subscribe'>;
   readonly stdout: NodeJS.WriteStream;
   /** The caller's terminal-output guard wrapper (allowTerminalWrite). */
   readonly writeAllowed: (write: () => void) => void;
@@ -40,6 +41,8 @@ export function installStartupThemeProbe(deps: StartupThemeProbeDeps): ThemeProb
   // The configured theme applies before the first paint; the probe below
   // completes the resolution (mode, and the palette for `system`).
   setActiveThemeName(resolveConfiguredThemeName(deps.configManager));
+  // Every later display.theme / display.themeMode change applies live, whoever writes it.
+  subscribeThemeSettings(deps.configManager, () => { deps.resetDiff(); deps.render(); });
   return installBackgroundThemeProbe({
     configManager: deps.configManager,
     applyThemeMode: setActiveThemeMode,

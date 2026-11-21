@@ -168,6 +168,11 @@ export class DelegatedInboundReviewReceiver {
   async markReviewed(ref: NativeInboundSourceRef): Promise<DelegatedReviewRecord | null> {
     const record = await this.get(ref);
     if (!record || record.state !== 'accepted-for-review') return record;
+    // A cancel or another write that ran while this read waited wins: the row as it is now is returned, never written back.
+    if (this.records.get(ref.requestId) !== record || !this.durable.has(ref.requestId)) {
+      const current = this.records.get(ref.requestId);
+      return current && this.durable.has(ref.requestId) ? current : null;
+    }
     const reviewed: DelegatedReviewRecord = Object.freeze({ ...record, state: 'reviewed' });
     this.records.set(ref.requestId, reviewed);
     await this.persist();

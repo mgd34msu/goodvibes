@@ -172,6 +172,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
       // Optional Gist upload: resolve auth token then push content as a secret gist.
       let shareLink: string | undefined;
       let uploadReceipt: string | undefined;
+      let uploadUnconfirmed = false;
       if (upload) {
         // The github service entry's bearer, else GITHUB_TOKEN; resolved once, right before the request.
         const serviceRegistry = ctx.platform.serviceRegistry;
@@ -223,6 +224,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
             if (result.ok) {
               shareLink = result.url;
             } else {
+              uploadUnconfirmed = true;
               ctx.print(`Upload unconfirmed: ${result.error}. GitHub may have received it; check before retrying.`);
             }
           } catch (error) {
@@ -234,9 +236,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
       }
 
       // Copy export path to clipboard if requested.
-      if (doCopy) {
-        copyToClipboard(outputPath);
-      }
+      const copied = doCopy ? copyToClipboard(outputPath) : false;
 
       // Open the exported HTML in the default browser if requested.
       let openResult = '';
@@ -246,11 +246,14 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
 
       // Emit the summary line, with all post-export hints inline.
       const hints: string[] = [];
-      if (upload) hints.push(redact ? '(redacted before upload)' : '(uploaded unredacted, as stored)');
-      else hints.push(redact ? '(sensitive data redacted)' : '(not redacted)');
+      if (shareLink) hints.push(redact ? '(redacted before upload)' : '(uploaded unredacted, as stored)');
+      else {
+        if (upload) hints.push(uploadUnconfirmed ? '(upload unconfirmed)' : '(not uploaded)');
+        hints.push(redact ? '(sensitive data redacted)' : '(not redacted)');
+      }
       if (shareLink) hints.push(`Share link: ${shareLink}`);
       if (uploadReceipt) hints.push(`Upload receipt: ${uploadReceipt}`);
-      if (doCopy) hints.push('(path copied to clipboard)');
+      if (doCopy) hints.push(copied ? '(path copied to clipboard)' : '(could not copy the path)');
       if (doOpen && format === 'html') hints.push(openResult === 'browser open requested' ? '(opened in browser)' : `(not opened: ${openResult})`);
       if (doOpen && format !== 'html') hints.push('(not opened: only an html file opens in the browser)');
 

@@ -43,6 +43,7 @@
 import { logger } from '../utils/logger.js';
 import { resolveSecretInput, type SecretRefResolutionOptions } from '../config/secret-refs.js';
 import type { SecretsManager } from '../config/secrets.js';
+import { channelCredentials } from '../channels/credential-holder.js';
 
 /**
  * The credential an adapter should check against, or the reason it has none.
@@ -54,8 +55,12 @@ import type { SecretsManager } from '../config/secrets.js';
 export type SurfaceCredential =
   /** A usable credential. This is the only shape carrying a value. */
   | { readonly state: 'resolved'; readonly value: string }
-  /** No credential is configured anywhere. The surface is unconfigured. */
-  | { readonly state: 'absent' }
+  /**
+   * No credential is configured anywhere. The surface is unconfigured.
+   * `setting` names where to set one: the first config key among the
+   * sources, else the first environment variable.
+   */
+  | { readonly state: 'absent'; readonly setting: string }
   /**
    * A credential IS configured and could not be produced, a reference whose
    * secret is missing from the store, in a scope this process cannot read, or
@@ -73,7 +78,7 @@ export type SurfaceCredentialSource =
   | { readonly kind: 'env'; readonly name: string };
 
 /** The registry secret slots the adapters ask for. */
-type ServiceSecretFieldName = 'primary' | 'password' | 'authToken' | 'signingSecret' | 'appToken';
+type ServiceSecretFieldName = 'primary' | 'password' | 'authToken' | 'signingSecret' | 'appToken' | 'publicKey';
 
 /**
  * The slice of an adapter context this needs.
@@ -86,16 +91,29 @@ export interface SurfaceCredentialContext {
   readonly configManager: { get(key: string): unknown };
   readonly serviceRegistry?: {
     resolveSecret(service: string, field: ServiceSecretFieldName): Promise<string | null>;
+    /** The registry entry, when the registry can show it: a held credential is keyed by it. */
+    get?(service: string): unknown;
   } | undefined;
   readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
 }
 
-function secretRefOptions(context: SurfaceCredentialContext): SecretRefResolutionOptions {
+function secretRefOptions(context: SurfaceCredentialContext, configKey: string): SecretRefResolutionOptions {
   const secrets = context.secretsManager;
   return {
     resolveLocalSecret: secrets ? (key) => secrets.get(key) : undefined,
     homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
+    configKey,
   };
+}
+
+/** Where a person sets the credential these sources read: the first setting, else the first environment variable. */
+function settingOf(sources: readonly SurfaceCredentialSource[]): string {
+  const config = sources.find((source) => source.kind === 'config');
+  if (config) return config.key;
+  const env = sources.find((source) => source.kind === 'env');
+  if (env) return env.name;
+  const registry = sources.find((source) => source.kind === 'registry');
+  return registry ? `the ${registry.service} service's ${registry.field}` : 'a credential';
 }
 
 /**
@@ -116,7 +134,10 @@ function secretRefOptions(context: SurfaceCredentialContext): SecretRefResolutio
  * trade `acceptRefShapedLiteral` already makes one layer down.
  *
  * Only config values are resolved. Registry values arrive already resolved, and
- * an environment variable is a literal by construction.
+ * an environment variable is a literal by construction. Both config and
+ * registry reads go through the process's credential holder
+ * (channels/credential-holder.ts), the one delivery and status use, so a
+ * password-manager reference is resolved once per process, not per request.
  */
 export async function resolveSurfaceCredential(
   context: SurfaceCredentialContext,
@@ -135,13 +156,17 @@ export async function resolveSurfaceCredential(
       // same fail-open this whole module exists to prevent.
       const raw = String(context.configManager.get(source.key) ?? '');
       if (raw.length === 0) continue;
-      const resolved = await resolveSecretInput(raw, secretRefOptions(context), 'dispatch');
+      const resolved = await channelCredentials.resolve(`config:${source.key}`, raw,
+        () => resolveSecretInput(raw, secretRefOptions(context, source.key), 'dispatch'), context.secretsManager);
       if (resolved !== null && resolved.length > 0) return { state: 'resolved', value: resolved };
       return { state: 'unresolvable', configKey: source.key };
     }
 
     if (source.kind === 'registry') {
-      const value = (await context.serviceRegistry?.resolveSecret(source.service, source.field)) ?? '';
+      const registry = context.serviceRegistry;
+      if (!registry) continue;
+      const value = (await channelCredentials.resolve(`service:${source.service}:${source.field}`, registry.get?.(source.service),
+        () => registry.resolveSecret(source.service, source.field), context.secretsManager)) ?? '';
       if (value.length > 0) return { state: 'resolved', value };
       continue;
     }
@@ -150,7 +175,83 @@ export async function resolveSurfaceCredential(
     if (value.length > 0) return { state: 'resolved', value };
   }
 
-  return { state: 'absent' };
+  return { state: 'absent', setting: settingOf(sources) };
+}
+
+/**
+ * Where each surface's inbound webhook finds the credential it checks callers
+ * against, in the order it looks: the adapter and the channel doctor read the
+ * same list, so the doctor's inbound check describes what the webhook does.
+ * Surfaces whose inbound check is more than one credential (telephony,
+ * Microsoft Teams) or that need none in some modes by design (Telegram's
+ * managed webhook and polling, ntfy) keep their own reads.
+ */
+export const INBOUND_CREDENTIAL_SOURCES = {
+  slack: [
+    { kind: 'registry', service: 'slack', field: 'signingSecret' },
+    { kind: 'config', key: 'surfaces.slack.signingSecret' },
+    { kind: 'env', name: 'SLACK_SIGNING_SECRET' },
+  ],
+  discord: [
+    { kind: 'registry', service: 'discord', field: 'publicKey' },
+    { kind: 'config', key: 'surfaces.discord.publicKey' },
+    { kind: 'env', name: 'DISCORD_PUBLIC_KEY' },
+  ],
+  whatsapp: [
+    { kind: 'config', key: 'surfaces.whatsapp.signingSecret' },
+    { kind: 'registry', service: 'whatsapp', field: 'signingSecret' },
+    { kind: 'env', name: 'WHATSAPP_SIGNING_SECRET' },
+    { kind: 'env', name: 'WHATSAPP_BRIDGE_TOKEN' },
+  ],
+  'google-chat': [
+    { kind: 'config', key: 'surfaces.googleChat.verificationToken' },
+    { kind: 'registry', service: 'google-chat', field: 'signingSecret' },
+    { kind: 'env', name: 'GOOGLE_CHAT_VERIFICATION_TOKEN' },
+  ],
+  signal: [
+    { kind: 'config', key: 'surfaces.signal.token' },
+    { kind: 'registry', service: 'signal', field: 'primary' },
+    { kind: 'env', name: 'SIGNAL_BRIDGE_TOKEN' },
+  ],
+  imessage: [
+    { kind: 'config', key: 'surfaces.imessage.token' },
+    { kind: 'registry', service: 'imessage', field: 'primary' },
+    { kind: 'env', name: 'IMESSAGE_BRIDGE_TOKEN' },
+  ],
+  bluebubbles: [
+    { kind: 'config', key: 'surfaces.bluebubbles.password' },
+    { kind: 'registry', service: 'bluebubbles', field: 'password' },
+    { kind: 'env', name: 'BLUEBUBBLES_PASSWORD' },
+  ],
+  // A secret of its own for inbound calls comes first, so the account's
+  // delivery credential is not the shared secret a caller must hold. The
+  // delivery credential stays as the fallback for a surface that has not set one.
+  mattermost: [
+    { kind: 'config', key: 'surfaces.mattermost.webhookSecret' },
+    { kind: 'registry', service: 'mattermost', field: 'signingSecret' },
+    { kind: 'env', name: 'MATTERMOST_WEBHOOK_SECRET' },
+    { kind: 'config', key: 'surfaces.mattermost.botToken' },
+    { kind: 'registry', service: 'mattermost', field: 'primary' },
+    { kind: 'env', name: 'MATTERMOST_BOT_TOKEN' },
+  ],
+  matrix: [
+    { kind: 'config', key: 'surfaces.matrix.webhookSecret' },
+    { kind: 'registry', service: 'matrix', field: 'signingSecret' },
+    { kind: 'env', name: 'MATRIX_WEBHOOK_SECRET' },
+    { kind: 'config', key: 'surfaces.matrix.accessToken' },
+    { kind: 'registry', service: 'matrix', field: 'primary' },
+    { kind: 'env', name: 'MATRIX_ACCESS_TOKEN' },
+  ],
+} as const satisfies Record<string, readonly SurfaceCredentialSource[]>;
+
+export type InboundCredentialSurface = keyof typeof INBOUND_CREDENTIAL_SOURCES;
+
+/** The credential `surface`'s inbound webhook checks callers against. */
+export function resolveInboundCredential(
+  context: SurfaceCredentialContext,
+  surface: InboundCredentialSurface,
+): Promise<SurfaceCredential> {
+  return resolveSurfaceCredential(context, ...INBOUND_CREDENTIAL_SOURCES[surface]);
 }
 
 /**

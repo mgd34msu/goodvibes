@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 
 export interface CliExternalRuntimeInspectionOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
@@ -29,14 +29,9 @@ export interface CliExternalRuntimeSnapshot {
   readonly error: string | null;
 }
 
-function resolveBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
-  // `doctor` prints this string. It used to echo the bind host verbatim, so a
-  // daemon bound to 0.0.0.0 reported `baseUrl: http://0.0.0.0:3421`, an
-  // address the probe below then failed to reach.
-  return connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
-  );
+/** The Agent's one connected-host address (connected-host-dial.ts); `doctor` prints its origin. */
+function resolveAddress(configManager: Pick<ConfigManager, 'get'>) {
+  return resolveConnectedHostAddress(configManager);
 }
 
 async function fetchJson(
@@ -69,10 +64,21 @@ async function fetchJson(
 export async function inspectCliExternalRuntime(
   options: CliExternalRuntimeInspectionOptions,
 ): Promise<CliExternalRuntimeSnapshot> {
-  const baseUrl = resolveBaseUrl(options.configManager);
+  const { baseUrl, refusal } = resolveAddress(options.configManager);
   const token = readConnectedHostOperatorToken(options.homeDirectory, baseUrl);
   const timeoutMs = options.timeoutMs ?? 1500;
   const route = '/api/goodvibes-agent/knowledge/status' as const;
+  if (refusal) {
+    return {
+      baseUrl,
+      statusCode: null,
+      reachable: false,
+      compatible: false,
+      operatorToken: { present: Boolean(token.token), path: token.path },
+      agentKnowledge: { route, ready: false, kind: 'connected_host_unavailable', statusCode: null, probed: false },
+      error: refusal,
+    };
+  }
 
   try {
     const status = await fetchJson(`${baseUrl}/status`, token.token, timeoutMs);

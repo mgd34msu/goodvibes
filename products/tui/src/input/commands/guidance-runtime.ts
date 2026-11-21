@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { randomUUID } from 'node:crypto';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
@@ -11,7 +12,7 @@ import { requireReadModels, requireSessionMemoryStore, requireShellPaths } from 
 
 /** Where this app keeps its guidance dismissals. */
 function guidanceOptionsFor(ctx: CommandContext): GuidancePersistenceOptions {
-  return { homeDirectory: requireShellPaths(ctx).homeDirectory, surfaceRoot: 'tui' };
+  return { homeDirectory: requireShellPaths(ctx).homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT };
 }
 
 /**

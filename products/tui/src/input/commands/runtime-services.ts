@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import {
   createCommandServiceAccessors,
   createCommandPathAccessors,
@@ -50,7 +51,7 @@ export const {
   requireModeManager,
   requireAutomationManager,
 } = createCommandServiceAccessors<CommandContext>();
-export const { requireEcosystemCatalogPaths } = createCommandPathAccessors('tui');
+export const { requireEcosystemCatalogPaths } = createCommandPathAccessors(GOODVIBES_TUI_SURFACE_ROOT);
 import type { CommandContext } from '../command-registry.ts';
 import { compactSmallWindow, getLastCompactionEvent, NOTHING_TO_COMPACT_YET, NothingToCompactError, recordSmallWindowCompaction, SMALL_WINDOW_KEEP_RECENT, SMALL_WINDOW_THRESHOLD } from '@goodvibes/engine/platform/platform/core';
 import type { CompactionContext, CompactionEvent } from '@goodvibes/engine/platform/platform/core';

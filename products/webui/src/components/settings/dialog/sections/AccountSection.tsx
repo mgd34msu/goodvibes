@@ -7,12 +7,14 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  GOODVIBES_BASE_URL,
   getCurrentAuth,
   invokeMethod,
   login,
   setExplicitAuthToken,
-  signOut,
 } from '../../../../lib/goodvibes';
+import { isDifferentOrigin, parseScannedPairing, type ScannedPairing } from '../../../../lib/pairing-qr';
+import { useSignOut } from '../../../../hooks/useSignOut';
 import { queryKeys } from '../../../../lib/queries';
 import { compactJson } from '../../../../lib/object';
 import { errorDebugValue, formatError } from '../../../../lib/errors';
@@ -26,6 +28,27 @@ import { MailAccountSettings } from '../../MailAccountSettings';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { ReadableValue, SettingsBlock, ShowDetails } from '../parts';
 import { groupsForSection } from '../sections';
+
+/**
+ * The sign-in code in what was pasted: `goodvibes pair` prints a link carrying it, and a
+ * QR's JSON payload can be pasted too, so the text is read as a pairing payload first and
+ * is a bare code only when it is not one. A link for another daemon is refused by name:
+ * a credential goes only to the daemon it was issued for.
+ */
+function signInCodeFromPaste(text: string): string {
+  let parsed: ScannedPairing;
+  try {
+    parsed = parseScannedPairing(text);
+  } catch {
+    return text;
+  }
+  if (parsed.kind === 'relay') throw new Error('That is a relay code, not a sign-in code');
+  if (parsed.kind === 'password') throw new Error('That carries a username and password; enter them under Sign in above');
+  if (parsed.url && isDifferentOrigin(parsed.url, GOODVIBES_BASE_URL)) {
+    throw new Error(`That link is for GoodVibes at ${new URL(parsed.url).origin}, and this page is at ${GOODVIBES_BASE_URL}; it was not sent here. Open it there instead`);
+  }
+  return parsed.token;
+}
 
 export function AccountSection() {
   const queryClient = useQueryClient();
@@ -44,20 +67,21 @@ export function AccountSection() {
       await queryClient.invalidateQueries();
     },
   });
+  const { signOut } = useSignOut();
+  const [signingOut, setSigningOut] = useState(false);
   const tokenMutation = useMutation({
-    mutationFn: () => setExplicitAuthToken(token),
+    mutationFn: () => setExplicitAuthToken(signInCodeFromPaste(token.trim())),
     onSuccess: async () => {
       setToken('');
       await queryClient.invalidateQueries();
     },
   });
-  // Clearing the stored credential is a sign-out: the daemon session it held is ended too.
-  const clearTokenMutation = useMutation({
-    mutationFn: signOut,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries();
-    },
-  });
+  // The app's one sign-out (hooks/useSignOut): it ends the daemon session and the relay
+  // pairing, and the signed-out gate that replaces this dialog shows a failure with its retry.
+  function handleSignOut() {
+    setSigningOut(true);
+    void signOut().finally(() => setSigningOut(false));
+  }
 
   const loginDiagnostics = {
     route: 'POST /api/browser-session (over the relay: POST /login, kept in memory)',
@@ -141,11 +165,11 @@ export function AccountSection() {
               onChange={(event) => setToken(event.target.value)}
               type="password"
               autoComplete="off"
-              placeholder="Paste token deliberately"
+              placeholder="Paste a token, or the link or code goodvibes pair prints"
             />
           </Field>
           <div className="settings-actions">
-            <Button disabled={clearTokenMutation.isPending} onClick={() => clearTokenMutation.mutate()}>
+            <Button disabled={signingOut} onClick={handleSignOut}>
               Sign out
             </Button>
             <Button type="submit" disabled={tokenMutation.isPending || !token.trim()}>
@@ -154,11 +178,6 @@ export function AccountSection() {
           </div>
         </form>
         {tokenMutation.error && <div className="banner warning">{formatError(tokenMutation.error)}</div>}
-        {clearTokenMutation.data && !clearTokenMutation.data.endedOnDaemon && (
-          <div className="banner warning" role="alert">
-            Cleared here; the daemon session could not be ended: {clearTokenMutation.data.error ?? 'no answer'}.
-          </div>
-        )}
       </SettingsBlock>
 
       <StepUpSettings />

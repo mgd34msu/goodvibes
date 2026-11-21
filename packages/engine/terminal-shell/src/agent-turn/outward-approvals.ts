@@ -94,17 +94,30 @@ function live(): PendingOutwardAction[] {
   return pending;
 }
 
+/** The same deed: one action with the same content, compared key by key in sorted order. */
+function sameDeed(entry: PendingOutwardAction, action: string, content: PendingOutwardAction['content']): boolean {
+  return entry.action === action && contentKey(entry.content) === contentKey(content);
+}
+
+function contentKey(content: PendingOutwardAction['content']): string {
+  return JSON.stringify(Object.keys(content).sort().filter((key) => content[key] !== undefined).map((key) => [key, content[key]]));
+}
+
 /**
  * Remember what was just refused.
  *
  * The owner approves an action he has been SHOWN, so the thing he approves has
  * to be recorded at the moment of refusal, otherwise `/google approve` would
  * be approving whatever came next, which is a blank cheque. Several refusals
- * in one turn each stay approvable.
+ * in one turn each stay approvable; a refusal of the same action with the same
+ * content as one already waiting refreshes that entry (keeping its number)
+ * instead of adding a second, so one approval can never send it twice.
  */
 export function rememberRefusedOutwardAction(input: Omit<PendingOutwardAction, 'at' | 'id'>): PendingOutwardAction {
-  const entry: PendingOutwardAction = { ...input, id: nextPendingId++, at: Date.now() };
-  pending = [...live(), entry].slice(-MAX_PENDING);
+  const entries = live();
+  const same = entries.find((entry) => sameDeed(entry, input.action, input.content));
+  const entry: PendingOutwardAction = { ...input, id: same?.id ?? nextPendingId++, at: Date.now() };
+  pending = [...entries.filter((existing) => existing !== same), entry].slice(-MAX_PENDING);
   return entry;
 }
 
@@ -118,7 +131,8 @@ export function takeRefusedOutwardAction(id?: number): PendingOutwardAction | nu
   const entries = live();
   const held = id === undefined ? entries.at(-1) : entries.find((entry) => entry.id === id);
   if (!held) return null;
-  pending = entries.filter((entry) => entry !== held);
+  // The approval covers this send: any other waiting entry for the same deed goes with it.
+  pending = entries.filter((entry) => !sameDeed(entry, held.action, held.content));
   return held;
 }
 

@@ -5,9 +5,6 @@ import {
   projectFeedContextStable,
   projectFeedContextClosures,
 } from '@goodvibes/engine/terminal-shell/input-feed-context';
-import '@goodvibes/engine/terminal-shell/composer-controller';
-import 'node:fs';
-import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
 import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
 import { resolveFooterTarget, type FooterTarget } from '../renderer/footer-targets.ts';
@@ -66,7 +63,6 @@ import {
   handleCtrlC,
   registerPaste,
 } from './handler-content-actions.ts';
-import './handler-feed-routes.ts';
 import { saveUndoState } from './handler-prompt-buffer.ts';
 import { createHandlerModals, ownModal, type HandlerModals } from './handler-modal-stack.ts';
 import { type ConcealedInputRequest } from './concealed-input.ts';
@@ -77,9 +73,6 @@ import {
   submitLinePromptForHandler,
   cancelLinePromptForHandler,
 } from './handler-line-prompts.ts';
-import './handler-modal-token-routes.ts';
-import './handler-command-route.ts';
-import './handler-shortcuts.ts';
 import { pasteImageFromClipboard, pasteFromClipboard } from '../utils/clipboard.ts';
 import type { ClipboardPasteSource } from './handler-content-actions.ts';
 import { feedInputTokens } from './handler-feed.ts';

@@ -11,7 +11,7 @@ import { harnessCatalogInvocationAuthority } from '@goodvibes/engine/terminal-sh
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
 import { DETACHED_LOG_CAP_BYTES, DETACHED_LOG_KEEP_BYTES, detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
-  type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
+  type DetachedProcessListing, type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
 import { operatorContractMethods, type OperatorContractMethodEntry } from '@goodvibes/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { BackgroundProcess, ProcessManager } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -510,7 +510,8 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const entries = selected.matches;
   // One read of the detached records for the whole listing; every row and the earlier-session list use it.
-  const detachedRecords = context.workspace.shellPaths ? listDetachedProcesses(context.workspace.shellPaths) : [];
+  const detachedListing: DetachedProcessListing = context.workspace.shellPaths ? listDetachedProcesses(context.workspace.shellPaths) : { records: [] };
+  const detachedRecords = detachedListing.records;
   const detached = earlierDetached(detachedRecords, manager);
   const all = selected.all;
   const limit = readLimit(args.limit, 100);
@@ -533,6 +534,9 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
     },
     processes,
     ...(detached.length > 0 ? { detachedFromEarlierSessions: detached.map(record => describeDetachedRecord(record, args.includeParameters === true)) } : {}),
+    ...(detachedListing.unreadable !== undefined
+      ? { detachedFromEarlierSessionsUnreadable: `The detached-process records could not be read (${detachedListing.unreadable}); processes from earlier sessions are not listed.` }
+      : {}),
     judgments: selected.judgments,
     returned: processes.length,
     total: all.length,
@@ -729,9 +733,9 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       const { lifetime, killOnTimeout, result } = await spawnBackgroundProcess(manager, args, command, cwd, timeoutMs,
         { signal: options.signal, assertCurrent: () => { assertPrivilegeCurrent(); assertEffect(); } }, logPath);
       const cwdLabel = workspaceRelativeLabel(context, cwd);
-      const recorded = lifetime === 'detached' && result.process_id && result.pid && logPath
+      const record = lifetime === 'detached' && result.process_id && result.pid && logPath
         ? recordDetachedProcess(shellPaths, { processId: result.process_id, pid: result.pid, command, cwd: cwdLabel, startedAt: new Date().toISOString(), logPath })
-        : false;
+        : undefined;
       return {
         status: 'started',
         done: true,
@@ -739,9 +743,9 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
         killOnTimeout,
         lifetimeBehavior: lifetime !== 'detached'
           ? 'Ended when the Agent closes.'
-          : recorded
+          : record?.recorded
             ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')} (${DETACHED_LOG_LIMIT_NOTE}). Later sessions list it under process action:"list" and can stop it with process action:"kill"; the log is removed when it is stopped or found ended.`
-            : `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Its start time could not be read (it may already have ended), so later sessions will not list it: stop it with process action:"kill" in this session. The log is removed after a day without output.`,
+            : `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. It was not recorded for later sessions (${record?.recorded === false ? record.reason : 'no process id was returned'}), so later sessions will not list it: stop it with process action:"kill" in this session. The log is removed after a day without output.`,
         timeoutBehavior: timeoutMs === 0 ? 'No automatic deadline; stop it explicitly with process action:"kill".' : killOnTimeout
           ? `SIGTERM then SIGKILL after ${timeoutMs}ms.`
           : `Left running past ${timeoutMs}ms; stop it explicitly with process action:"kill".`,

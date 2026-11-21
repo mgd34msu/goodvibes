@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
@@ -392,9 +393,9 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
             return;
           }
           const fileWrites: Array<{ path: string; body: unknown }> = [];
-          if (bundle.services) fileWrites.push({ path: getShellPaths().resolveUserPath('tui', 'services.json'), body: bundle.services });
-          if (bundle.ecosystem?.plugins) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'plugins.json'), body: bundle.ecosystem.plugins });
-          if (bundle.ecosystem?.skills) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'skills.json'), body: bundle.ecosystem.skills });
+          if (bundle.services) fileWrites.push({ path: getShellPaths().resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'services.json'), body: bundle.services });
+          if (bundle.ecosystem?.plugins) fileWrites.push({ path: getShellPaths().resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem', 'plugins.json'), body: bundle.ecosystem.plugins });
+          if (bundle.ecosystem?.skills) fileWrites.push({ path: getShellPaths().resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem', 'skills.json'), body: bundle.ecosystem.skills });
           // Remember each file's previous contents so a failed write can put every replaced file back, not only the settings.
           const replaced: Array<{ path: string; previous: string | null }> = [];
           try {

@@ -57,17 +57,6 @@ import {
   type SecretScope,
 } from '@goodvibes/engine/platform/platform/config';
 
-/** The config keys the connector reads. clientId is not a secret (RFC 8252); the
- *  secret ref is secret-backed and listed in SECRET_CONFIG_KEYS. */
-export const CALENDAR_OAUTH_CLIENT_ID_KEYS: Record<CalendarProviderId, string> = {
-  google: 'calendar.google.clientId',
-  microsoft: 'calendar.microsoft.clientId',
-};
-export const CALENDAR_OAUTH_CLIENT_SECRET_KEYS: Record<CalendarProviderId, string> = {
-  google: 'calendar.google.clientSecretRef',
-  microsoft: 'calendar.microsoft.clientSecretRef',
-};
-
 /** The narrow config-manager slice this service reads. */
 export interface CalendarConfigReader {
   get(key: string): unknown;
@@ -269,8 +258,11 @@ export class CalendarOAuthService {
 
   /** Read the client id (config) and client secret (secret store), when set. */
   async resolveOverrides(provider: CalendarProviderId): Promise<OAuthClientOverrides> {
-    const clientId = this.readString(CALENDAR_OAUTH_CLIENT_ID_KEYS[provider]);
-    const clientSecret = await this.resolveSecretBacked(CALENDAR_OAUTH_CLIENT_SECRET_KEYS[provider]);
+    // The keys are the profile's: clientId is not a secret (RFC 8252); the
+    // secret ref is secret-backed and listed in SECRET_CONFIG_KEYS.
+    const profile = providerProfile(provider);
+    const clientId = this.readString(profile.clientIdConfigKey);
+    const clientSecret = await this.resolveSecretBacked(profile.clientSecretRefConfigKey);
     const overrides: OAuthClientOverrides = {
       ...(clientId ? { clientId } : {}),
       ...(clientSecret ? { clientSecret } : {}),

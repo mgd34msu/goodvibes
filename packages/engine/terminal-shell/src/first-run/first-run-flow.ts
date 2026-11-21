@@ -16,7 +16,7 @@ import type { ConfigManager, OAuthProviderConfig, SecretsManager, SubscriptionMa
 import { createOAuthLocalListener, getSubscriptionProviderConfig } from '@goodvibes/engine/platform/platform/config';
 import { resolveDefaultModelReadiness, type ModelDefinition, type ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import { localScanState } from '@goodvibes/engine/platform/platform/discovery';
-import { openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { logger, openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SurfaceLayer } from '../renderer/surface-kit.js';
@@ -317,20 +317,34 @@ export class FirstRunModal implements SurfaceModal {
       step.close = () => active?.close();
       if (step.waiting) this.startSpinner();
       if (step.waiting && active) {
-        void active.waitForCode().then(async (callback) => {
-          if (this.step !== step) return;
-          await manager.completeOAuthLogin(providerId, config, callback.code);
-          active.close();
-          const failed = await this.finishWithProvider(providerId, 'signed in');
-          if (failed) { step.error = failed; this.deps.renderRequest(); }
-        }).catch(() => {
+        const stopWaiting = (message: string): void => {
           if (this.step !== step || this.finished) return;
           active.close();
           step.waiting = false;
           step.needsCode = true;
-          step.error = 'Sign-in was cancelled in the browser. Press ⏎ to start again.';
+          step.error = message;
           this.stopSpinner();
           this.deps.renderRequest();
+        };
+        void active.waitForCode().then(async (callback) => {
+          if (this.step !== step) return;
+          try {
+            await manager.completeOAuthLogin(providerId, config, callback.code);
+            active.close();
+            const failed = await this.finishWithProvider(providerId, 'signed in');
+            if (failed) { step.error = failed; this.deps.renderRequest(); }
+          } catch (error) {
+            const reason = summarizeError(error).replace(/[.\s]+$/, '');
+            logger.warn('[first-run] browser sign-in came back but could not be completed', { provider: providerId, error: reason });
+            stopWaiting(`The sign-in came back but ${step.offer.name} did not complete it: ${reason}. Press ⏎ to start again.`);
+          }
+        }, (error: unknown) => {
+          const reason = summarizeError(error).replace(/[.\s]+$/, '');
+          if (this.step !== step || this.finished) return;
+          logger.warn('[first-run] browser sign-in did not return a code', { provider: providerId, error: reason });
+          const refused = /^OAuth callback returned error: (.*)$/s.exec(reason);
+          if (refused) stopWaiting(`${step.offer.name} refused the sign-in: ${refused[1]}. Press ⏎ to start again.`);
+          else stopWaiting(`The sign-in could not wait for the browser: ${reason}. Press ⏎ to start again.`);
         });
       } else {
         listener?.close();

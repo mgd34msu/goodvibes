@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { describeCardTransportRefusal, isLivePaymentOperation, canReconcilePaymentOperation, mayCrossWithCardDetails, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
-import { client as platformClient } from '../../lib/goodvibes';
-import { errorCode, formatError } from '../../lib/errors';
+import { client as platformClient, SAME_ADVANCE_APPROVAL_AGAIN } from '../../lib/goodvibes';
+import { formatError, isDefiniteRefusal } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
 import { Button } from '../ui/Button';
@@ -131,10 +131,13 @@ export function PaymentWindows({ currency = 'USD' }: { readonly currency?: strin
       setAdvance({ merchantDomain: '', item: '', amount: '' });
     } catch (error) {
       if (controller.signal.aborted) return;
-      // An answer that could not be confirmed is not a refusal: the approval may exist.
-      setMessage(errorCode(error) === 'OUTCOME_UNKNOWN'
-        ? `It may have been approved: ${formatError(error)}`
-        : `Nothing was approved: ${formatError(error)}`);
+      // Only the daemon's own refusal means nothing was approved; a lost or unreadable
+      // answer may have recorded one, which approving the same three again returns.
+      // The facade's own unconfirmed-answer error already says so.
+      const reason = formatError(error);
+      if (isDefiniteRefusal(error)) setMessage(`Nothing was approved: ${reason}`);
+      else if (reason.includes(SAME_ADVANCE_APPROVAL_AGAIN)) setMessage(`${reason} Refresh purchases to see it.`);
+      else setMessage(`It may have been approved: ${reason}. ${SAME_ADVANCE_APPROVAL_AGAIN}; refresh purchases to see it.`);
     } finally {
       if (active.current === controller) active.current = null;
       if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: QUERY_KEY }); }

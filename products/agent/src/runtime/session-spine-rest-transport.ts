@@ -23,7 +23,7 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { formatRefusal } from '@goodvibes/engine/errors';
 import { readConnectedHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { isThisMachineHost, resolveDaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { bearerFor } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
@@ -37,8 +37,8 @@ export interface SessionRegistrationConnection {
 }
 
 /**
- * Builds a per-op connection resolver: the connected host (controlPlane.host
- * and port, default 127.0.0.1:3421) and the credential bound to that origin by
+ * Builds a per-op connection resolver: the connected host (the Agent's one
+ * connected-host address, connected-host-dial.ts) and the credential bound to that origin by
  * the one daemon target resolver: GOODVIBES_CONNECTED_HOST_TOKEN, this Agent's
  * pairing with that host, or this machine's daemon token only when the host
  * is this machine. With `daemon.connectedHost.enabled` off, or no credential
@@ -50,13 +50,11 @@ export function createSpineConnectionResolver(
   homeDirectory: string,
 ): () => SessionRegistrationConnection {
   return () => {
-    const baseUrl = connectedHostBaseUrl(
-      configManager.get('controlPlane.host'),
-      configManager.get('controlPlane.port'),
-    );
+    const { baseUrl, refusal } = resolveConnectedHostAddress(configManager);
     if (configManager.get('daemon.connectedHost.enabled') === false) {
       return { baseUrl, token: null, unavailable: 'this surface is set not to dial a daemon (daemon.connectedHost.enabled is false)' };
     }
+    if (refusal) return { baseUrl, token: null, unavailable: refusal };
     const host = parseDaemonOrigin(baseUrl)?.host ?? '';
     const environment = process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim()
       || (isThisMachineHost(host) ? process.env.GOODVIBES_DAEMON_TOKEN?.trim() : undefined);

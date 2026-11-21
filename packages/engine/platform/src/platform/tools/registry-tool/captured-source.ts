@@ -7,7 +7,7 @@ import {
 } from '../../contract/input-authority.js';
 import { CONTRACT_INPUT_EXCLUSIONS } from '../../contract/input-snapshot.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
-import type { RegistryToolSource } from './source.js';
+import { liveRegistryScope, type RegistryToolSource } from './source.js';
 
 export interface CapturedRegistryContext { readonly kind: 'captured-registry-context' }
 export interface CapturedRegistryBinding {
@@ -55,13 +55,9 @@ export async function admitCapturedRegistryContext(
   const workingDirectory = realRoot(contractInputAuthoritySourceRoot(binding.authority));
   const filter = binding.readAccessFilter;
   if (!filter) throw new Error('registry input requires original-owner read authorization');
-  const owners = [...new Set([workingDirectory, ...(homeDirectory === undefined ? [] : [homeDirectory])])];
   const surfaceRoot = roots.surfaceRoot?.trim() ? roots.surfaceRoot : undefined;
-  const declared = owners.flatMap((root) => [
-    join(root, '.goodvibes', 'skills'),
-    ...(surfaceRoot === undefined ? [] : [join(root, '.goodvibes', surfaceRoot, 'skills')]),
-    join(root, '.goodvibes', 'agents'),
-  ]);
+  // The same directories a live session reads, from the one list of skill and agent roots.
+  const declared = [...new Set(liveRegistryScope({ workingDirectory, homeDirectory, surfaceRoot }))];
   const files = new Map<string, CapturedFile>();
   const directories = new Map<string, readonly string[]>();
   const directoryIdentities = new Map<string, string>();

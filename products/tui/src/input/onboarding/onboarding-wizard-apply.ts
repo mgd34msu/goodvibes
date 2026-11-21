@@ -18,7 +18,7 @@ import {
   getExternalSurfaceAutoStartFieldId,
   isExternalSurfaceSelectedByDefault,
 } from './onboarding-wizard-external-surfaces.ts';
-import { adoptedDaemonScheme, getDaemonSource } from './onboarding-wizard-network-adopt.ts';
+import { adoptedDaemonScheme, DAEMON_SOURCE_FIELD_ID, getDaemonSource } from './onboarding-wizard-network-adopt.ts';
 import { applyFeatureUnitOperations, dropUnchangedConfigOperations } from './onboarding-feature-units.ts';
 import { adoptedDaemonUrl, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isSecretReferenceValue } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets, providerKeyFieldId } from '../../runtime/onboarding/provider-key-capture.ts';
@@ -114,7 +114,10 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // `goodvibes-daemon install-service`) and keeps running for Local TUI Only,
     // so that choice leaves the service settings as they are; a server-backed
     // choice needs the service, so it turns them on.
-    if (hasServers) {
+    // Pointing this terminal at a daemon elsewhere is a client-side choice: it
+    // leaves this machine's service, control plane and binds as they are.
+    const exposureWrites = controller.topic !== 'connect-daemon';
+    if (hasServers && exposureWrites) {
       setConfig('service.enabled', true);
       setConfig('service.autostart', true);
       setConfig('service.restartOnFailure', true);
@@ -127,22 +130,27 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // daemon.enabled untouched and lets the platform's own default-true (or an existing
     // explicit user override) govern. (The deprecated danger.daemon alias this
     // comment used to also name was later removed.)
-    setConfig('controlPlane.enabled', hasServers);
-    setConfig('danger.httpListener', httpListener);
-    setConfig('web.enabled', browserAccess);
+    if (exposureWrites) {
+      setConfig('controlPlane.enabled', hasServers);
+      setConfig('danger.httpListener', httpListener);
+      setConfig('web.enabled', browserAccess);
+    }
 
     // Which daemon this terminal dials is its own setting, apart from how a daemon on
     // this machine binds: connecting to an existing one points there, starting one here clears it.
-    setConfig('daemon.connectedHost.url', getDaemonSource(controller) === 'adopt' ? readAdoptedDaemonUrl(controller) : '');
+    // Only the form that shows the choice writes it.
+    if (shownFieldIds.has(DAEMON_SOURCE_FIELD_ID)) {
+      setConfig('daemon.connectedHost.url', getDaemonSource(controller) === 'adopt' ? readAdoptedDaemonUrl(controller) : '');
+    }
 
-    if (hasServers) {
+    if (exposureWrites && hasServers) {
       addNetworkOperations(controller, operations, customNetwork, {
         controlPlane: hasServers,
         controlPlaneRemote,
         httpListener: httpListenerNetworkFields,
         web: browserAccess,
       });
-    } else {
+    } else if (exposureWrites) {
       setConfig('controlPlane.hostMode', 'local');
       setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
       setConfig('httpListener.hostMode', 'local');

@@ -301,6 +301,8 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
         return;
       }
       framed = joined;
+    } else {
+      joiners.get(activeChannel)?.interrupt();
     }
     const header = framed.header;
     if (header.kind === 'response') {

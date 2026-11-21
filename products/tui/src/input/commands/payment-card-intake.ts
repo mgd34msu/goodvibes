@@ -52,8 +52,6 @@ import { bindCredential, daemonTarget } from '@goodvibes/engine/platform/platfor
 import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
-import '@goodvibes/engine/platform/platform/payments';
-import '../payments-config.ts';
 
 /**
  * This command is wired only into the TUI's own composer command registry,

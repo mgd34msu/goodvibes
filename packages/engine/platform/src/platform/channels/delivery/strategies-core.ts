@@ -11,8 +11,8 @@ import { DeliveryError, DiscordIntegration, HomeAssistantIntegration, NtfyIntegr
 import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import type { HostResolver } from '../../runtime/network/destination.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
-import { resolveHomeAssistantAccessToken, resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
-import { readNtfyTopics } from '../builtin/surface-secrets.js';
+import { resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
+import { readNtfyTopics, requireSurfaceSecret } from '../builtin/surface-secrets.js';
 import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from './types.js';
 import {
   appendAttachmentSummary,
@@ -24,7 +24,6 @@ import {
   firstNonEmpty,
   fitForSurface,
   requireOkResponse,
-  resolveDeliveryCredential,
   resolveAttachments,
   resolveChannelDeliverySurfaceKind,
   success,
@@ -86,6 +85,10 @@ export function createWebhookDeliveryStrategy(
     supportsGuardedDelivery: true,
     supportsPublication: true,
     supportsAttachments: true,
+    // The announcement identity goes out as Idempotency-Key, so the receiver drops a repeat.
+    repeatSafe(request) {
+      return Boolean(request.announces);
+    },
     canHandle(request) {
       return request.target.kind === 'webhook' || resolveChannelDeliverySurfaceKind(request.target) === 'webhook';
     },
@@ -199,14 +202,11 @@ export function createSlackDeliveryStrategy(
         String(configManager.get('surfaces.slack.defaultChannel') ?? ''),
       );
       if (channelId) {
-        const botToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-          serviceName: 'slack', serviceField: 'primary', configKey: 'surfaces.slack.botToken',
-          environmentValue: process.env.SLACK_BOT_TOKEN,
-        });
+        const botToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'slack', 'primary') ?? undefined;
         await new SlackIntegration('', botToken ?? '').postMessage(channelId, bodyWithAttachments, undefined, request);
         return success(channelId);
       }
-      const webhookUrl = await serviceRegistry.resolveSecret('slack', 'webhookUrl') ?? process.env.SLACK_WEBHOOK_URL;
+      const webhookUrl = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'slack', 'webhookUrl');
       await new SlackIntegration(webhookUrl ?? '', '').postWebhook(bodyWithAttachments, undefined, undefined, request);
       return success();
     },
@@ -226,6 +226,23 @@ export function createDiscordDeliveryStrategy(
     supportsGuardedDelivery: true,
     supportsPublication: true,
     supportsAttachments: true,
+    /**
+     * A bot post carries the announcement as its nonce and an interaction edit
+     * replaces the same message, so Discord drops a repeat of either; a post
+     * through a webhook carries no identity and is not repeat-safe.
+     */
+    repeatSafe(request) {
+      if (request.target.address?.startsWith('https://')) return false;
+      const channelId = firstNonEmpty(
+        request.target.address,
+        request.binding?.channelId,
+        request.binding?.externalId,
+        String(configManager.get('surfaces.discord.defaultChannelId') ?? ''),
+      );
+      if (channelId) return Boolean(request.announces);
+      return typeof request.binding?.metadata.applicationId === 'string'
+        && typeof request.binding?.metadata.interactionToken === 'string';
+    },
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'discord';
     },
@@ -277,14 +294,11 @@ export function createDiscordDeliveryStrategy(
         String(configManager.get('surfaces.discord.defaultChannelId') ?? ''),
       );
       if (channelId) {
-        const botToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-          serviceName: 'discord', serviceField: 'primary', configKey: 'surfaces.discord.botToken',
-          environmentValue: process.env.DISCORD_BOT_TOKEN,
-        });
+        const botToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'discord', 'primary') ?? undefined;
         await new DiscordIntegration('', botToken ?? '').postMessage(channelId, bodyWithAttachments, undefined, request, request.announces);
         return success(channelId);
       }
-      const webhookUrl = await serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL;
+      const webhookUrl = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'discord', 'webhookUrl');
       await new DiscordIntegration(webhookUrl ?? '', '').postWebhook(bodyWithAttachments, undefined, undefined, request);
       return success();
     },
@@ -313,10 +327,7 @@ export function createNtfyDeliveryStrategy(
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
       const baseUrl = String(configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh');
-      const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'ntfy', serviceField: 'primary', configKey: 'surfaces.ntfy.token',
-        environmentValue: process.env.NTFY_ACCESS_TOKEN,
-      });
+      const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'ntfy', 'primary') ?? undefined;
       const topic = firstNonEmpty(
         request.target.address,
         request.binding?.channelId,
@@ -485,7 +496,7 @@ export function createHomeAssistantDeliveryStrategy(
         process.env.HA_URL,
       );
       if (!baseUrl) throw new Error('Missing Home Assistant instance URL');
-      const token = await resolveHomeAssistantAccessToken({ configManager, secretsManager, serviceRegistry });
+      const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'homeassistant', 'primary');
       if (!token) throw new Error('Missing Home Assistant access token');
       const eventType = resolveHomeAssistantEventType(configManager);
       const client = new HomeAssistantIntegration({ baseUrl, accessToken: token });
@@ -545,10 +556,7 @@ export function createTelegramDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
-      const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'telegram', serviceField: 'primary', configKey: 'surfaces.telegram.botToken',
-        environmentValue: process.env.TELEGRAM_BOT_TOKEN,
-      });
+      const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'telegram', 'primary') ?? undefined;
       const chatId = firstNonEmpty(
         request.target.address,
         request.binding?.channelId,
@@ -621,11 +629,7 @@ export function createGoogleChatDeliveryStrategy(
       if (boundWebhook !== undefined) assertPublicWebhookAddress('Google Chat', boundWebhook);
       const untrustedWebhook = firstNonEmpty(explicitTarget, boundWebhook);
       const webhookUrl = untrustedWebhook
-        ?? await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-          serviceName: 'google-chat', serviceField: 'webhookUrl', configKey: 'surfaces.googleChat.webhookUrl',
-          serviceDefault: () => serviceRegistry.get('google-chat')?.baseUrl,
-          environmentValue: process.env.GOOGLE_CHAT_WEBHOOK_URL,
-        });
+        ?? await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'google-chat', 'webhookUrl') ?? undefined;
       if (!webhookUrl) {
         throw new Error('Missing Google Chat webhook URL');
       }

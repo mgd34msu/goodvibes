@@ -4,8 +4,8 @@ import { installedSuiteNeedsRepair, applySuiteUpdate, rollbackSuiteUpdate, captu
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, createSelfUpdateCommand,
-  retainSuiteUpdateConfiguration, formatSuiteUpdateReport,
-  type ReleaseUpdateCheck, type SuiteUpdateConfigurationSource,
+  retainSuiteUpdateConfiguration, formatSuiteUpdateReport, daemonRestartFooter,
+  type DaemonServiceNameSource, type ReleaseUpdateCheck, type RunCommand, type SuiteUpdateConfigurationSource,
 } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
 import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
@@ -31,7 +31,10 @@ export interface ApplyUpdateOptions {
   readonly currentVersion: string;
   readonly print: (line: string) => void;
   readonly io?: UpdateFileIo;
-  readonly configManager?: SuiteUpdateConfigurationSource | undefined;
+  /** The suite's update settings, and the daemon service name the restart line names. */
+  readonly configManager?: (SuiteUpdateConfigurationSource & DaemonServiceNameSource) | undefined;
+  /** Asks the service manager whether the daemon runs as a service; injectable so tests never run systemctl. */
+  readonly runCommand?: RunCommand | undefined;
   readonly signal?: AbortSignal | undefined;
   /** Original runtime/idle ownership, rechecked by the shared updater before effects. */
   readonly assertCurrent?: (() => void) | undefined;
@@ -69,7 +72,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
       beforeCommit: () => { if (progress) progress.begun = true; },
     });
     if (progress) { progress.begun = true; progress.committed = true; }
-    options.print(formatSuiteUpdateReport(result, 'updated'));
+    options.print(formatSuiteUpdateReport(result, 'updated', await daemonRestartFooter(result, options.platform, options.configManager ?? {}, options.runCommand)));
     return result;
   } catch (error) {
     recordSwapFailure(progress, error);
@@ -83,21 +86,24 @@ export interface RollbackUpdateOptions {
   readonly currentVersion?: string;
   readonly print: (line: string) => void;
   readonly io?: UpdateFileIo;
-  readonly configManager?: SuiteUpdateConfigurationSource | undefined;
+  /** The suite's update settings, and the daemon service name the restart line names. */
+  readonly configManager?: (SuiteUpdateConfigurationSource & DaemonServiceNameSource) | undefined;
+  /** Asks the service manager whether the daemon runs as a service; injectable so tests never run systemctl. */
+  readonly runCommand?: RunCommand | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
-export function rollbackUpdate(options: RollbackUpdateOptions): void {
+export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<void> {
   if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
   const selected = retainSuiteUpdateConfiguration(options.configManager);
   const current = () => { selected.assertCurrent(); assertOwner(options.assertCurrent); selected.assertCurrent(); };
   current();
   const result = rollbackSuiteUpdate({ ...options, currentVersion: options.currentVersion ?? VERSION,
     webuiDirectory: selected.webuiDirectory, assertCurrent: current });
-  options.print(formatSuiteUpdateReport(result, 'restored'));
+  options.print(formatSuiteUpdateReport(result, 'restored', await daemonRestartFooter(result, options.platform, options.configManager ?? {}, options.runCommand)));
 }
 export function registerUpdateCommand(registry: CommandRegistry): void { registry.register(selfUpdateCommand); }
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
-  version: VERSION, elsewhere: 'the terminal app (goodvibes)',
+  version: VERSION,
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION, workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
   repairRequired: (version, ctx) => installedSuiteNeedsRepair({ execPath: process.execPath, platform: process.platform, arch: process.arch, version,
     webuiDirectory: retainSuiteUpdateConfiguration(ctx.platform.configManager).webuiDirectory }),

@@ -25,8 +25,10 @@ import {
   type HostSystemMessageSink,
 } from '@/runtime/index.ts';
 import type { ProviderDiscoveryReporter } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import {
-  loadLanScanConsent,
+  lanScanGranted,
+  readLanScanConsent,
   saveLanScanConsent,
   type ConsentRoots,
 } from './lan-scan-consent-store.ts';
@@ -34,8 +36,10 @@ import {
 export {
   agentTrustsScannedServer,
   discoveredProvidersFilePath,
-  loadLanScanConsent,
+  lanScanGranted,
+  readLanScanConsent,
   saveLanScanConsent,
+  type LanScanConsentRead,
   type LanScanConsentState,
   type LanScanDecision,
 } from './lan-scan-consent-store.ts';
@@ -46,15 +50,31 @@ export const NETWORK_SCAN_ENABLE_COMMAND = '/network-scan on';
 export const NETWORK_SCAN_DISABLE_COMMAND = '/network-scan off';
 export const NETWORK_SCAN_STATUS_COMMAND = '/network-scan';
 
-/** Shown exactly once, the very first time the Agent starts and no decision has been recorded yet. */
-export function firstRunConsentMessage(): string {
+/**
+ * Shown exactly once, the very first time the Agent starts and no decision has
+ * been recorded yet. `saveFailure` is the reason the first-run "off" could not
+ * be recorded; the notice then says so, and the next start shows it again.
+ */
+export function firstRunConsentMessage(saveFailure?: string): string {
+  const notSaved = saveFailure
+    ? ` This choice could not be saved (${saveFailure}), so this notice shows again at the next start.`
+    : '';
   return (
     '[Scan] Model servers on this computer (such as Ollama or LM Studio) are found at each start. ' +
     'Scanning the local network for model servers on other devices is off by default. ' +
     'If turned on, it checks other devices on this computer\'s local network (your subnet only, nothing beyond it) ' +
     'so the servers it finds can be added as chat providers. ' +
     'Servers it finds are remembered for the next start. ' +
-    `Turn it on with ${NETWORK_SCAN_ENABLE_COMMAND}; nothing on the network is scanned until you do.`
+    `Turn it on with ${NETWORK_SCAN_ENABLE_COMMAND}; nothing on the network is scanned until you do.` +
+    notSaved
+  );
+}
+
+/** Shown at a start whose consent file exists but cannot be read: scanning stays off and the file is left as it is. */
+export function unreadableConsentMessage(path: string, reason: string): string {
+  return (
+    `[Scan] The network-scanning decision in ${path} could not be read (${reason}), so the local network is not scanned at this start. ` +
+    `The file is left as it is; fix it, or record a new decision with ${NETWORK_SCAN_ENABLE_COMMAND} or ${NETWORK_SCAN_DISABLE_COMMAND}.`
   );
 }
 
@@ -106,17 +126,26 @@ function startPass(options: LanScanGateOptions, networkScan: boolean): Backgroun
  * The Agent's provider start-up pass. Bootstrap calls it once; it always
  * registers environment-key providers, restores saved servers on this computer
  * and scans this computer, and scans the subnet only with recorded consent.
- * The first start with no decision explains the subnet scan and records "off".
+ * The first start with no consent file explains the subnet scan and records
+ * "off"; a consent file that exists but cannot be read leaves the subnet
+ * unscanned for this start, is reported, and is not overwritten.
  */
 export function runGatedLanScan(options: LanScanGateOptions): BackgroundRuntimeTaskHandle {
   const { shellPaths, surfaceRoot, systemMessageRouter } = options;
   lastGateOptions = options;
-  const existing = loadLanScanConsent(shellPaths, surfaceRoot);
-  if (!existing) {
-    saveLanScanConsent(shellPaths, surfaceRoot, 'declined');
-    systemMessageRouter.low(firstRunConsentMessage());
+  const consent = readLanScanConsent(shellPaths, surfaceRoot);
+  if (consent.kind === 'absent') {
+    let saveFailure: string | undefined;
+    try {
+      saveLanScanConsent(shellPaths, surfaceRoot, 'declined');
+    } catch (err) {
+      saveFailure = summarizeError(err);
+    }
+    systemMessageRouter.low(firstRunConsentMessage(saveFailure));
+  } else if (consent.kind === 'unreadable') {
+    systemMessageRouter.high(unreadableConsentMessage(consent.path, consent.reason), 'warning');
   }
-  return startPass(options, existing?.decision === 'granted');
+  return startPass(options, lanScanGranted(consent));
 }
 
 /**

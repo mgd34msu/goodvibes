@@ -237,7 +237,9 @@ interface LiveSession {
   modeChosen?: true;
 }
 
-const RESTART_NOTICE = 'This session was interrupted by a daemon restart. The turn that was running did not finish.';
+/** How long a native host waiting for its session rechecks without a wake, for a wake that was missed. */
+const NATIVE_AVAILABILITY_FALLBACK_MS = 1_000;
+const RESTART_NOTICE ='This session was interrupted by a daemon restart. The turn that was running did not finish.';
 
 export class HostedSessionManager {
   private readonly sessions = new Map<string, LiveSession>();
@@ -594,6 +596,7 @@ export class HostedSessionManager {
         ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
         ...(this.options.workPlan ? { workPlan: this.options.workPlan } : {}),
         attended: () => this.hasAttachedClient(sessionId),
+        busyEnded: () => this.wakeTurnWaiters(sessionId),
       });
       const record: HostedSessionRecord = {
         id: sessionId,
@@ -1043,10 +1046,10 @@ export class HostedSessionManager {
       signal.throwIfAborted();
       if (live.runtime && !live.runtime.isRunning() && !live.runtime.orchestrator.isThinking
         && live.runtime.liveTurnControls.listQueuedMessages().length === 0) return;
-      // A running turn wakes this at its end event; one long fallback covers a
-      // missed event. Between turns (the ended turn still settling, or a queued
-      // message about to start) it rechecks briefly until one or the other holds.
-      await this.nextTurnChange(sessionId, signal, live.record.status === 'running' ? 1_000 : 20);
+      // Woken by a turn's start or end event and by the runtime letting go of
+      // the session (a submitted turn settled, a queued message deleted); one
+      // long fallback covers a missed wake.
+      await this.nextTurnChange(sessionId, signal, NATIVE_AVAILABILITY_FALLBACK_MS);
     }
   }
 
@@ -1065,6 +1068,7 @@ export class HostedSessionManager {
       const wake = (): void => { finish(); resolve(); };
       const abort = (): void => { finish(); reject(signal.reason); };
       const timer = setTimeout(wake, ms);
+      timer.unref?.();
       own.add(wake);
       signal.addEventListener('abort', abort, { once: true });
     });
@@ -1207,6 +1211,7 @@ export class HostedSessionManager {
         ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
         ...(this.options.workPlan ? { workPlan: this.options.workPlan } : {}),
         attended: () => this.hasAttachedClient(live.record.id),
+        busyEnded: () => this.wakeTurnWaiters(live.record.id),
       });
       live.runtime = runtime;
       live.lease = lease;

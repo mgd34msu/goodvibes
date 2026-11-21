@@ -50,19 +50,30 @@ type OpenAITranscriptionVerboseSegment = {
   readonly avg_logprob?: number | undefined;
 };
 
-type OpenAITranscriptionVerboseResponse = {
+/**
+ * A transcription reply: `verbose_json` (whisper-1) carries the language and
+ * timed segments; `json` (the gpt-4o transcribe models, which take no other
+ * structured format) carries the text alone.
+ */
+type OpenAITranscriptionResponse = {
   readonly text?: string | undefined;
   readonly language?: string | undefined;
   readonly segments?: readonly OpenAITranscriptionVerboseSegment[] | undefined;
 };
 
+/** The one STT model that answers `verbose_json`; every other model is asked for `json`. */
+const OPENAI_VERBOSE_TRANSCRIPTION_MODEL = 'whisper-1';
+
+/** The reply of `POST /realtime/client_secrets`: the secret at the top level, the session it is for beside it. */
 type OpenAIRealtimeClientSecretResponse = {
-  readonly client_secret?: {
-    readonly value?: string | undefined;
-    readonly expires_at?: number | undefined;
-  };
-  readonly id?: string | undefined;
-  readonly model?: string | undefined;
+  readonly value?: string | undefined;
+  /** Epoch seconds. */
+  readonly expires_at?: number | undefined;
+  readonly session?: {
+    readonly id?: string | undefined;
+    readonly model?: string | undefined;
+    readonly [key: string]: unknown;
+  } | undefined;
 };
 
 function resolveOpenAISpeechFormat(format: string | undefined): string {
@@ -98,6 +109,11 @@ function resolveOpenAIRealtimeAudioFormat(
   return { type: 'audio/pcm', rate: 24000 };
 }
 
+/** Where a WebRTC client posts its SDP offer with the client secret. */
+function openAIRealtimeCallsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/realtime/calls`;
+}
+
 function buildOpenAIRealtimeMetadata(params: {
   baseUrl: string;
   model: string;
@@ -107,7 +123,7 @@ function buildOpenAIRealtimeMetadata(params: {
   sessionPayload: Record<string, unknown>;
 }): Record<string, unknown> {
   const trimmedBase = params.baseUrl.replace(/\/+$/, '');
-  const httpUrl = `${trimmedBase}/realtime?model=${encodeURIComponent(params.model)}`;
+  const callsUrl = openAIRealtimeCallsUrl(trimmedBase);
   const websocketBase = trimmedBase.replace(/^http/i, 'ws');
   const wsUrl = `${websocketBase}/realtime?model=${encodeURIComponent(params.model)}`;
   return {
@@ -115,8 +131,9 @@ function buildOpenAIRealtimeMetadata(params: {
     clientSecret: params.clientSecret,
     expiresAt: params.expiresAt,
     connect: {
+      // The SDP offer is posted to the calls endpoint; the answer comes back as application/sdp.
       webrtc: {
-        url: httpUrl,
+        url: callsUrl,
         method: 'POST',
         contentType: 'application/sdp',
         authorization: 'Bearer <client_secret>',
@@ -125,7 +142,6 @@ function buildOpenAIRealtimeMetadata(params: {
         url: wsUrl,
         headers: {
           Authorization: `Bearer ${params.clientSecret}`,
-          'OpenAI-Beta': 'realtime=v1',
         },
       },
     },
@@ -234,8 +250,9 @@ export function createOpenAIProvider(): VoiceProvider {
         new Blob([Buffer.from(buffer)], { type: mimeType || 'application/octet-stream' }),
         inferFilename(request.audio, '.wav'),
       );
-      form.append('model', request.modelId?.trim() || DEFAULT_OPENAI_STT_MODEL);
-      form.append('response_format', 'verbose_json');
+      const model = request.modelId?.trim() || DEFAULT_OPENAI_STT_MODEL;
+      form.append('model', model);
+      form.append('response_format', model === OPENAI_VERBOSE_TRANSCRIPTION_MODEL ? 'verbose_json' : 'json');
       if (request.language?.trim()) form.append('language', request.language.trim());
       if (request.prompt?.trim()) form.append('prompt', request.prompt.trim());
 
@@ -250,7 +267,7 @@ export function createOpenAIProvider(): VoiceProvider {
       if (!response.ok) {
         throw await voiceHttpError('OpenAI', 'transcription', response);
       }
-      const payload = await response.json() as OpenAITranscriptionVerboseResponse;
+      const payload = await response.json() as OpenAITranscriptionResponse;
       const text = payload.text?.trim();
       if (!text) throw new Error('OpenAI transcription response missing transcript');
       return {
@@ -267,7 +284,7 @@ export function createOpenAIProvider(): VoiceProvider {
           .filter((segment) => segment.text.length > 0),
         metadata: {
           baseUrl,
-          modelId: request.modelId?.trim() || DEFAULT_OPENAI_STT_MODEL,
+          modelId: model,
         },
       };
     },
@@ -333,17 +350,18 @@ export function createOpenAIProvider(): VoiceProvider {
       if (!response.ok) {
         throw await voiceHttpError('OpenAI', 'realtime session', response);
       }
-      const payload = await response.json() as OpenAIRealtimeClientSecretResponse & Record<string, unknown>;
-      const clientSecret = payload.client_secret?.value?.trim();
+      const payload = await response.json() as OpenAIRealtimeClientSecretResponse;
+      const clientSecret = typeof payload.value === 'string' ? payload.value.trim() : '';
       if (!clientSecret) throw new Error('OpenAI realtime session response missing client secret');
-      const expiresAt = typeof payload.client_secret?.expires_at === 'number'
-        ? payload.client_secret.expires_at * 1000
+      const expiresAt = typeof payload.expires_at === 'number'
+        ? payload.expires_at * 1000
         : undefined;
+      const session: NonNullable<OpenAIRealtimeClientSecretResponse['session']> = payload.session && typeof payload.session === 'object' ? payload.session : {};
       return {
         providerId: 'openai',
-        sessionId: trimToUndefined(payload.id) || `openai-realtime-${Date.now()}`,
+        sessionId: trimToUndefined(session.id) || `openai-realtime-${Date.now()}`,
         transport: 'webrtc',
-        url: `${baseUrl}/realtime?model=${encodeURIComponent(model)}`,
+        url: openAIRealtimeCallsUrl(baseUrl),
         expiresAt,
         metadata: buildOpenAIRealtimeMetadata({
           baseUrl,
@@ -351,7 +369,7 @@ export function createOpenAIProvider(): VoiceProvider {
           clientSecret,
           expiresAt,
           request,
-          sessionPayload: payload,
+          sessionPayload: session,
         }),
       };
     },

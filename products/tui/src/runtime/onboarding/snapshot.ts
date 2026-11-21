@@ -4,8 +4,6 @@ import {
   createOnboardingSnapshotReadHelpers,
   captureOnboardingConfigSnapshot,
 } from '@goodvibes/engine/terminal-shell/onboarding-snapshot-reads';
-import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
-import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
 
 import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
 import { readOnboardingRuntimeState } from './state.ts';

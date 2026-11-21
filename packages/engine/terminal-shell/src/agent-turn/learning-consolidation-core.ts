@@ -271,6 +271,14 @@ export function cloneRecord(record: unknown): Record<string, unknown> {
   return JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
 }
 
+/** The record asked for does not exist; any other error from a read means it could not be read. */
+export class LearningRecordNotFoundError extends Error {
+  constructor(readonly domain: AgentLearningConsolidationDomain, readonly id: string) {
+    super(`Unknown Agent-local ${domain} ${id}`);
+    this.name = 'LearningRecordNotFoundError';
+  }
+}
+
 export async function getRecord(
   shellPaths: ShellPathService,
   memory: ConsolidationMemory,
@@ -279,21 +287,21 @@ export async function getRecord(
 ): Promise<MemoryRecord | AgentPersonaRecord | AgentSkillRecord | AgentRoutineRecord> {
   if (domain === 'memory') {
     const record = await memory.get(id);
-    if (!record) throw new Error(`Unknown Agent-local memory ${id}`);
+    if (!record) throw new LearningRecordNotFoundError('memory', id);
     return record;
   }
   if (domain === 'persona') {
     const record = AgentPersonaRegistry.fromShellPaths(shellPaths).get(id);
-    if (!record) throw new Error(`Unknown Agent-local persona ${id}`);
+    if (!record) throw new LearningRecordNotFoundError('persona', id);
     return record;
   }
   if (domain === 'skill') {
     const record = AgentSkillRegistry.fromShellPaths(shellPaths).get(id);
-    if (!record) throw new Error(`Unknown Agent-local skill ${id}`);
+    if (!record) throw new LearningRecordNotFoundError('skill', id);
     return record;
   }
   const record = AgentRoutineRegistry.fromShellPaths(shellPaths).get(id);
-  if (!record) throw new Error(`Unknown Agent-local routine ${id}`);
+  if (!record) throw new LearningRecordNotFoundError('routine', id);
   return record;
 }
 

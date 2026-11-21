@@ -40,7 +40,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'command-palette':       'Open help: every command and keyboard shortcut in one searchable list',
   'workspace-picker':      'Open the Agent operator workspace',
   'workspace-close':       'Close the Agent workspace',
-  'workspace-close-all':   'Close the Agent workspace (alias: also bound to Ctrl+Shift+X)',
+  'workspace-close-all':   'Close the Agent workspace',
   'workspace-tab-next':    'Cycle Agent workspace category forward',
   'workspace-tab-prev':    'Cycle Agent workspace category backward',
   'open-agents':           'Open Your agents: what is running, what waits for you, what is scheduled',

@@ -48,6 +48,8 @@ export interface SharedApprovalAuditRecord {
   readonly actorNode?: string | undefined;
   readonly createdAt: number;
   readonly note?: string | undefined;
+  /** The request id of a claim or cancel relayed from another node: a resend of it is recognised as already applied. */
+  readonly relayRequestId?: string | undefined;
 }
 
 export interface SharedApprovalRecord {
@@ -124,6 +126,9 @@ export interface ApprovalRelayPort {
     readonly reason?: string | undefined;
     readonly note?: string | undefined;
     readonly selectedHunks?: readonly number[] | undefined;
+    /** An approve that keeps its answer: the owning node saves the rule before it records the approval. */
+    readonly remember?: boolean | undefined;
+    readonly rememberTier?: RememberTier | undefined;
   }, viewer: import('./approval-lifecycle.js').ApprovalViewer): Promise<import('./approval-lifecycle.js').TransitionOutcome & { readonly reading: import('./approval-lifecycle.js').ApprovalReading | null }>;
 }
 
@@ -140,6 +145,18 @@ export interface ApprovalActionInput {
    * local-prompt paths.
    */
   readonly expectedRevision: number | undefined;
+  /** A claim or cancel relayed from another node: its request id, kept on the audit entry the action writes. */
+  readonly relayRequestId?: string | undefined;
+}
+
+/** Steps one answer runs inside its write unit, before the record is written. */
+interface CommitSteps {
+  /** Saves the rule an answer remembers. */
+  readonly keep?: (() => Promise<void>) | undefined;
+  /** Puts an approved change in effect (onApproved). */
+  readonly effect?: (() => unknown | Promise<unknown>) | undefined;
+  /** Stamped on the audit entry the transition writes. */
+  readonly relayRequestId?: string | undefined;
 }
 
 type ApprovalListener = (approval: SharedApprovalRecord) => void;
@@ -241,6 +258,7 @@ function validateApprovalAuditRecord(value: unknown): void {
   validateOptionalString(value['actorSurface']);
   validateOptionalString(value['actorNode']);
   validateOptionalString(value['note']);
+  validateOptionalString(value['relayRequestId']);
 }
 
 function validateRequester(value: unknown): void {
@@ -422,6 +440,13 @@ function buildAudit(action: SharedApprovalAuditRecord['action'], actor: string, 
     createdAt: Date.now(),
     ...(note ? { note } : {}),
   };
+}
+
+/** The record with the request id of the relayed action on the audit entry that action just wrote (the last one). */
+function withRelayRequestId(record: SharedApprovalRecord, relayRequestId: string): SharedApprovalRecord {
+  const last = record.audit[record.audit.length - 1];
+  if (!last) return record;
+  return { ...record, audit: [...record.audit.slice(0, -1), { ...last, relayRequestId }] };
 }
 
 /** Deterministic JSON for coalescing, object keys sorted at every level. */
@@ -771,7 +796,7 @@ export class ApprovalBroker {
       id: approvalId,
       expectedRevision: input.expectedRevision,
       transition: { to: 'claimed', actor: actorOf(input), ...(input.note !== undefined ? { note: input.note } : {}) },
-    });
+    }, { relayRequestId: input.relayRequestId });
   }
 
   async resolveApproval(approvalId: string, input: ResolveSharedApprovalInput): Promise<TransitionOutcome> {
@@ -780,9 +805,11 @@ export class ApprovalBroker {
 
   /**
    * Put `effect` in force when this approval is approved, inside the answer:
-   * the approver's resolve returns only after it ran, and a failure comes back
-   * to the approver as the answer's error with the reason, never only a log
-   * line. Denial, expiry or cancellation drop it. Returns the unregister.
+   * it runs in the answer's write unit before the approval is recorded, so the
+   * approver's resolve returns only after it ran, and a failure leaves the ask
+   * waiting and comes back to the approver as the answer's error with the
+   * reason. Any end of the ask (approved, denied, expired, cancelled) lets it
+   * go. Returns the unregister.
    */
   onApproved(approvalId: string, effect: () => unknown | Promise<unknown>): () => void {
     this.#approvedEffects.set(approvalId, effect);
@@ -816,6 +843,8 @@ export class ApprovalBroker {
     const argsDigest = approved && approval ? contentDigest(modifiedArgs ?? approval.request.args) : undefined;
     // The rule the answer asks to keep is saved inside its write, before the answer is recorded.
     const keep = approval ? this.#rememberedRule(approval, input.rememberTier, approved, modifiedArgs) : undefined;
+    // The change an approve puts in effect runs in the same unit, after the rule and before the record.
+    const effect = approved ? this.#approvedEffects.get(approvalId) : undefined;
     let withheldAnswer: string | undefined;
     if (approved && approval?.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
       withheldAnswer = modifiedArgs['answer'];
@@ -844,7 +873,7 @@ export class ApprovalBroker {
           ...(proof !== undefined ? { ownerProof: proof } : {}),
           ...(input.note !== undefined ? { note: input.note } : {}),
         },
-      }, keep);
+      }, { keep, effect });
     } catch (error) {
       if (!(error instanceof OwnerDecisionStaleError)) throw error;
       // The owner's capability went stale between its check and its write: the
@@ -855,16 +884,6 @@ export class ApprovalBroker {
     }
     if (outcome.applied && approval && input.rememberTier && input.rememberTier !== 'session') {
       await this.#sweepRemembered(approval, input, approved);
-    }
-    const effect = outcome.applied ? this.#approvedEffects.get(approvalId) : undefined;
-    if (outcome.applied) this.#approvedEffects.delete(approvalId);
-    if (effect && approved) {
-      try {
-        await effect();
-      } catch (error) {
-        throw Object.assign(new Error(`Approved, but the change could not be put in effect: ${error instanceof Error ? error.message : String(error)}. Nothing was changed; ask for it again.`, { cause: error }),
-          { code: 'APPROVED_NOT_APPLIED', status: 500 });
-      }
     }
     return outcome;
   }
@@ -961,7 +980,7 @@ export class ApprovalBroker {
       id: approvalId,
       expectedRevision: input.expectedRevision,
       transition: { to: 'cancelled', actor: actorOf(input), cause: 'cancelled-by-actor', ...(input.note !== undefined ? { note: input.note } : {}) },
-    });
+    }, { relayRequestId: input.relayRequestId });
   }
 
   /**
@@ -985,10 +1004,10 @@ export class ApprovalBroker {
     });
   }
 
-  /** One transition, checked and written in one unit of the write queue; `keep` saves the rule an answer remembers first. */
-  async #transition(request: TransitionRequest, keep?: () => Promise<void>): Promise<TransitionOutcome> {
+  /** One transition, checked and written in one unit of the write queue, with the answer's own steps run first (CommitSteps). */
+  async #transition(request: TransitionRequest, steps: CommitSteps = {}): Promise<TransitionOutcome> {
     await this.start();
-    const [outcome] = await this.#commit([request], undefined, keep);
+    const [outcome] = await this.#commit([request], undefined, steps);
     return outcome!;
   }
 
@@ -1002,21 +1021,26 @@ export class ApprovalBroker {
    * snapshot with the new records in place, and put them in memory only after
    * the write landed (save, then acknowledge). An answer that remembers a rule
    * (`keep`, one request) saves that rule first, in the same unit: a rule that
-   * cannot be saved changes nothing and the approver is told. The deny direction (denied,
+   * cannot be saved changes nothing and the approver is told. An approve that
+   * puts a change in effect (`effect`) runs it next, in the same unit: a change
+   * that fails leaves the ask waiting and the approver is told. The deny direction (denied,
    * cancelled, expired) keeps the fail-closed rule: its waiters are refused
    * even when the write fails, and the error says so. After the unit, waiters
    * are answered (an approve's typed answer goes to its own waiter only) and
    * the new revision is published.
    */
-  async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause, keep?: () => Promise<void>): Promise<TransitionOutcome[]> {
+  async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause, steps: CommitSteps = {}): Promise<TransitionOutcome[]> {
+    const { keep, effect, relayRequestId } = steps;
     const planned: PlannedTransition[] = [];
-    // Set inside the write unit: the write's failure, a remembered rule that was not saved, and an owner decision that went stale after it landed.
-    const ended: { failed?: { readonly error: unknown }; notKept?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
+    // Set inside the write unit: the write's failure, a remembered rule that was not saved, an approved change that could not be put in effect, and an owner decision that went stale after it landed.
+    const ended: { failed?: { readonly error: unknown }; notKept?: { readonly error: unknown }; notApplied?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
+    let effectRan = false;
     const committed: PlannedTransition[] = [];
     await this.writes.run(async () => {
       const working = new Map<string, SharedApprovalRecord>();
       for (const request of requests) {
-        const plan = this.#plan(request, working, cause);
+        let plan = this.#plan(request, working, cause);
+        if (relayRequestId !== undefined && plan.next && plan.refusal === undefined) plan = { ...plan, next: withRelayRequestId(plan.next, relayRequestId) };
         planned.push(plan);
         if (plan.next) working.set(plan.next.id, plan.next);
       }
@@ -1036,6 +1060,17 @@ export class ApprovalBroker {
           await keep();
         } catch (error) {
           ended.notKept = { error };
+          for (const plan of changing) if (plan.ownerCheck) this.#ownerApprovals.settle(plan.request.id);
+          return;
+        }
+      }
+      // The approved change is put in effect before the approval is recorded: a record never says approved for a change that is not in force.
+      if (effect && changing.some((plan) => plan.refusal === undefined && plan.next!.status === 'approved')) {
+        try {
+          await effect();
+          effectRan = true;
+        } catch (error) {
+          ended.notApplied = { error };
           for (const plan of changing) if (plan.ownerCheck) this.#ownerApprovals.settle(plan.request.id);
           return;
         }
@@ -1081,10 +1116,18 @@ export class ApprovalBroker {
       throw Object.assign(new Error(`Your choice to remember this answer could not be saved (${failureText(failure)}). Nothing was decided: the ask is still waiting; answer it again, or answer it without remembering.`, { cause: failure }),
         { code: 'REMEMBER_NOT_SAVED', status: 500 });
     }
+    if (ended.notApplied) {
+      const failure = ended.notApplied.error;
+      throw Object.assign(new Error(`The approved change could not be put in effect (${failureText(failure)}). Nothing was decided: the ask is still waiting; answer it again, or deny it.`, { cause: failure }),
+        { code: 'APPROVED_NOT_APPLIED', status: 500 });
+    }
     if (ended.failed) {
       const failure = ended.failed.error;
       const plan = planned.find((entry) => entry.next !== undefined);
       const id = plan?.request.id ?? requests[0]?.id ?? 'the approval';
+      if (effectRan) {
+        throw new Error(`The approved change to ${id} is in effect, but the approval could not be saved (${failureText(failure)}). The ask still shows as waiting; approve it again to record it.`, { cause: failure });
+      }
       if (plan?.next && denyDirection(plan.next.status)) {
         throw new Error(`The ${plan.next.status === 'denied' ? 'denial' : plan.next.status === 'expired' ? 'expiry' : 'cancellation'} of ${id} was applied and the waiting call was refused, but it could not be saved (${failureText(failure)}). It is saved with the next approvals write.`, { cause: failure });
       }
@@ -1224,6 +1267,8 @@ export class ApprovalBroker {
   /** Resolve every waiter attached to an approval (coalesced asks share one record). */
   private resolvePending(approvalId: string, recorded: SharedApprovalDecision, withheldAnswer?: string): void {
     this.#ownerApprovals.retire(approvalId);
+    // The ask has ended: an approved change already ran in its write unit, and any other end lets it go.
+    this.#approvedEffects.delete(approvalId);
     const pending = this.pendingResolvers.get(approvalId);
     if (!pending) return;
     const ordinary = ordinaryApprovalDecision(recorded);

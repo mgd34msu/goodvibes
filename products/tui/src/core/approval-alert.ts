@@ -71,16 +71,17 @@ export interface ApprovalTurnSource {
  * Wrap a PermissionRequestHandler so every call also fires an unfocused-user
  * alert (subject to the behavior.notifyOnApprovalPending / notifyOnlyWhenUnfocused
  * gates). The wrapped handler's behavior (what it resolves to) is completely
- * unchanged, this only adds a side effect at call time.
+ * unchanged and it receives the caller's options (the ask's abort signal); this
+ * only adds a side effect at call time.
  */
 export function wrapRequestPermissionWithAlert(
   original: PermissionRequestHandler,
   deps: ApprovalAlertDeps,
 ): PermissionRequestHandler {
-  return (request: PermissionPromptRequest) => {
+  return (request, options) => {
     try { fireApprovalAlert(request, deps); }
     catch { logger.debug('approval-alert: notification could not be prepared'); }
-    return original(request);
+    return original(request, options);
   };
 }
 

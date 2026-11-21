@@ -153,6 +153,12 @@ export class BrowserEngine {
     this.untrusted = options.untrusted;
     this.cardGuard = options.cardFieldGuard ?? null;
     this.approval = options.approval ?? null;
+    // The session manager owns when a session or page ends, by every path (a
+    // close or release here, the person closing the browser or a tab, a crash,
+    // shutdown); what this engine holds for it, typed card material included,
+    // goes then.
+    sessions.onSessionEnded((sessionId) => this.forgetSessionState(sessionId));
+    sessions.onPageEnded((sessionId, pageId) => this.forgetPageState(sessionId, pageId));
   }
 
   /** Whether this engine can be used to pay for something (see fill-card.ts). */
@@ -416,29 +422,31 @@ export class BrowserEngine {
 
   release(sessionId: string): Record<string, unknown> {
     const session = this.sessions.release(sessionId);
-    this.forgetSessionState(sessionId);
     return { released: session, note: 'Disconnected. The browser is still running.' };
   }
 
   async close(sessionId: string): Promise<Record<string, unknown>> {
-    try {
-      const session = await this.sessions.closeSession(sessionId);
-      return { closed: session };
-    } finally {
-      // Every page's material in this session is gone with the browser that held
-      // it. Material bound to a page that outlives the session it was typed in
-      // would be material with no page left to be redacted out of. Done even
-      // when the close itself failed: the session's controls are unusable either way.
-      this.forgetSessionState(sessionId);
-    }
+    const session = await this.sessions.closeSession(sessionId);
+    return { closed: session };
   }
 
-  /** Drops what this engine holds for a session it no longer drives: snapshots and armed card material. */
+  /**
+   * Drops what this engine holds for a session that ended: snapshots and armed
+   * card material. Material bound to a page that outlives the session it was
+   * typed in would be material with no page left to be redacted out of.
+   */
   private forgetSessionState(sessionId: string): void {
     this.snapshots.clearSession(sessionId);
     this.blockedOrigins.delete(sessionId);
     this.cardGuard?.disarmSession?.(sessionId);
     for (const key of [...this.localReach.keys()]) if (key.startsWith(`${sessionId}:`)) this.localReach.delete(key);
+  }
+
+  /** Drops what this engine holds for one page that ended. */
+  private forgetPageState(sessionId: string, pageId: string): void {
+    this.snapshots.clear(sessionId, pageId);
+    this.cardGuard?.disarm(sessionId, pageId);
+    this.localReach.delete(`${sessionId}:${pageId}`);
   }
 
   /**
@@ -1574,12 +1582,6 @@ export class BrowserEngine {
   async tabs(target: BrowserTarget): Promise<Record<string, unknown>> {
     const sessionId = this.resolveSessionId(target);
     const pages = await this.guardedPageList(sessionId);
-    // Tabs the person closed natively are gone from the list; what this engine
-    // held for them goes with them.
-    for (const pageId of this.snapshots.retainPages(sessionId, new Set(pages.map((page) => page.pageId)))) {
-      this.cardGuard?.disarm(sessionId, pageId);
-      this.localReach.delete(`${sessionId}:${pageId}`);
-    }
     return { sessionId, pages };
   }
 
@@ -1620,9 +1622,6 @@ export class BrowserEngine {
   async closeTab(target: BrowserTarget, args: { readonly pageId: string }): Promise<Record<string, unknown>> {
     const sessionId = this.resolveSessionId(target);
     await this.sessions.closePage(sessionId, args.pageId);
-    this.snapshots.clear(sessionId, args.pageId);
-    this.cardGuard?.disarm(sessionId, args.pageId);
-    this.localReach.delete(`${sessionId}:${args.pageId}`);
     return { sessionId, closedPageId: args.pageId, pages: await this.guardedPageList(sessionId) };
   }
 

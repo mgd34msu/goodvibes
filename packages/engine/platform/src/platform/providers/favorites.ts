@@ -101,14 +101,15 @@ export interface FavoritesUsageRestriction {
 }
 
 /**
- * The model picker's pinned list and usage counts, shared by every product on
- * one home. Every change (pin, unpin, usage) is one read, change and rename
- * under the file's process lock, so a pin made in one product while another
- * records usage keeps both.
+ * The model picker's pinned list and usage counts, shared by every window of
+ * one product on one home (each product keeps its own file under its surface
+ * directory). Every read is of the file as it is now, so a pin made in one
+ * window shows in another's picker; every change (pin, unpin, usage) is one
+ * read, change and rename under the file's process lock, so a pin made in one
+ * window while another records usage keeps both.
  */
 export class FavoritesStore {
   private readonly dir: string;
-  private cache: FavoritesData | null = null;
 
   constructor(options: FavoritesStoreOptions) {
     this.dir = options.dir;
@@ -124,9 +125,7 @@ export class FavoritesStore {
 
   async load(ownership?: FavoritesUsageRestriction): Promise<FavoritesData> {
     ownership?.signal?.throwIfAborted();
-    const loaded = await this.readFile();
-    this.cache = loaded;
-    return loaded;
+    return this.readFile();
   }
 
   private async readFile(): Promise<FavoritesData> {
@@ -163,7 +162,6 @@ export class FavoritesStore {
         await rm(tmp, { force: true }).catch(() => undefined);
         throw error;
       }
-      this.cache = next;
     }, signal ? { signal } : {});
   }
 
@@ -219,8 +217,7 @@ export class FavoritesStore {
       .map((entry) => entry.registryKey);
   }
 
-  private async getData(): Promise<FavoritesData> {
-    if (this.cache) return this.cache;
-    return this.load();
+  private getData(): Promise<FavoritesData> {
+    return this.readFile();
   }
 }

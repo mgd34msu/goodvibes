@@ -3,7 +3,7 @@ import { readCliModelInUse, readCliProviderSignInFacts, readSavedCliModelInUse }
 import { agentTrustsScannedServer } from '../runtime/lan-scan-consent-store.ts';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -32,7 +32,7 @@ export interface StatusCommandRuntime {
 export async function runOnboardingStatusCommand(runtime: StatusCommandRuntime): Promise<number> {
   const { cli, configManager, workingDirectory, homeDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
-  const selectedHost = canonicalizePairingHost(resolveConnectedHostBaseUrl(configManager)) ?? '(invalid endpoint)';
+  const selectedHost = canonicalizePairingHost(resolveConnectedHostAddress(configManager).baseUrl) ?? '(invalid endpoint)';
   const nativeReadiness = await readConnectedHostReadiness({ configManager, homeDirectory });
   const pairingStatus = readAgentHostPairing(homeDirectory, selectedHost).status;
   writeExitingStdoutLine(

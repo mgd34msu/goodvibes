@@ -51,6 +51,7 @@ import {
 } from './shared.js';
 import type { TransportPaths } from './transport-paths.js';
 import type {
+  HttpApprovalActionOutcome,
   HttpPeerRecordSnapshot,
   HttpPeerSnapshot,
   HttpProvidersSnapshot,
@@ -268,34 +269,15 @@ function createOperatorClient(
         const records = assertSharedApprovalArray((await operatorApi.approvals.list({ approvalId })).approvals, 'approvals.list');
         return records.find((entry) => entry.id === approvalId) ?? null;
       },
-      claim: async (approvalId, actor, actorSurface = 'transport', note): Promise<SharedApprovalRecord | null> => {
-        const response = await withNullOnNotFound(() => operatorApi.invoke<{ approval?: SharedApprovalRecord | null }>(
-          'approvals.claim',
-          { approvalId, actor, actorSurface, ...(note ? { note } : {}) },
-        ));
-        return response?.approval ?? null;
-      },
-      approve: async (approvalId, actor, actorSurface = 'transport', note): Promise<SharedApprovalRecord | null> => {
-        const response = await withNullOnNotFound(() => operatorApi.invoke<{ approval?: SharedApprovalRecord | null }>(
-          'approvals.approve',
-          { approvalId, disposition: 'approved', actor, actorSurface, ...(note ? { note } : {}) },
-        ));
-        return response?.approval ?? null;
-      },
-      deny: async (approvalId, actor, actorSurface = 'transport', note): Promise<SharedApprovalRecord | null> => {
-        const response = await withNullOnNotFound(() => operatorApi.invoke<{ approval?: SharedApprovalRecord | null }>(
-          'approvals.deny',
-          { approvalId, disposition: 'denied', actor, actorSurface, ...(note ? { note } : {}) },
-        ));
-        return response?.approval ?? null;
-      },
-      cancel: async (approvalId, actor, actorSurface = 'transport', note): Promise<SharedApprovalRecord | null> => {
-        const response = await withNullOnNotFound(() => operatorApi.invoke<{ approval?: SharedApprovalRecord | null }>(
-          'approvals.cancel',
-          { approvalId, actor, actorSurface, ...(note ? { note } : {}) },
-        ));
-        return response?.approval ?? null;
-      },
+      // The body is the action's own fields: the daemon records the decider from the credential.
+      claim: async (approvalId, input): Promise<HttpApprovalActionOutcome | null> =>
+        await withNullOnNotFound(() => operatorApi.invoke<HttpApprovalActionOutcome>('approvals.claim', { ...input, approvalId })),
+      approve: async (approvalId, input): Promise<HttpApprovalActionOutcome | null> =>
+        await withNullOnNotFound(() => operatorApi.invoke<HttpApprovalActionOutcome>('approvals.approve', { ...input, approvalId, disposition: 'approved' })),
+      deny: async (approvalId, input): Promise<HttpApprovalActionOutcome | null> =>
+        await withNullOnNotFound(() => operatorApi.invoke<HttpApprovalActionOutcome>('approvals.deny', { disposition: 'denied', ...input, approvalId })),
+      cancel: async (approvalId, input): Promise<HttpApprovalActionOutcome | null> =>
+        await withNullOnNotFound(() => operatorApi.invoke<HttpApprovalActionOutcome>('approvals.cancel', { ...input, approvalId })),
     },
     providers: {
       listIds: async (): Promise<readonly string[]> =>

@@ -49,7 +49,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  * stubbed fetch, a stubbed apply, and pinned fixture versions, never the
  * live build VERSION and never the real network.
  */
-import { normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
+import { fallbackUpdateCommand, normalizeVersion, type UpdateFetchLike } from '../runtime/update-check.ts';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions } from '../input/commands/update-runtime.ts';
 import { readUpdateSettings, type UpdateSettings } from '../config/update-settings.ts';
 import { recordSelfUpdate } from '../runtime/self-update-receipt.ts';
@@ -117,7 +117,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
     unswappable: (kind) =>
       kind === 'source'
         ? 'auto-update skipped: running from source (dev checkout)'
-        : 'auto-update skipped: package-managed install, update with: bun add -g @goodvibes/agent',
+        : `auto-update skipped: package-managed install, update with: ${fallbackUpdateCommand(kind)}`,
     apply: ({ signal, progress }) => {
       configuration.assertCurrent();
       return (options.apply ?? applyUpdate)({
@@ -147,7 +147,7 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
 }
 
 export interface SelfUpdateAtLaunchParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw'> & Partial<Pick<ConfigManager, 'get' | 'getControlPlaneConfigDir'>>;
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>;
   readonly stdout: { write(chunk: string): unknown };
 }
 

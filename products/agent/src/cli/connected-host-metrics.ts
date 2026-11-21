@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 
 /**
  * Reads the connected daemon host's process-wide runtime metrics snapshot via
@@ -55,14 +55,10 @@ export interface CliConnectedHostMetricsInspectionOptions {
   readonly timeoutMs?: number;
 }
 
-// Same base-url resolution the connected-host status probe uses
-// (cli/external-runtime.ts): controlPlane.host/port, defaulting to the local
-// daemon. Kept in step with that module so both probes target one host.
-function resolveBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
-  return connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
-  );
+// The Agent's one connected-host address (connected-host-dial.ts), the same
+// one the status probe in cli/external-runtime.ts reads.
+function resolveAddress(configManager: Pick<ConfigManager, 'get'>) {
+  return resolveConnectedHostAddress(configManager);
 }
 
 function readNumber(value: unknown): number {
@@ -119,7 +115,8 @@ export async function inspectConnectedHostMetrics(
     methodId: 'runtime.metrics.get' as const,
     requiredScope: 'read:telemetry' as const,
   };
-  const baseUrl = resolveBaseUrl(options.configManager);
+  const { baseUrl, refusal } = resolveAddress(options.configManager);
+  if (refusal) return { ...base, status: 'unavailable', statusCode: null, metrics: null, error: refusal };
   const token = readConnectedHostOperatorToken(options.homeDirectory, baseUrl);
   if (!token.token) {
     return { ...base, status: 'auth_required', statusCode: null, metrics: null, error: `No connected-host operator token found at ${token.path}` };

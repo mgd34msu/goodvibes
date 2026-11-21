@@ -11,7 +11,6 @@ import {
 } from '@goodvibes/engine/terminal-shell/model-picker-auth-facts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
-import '@goodvibes/engine/platform/platform/providers';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ShellViews } from '../views/builtin-views.ts';
@@ -33,8 +32,7 @@ import { confirmThrough } from '../input/confirm-dialog.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { classifyServiceSettingChange } from '@goodvibes/engine/terminal-shell/service-setting-change';
-import { setActiveThemeMode, setActiveThemeName } from '../renderer/theme.ts';
-import { THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY, coerceThemeModeSetting } from '../renderer/theme-mode-config.ts';
+import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
@@ -295,23 +293,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
         },
         requestRender: render,
         onSettingApplied: (change) => {
-          // forced dark/light applies immediately (rebuild palettes + full
-          // repaint); auto only re-probes at startup, so it takes effect next launch.
-          if (String(change.key) === THEME_NAME_CONFIG_KEY) {
-            // Theme changes apply immediately: rebuild palettes + full repaint.
-            const applied = setActiveThemeName(change.value);
-            commandContext.requestFullRepaint?.();
-            return { message: `Theme: ${applied} (applied now)` };
-          }
-          if (String(change.key) === THEME_MODE_CONFIG_KEY) {
-            const next = coerceThemeModeSetting(change.value);
-            if (next === 'dark' || next === 'light') {
-              setActiveThemeMode(next);
-              commandContext.requestFullRepaint?.();
-              return { message: `Theme mode: ${next} (applied now)` };
-            }
-            return { message: 'Theme mode: auto (probes terminal on next startup)' };
-          }
+          // A theme change was applied by the start-up theme subscription
+          // (renderer/terminal-bg-probe.ts); this only reports what it did.
+          const themeMessage = takeAppliedThemeMessage(String(change.key));
+          if (themeMessage !== undefined) return { message: themeMessage };
           const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
           if (!builtinSetting) return;
           const serviceChange = { ...change, key: builtinSetting.key };

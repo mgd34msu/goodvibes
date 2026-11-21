@@ -5,7 +5,7 @@ import {
   collectMarkdownReferences, extractMarkdownPreview, extractMarkdownSections,
   parseMarkdownFrontmatter, type MarkdownDisclosure,
 } from '../../utils/markdown-disclosure.js';
-import { resolveSkillRoots } from '../../skills/roots.js';
+import { resolveSkillRoots, type SkillRoot } from '../../skills/roots.js';
 
 export interface RegistryToolSource {
   /** True for the live file-system source, whose judgments need no per-candidate serialisation. */
@@ -24,10 +24,14 @@ export interface LiveRegistryRoots {
   readonly surfaceRoot?: string | undefined;
 }
 
-/** The skill directories, in search order: the same list every skill reader takes from platform/skills. */
+/** The skill roots, in search order: the same list every skill reader takes from platform/skills. */
+export function registrySkillRoots(roots: LiveRegistryRoots): SkillRoot[] {
+  return resolveSkillRoots({ workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory || undefined }, roots.surfaceRoot ?? '');
+}
+
+/** The skill directories, in search order. */
 export function registrySkillDirectories(roots: LiveRegistryRoots): string[] {
-  return resolveSkillRoots({ workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory || undefined }, roots.surfaceRoot ?? '')
-    .map((root) => root.directory);
+  return registrySkillRoots(roots).map((root) => root.directory);
 }
 
 /** The agent directories, in search order: `.goodvibes/agents` of the project, then of the home directory. */

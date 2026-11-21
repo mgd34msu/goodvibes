@@ -37,7 +37,6 @@ import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { FlagState } from '@/runtime/index.ts';
-import '@/runtime/index.ts';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
 import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 import { logger } from '@goodvibes/engine/platform/platform/utils';

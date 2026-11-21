@@ -4,20 +4,18 @@ import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionT
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
-import { ingressAnswer, readTextBodyWithinLimit } from '../helpers.js';
+import { ingressAnswer, readTextBodyWithinLimit, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, savedWithin, submitSurfaceMessageSaved, SURFACE_ACK_DEADLINE_MS, surfaceAckStillSaving, surfaceOutcomeResponse } from '../surface-message.js';
 
 /** Discord message flag: only the user who ran the command sees the reply. */
 const EPHEMERAL_MESSAGE_FLAG = 64;
 
 export async function handleDiscordSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const publicKey =
-    await context.serviceRegistry.resolveSecret('discord', 'publicKey')
-    ?? process.env.DISCORD_PUBLIC_KEY;
-  if (!publicKey) {
-    logger.warn('handleDiscordSurfaceWebhook: DISCORD_PUBLIC_KEY not set, rejecting');
-    return Response.json({ error: 'Webhook not configured' }, { status: 503 });
-  }
+  const credential = await resolveInboundCredential(context, 'discord');
+  if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('discord', credential);
+  if (credential.state === 'absent') return surfaceCredentialAbsent('discord', credential.setting);
+  const publicKey = credential.value;
 
   const signature = req.headers.get('x-signature-ed25519') ?? '';
   const timestamp = req.headers.get('x-signature-timestamp') ?? '';

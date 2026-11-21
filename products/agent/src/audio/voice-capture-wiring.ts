@@ -15,14 +15,12 @@ import { createVoiceCapturePorts, wireTerminalWakeCapture } from '@goodvibes/eng
  * which is what keeps this file out of the shell-UI layers.
  */
 
-import '@goodvibes/engine/platform/platform/utils';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes/engine/platform/platform/voice';
 import type { AudioInputDeviceEnumerator } from '@goodvibes/engine/platform/platform/voice/capture';
 import type { VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { createAgentCaptureOpener } from './capture.ts';
 import { playActivationSound } from './activation-sound.ts';
-import './player.ts';
 import type { StreamingAudioPlayer } from './player.ts';
 import { createVoiceSttGateway } from '../core/voice-stt-gateway.ts';
 import { startWakeRuntime, wireWakeRuntime } from './wake-runtime.ts';

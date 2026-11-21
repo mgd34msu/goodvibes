@@ -12,8 +12,7 @@ import {
   assertProviderMatchesModel,
   assertProviderHasModel,
   buildDefaultSource,
-  computeNextRun,
-  jobEnablement,
+  nextJobEnablement,
   normalizeOptionalString,
   normalizeProviderQualifiedModel,
   normalizeProviderQualifiedModelList,
@@ -59,9 +58,9 @@ export async function createAutomationJobRecord(
   options: AutomationJobMutationOptions = {},
 ): Promise<ManagedAutomationJob> {
   const now = Date.now();
-  const enabled = input.enabled ?? true;
   const jobId = input.id?.trim() || `auto-${randomUUID().slice(0, 8)}`;
   const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule)), now);
+  const enablement = nextJobEnablement(undefined, input.enabled ?? true, schedule, now, 'created-disabled');
   const job: AutomationJob = {
     id: jobId,
     labels: [],
@@ -72,19 +71,20 @@ export async function createAutomationJobRecord(
     ...(input.kind ? { kind: input.kind } : {}),
     name: input.name.trim() || input.prompt.slice(0, 40),
     description: input.description ?? input.prompt,
-    ...jobEnablement(enabled),
+    enabled: enablement.enabled,
+    status: enablement.status,
     schedule,
     execution: buildDefaultExecution(input, context.listModels?.()),
     delivery: buildDefaultDelivery(input.delivery),
     failure: buildDefaultFailurePolicy(context.configManager, input.failure),
-    source: buildDefaultSource(enabled, now),
-    nextRunAt: enabled ? computeNextRun(schedule, now) : undefined,
+    source: buildDefaultSource(enablement.enabled, now),
+    nextRunAt: enablement.nextRunAt,
     lastRunAt: undefined,
     lastRunId: undefined,
     runCount: 0,
     successCount: 0,
     failureCount: 0,
-    pausedReason: enabled ? undefined : 'created-disabled',
+    pausedReason: enablement.pausedReason,
     // The setting is a default for one-shot jobs only: a recurring job deleted after its first run would silently stop recurring.
     deleteAfterRun: input.deleteAfterRun ?? (schedule.kind === 'at' && Boolean(context.configManager.get('automation.deleteAfterRun'))),
     archivedAt: undefined,
@@ -104,23 +104,11 @@ export async function toggleAutomationJobEnabled(
 ): Promise<ManagedAutomationJob | null> {
   const job = context.jobs.get(jobId);
   if (!job) return null;
-  const nextRunAt = enabled ? computeNextRun(job.schedule, Date.now()) : undefined;
-  // A one-time schedule already in the past has nothing left to run: enabling
-  // it would leave an enabled job that never fires, so it stays disabled and
-  // says why.
-  const expired = enabled && nextRunAt === undefined;
-  const effectiveEnabled = enabled && !expired;
+  const now = Date.now();
   const updated: AutomationJob = {
     ...job,
-    ...jobEnablement(effectiveEnabled),
-    pausedReason: expired ? 'schedule-expired' : enabled ? undefined : 'operator-disabled',
-    updatedAt: Date.now(),
-    nextRunAt,
-    source: {
-      ...job.source,
-      enabled: effectiveEnabled,
-      updatedAt: Date.now(),
-    },
+    ...nextJobEnablement(job, enabled, job.schedule, now),
+    updatedAt: now,
   };
   const committed = await context.commitJob(job, updated, options);
   context.scheduleJob(committed);
@@ -138,7 +126,6 @@ export async function updateAutomationJobRecord(
   const job = context.jobs.get(jobId);
   if (!job) return null;
 
-  const nextEnabled = patch.enabled ?? job.enabled;
   const prompt = patch.prompt ?? job.execution.prompt ?? job.description ?? job.name;
   const updatedAt = Date.now();
   const models = context.listModels?.();
@@ -151,8 +138,7 @@ export async function updateAutomationJobRecord(
     : job.schedule;
   // The next run moves only when what decides it moved: the schedule, or
   // whether the job is enabled. A rename or a prompt fix keeps it.
-  const scheduleChanged = JSON.stringify(nextSchedule) !== JSON.stringify(job.schedule);
-  const timingChanged = scheduleChanged || nextEnabled !== job.enabled;
+  const enablement = nextJobEnablement(job, patch.enabled ?? job.enabled, nextSchedule, updatedAt);
   const nextModelProvider = patch.provider !== undefined
     ? normalizeOptionalString(patch.provider)
     : job.execution.modelProvider;
@@ -174,7 +160,6 @@ export async function updateAutomationJobRecord(
     ...(patch.kind ? { kind: patch.kind } : {}),
     name: patch.name ?? job.name,
     description: patch.description ?? (patch.prompt ? patch.prompt : job.description),
-    ...jobEnablement(nextEnabled),
     schedule: nextSchedule,
     execution: {
       ...job.execution,
@@ -212,14 +197,8 @@ export async function updateAutomationJobRecord(
       },
     }),
     deleteAfterRun: patch.deleteAfterRun ?? job.deleteAfterRun,
-    pausedReason: nextEnabled ? undefined : job.pausedReason ?? 'operator-disabled',
-    nextRunAt: !nextEnabled ? undefined : timingChanged || job.nextRunAt === undefined ? computeNextRun(nextSchedule, updatedAt) : job.nextRunAt,
+    ...enablement,
     updatedAt,
-    source: {
-      ...job.source,
-      enabled: nextEnabled,
-      updatedAt,
-    },
   };
 
   const committed = await context.commitJob(job, updated, options);

@@ -10,7 +10,7 @@ import { editTarget, editTargetView } from '../batteries/edit-target.js';
 import { judge } from '../../runtime/judge.js';
 import { resolveEditText } from './edit-text.js';
 
-type AstGrepModule = typeof import('@ast-grep/napi');
+import { loadAstGrep, parserForFile, type AstGrepModule } from '../shared/ast-grep.js';
 /** Why an edit was not applied, decided by the matcher that refused it. */
 export type EditFailureStatus = Exclude<EditResultStatus, 'applied'>;
 /** A refused edit: the message, the matcher's own status, and what to do next. */
@@ -339,35 +339,6 @@ type AstGrepNode = {
 };
 type AstGrepParser = { parse: (src: string) => { root(): { findAll(pat: string): AstGrepNode[] } } };
 
-let astGrepModulePromise: Promise<AstGrepModule> | null = null;
-
-async function loadAstGrep(): Promise<AstGrepModule> {
-  astGrepModulePromise ??= import('@ast-grep/napi');
-  return astGrepModulePromise;
-}
-
-function getAstGrepLang(astGrep: AstGrepModule, filePath: string): AstGrepParser | null {
-  const lang = extname(filePath).slice(1).toLowerCase();
-  switch (lang) {
-    case 'ts':
-      return astGrep.ts as unknown as AstGrepParser;
-    case 'tsx':
-      return astGrep.tsx as unknown as AstGrepParser;
-    case 'js':
-    case 'mjs':
-    case 'cjs':
-      return astGrep.js as unknown as AstGrepParser;
-    case 'jsx':
-      return astGrep.jsx as unknown as AstGrepParser;
-    case 'css':
-      return astGrep.css as unknown as AstGrepParser;
-    case 'html':
-      return astGrep.html as unknown as AstGrepParser;
-    default:
-      return null;
-  }
-}
-
 export function computeExactEdit(
   fileContent: string,
   item: EditItem,
@@ -479,7 +450,8 @@ export async function computeAstPatternEdit(
     );
   }
 
-  const parser = getAstGrepLang(astGrep, filePath);
+  // The same extensions the find tool's structural mode parses (tools/shared/ast-grep.ts).
+  const parser = parserForFile(astGrep, filePath) as unknown as AstGrepParser | null;
   if (!parser) {
     return withExactFallbackWarning(
       computeExactEdit(fileContent, item),

@@ -7,6 +7,7 @@ import { createNativeConversationIntakeBinding } from './native-conversation-int
 import { NativeWorkSubmissionPreflight } from './native-work-submission-preflight.js';
 import { realpathSync } from 'node:fs';
 import { NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
+import { intakeJournalPathFor } from './native-journal-paths.js';
 import { NativeWorkSubmissionControls, type NativeWorkSubmissionBinding } from './native-work-submission.js';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity, type NativeHostIdentityFormat, type NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
@@ -270,7 +271,7 @@ export function createBoundNativeWorkLedgerView(
         endpoint: host.baseUrl,
         projectId,
         workspace,
-        journal: new NativeConversationIntakeJournal(`${host.journalPath}.intake`, {}, policy.intake),
+        journal: new NativeConversationIntakeJournal(intakeJournalPathFor(host.journalPath), {}, policy.intake),
         bind: () =>
           createNativeConversationIntakeBinding(
             host,

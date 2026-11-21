@@ -63,8 +63,6 @@ function terminal() {
   };
   const route = createCommandModeTokenHandler<Ctx, typeof state>({
     surfaceRoot: 'goodvibes',
-    unknownCommand: (name) => `unknown /${name}`,
-    commandError: (_error, name) => `/${name} failed`,
     prepare(ctx, current, raw) {
       const split = splitSlashCommand(raw, (name) => current.commandRegistry.get(name));
       return split.ok ? { name: split.name, args: split.args, context: ctx } : undefined;

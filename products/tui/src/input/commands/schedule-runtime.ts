@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AutomationJobStore } from '@goodvibes/engine/platform/platform/automation';
 import type { AutomationJob, AutomationScheduleDefinition } from '@goodvibes/engine/platform/platform/automation';
@@ -79,6 +81,25 @@ interface RoutineOwner {
   retryRun(runId: string): Promise<string>;
 }
 
+/**
+ * The id a daemon create is sent with, per line, for this terminal process.
+ * The daemon replays a create whose id it already holds, so a line whose
+ * answer was lost and is run again returns the routine the first send made
+ * rather than a second one. The id is forgotten on a definite answer (the
+ * routine was created, or the daemon refused it), so the same line run again
+ * after that is a deliberate new routine.
+ */
+const pendingCreateIds = new Map<string, string>();
+
+function createFingerprint(schedule: AutomationScheduleDefinition, name: string, prompt: string, fields: ScheduleFields): string {
+  return JSON.stringify({ name, prompt, schedule, fields });
+}
+
+/** The daemon answered: a success, or a refusal of this request (not a timeout or a missing route). */
+function definiteRefusal(error: unknown): boolean {
+  return error instanceof GoodVibesError && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && error.status !== 408;
+}
+
 async function daemonOwner(ctx: CommandContext, rpc: OperatorRpcAvailable): Promise<RoutineOwner> {
   const operator = rpc.platformClient.operator;
   const move = await moveTerminalRoutinesToDaemon(ctx.platform.configManager, rpc, ctx.ops.automationManager);
@@ -87,9 +108,24 @@ async function daemonOwner(ctx: CommandContext, rpc: OperatorRpcAvailable): Prom
     runsNote: 'runs once, with or without a terminal open',
     notices: move.lines,
     list: async () => listedJobs(await operator.invoke('automation.jobs.list', {})).map(daemonView),
-    create: async (schedule, name, prompt, fields) => daemonView(await operator.invoke('automation.jobs.create', daemonCreateInput({
-      ...daemonScheduleFields(schedule), ...fields, name, prompt, description: prompt,
-    }))),
+    create: async (schedule, name, prompt, fields) => {
+      const fingerprint = createFingerprint(schedule, name, prompt, fields);
+      const id = pendingCreateIds.get(fingerprint) ?? `routine-${randomUUID()}`;
+      pendingCreateIds.set(fingerprint, id);
+      try {
+        const created = await operator.invoke('automation.jobs.create', daemonCreateInput({
+          ...daemonScheduleFields(schedule), ...fields, id, name, prompt, description: prompt,
+        }));
+        pendingCreateIds.delete(fingerprint);
+        return daemonView(created);
+      } catch (error) {
+        if (definiteRefusal(error)) {
+          pendingCreateIds.delete(fingerprint);
+          throw error;
+        }
+        throw commandRefusal(`${describeOperatorRpcError(error)} It may have been created; /schedule list shows it. Running the same line again will not create a second one.`);
+      }
+    },
     remove: async (jobId) => { await operator.invoke('automation.jobs.delete', { jobId }); },
     setEnabled: async (jobId, enabled) => {
       if (enabled) await operator.invoke('automation.jobs.enable', { jobId });
@@ -191,7 +227,10 @@ async function changing<T>(ctx: CommandContext, work: (owner: RoutineOwner) => P
   const owner = await ownerFor(ctx);
   if (owner.readOnly) throw commandRefusal(owner.readOnly);
   const rpc = resolveDaemonEnabled(ctx.platform.configManager);
-  try { return await work(owner); } catch (error) { throw commandRefusal(rpc ? describeOperatorRpcError(error) : summarizeError(error)); }
+  try { return await work(owner); } catch (error) {
+    if (error instanceof Error && error.name === 'RefusalError') throw error;
+    throw commandRefusal(rpc ? describeOperatorRpcError(error) : summarizeError(error));
+  }
 }
 
 const TERMINAL_SCHEDULES: ScheduleHost<CommandContext> = {

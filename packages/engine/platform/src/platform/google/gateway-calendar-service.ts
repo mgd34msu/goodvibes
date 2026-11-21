@@ -24,6 +24,7 @@
  * scope", not a bare 500.
  */
 
+import { createHash } from 'node:crypto';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type {
   CalendarGatewayCalendarSummary,
@@ -156,6 +157,11 @@ function codeFor(failure: GoogleApiFailure): string {
   if (failure.status === 429) return 'RATE_LIMITED';
   if (failure.status === 401) return 'UNAUTHENTICATED';
   return 'CALENDAR_REQUEST_FAILED';
+}
+
+/** The Google event id a caller's event UID is created under: lowercase hex SHA-256, a valid base32hex id of 64 characters. */
+function googleEventIdForUid(uid: string): string {
+  return createHash('sha256').update(uid).digest('hex');
 }
 
 function unwrap<T>(result: GoogleApiResult<T>): T {
@@ -368,22 +374,41 @@ export function createGoogleCalendarGatewayService(
       if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
         throw new GatewayVerbError("Field 'end' must not be before 'start'.", 'INVALID_ARGUMENT', 400);
       }
-      const created = unwrap(
-        await client.createEvent({
-          summary: input.title,
-          start: input.start,
-          end: input.end,
-          // The route already required the owner's confirmation for this
-          // call, with the attendee list in front of them.
-          ...(input.attendees === undefined || input.attendees.length === 0
-            ? {}
-            : { attendees: input.attendees, notifyAttendees: true }),
-          ...(input.location === undefined ? {} : { location: input.location }),
-          ...(input.description === undefined ? {} : { description: input.description }),
-          ...(input.calendarId === undefined ? {} : { calendarId: input.calendarId }),
-        }),
-      );
-      return { eventId: created.id, uid: created.id, createdAt: new Date(now()).toISOString() };
+      const calendarId = input.calendarId ?? 'primary';
+      // A caller's UID becomes the Google event id (its SHA-256 in hex, which
+      // is base32hex), so a create sent again after a lost answer is refused
+      // as a duplicate and the event already made is returned instead.
+      const eventId = input.uid === undefined ? undefined : googleEventIdForUid(input.uid);
+      const result = await client.createEvent({
+        ...(eventId === undefined ? {} : { id: eventId }),
+        summary: input.title,
+        start: input.start,
+        end: input.end,
+        // The route already required the owner's confirmation for this
+        // call, with the attendee list in front of them.
+        ...(input.attendees === undefined || input.attendees.length === 0
+          ? {}
+          : { attendees: input.attendees, notifyAttendees: true }),
+        ...(input.location === undefined ? {} : { location: input.location }),
+        ...(input.description === undefined ? {} : { description: input.description }),
+        ...(input.calendarId === undefined ? {} : { calendarId: input.calendarId }),
+      });
+      if (!result.ok && eventId !== undefined && result.status === 409) {
+        const existing = unwrap(await client.getEvent(eventId, calendarId));
+        recordEventsRead(input.calendarId, [existing]);
+        return { eventId: existing.id, uid: input.uid ?? existing.id, createdAt: new Date(now()).toISOString() };
+      }
+      if (!result.ok && result.transport === 'unreachable') {
+        throw new GatewayVerbError(
+          `${result.problem} ${eventId === undefined
+            ? 'Check the calendar before creating it again; creating it blindly can add it twice and invite the guests twice.'
+            : `Read it with calendar.events.get eventId ${eventId} before creating it again.`}`,
+          'CALENDAR_OUTCOME_UNKNOWN',
+          502,
+        );
+      }
+      const created = unwrap(result);
+      return { eventId: created.id, uid: input.uid ?? created.id, createdAt: new Date(now()).toISOString() };
     },
 
     /**

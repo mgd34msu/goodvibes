@@ -21,18 +21,22 @@
  *
  * ON THE FLOOR VALUE
  *
- * `AGENT_DAEMON_BUILD_FLOOR` is '3.1.2'. The platform is explicit that the floor
+ * `AGENT_DAEMON_BUILD_FLOOR` is '3.3.2'. The platform is explicit that the floor
  * belongs to the consumer, not the platform: "the TUI, the agent and the web
  * UI need different daemon behaviors at different times, and a single
  * platform-wide constant would either over-refuse for one of them or under-refuse
  * for another. Each consumer passes its own and states, in its own release
  * notes, what it raised the floor for."
  *
- * The daemon shares this repository's release line. 3.1.2 is the oldest build
- * that serves every verb this Agent depends on: the hosted-session verbs its
- * conversation turns are routed through, `approvals.raise`, the conversation
- * rewind verbs and `sessions.permissionMode.set`. 3.1.1 and earlier answer
- * those with a 404 that reads as a broken feature; 3.1.2 and later serve them.
+ * The daemon shares this repository's release line. 3.3.2 is the oldest build
+ * that serves every verb this Agent depends on. 3.1.2 added the hosted-session
+ * verbs its conversation turns are routed through, `approvals.raise`, the
+ * conversation rewind verbs and `sessions.permissionMode.set`; 3.3.0 added
+ * `inbox.answer`; 3.3.2 added `mcp.servers.reload` and the MCP trust, role,
+ * quarantine and tool-block verbs, `relay.codes.list` and `relay.codes.revoke`,
+ * and `automation.schedules.pause`, `automation.schedules.resume` and
+ * `automation.schedules.preview`. An older daemon answers some of those with a
+ * 404 that reads as a broken feature; 3.3.2 and later serve them.
  *
  * The floor REFUSES, it does not merely warn. The verdict is set by the one
  * `/status` read on the adoption edge (`judgeForAdoption`). A daemon below the
@@ -58,7 +62,7 @@ export { evaluateDaemonStatusCompatibility };
  * The oldest daemon build this Agent will work against, or undefined for "this
  * client is not asking for anything". See the note above before changing it.
  */
-export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '3.1.2';
+export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '3.3.2';
 
 export interface DaemonBuildGuardOptions {
   /** The floor this client declares. Undefined means it declares none. */

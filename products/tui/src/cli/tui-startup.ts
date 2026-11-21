@@ -168,43 +168,40 @@ export function applyInitialTuiCliState(options: {
     const link = parseDeepLink(cli.commandArgs[0] ?? '');
     if (link) commandContext.print(openDeepLink(commandContext, link.surface, link.target));
     runFirstRunSteps();
-  } else if (cli.command === 'sessions' && cli.commandArgs[0] === 'resume') {
-    const target = cli.commandArgs.slice(1).join(' ').trim();
-    if (target) {
-      return resumeSessionAndRender(commandRegistry, target, commandContext, render);
-    }
-  } else if (cli.flags.continueLast) {
-    // --continue: resume the last session tracked by the pointer file. A crash
+  } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.continueLast || cli.flags.resume !== undefined || cli.flags.fork !== undefined) {
+    // One session to open, in this order: `sessions resume <id>`; `--continue`
+    // (the last session); `--resume [id]`; `--fork [id]`. A bare `--resume` or
+    // `--fork` means the last session, read from the pointer file. A crash
     // snapshot newer than its saved copy is offered by the resume routine, as
-    // for every other way of opening a session.
-    const lastId = readLastSessionPointer({ surface });
-    if (lastId) {
-      return resumeSessionAndRender(commandRegistry, lastId, commandContext, render);
-    }
-    nothingToContinue();
-  } else if (cli.flags.resume !== undefined) {
-    // --resume [id]: explicit id dispatches directly; bare form (sentinel 'latest') resolves via pointer
-    if (cli.flags.resume !== 'latest') {
-      return resumeSessionAndRender(commandRegistry, cli.flags.resume, commandContext, render);
-    } else {
-      const lastId = readLastSessionPointer({ surface });
-      if (lastId) {
-        return resumeSessionAndRender(commandRegistry, lastId, commandContext, render);
-      }
+    // for every other way of opening one.
+    const sessionsResume = cli.command === 'sessions' && cli.commandArgs[0] === 'resume';
+    const fork = !sessionsResume && !cli.flags.continueLast && cli.flags.resume === undefined;
+    const named = sessionsResume
+      ? cli.commandArgs.slice(1).join(' ').trim()
+      : cli.flags.continueLast
+        ? undefined
+        : cli.flags.resume !== undefined
+          ? (cli.flags.resume === 'latest' ? undefined : cli.flags.resume)
+          : typeof cli.flags.fork === 'string' ? cli.flags.fork : undefined;
+    const target = named ?? readLastSessionPointer({ surface }) ?? '';
+    if (!target) {
       nothingToContinue();
+      return undefined;
     }
-  } else if (cli.flags.fork !== undefined) {
-    // --fork [id]: fork specific session (true = bare fork-current; string = explicit id to resume then fork)
-    if (cli.flags.fork === true) {
-      // Bare --fork: fork the current session without a prior resume
-      return commandRegistry.execute('session', ['fork'], commandContext).then(() => render());
-    } else {
-      // Explicit id: resume the named session first, then fork
-      return commandRegistry
-        .execute('session', ['resume', cli.flags.fork], commandContext)
-        .then(() => commandRegistry.execute('session', ['fork'], commandContext))
-        .then(() => render());
-    }
+    // A fork runs only after its session resumed, so bare --fork forks the last
+    // session and never the new empty one.
+    return resumeSessionAndRender(commandRegistry, target, commandContext, render)
+      .then(async () => {
+        if (!fork) return;
+        await commandRegistry.execute('session', ['fork'], commandContext);
+        render();
+      })
+      .catch((error: unknown) => {
+        // A refusal (no such session, one open elsewhere) is said with its own next step, then the launch goes on as a plain one would.
+        commandContext.print(`[Resume] Could not ${fork ? 'resume and fork' : 'resume'} session ${target}: ${summarizeError(error)}`);
+        render();
+        runFirstRunSteps();
+      });
   } else {
     runFirstRunSteps();
   }

@@ -4,6 +4,7 @@
  * reported and can neither skip the session-saving shutdown nor keep the
  * terminal from being restored.
  */
+import { ShutdownReleaseError } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 import { runUnsubscribes, settleInteractiveExit, withShutdownDeadline } from './exit-completion.ts';
 
 export interface ExitSequenceDeps<Snapshot> {
@@ -29,6 +30,8 @@ export interface ExitSequenceDeps<Snapshot> {
   readonly buildMessagesSnapshot: () => Snapshot;
   /** Releases every runtime owner and saves the session. */
   readonly shutdown: (snapshot: Snapshot) => Promise<void>;
+  /** True once `shutdown` has saved the session durably, even while its releases are still running. */
+  readonly sessionSaved: () => boolean;
   /** Removes this session's recovery snapshot once the save finished. */
   readonly removeRecoveryPoint: () => void;
   /** Stops timers and listeners this exit must not leave running. */
@@ -97,16 +100,21 @@ export function runExitSequence<Snapshot>(
       }
     }
     const saved = snapshot;
-    // Bounded so a hung owner cannot hold the process open. The session is
-    // saved near the end of shutdown, so the recovery snapshot is removed only
-    // once that shutdown has finished: if the deadline wins, it stays and the
-    // next launch can restore from it.
+    // Bounded so a hung owner cannot hold the process open. The recovery
+    // snapshot is removed once the session is saved: when shutdown finished, or
+    // when it failed or met the deadline only in a release after the save (its
+    // failures are reported as warnings). A shutdown that ended before the save
+    // keeps the recovery point for the next launch.
     const runtimeShutdown = (saved !== undefined
       ? withShutdownDeadline(hostedDetach.then(() => deps.shutdown(saved)))
       : Promise.reject(new Error('The session snapshot could not be built; shutdown was not run.')))
       .then(() => {
         deps.removeRecoveryPoint();
-      }, (error: unknown) => { shutdownIncomplete = true; throw error; });
+      }, (error: unknown) => {
+        if (saved !== undefined && (error instanceof ShutdownReleaseError || deps.sessionSaved())) deps.removeRecoveryPoint();
+        else shutdownIncomplete = true;
+        throw error;
+      });
     exitCompletion = settleInteractiveExit(runtimeShutdown, spokenOutputDrain, herdrRelease);
     deps.detach();
   } catch (error) {

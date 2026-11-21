@@ -56,7 +56,7 @@
  * hiding them would trade one dishonesty for another. What the caller must show
  * alongside them is {@link describeApprovalsUnavailable}.
  */
-import type { SharedApprovalRecord } from '@goodvibes/engine/platform/platform/control-plane';
+import { isOpenApprovalStatus, type SharedApprovalRecord } from '@goodvibes/engine/platform/platform/control-plane';
 import type {
   ApprovalUpdateNotice,
   ApprovalUpdateSubscription,
@@ -128,14 +128,6 @@ export interface ApprovalsViewOptions {
 const DEFAULT_REFRESH_INTERVAL_MS = 15_000;
 
 /**
- * The statuses that keep an ask on the panel.
- *
- * `claimed` counts: another surface is answering it, and hiding it would make
- * the ask look answered before anyone decided anything.
- */
-const WAITING_STATUSES: ReadonlySet<string> = new Set(['pending', 'claimed']);
-
-/**
  * Apply one pushed transition to the host rows this view holds.
  *
  * The frame carries the whole record, so this is the application of the
@@ -153,7 +145,8 @@ export function applyApprovalUpdate(
   // A record older than the one held is a late frame or a list read that crossed a push: it changes nothing.
   if (index >= 0 && revisionOf(rows[index]!) >= revisionOf(record) && revisionOf(record) > 0) return rows;
   const withoutIt = rows.filter((row) => approvalRefKey(row) !== key);
-  if (!WAITING_STATUSES.has(record.status)) return withoutIt;
+  // A claimed ask stays: another surface is answering it, and nobody has decided it yet.
+  if (!isOpenApprovalStatus(record.status)) return withoutIt;
   if (index < 0) return [...rows, record];
   const next = [...rows];
   next[index] = record;
@@ -420,8 +413,12 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         if (opened === null || liveUpdates) return;
         liveUpdates = true;
         armTimer();
-        // Frames are not replayed: the list is read once now, which reconciles anything missed while closed.
-        void refresh();
+        // Frames are not replayed: the list is read once by a request sent after the subscription exists, which
+        // reconciles anything missed while closed. A read already out was computed before the stream opened, so it
+        // is let finish and a new one follows it.
+        const before = inFlight;
+        if (before) void before.finally(() => { void refresh(); });
+        else void refresh();
       })
       .catch(() => {
         // `subscribe` is documented to report failure as null rather than throw;

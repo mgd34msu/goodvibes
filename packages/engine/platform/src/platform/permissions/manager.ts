@@ -1121,8 +1121,8 @@ export class PermissionManager {
       assertCurrent();
       return Object.freeze({ result: refused, revisionIds: Object.freeze([]), claim: () => { throw new Error('Owner policy denied this tool call'); } });
     }
-    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, admissionEvidence);
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, capturedAuthority.directory ?? undefined, admissionEvidence);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts, capturedAuthority.directory ?? undefined);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: permissions.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner, sessionId: options.hookOwner?.sessionId,
@@ -1356,7 +1356,7 @@ export class PermissionManager {
     // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
     // What code or a confident reading says cannot be undone is asked about every time: an answer to it is never kept.
     const rememberOptions = o.ownerOnly === 'channel-request' || o.single === true
-      || undoFactOf(input.toolName, input.args, analysis.reading, o.ownerOnly).cannotUndo
+      || undoFactOf(input.toolName, input.args, analysis.reading, o.ownerOnly, input.workingDirectory).cannotUndo
       ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere());
     const asked = await awaitPermission(() => this.requestPermission({
       callId: input.callId, tool: input.toolName, args: input.args, category: input.category,
@@ -1818,8 +1818,8 @@ export class PermissionManager {
       assertCurrent();
       return this.emitAndReturn(callId, toolName, category, this.neverRunResult(neverRun, analysis), hookOwner);
     }
-    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category);
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, config.directory ?? undefined);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts, config.directory ?? undefined);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal, assertCurrent },
@@ -1904,7 +1904,8 @@ export class PermissionManager {
         decision: { state: 'refused', decidedBy: 'rule', reason: `refused by ${description}`, limit: description,
           next: ['carry on without this call and report that it was not run', 'only the owner can remove the rule'] } } };
     }
-    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition, category));
+    const directory = this.configReader.getWorkingDirectory() ?? undefined;
+    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition, category, directory), directory);
     const rule = await this.ruleFactOf({
       toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: signal ? { signal } : {},
@@ -1926,13 +1927,14 @@ export class PermissionManager {
    * declaration covers: a shell command that mails or posts a message, a
    * `fetch` to a messaging service, an MCP or plugin tool's recipient
    * arguments (gate/send-recipients.ts). Cost per call: one parse of each
-   * command a call runs, a walk of an undeclared tool's arguments, and a few
-   * settings reads only when a recipient was found.
+   * command a call runs (and a read of each shell script it runs, from
+   * `directory`), a walk of an undeclared tool's arguments, and a few settings
+   * reads only when a recipient was found.
    */
   private ownerOnlyFacts(toolName: string, args: Record<string, unknown>, definition: ToolDefinition | undefined,
-    category: PermissionCategory, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
+    category: PermissionCategory, directory: string | undefined, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
     const declared = callRecipients(args, definition);
-    const read = undeclaredSendRecipients(toolName, args, definition, callCommands(toolName, args, definition), category === 'read');
+    const read = undeclaredSendRecipients(toolName, args, definition, callCommands(toolName, args, definition), category === 'read', directory);
     const recipients = declared === undefined || read === undefined ? undefined : [...declared, ...read];
     const known = recipients === undefined || recipients.length === 0 ? undefined : this.knownRecipients();
     return {

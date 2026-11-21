@@ -156,6 +156,12 @@ const KNOWLEDGE_JOB_RUN_REINDEX_RESULT_SCHEMA = objectSchema({
 }, ['sourceCount', 'issueCount'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_REFRESH_RESULT_SCHEMA = objectSchema({
   refreshed: NUMBER_SCHEMA,
+  attempted: NUMBER_SCHEMA,
+  failed: NUMBER_SCHEMA,
+  failures: arraySchema(objectSchema({
+    sourceId: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['sourceId', 'reason'], { additionalProperties: false })),
 }, ['refreshed'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_BROWSER_SYNC_RESULT_SCHEMA = objectSchema({
   imported: NUMBER_SCHEMA,

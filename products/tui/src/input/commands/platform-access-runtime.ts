@@ -9,9 +9,7 @@ import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes/engi
 import { daemonTokenOverride, resolveControlPlaneBaseUrl } from '../../runtime/client/operator-endpoint.ts';
 import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes/engine/platform/platform/config';
 import { registerUpdateCommand } from './update-runtime.ts';
-import '@/runtime/index.ts';
 import {
   requireSecretsManager,
   requireShellPaths,
@@ -131,7 +129,7 @@ async function exchangeServiceLogin(
       const notInUse = daemonTokenOverride()
         ? 'GOODVIBES_DAEMON_TOKEN is set, and it is the bearer for every daemon call while it is'
         : dialledOrigin !== signedIn
-          ? `this terminal dials ${dialled ?? 'no daemon address'}, not ${signedIn}; the session is used once this terminal is pointed at that address (connect to it from /setup, Network step)`
+          ? `this terminal dials ${dialled ?? 'no daemon address'}, not ${signedIn}; the session is used once this terminal is pointed at that address (connect to it with /setup connect-daemon)`
           : null;
       ctx.print([
         notInUse

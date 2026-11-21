@@ -35,6 +35,45 @@ export function createOrderedShutdown<SessionData>(
       if (errors.length > 1) throw new AggregateError(errors, message);
     }));
 }
+/**
+ * Thrown by a session shutdown when the session WAS saved durably and only
+ * releasing other owned resources failed. A shell keeps this apart from a
+ * failed save: recovery state is for a session that was not saved.
+ */
+export class ShutdownReleaseError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string) {
+    super(errors, message);
+    this.name = 'ShutdownReleaseError';
+  }
+}
+
+/** A session shutdown handler that also says whether its save has landed. */
+export type SessionShutdown<SessionData> = ((sessionData: SessionData) => Promise<void>) & {
+  /** True once the session is durably saved, even while releases are still running. */
+  readonly sessionSaved: () => boolean;
+};
+
+/**
+ * {@link createOrderedShutdown} for a session that is saved during the run. `run`
+ * receives `markSaved`, which its save step calls once the session is on disk
+ * (shutdownRuntime's `onSessionSaved`). A failure after that is thrown as a
+ * {@link ShutdownReleaseError} carrying `savedMessage`; a failure before it stays
+ * the plain failure a shell treats as "not saved".
+ */
+export function createSessionShutdown<SessionData>(
+  run: (sessionData: SessionData, attempt: AttemptShutdownCleanup, markSaved: () => void) => Promise<void>,
+  message: string,
+  savedMessage: string,
+): SessionShutdown<SessionData> {
+  let durablySaved = false;
+  const markSaved = (): void => { durablySaved = true; };
+  const shutdown = createOrderedShutdown<SessionData>((sessionData, attempt) => run(sessionData, attempt, markSaved), message, (errors, failureMessage) => {
+    if (!durablySaved) return errors.length === 1 ? errors[0] : new AggregateError(errors, failureMessage);
+    return new ShutdownReleaseError(errors, savedMessage);
+  });
+  return Object.assign(shutdown, { sessionSaved: () => durablySaved });
+}
+
 /** Remove ownership before invoking any unsubscribe; one failure cannot strand siblings. */
 export async function drainShutdownRegistry(registry: ShutdownCleanup[], attempt: AttemptShutdownCleanup): Promise<void> {
   for (const unsubscribe of registry.splice(0)) await attempt(unsubscribe);

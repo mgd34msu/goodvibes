@@ -19,9 +19,9 @@
  */
 import {
   HOME_ASSISTANT_DEFAULT_EVENT_TYPE,
-  resolveHomeAssistantAccessToken,
   resolveHomeAssistantBaseUrl,
 } from '../channels/builtin/homeassistant.js';
+import { requireSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import type { RouteBindingManager } from '../channels/index.js';
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -227,7 +227,7 @@ export async function publishHomeAssistantChatReply(
   },
 ): Promise<void> {
   const baseUrl = resolveHomeAssistantBaseUrl(deps.configManager, deps.serviceRegistry);
-  const accessToken = await resolveHomeAssistantAccessToken(deps);
+  const accessToken = await requireSurfaceSecret(deps, 'homeassistant', 'primary');
   if (!baseUrl || !accessToken) {
     throw new Error('Home Assistant instance URL or access token is not configured.');
   }

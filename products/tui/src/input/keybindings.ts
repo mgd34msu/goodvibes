@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { COMMON_ACTION_DESCRIPTIONS, createKeybindingDefaults } from '@goodvibes/engine/terminal-shell/keybinding-catalog';
 import { KeybindingsManager as PlatformKeybindingsManager, type KeyCombo, type KeybindingsManagerOptions } from '@goodvibes/engine/terminal-shell/keybindings';
 export type { KeyCombo, KeybindingsManagerOptions };
@@ -41,16 +42,16 @@ export type KeyAction =
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open the command palette (search & run any command)',
-  'open-agents':           'Open Your agents: what is running, what waits for you, what is scheduled (same as F2)',
+  'open-agents':           'Open Your agents: what is running, what waits for you, what is scheduled',
   'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
-  'clear-prompt':          'Clear the entire prompt (Alt+U; kill-to-start owns Ctrl+U)',
-  'word-back':             'Move cursor to start of previous word (Alt+B)',
-  'word-forward':          'Move cursor to end of next word (Alt+F)',
-  'kill-to-start':         'Kill from cursor to start of line into kill ring (Ctrl+U)',
-  'kill-word-forward':     'Kill word forward into kill ring (Alt+D)',
-  'yank':                  'Yank (paste) from kill ring (Ctrl+Shift+Y)',
-  'yank-pop':              'Rotate kill ring and yank next entry (Alt+Y)',
+  'clear-prompt':          'Clear the entire prompt',
+  'word-back':             'Move cursor to start of previous word',
+  'word-forward':          'Move cursor to end of next word',
+  'kill-to-start':         'Kill from cursor to start of line into kill ring',
+  'kill-word-forward':     'Kill word forward into kill ring',
+  'yank':                  'Yank (paste) from kill ring',
+  'yank-pop':              'Rotate kill ring and yank next entry',
   'cancel-tool-call':      'Cancel the running tool call (the turn continues)',
   'toggle-keep-awake':     'Toggle keep-awake (the "sleep disabled" chip)',
   'toggle-memory-provenance': 'List/hide the memories a turn used (provenance chip drill-in)',
@@ -140,6 +141,6 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {
   constructor(options: KeybindingsManagerOptions) {
     // A file written before Ctrl+A had one meaning still names it by the old action.
-    super(options, { surfaceRoot: 'tui', defaults: DEFAULT_KEYBINDINGS, descriptions: ACTION_DESCRIPTIONS, aliases: { 'apply-diff-line-start': 'line-start' }, abbreviateNamedKeys: true });
+    super(options, { surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, defaults: DEFAULT_KEYBINDINGS, descriptions: ACTION_DESCRIPTIONS, aliases: { 'apply-diff-line-start': 'line-start' }, abbreviateNamedKeys: true });
   }
 }

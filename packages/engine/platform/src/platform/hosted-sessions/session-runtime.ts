@@ -166,6 +166,13 @@ export interface HostedSessionRuntimeOptions {
    * person there is asked. Omitted ⇒ no one is attached.
    */
   readonly attended?: (() => boolean) | undefined;
+  /**
+   * Called when something that held the session busy has let go: a submitted
+   * message's turn settled (answered, failed or refused) or a queued message
+   * was deleted. The host rechecks whether the session is free on it instead
+   * of polling.
+   */
+  readonly busyEnded?: (() => void) | undefined;
 }
 
 /** The engine's side of a session's contracts. */
@@ -477,6 +484,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     },
   });
 
+  // After the turn's own settling steps in this tick, so the host's recheck reads the orchestrator at rest.
+  const busyEnded = (): void => { if (options.busyEnded) queueMicrotask(options.busyEnded); };
   const runtime: HostedSessionRuntime = {
     sessionId,
     conversation,
@@ -529,7 +538,11 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       cancelToolCall: (callId: string) => orchestrator.cancelToolCall(callId),
       listQueuedMessages: () => orchestrator.listQueuedMessages(),
       editQueuedMessage: (id: string, text: string) => orchestrator.editQueuedMessage(id, text),
-      deleteQueuedMessage: (id: string) => orchestrator.deleteQueuedMessage(id),
+      deleteQueuedMessage: (id: string) => {
+        const deleted = orchestrator.deleteQueuedMessage(id);
+        busyEnded();
+        return deleted;
+      },
     },
     isRunning: () => orchestrator.isTurnInFlight,
     submit: async (text: string, correlationId?: string, submitOptions?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void> => {
@@ -541,22 +554,24 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       // flight: a message queued behind a running turn must not erase the
       // evidence that turn's pending send is judged against. Channel and
       // automation input never starts one, so their exposure accumulates.
-      await withUntrustedContentScope(contentScope, async () => {
-        if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
-        await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
-          awaitQueuedTurn: true,
-          // An operator's message is the owner's request for its own turn (and only that turn).
-          ...(submitOptions?.operatorInput === true ? { ownerRequest: true } : {}),
-          ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
-          origin: {
-            source: 'hosted-session',
-            surface: 'service',
-            // Carry only the broker's correlation identity. It associates this
-            // actual turn with its submitting input; it conveys no authority.
-            ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
-          },
-        }));
-      });
+      try {
+        await withUntrustedContentScope(contentScope, async () => {
+          if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
+          await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
+            awaitQueuedTurn: true,
+            // An operator's message is the owner's request for its own turn (and only that turn).
+            ...(submitOptions?.operatorInput === true ? { ownerRequest: true } : {}),
+            ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
+            origin: {
+              source: 'hosted-session',
+              surface: 'service',
+              // Carry only the broker's correlation identity. It associates this
+              // actual turn with its submitting input; it conveys no authority.
+              ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
+            },
+          }));
+        });
+      } finally { busyEnded(); }
     },
     submitNative: async (permit, inputId, correlationId): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);
@@ -571,11 +586,13 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       // the same reason the turn is the owner's own (`ownerDirect`): the gate
       // asks the owner about its edits and commands instead of refusing them as
       // input from a surface anyone can write to.
-      await withUntrustedContentScope(contentScope, () => {
-        ledger.startTurn();
-        return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
-          origin: { source: 'native-hosted-conversation', surface: 'service', ownerDirect: true, metadata: { inputId, correlationId } } }));
-      });
+      try {
+        await withUntrustedContentScope(contentScope, () => {
+          ledger.startTurn();
+          return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
+            origin: { source: 'native-hosted-conversation', surface: 'service', ownerDirect: true, metadata: { inputId, correlationId } } }));
+        });
+      } finally { busyEnded(); }
       const after = readNativeConversationTurnStatus(permit);
       if (after !== 'settled') throw new Error(after === 'retryable'
         ? 'The model provider failed before the turn changed anything; the same message can be sent again.'

@@ -63,12 +63,15 @@ export interface WorkflowInstance {
   currentState: string;
   task: string;
   startedAt: number;
+  /** When it last started or moved; one left without a move for an hour is cancelled as abandoned. */
+  lastActivityAt: number;
   completedAt?: number | undefined;
   transitions: number;
   context: Record<string, unknown>;
   cancelled?: boolean | undefined;
 }
 
+/** How long a finished workflow is kept, and how long an unfinished one may go without a move before it is cancelled as abandoned. */
 const WORKFLOW_EVICT_AFTER_MS = 60 * 60 * 1000; // 1 hour
 const WORKFLOW_MAX_COMPLETED = 50;
 
@@ -81,13 +84,16 @@ export class WorkflowManager {
       throw new Error(`Unknown workflow definition: ${definition}`);
     }
 
+    const now = Date.now();
+    this.prune(now);
     const id = `wf-${crypto.randomUUID().slice(0, 8)}`;
     const instance: WorkflowInstance = {
       id,
       definition,
       currentState: def.states[0]!,
       task,
-      startedAt: Date.now(),
+      startedAt: now,
+      lastActivityAt: now,
       transitions: 0,
       context: {},
     };
@@ -121,8 +127,9 @@ export class WorkflowManager {
 
     instance.currentState = targetState;
     instance.transitions += 1;
+    instance.lastActivityAt = Date.now();
     if (targetState === 'complete') {
-      instance.completedAt = Date.now();
+      instance.completedAt = instance.lastActivityAt;
     }
     return { success: true };
   }
@@ -146,7 +153,21 @@ export class WorkflowManager {
   }
 
   list(): WorkflowInstance[] {
-    const now = Date.now();
+    this.prune(Date.now());
+    return Array.from(this.workflows.values());
+  }
+
+  /**
+   * Cancels a workflow left unfinished with no move for the eviction window
+   * (abandoned), then drops finished ones past the window and beyond the cap.
+   */
+  private prune(now: number): void {
+    for (const wf of this.workflows.values()) {
+      if (wf.completedAt === undefined && now - wf.lastActivityAt > WORKFLOW_EVICT_AFTER_MS) {
+        wf.cancelled = true;
+        wf.completedAt = now;
+      }
+    }
     // Evict expired completed/cancelled workflows
     for (const [id, wf] of this.workflows) {
       if (wf.completedAt !== undefined && now - wf.completedAt > WORKFLOW_EVICT_AFTER_MS) {
@@ -161,7 +182,6 @@ export class WorkflowManager {
       const toEvict = completed.slice(0, completed.length - WORKFLOW_MAX_COMPLETED);
       for (const wf of toEvict) this.workflows.delete(wf.id);
     }
-    return Array.from(this.workflows.values());
   }
 }
 

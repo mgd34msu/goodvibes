@@ -47,10 +47,10 @@ export interface RemoteToolOptions {
   readonly importRoot?: string | undefined;
 }
 
-/** The runner contract an artifact file carries, or undefined when the file does not hold one. */
+/** The runner contract an artifact file (an absolute path) carries, or undefined when the file does not hold one. */
 async function contractInFile(path: string): Promise<{ runnerId: string } & Record<string, unknown> | undefined> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(resolve(path), 'utf-8'));
+    const parsed: unknown = JSON.parse(await readFile(path, 'utf-8'));
     const contract = (parsed as { runnerContract?: Record<string, unknown> } | null)?.runnerContract;
     return typeof contract?.runnerId === 'string' ? { ...contract, runnerId: contract.runnerId } : undefined;
   } catch {
@@ -152,21 +152,23 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
 
       if (input.mode === 'import-artifact') {
         if (!input.path) return { success: false, error: 'import-artifact requires path.' };
+        // A relative path names a file in the project this tool serves, not in the process's directory.
+        const artifactPath = options.importRoot !== undefined ? resolve(options.importRoot, input.path) : resolve(input.path);
         if (options.importRoot !== undefined) {
-          const rel = relative(resolve(options.importRoot), resolve(input.path));
+          const rel = relative(resolve(options.importRoot), artifactPath);
           if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
-            return { success: false, error: `import-artifact reads only files inside the project (${resolve(options.importRoot)}); ${resolve(input.path)} is outside it. Nothing was imported.` };
+            return { success: false, error: `import-artifact reads only files inside the project (${resolve(options.importRoot)}); ${artifactPath} is outside it. Nothing was imported.` };
           }
         }
         // An import installs the file's runner contract, so it may add a runner but never replace one that is registered.
-        const incoming = await contractInFile(input.path);
+        const incoming = await contractInFile(artifactPath);
         const current = incoming ? registry.listContracts().find((contract) => contract.runnerId === incoming.runnerId) : undefined;
         // Compared as JSON so optional fields the registry leaves undefined match a file that omits them.
         if (incoming && current && !isDeepStrictEqual(JSON.parse(JSON.stringify(current)), JSON.parse(JSON.stringify(incoming)))) {
           return { success: false, error: `Runner ${incoming.runnerId} already has a contract, and the file carries a different one (trust class ${current.trustClass}, workspace, transport, template or pool may differ). Nothing was imported; a registered contract is not replaced by a file.` };
         }
         try {
-          const artifact = await registry.importArtifact(input.path);
+          const artifact = await registry.importArtifact(artifactPath);
           return { success: true, output: JSON.stringify(artifact) };
         } catch (error) {
           return { success: false, error: summarizeError(error) };

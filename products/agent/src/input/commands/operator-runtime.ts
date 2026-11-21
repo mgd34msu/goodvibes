@@ -9,8 +9,6 @@ import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
-import '@goodvibes/engine/platform/platform/utils';
-import '@goodvibes/engine/platform/platform/utils';
 import { commandRefusal, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';

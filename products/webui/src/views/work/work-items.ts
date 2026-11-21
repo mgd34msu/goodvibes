@@ -43,6 +43,7 @@ import { isClosedStatus, type UnionSessionRecord } from '../../lib/sessions-unio
 import { whenLabel } from '../../lib/when-label';
 import type { ProcessKind } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import { attemptGroupProgress } from './attempt-group-progress';
+import { costAmountLabel } from '../../lib/cost-source';
 
 /** Short time label ("5m ago", "Nov 14"); '' for a missing or epoch time. */
 export { whenLabel };
@@ -123,9 +124,7 @@ export function attentionPhrase(reason: string): string {
  */
 export function knownCost(node: Pick<FleetProcessNode, 'costUsd' | 'costState' | 'kind'>): string | undefined {
   if (isObservedKind(node.kind)) return undefined;
-  if (node.costState === 'unpriced' || node.costUsd == null) return undefined;
-  const amount = `$${node.costUsd.toFixed(2)}`;
-  return node.costState === 'estimated' ? `~${amount}` : amount;
+  return costAmountLabel(node.costUsd, node.costState, { whenUnpriced: 'omit' });
 }
 
 /** An approval's one line, in the presentation's words ("Run bun test?"). */

@@ -1,5 +1,6 @@
 import type { TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
 import { cardAwaitsTab } from '@goodvibes/engine/terminal-shell/blocking-permission-input';
+import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { HunkSelectionState } from './hunk-selection.ts';
 import { renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
@@ -41,10 +42,10 @@ export class PermissionPromptUI {
    */
   static queueCount(
     pending: { readonly callId: string },
-    broker?: { listApprovals(limit?: number): ReadonlyArray<{ readonly callId: string; readonly status: string }> } | null,
+    broker?: { listApprovals(limit?: number): ReadonlyArray<{ readonly callId: string; readonly status: SharedApprovalStatus }> } | null,
   ): number {
     try {
-      return broker?.listApprovals().filter((record) => (record.status === 'pending' || record.status === 'claimed') && record.callId !== pending.callId).length ?? 0;
+      return broker?.listApprovals().filter((record) => isOpenApprovalStatus(record.status) && record.callId !== pending.callId).length ?? 0;
     } catch {
       return 0; // an unreadable broker never blocks the card
     }

@@ -4,13 +4,12 @@ import {
   createOnboardingSnapshotReadHelpers,
   captureOnboardingConfigSnapshot,
 } from '@goodvibes/engine/terminal-shell/onboarding-snapshot-reads';
-import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
-import '@goodvibes/engine/terminal-shell/onboarding-read-facts';
 
 import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
 import { summarizeAgentBehaviorDiscovery } from '../../agent/behavior-discovery-summary.ts';
 import { readOnboardingRuntimeState } from './state.ts';
 import { captureNativeReadRestrictions } from '../read-restrictions.ts';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type {
   OnboardingConfigSnapshot,
   OnboardingSnapshotCollectionIssueArea,
@@ -64,5 +63,5 @@ export async function collectOnboardingSnapshot(
 const { buildServicesSnapshot, loadOptionalSnapshot } = createOnboardingSnapshotReadHelpers<OnboardingSnapshotCollectionIssueArea>({
   serviceArea: 'host',
   drainOnFailure: true,
-  error: (error) => (error instanceof Error ? error.message : String(error)),
+  error: summarizeError,
 });

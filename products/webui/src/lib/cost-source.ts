@@ -86,13 +86,28 @@ export function priceSourceLabel(
   return asOf ? `${base}, as of ${asOf}` : base;
 }
 
+/** The one marker every cost display shows for a cost the daemon could not price. */
+export const UNPRICED_COST_MARKER = 'price unknown';
+
 /**
- * Dollar amount rendering shared by cost displays: real dollars where priced,
- * the explicit "price unknown" marker where not, never $0.00 for unpriced.
+ * The one cost renderer every screen uses: real dollars where priced (four
+ * decimals under $1, two from $1), `~` before an estimate, and never $0.00 for
+ * unpriced. Unpriced (or no figure) is the "price unknown" marker, or, with
+ * `{ whenUnpriced: 'omit' }`, undefined for a list that shows nothing then.
  */
-export function costAmountLabel(costUsd: number | null | undefined, costState: string): string {
+export function costAmountLabel(costUsd: number | null | undefined, costState: string): string;
+export function costAmountLabel(
+  costUsd: number | null | undefined,
+  costState: string,
+  options: { readonly whenUnpriced: 'omit' | 'marker' },
+): string | undefined;
+export function costAmountLabel(
+  costUsd: number | null | undefined,
+  costState: string,
+  options?: { readonly whenUnpriced: 'omit' | 'marker' },
+): string | undefined {
   if (costState === 'unpriced' || costUsd == null) {
-    return costState === 'estimated' && costUsd != null ? `~$${formatUsd(costUsd)}` : 'price unknown';
+    return options?.whenUnpriced === 'omit' ? undefined : UNPRICED_COST_MARKER;
   }
   const amount = `$${formatUsd(costUsd)}`;
   return costState === 'estimated' ? `~${amount}` : amount;

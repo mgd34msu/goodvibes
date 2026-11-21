@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createInterface } from 'node:readline/promises';
 import { TuiConfigManager } from '../config/host-settings.ts';
 import { applyRuntimeConfigValue } from '@goodvibes/engine/terminal-shell';
@@ -45,7 +46,7 @@ export async function runTuiHostCommand(
     if (args.length === 3 && args[1] === '--url') unpairUrl = args[2];
     else if (args.length !== 1) { io.write(TUI_HOST_PAIR_HELP); return 2; }
     if (unpairUrl !== undefined && !canonicalizePairingHost(unpairUrl)) { io.write('Use an exact HTTP(S) origin without a path, user information, query or fragment.'); return 2; }
-    const configManager = new TuiConfigManager({ workingDir: roots.defaultWorkingDirectory, homeDir: roots.homeDirectory, surfaceRoot: 'tui', readOnly: true });
+    const configManager = new TuiConfigManager({ workingDir: roots.defaultWorkingDirectory, homeDir: roots.homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, readOnly: true });
     if (unpairUrl !== undefined) applyRuntimeConfigValue(configManager, 'controlPlane.publicBaseUrl', canonicalizePairingHost(unpairUrl)!);
     const result = await unpairTuiHost({ configManager, homeDirectory: roots.homeDirectory });
     io.write(formatTuiHostPairing(result));
@@ -73,7 +74,7 @@ export async function runTuiHostCommand(
   // question() is pending. Lines entered before the fresh prompt are discarded.
   if (!terminal && io.interactive) openReader();
   try {
-    const configManager = new TuiConfigManager({ workingDir: roots.defaultWorkingDirectory, homeDir: roots.homeDirectory, surfaceRoot: 'tui', readOnly: true });
+    const configManager = new TuiConfigManager({ workingDir: roots.defaultWorkingDirectory, homeDir: roots.homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, readOnly: true });
     if (url !== undefined) applyRuntimeConfigValue(configManager, 'controlPlane.publicBaseUrl', canonicalizePairingHost(url)!);
     if (bootstrapShared) io.write('Explicit bootstrap: the existing daemon-global operator-tokens.json token will authenticate only to the selected host for this migration preview. Native work never uses it as a fallback. No secret is printed or copied.');
     const preview = await previewTuiHostPairing({ configManager, homeDirectory: roots.homeDirectory, bootstrapShared }, name, controller.signal);

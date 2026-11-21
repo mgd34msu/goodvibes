@@ -1,8 +1,8 @@
 /**
- * Friction fix: the Network step's daemon-source choice
- *, start a new daemon owned by this TUI (default) vs connect to one that is
- * already running elsewhere with a known token. Extracted from
- * onboarding-wizard-steps.ts to keep that file under the architecture line cap.
+ * The daemon-source choice of `/setup connect-daemon`: use the daemon on this
+ * computer (default) or connect to one already running elsewhere with a known
+ * token. Kept apart from onboarding-wizard-steps.ts to keep that file under
+ * the architecture line cap.
  */
 import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
@@ -30,7 +30,7 @@ export function adoptedDaemonScheme(controller: OnboardingWizardControllerLike):
 
 /**
  * Push the daemon-source radio, plus the host/port/token/connect fields when
- * 'adopt' is selected, onto the Network step's field list. Independent of the
+ * 'adopt' is selected, onto the network field list. Independent of the
  * local/custom network mode, adopting someone else's daemon is a client-side
  * choice about which daemon THIS TUI talks to, not about how THIS TUI's own
  * daemon binds to the network.

@@ -13,7 +13,7 @@ export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes/e
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 const AGENT_KNOWLEDGE_ROUTE = '/api/goodvibes-agent/knowledge';
 const DEFAULT_KNOWLEDGE_ROUTE = '/api/knowledge';
@@ -201,7 +201,7 @@ function connectedHostTarget(homeDir: string, connectedHostBaseUrl: string, expl
   return verificationHostTarget({
     homeDir, url: connectedHostBaseUrl, explicitToken,
     hostEnvKeys: ['GOODVIBES_CONNECTED_HOST_TOKEN'], localEnvKeys: ['GOODVIBES_DAEMON_TOKEN'],
-    readJson: readJsonFile, settingsPath: join(homeDir, 'agent', 'settings.json'),
+    readJson: readJsonFile,
   });
 }
 
@@ -210,8 +210,6 @@ function resolveConnectedHostBaseUrl(homeDir: string, explicit?: string): string
     homeDir,
     explicit,
     ['GOODVIBES_CONNECTED_HOST_URL', 'GOODVIBES_AGENT_RUNTIME_URL', 'GOODVIBES_DAEMON_URL'],
-    readJsonFile,
-    join(homeDir, 'agent', 'settings.json'),
   );
 }
 

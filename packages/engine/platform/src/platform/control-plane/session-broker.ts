@@ -68,6 +68,7 @@ import {
   finalizeAgentSessionInputs,
   markChannelReplyOwedInputs,
   CHANNEL_REPLY_METADATA_KEY,
+  countOwedChannelReplies,
   retireAbandonedSurfaceInputs,
   refreshPendingInputCount,
   settleChannelReplyInputs,
@@ -824,19 +825,32 @@ export class SharedSessionBroker {
     // A hosted loop the engine still vouches for would register itself again as an empty active record.
     if (this.externalLivenessProbe?.(session) === true) return 'active';
     this.sessions.delete(sessionId);
+    const forgotten = this.forgetSession(session);
+    await this.persist();
+    await forgotten;
+    this.updateActiveSessionsGauge();
+    this.publishUpdate('session-deleted', { sessionId });
+    return 'deleted';
+  }
+
+  /**
+   * Let go of everything held for a session whose record is gone for good
+   * (deleted, or swept by a finite retention window): its close fence, its
+   * loaded history (the record's removal already counts as the change the
+   * next write drops its log for), its load bookkeeping, its verification
+   * journal (tool output and file contents) and its routes. Everything but the
+   * routes is let go before this returns; it resolves once they are released.
+   */
+  private forgetSession(session: SharedSessionRecord): Promise<void> {
+    const sessionId = session.id;
     this.closeFences.get(sessionId)?.retire('session deleted');
     this.closeFences.delete(sessionId);
     this.messages.quietDelete(sessionId);
     this.inputs.quietDelete(sessionId);
     this.deferred.delete(sessionId);
     this.historyTouchedAt.delete(sessionId);
-    await this.persist();
-    // The session's verification journal holds its tool output and file contents; it goes with the session.
     forgetVerificationJournal(session.project, sessionId);
-    await this.releaseSessionRoutes(sessionId);
-    this.updateActiveSessionsGauge();
-    this.publishUpdate('session-deleted', { sessionId });
-    return 'deleted';
+    return this.releaseSessionRoutes(sessionId);
   }
 
   /**
@@ -1161,7 +1175,8 @@ export class SharedSessionBroker {
    * Channel answers stored and owed but never marked sent: the daemon stopped
    * while their send was in flight, or before it began. Read once at start-up
    * from the sessions already in memory (every active session and every one
-   * with work owed); no session history is loaded for it. Each entry carries
+   * with work or a channel send owed, which start loads and memory pressure
+   * never releases); no session history is loaded for it. Each entry carries
    * the stored answer, the newest message of that agent.
    */
   listOwedChannelReplies(only?: { readonly sessionId: string; readonly agentId: string }): Array<{ readonly sessionId: string; readonly agentId: string; readonly routeId: string; readonly task: string; readonly body: string }> {
@@ -1393,6 +1408,8 @@ export class SharedSessionBroker {
     for (const [sessionId, session] of this.sessions) {
       if (session.status !== 'closed' || session.pendingInputCount > 0 || this.changed.has(sessionId)) continue;
       if (this.deferred.has(sessionId)) continue;
+      // A channel answer still owed its send keeps the history in memory, where the resend reads it.
+      if (countOwedChannelReplies(this.inputs.peek(sessionId) ?? []) > 0) continue;
       if (now - (this.historyTouchedAt.get(sessionId) ?? session.updatedAt) < idleMs) continue;
       this.messages.quietDelete(sessionId);
       this.inputs.quietDelete(sessionId);
@@ -1780,12 +1797,8 @@ export class SharedSessionBroker {
         isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
       }, (event, payload) => this.publishUpdate(event, payload)).length;
     }
-    // Only a finite retention window deletes closed sessions, so only then is there anything to compare.
-    const closedBefore = Number.isFinite(this._deletionRetentionMs)
-      ? [...this.sessions.values()].filter((session) => session.status === 'closed').map((session) => session.id)
-      : [];
     const swept = sweepSharedSessions(
-      { sessions: this.sessions, messages: this.messages, inputs: this.inputs },
+      { sessions: this.sessions },
       {
         idleEmptyMs: this._idleEmptyMs,
         idleLongMs: this._idleLongMs,
@@ -1794,10 +1807,8 @@ export class SharedSessionBroker {
         isExternallyLive: (session) => this.externalLivenessProbe?.(session) === true,
       },
     );
-    for (const sessionId of closedBefore) {
-      if (!this.sessions.has(sessionId)) void this.releaseSessionRoutes(sessionId);
-    }
-    if (swept || orphaned > 0) {
+    for (const session of swept.deleted) void this.forgetSession(session);
+    if (swept.changed || orphaned > 0) {
       this.updateActiveSessionsGauge();
       void this.persist().catch((error: unknown) => {
         logger.warn('[session-broker] GC persistence failed', {

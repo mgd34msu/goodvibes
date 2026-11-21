@@ -63,7 +63,7 @@ import { createAgentInProcessHost, type AgentInProcessHost } from './in-process-
 import { agentAccountsToolOptions, registerAgentAccountsTool } from './accounts-tool.js';
 import { createDaemonExpectationClient, type DaemonExpectationClient } from './session-expectations.js';
 import { inProcessVerbCaller } from './in-process-host.js';
-import { connectedHostBaseUrl } from './connected-host-dial.js';
+import { resolveConnectedHostAddress, type ConnectedHostAddressKey } from './connected-host-dial.js';
 import type { ConnectedHostConfigReader } from './connected-host-client.js';
 import type { HostedDaemonRequestPath } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import { registerAgentChannelSendTool } from './channel-send-tool.js';
@@ -317,7 +317,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
     if (current?.requests === requests) return current.host;
     const host = createAgentInProcessHost({
       requests,
-      baseUrl: connectedHostBaseUrl(deps.settings.get('controlPlane.host'), deps.settings.get('controlPlane.port')),
+      // The daemon's own origin, derived from its bind: it keys the Agent's pairing and delegated credential for it.
+      baseUrl: resolveConnectedHostAddress({ get: (key: ConnectedHostAddressKey) => deps.settings.get(key) }).baseUrl,
       homeDirectory: deps.homeDirectory,
     });
     inProcess = { requests, host };

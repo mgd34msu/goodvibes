@@ -8,6 +8,7 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../markdown-frontmatter.js';
+import { workspaceContainmentRefusal } from './project-context-files.js';
 
 export type AgentVibeScope = 'project' | 'global';
 
@@ -71,8 +72,19 @@ type AgentVibePaths = Pick<ShellPathService,
   'workingDirectory' | 'homeDirectory' | 'resolveUserPath' | 'expandHomePath' | 'resolveWorkspacePath'
 >;
 
-function readVibeCandidate(path: string, scope: AgentVibeScope): AgentVibeFile | BlockedAgentVibeFile | null {
+/**
+ * One VIBE.md candidate. A project one must resolve inside `boundary` (the
+ * git root, else the working directory), the rule the project context files
+ * follow, so a repository VIBE.md linked to a file outside the workspace is
+ * not read into the prompt. Global ones are outside the workspace by design,
+ * and a path the owner named to import from (`boundary` null) is read as named.
+ */
+function readVibeCandidate(path: string, scope: AgentVibeScope, boundary: string | null): AgentVibeFile | BlockedAgentVibeFile | null {
   if (!existsSync(path)) return null;
+  if (scope === 'project' && boundary !== null) {
+    const refusal = workspaceContainmentRefusal(boundary, path);
+    if (refusal !== undefined) return { path, scope, reason: refusal };
+  }
   let content = '';
   try {
     const size = statSync(path).size;
@@ -134,16 +146,19 @@ function projectWalkRoots(workingDirectory: string): readonly string[] {
   return roots.reverse();
 }
 
-function candidatePaths(shellPaths: AgentVibePaths): readonly { readonly path: string; readonly scope: AgentVibeScope }[] {
+/** The candidates, and the walk boundary project ones must stay inside: the git root found, else the working directory. */
+function candidatePaths(shellPaths: AgentVibePaths): { readonly candidates: readonly { readonly path: string; readonly scope: AgentVibeScope }[]; readonly boundary: string } {
   const candidates: Array<{ path: string; scope: AgentVibeScope }> = [];
   candidates.push({ path: join(shellPaths.homeDirectory, '.goodvibes', 'VIBE.md'), scope: 'global' });
   candidates.push({ path: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'VIBE.md'), scope: 'global' });
-  for (const root of projectWalkRoots(shellPaths.workingDirectory)) {
+  const roots = projectWalkRoots(shellPaths.workingDirectory);
+  for (const root of roots) {
     candidates.push({ path: join(root, 'VIBE.md'), scope: 'project' });
     candidates.push({ path: join(root, '.goodvibes', 'VIBE.md'), scope: 'project' });
     candidates.push({ path: join(root, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'VIBE.md'), scope: 'project' });
   }
-  return candidates;
+  // projectWalkRoots lists the git root first, or the working directory alone.
+  return { candidates, boundary: roots[0] ?? resolve(shellPaths.workingDirectory) };
 }
 
 function dedupeCandidates(candidates: readonly { readonly path: string; readonly scope: AgentVibeScope }[]): readonly { readonly path: string; readonly scope: AgentVibeScope }[] {
@@ -169,9 +184,10 @@ export function globalVibeInitPath(shellPaths: Pick<ShellPathService, 'resolveUs
 export function discoverVibeFiles(shellPaths: AgentVibePaths): AgentVibeSnapshot {
   const files: AgentVibeFile[] = [];
   const blocked: BlockedAgentVibeFile[] = [];
-  const candidates = dedupeCandidates(candidatePaths(shellPaths));
+  const walk = candidatePaths(shellPaths);
+  const candidates = dedupeCandidates(walk.candidates);
   for (const candidate of candidates) {
-    const record = readVibeCandidate(candidate.path, candidate.scope);
+    const record = readVibeCandidate(candidate.path, candidate.scope, walk.boundary);
     if (!record) continue;
     if ('body' in record) files.push(record);
     else blocked.push(record);
@@ -268,7 +284,8 @@ export function resolveVibePathReference(shellPaths: AgentVibePaths, reference: 
 export function loadVibeImportSource(shellPaths: AgentVibePaths, reference: string): AgentVibeImportSource {
   const path = resolveVibePathReference(shellPaths, reference);
   const scope: AgentVibeScope = path.startsWith(resolve(shellPaths.homeDirectory, '.goodvibes')) ? 'global' : 'project';
-  const record = readVibeCandidate(path, scope);
+  // The owner named this path, so it is read as named.
+  const record = readVibeCandidate(path, scope, null);
   if (!record) throw new Error(`No VIBE.md found at ${path}`);
   if (!('body' in record)) throw new Error(`Cannot import VIBE.md from ${path}: ${record.reason}`);
   const name = record.frontmatter.name?.trim() || (record.scope === 'global' ? 'Global Vibe' : 'Project Vibe');

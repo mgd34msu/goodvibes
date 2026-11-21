@@ -9,6 +9,7 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
+  describeNamedDeliveryTarget,
   formatAgentChannelDeliveryPreview,
   formatAgentChannelDeliveryResult,
 } from './channel-delivery.js';
@@ -169,7 +170,7 @@ export function createAgentChannelSendTool(
           action: 'channel.send',
           // The target as the caller named it, not the resolved target object:
           // a refusal has to say the thing the reader typed.
-          description: `sending a channel message to ${input.channel ?? input.route ?? input.webhook ?? input.link ?? 'the named target'}`,
+          description: `sending a channel message to ${describeNamedDeliveryTarget(input)}`,
         },
         ledger,
         content: {
@@ -232,7 +233,7 @@ export function createAgentChannelSendTool(
         if (accepted) {
           return output([
             'Agent channel delivery sent',
-            `  target ${input.channel ?? input.route ?? input.webhook ?? input.link}`,
+            `  target ${describeNamedDeliveryTarget(input)}`,
             ...(accepted.responseId ? [`  response ${accepted.responseId}`] : []),
             `  note the message was accepted for delivery, then a follow-up check failed (${reason}); no delivery receipt was recorded and the send was not retried. Do not send it again.`,
           ].join('\n'));

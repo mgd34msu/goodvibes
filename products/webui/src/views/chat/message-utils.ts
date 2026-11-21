@@ -196,17 +196,18 @@ const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped
  * (late stream frames, a late request failure). Returns the status that should
  * result from `current` when `proposed` arrives:
  *
- * - once the user pressed Stop (`stopping`), delta/tool frames (`streaming`,
- *   `tooling`) do not un-stop the turn; only a terminal outcome resolves it;
+ * - once the user pressed Stop (`stopping`), `turn.started`, delta and tool frames
+ *   (`running`, `streaming`, `tooling`) do not un-stop the turn; only a terminal
+ *   outcome resolves it. Frames arrive in order and a session runs one turn at a
+ *   time, so a `turn.started` seen while stopping is the turn being stopped;
  * - a settled turn (`completed`, `stopped`, `stopped locally`, `session expired`)
  *   is not overwritten by a late `error`.
  *
- * Every other transition is taken as proposed. Writes that start a new turn or
- * report a terminal outcome from the stream itself are intentionally NOT
- * constrained here.
+ * Every other transition is taken as proposed. The send's own `submitted` write
+ * and terminal outcomes from the stream itself are not constrained here.
  */
 export function nextTurnStatus(current: TurnState, proposed: TurnState): TurnState {
-  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling')) return current;
+  if (current === 'stopping' && (proposed === 'running' || proposed === 'streaming' || proposed === 'tooling')) return current;
   if (proposed === 'error' && SETTLED_TURN_STATES.includes(current)) return current;
   return proposed;
 }

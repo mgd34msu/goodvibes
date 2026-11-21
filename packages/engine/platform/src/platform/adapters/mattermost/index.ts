@@ -1,5 +1,5 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
@@ -34,20 +34,9 @@ async function readBody(req: Request): Promise<Record<string, unknown> | Respons
 }
 
 export async function handleMattermostSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    // A secret of its own for inbound calls comes first, so the account's
-    // delivery credential is not the shared secret a caller must hold. The
-    // delivery credential stays as the fallback for a surface that has not set one.
-    { kind: 'config', key: 'surfaces.mattermost.webhookSecret' },
-    { kind: 'registry', service: 'mattermost', field: 'signingSecret' },
-    { kind: 'env', name: 'MATTERMOST_WEBHOOK_SECRET' },
-    { kind: 'config', key: 'surfaces.mattermost.botToken' },
-    { kind: 'registry', service: 'mattermost', field: 'primary' },
-    { kind: 'env', name: 'MATTERMOST_BOT_TOKEN' },
-  );
+  const credential = await resolveInboundCredential(context, 'mattermost');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('mattermost', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('mattermost', credential.setting);
   const unauthorized = () => Response.json({ error: 'Unauthorized' }, { status: 401 });
   // Mattermost's outgoing webhooks send their token in the body; a header or
   // bearer token is preferred when present. A token in a header is checked

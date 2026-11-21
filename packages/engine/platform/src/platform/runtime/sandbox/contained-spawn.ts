@@ -108,27 +108,67 @@ function plan(spawn: ContainedSpawn): { readonly argv: readonly string[]; readon
   return { argv: [command, ...args], applied: { backend: 'host', network: 'on' } };
 }
 
+/** Read a pipe to its end, or to the moment it is cancelled; text read so far is kept. */
+function readPipe(stream: ReadableStream<Uint8Array>): { readonly text: Promise<string>; cancel(): void } {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const text = (async () => {
+    let out = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        out += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      // A cancelled or broken pipe ends the output; what arrived is kept.
+    }
+    return out + decoder.decode();
+  })();
+  return { text, cancel: () => { void reader.cancel().catch(() => {}); } };
+}
+
 /**
  * Run one program someone other than the product chose, inside the
  * containment the caller states. Resolves with its output and what applied;
  * rejects with `ContainmentUnavailableError` when the containment cannot be
  * met (nothing was started), or when the program could not be started.
+ *
+ * Off Windows the program leads its own process group. An abort stops the
+ * whole group (a server a verify script left in the background included) and
+ * stops reading its pipes, so a descendant that holds them open cannot keep
+ * the run waiting; the result then has a null exit code.
  */
 export async function runContained(spawn: ContainedSpawn): Promise<ContainedResult> {
   const { argv, applied } = plan(spawn);
   spawn.signal?.throwIfAborted();
+  const ownGroup = process.platform !== 'win32';
   const child = Bun.spawn([...argv], {
     cwd: spawn.cwd,
     env: spawn.env === 'scrubbed' ? scrubbedEnv() : { ...spawn.env },
     stdin: spawn.stdin === undefined ? 'ignore' : new TextEncoder().encode(spawn.stdin),
     stdout: 'pipe',
     stderr: 'pipe',
-    ...(spawn.signal ? { signal: spawn.signal } : {}),
+    detached: ownGroup,
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return Object.freeze({ exitCode: child.signalCode === null ? exitCode : null, stdout, stderr, applied: Object.freeze(applied) });
+  const stdout = readPipe(child.stdout);
+  const stderr = readPipe(child.stderr);
+  let stopped = false;
+  const stop = (): void => {
+    stopped = true;
+    if (ownGroup) {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is already gone */ }
+    }
+    try { child.kill('SIGKILL'); } catch { /* the child is already gone */ }
+    stdout.cancel();
+    stderr.cancel();
+  };
+  spawn.signal?.addEventListener('abort', stop, { once: true });
+  try {
+    if (spawn.signal?.aborted) stop();
+    const [out, err, exitCode] = await Promise.all([stdout.text, stderr.text, child.exited]);
+    return Object.freeze({ exitCode: stopped || child.signalCode !== null ? null : exitCode, stdout: out, stderr: err, applied: Object.freeze(applied) });
+  } finally {
+    spawn.signal?.removeEventListener('abort', stop);
+  }
 }

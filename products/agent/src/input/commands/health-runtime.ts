@@ -6,7 +6,6 @@ import {
   collectContinuityIssues,
   formatHealthStatusValue,
 } from '@goodvibes/engine/terminal-shell/health-findings';
-import '@goodvibes/engine/platform/platform/config';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -23,6 +22,7 @@ import { refuseCliParseErrors } from './cli-command-output.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { setupReviewLines } from '@goodvibes/engine/terminal-shell/setup-review';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';
+import { isOpenApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import {
   requireMemoryGovernor,
@@ -67,7 +67,7 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
 
   const snapshot = await view.refresh();
   const unavailable = describeApprovalsUnavailable(snapshot);
-  const pending = snapshot.approvals.filter((approval) => approval.status === 'pending' || approval.status === 'claimed');
+  const pending = snapshot.approvals.filter((approval) => isOpenApprovalStatus(approval.status));
 
   const rows = pending.map((approval) => {
     const tool = typeof approval.request?.tool === 'string' && approval.request.tool.length > 0 ? approval.request.tool : 'unnamed tool';

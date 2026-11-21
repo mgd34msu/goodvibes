@@ -9,7 +9,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { pidIsAlive } from '../power/child-hygiene.js';
-import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { clearAbandonedCrossProcessLock, tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
 
 /** The refusal for a job id the scheduler does not know; the daemon answers it 404. */
@@ -37,20 +37,36 @@ function isRemovedSchedule(record: KnowledgeScheduleRecord): boolean {
   return typeof record.metadata.removedAt === 'number';
 }
 
-/** How long a job run with no live recorded owner must have been outstanding before it is treated as abandoned. */
+/**
+ * How long a run written by an older build, which holds no owner lock, must
+ * have been outstanding before it is treated as abandoned.
+ */
 const INTERRUPTED_RUN_MIN_AGE_MS = 6 * 60 * 60 * 1000;
 
-/** Stamped on every run this process starts, so another process can tell a dead owner's run from a live one's. */
+/**
+ * Stamped on every run a scheduler instance starts, so another instance can
+ * tell a gone owner's run from a live one's. `locked` says the instance held
+ * its run-owner lock (runOwnerLockPath) when it wrote the run: whether that
+ * lock is still held is then the whole answer. Runs written by older builds
+ * carry no `locked`.
+ */
 interface KnowledgeJobRunOwner {
   readonly instanceId: string;
   readonly pid: number;
+  readonly locked?: true;
 }
 
 function readRunOwner(run: KnowledgeJobRunRecord): KnowledgeJobRunOwner | null {
   const owner = run.metadata.owner;
   if (!owner || typeof owner !== 'object' || Array.isArray(owner)) return null;
-  const { instanceId, pid } = owner as Record<string, unknown>;
-  return typeof instanceId === 'string' && typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 ? { instanceId, pid } : null;
+  const { instanceId, pid, locked } = owner as Record<string, unknown>;
+  if (typeof instanceId !== 'string' || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  return locked === true ? { instanceId, pid, locked: true } : { instanceId, pid };
+}
+
+/** The lock an instance holds while it may still finish runs it wrote: beside the store, named for the instance. */
+function runOwnerLockPath(storagePath: string, instanceId: string): string {
+  return `${storagePath}.run-owner.${instanceId}`;
 }
 
 /**
@@ -102,6 +118,8 @@ export class KnowledgeScheduleService {
   private readonly owner: KnowledgeJobRunOwner = Object.freeze({ instanceId: randomUUID(), pid: process.pid });
   /** Held while this process owns schedule execution for the store file; see ownsSchedules(). */
   private scheduleOwnership: (() => void) | null = null;
+  /** Held from this instance's first run until dispose; see holdsRunOwnership(). */
+  private runOwnership: (() => void) | null = null;
   /** Reconciles run one at a time; overlapping ones each armed a timer and orphaned the other's. */
   private reconciling: Promise<void> = Promise.resolve();
   /** Schedules whose run is in progress; a timer re-armed meanwhile must not start a second run. */
@@ -353,7 +371,7 @@ export class KnowledgeScheduleService {
       metadata: {
         ...(input.sourceIds?.length ? { sourceIds: [...input.sourceIds] } : {}),
         ...(typeof input.limit === 'number' ? { limit: input.limit } : {}),
-        owner: { ...this.owner },
+        owner: this.holdsRunOwnership() ? { ...this.owner, locked: true } : { ...this.owner },
       },
     });
     this.inFlightRunIds.add(run.id);
@@ -406,7 +424,56 @@ export class KnowledgeScheduleService {
     }
     return (async () => {
       for (const runId of interrupted) await this.settleRun(runId, 'failed', 'interrupted: the process shut down before this job finished');
+      // Its runs are settled: the instance's lock and its files go.
+      this.releaseRunOwnership();
     })();
+  }
+
+  /**
+   * Whether this instance holds its run-owner lock, taking it on first use.
+   * Held for the instance's lifetime, it tells every other instance on the
+   * store, in this process or another, that runs stamped with this instance
+   * may still finish. When it cannot be taken the runs are stamped without
+   * `locked` and fall back to the pid and age rule.
+   */
+  private holdsRunOwnership(): boolean {
+    if (this.runOwnership) return true;
+    if (this.disposed) return false;
+    try {
+      this.runOwnership = tryAcquireCrossProcessLock(runOwnerLockPath(this.context.store.storagePath, this.owner.instanceId));
+    } catch (error) {
+      logger.warn('Knowledge run ownership could not be taken; runs fall back to the process check', { error: summarizeError(error) });
+      return false;
+    }
+    return this.runOwnership !== null;
+  }
+
+  private releaseRunOwnership(): void {
+    const release = this.runOwnership;
+    this.runOwnership = null;
+    if (!release) return;
+    const lockPath = runOwnerLockPath(this.context.store.storagePath, this.owner.instanceId);
+    try {
+      release();
+      clearAbandonedCrossProcessLock(lockPath);
+    } catch (error) {
+      logger.warn('Knowledge run ownership release failed', { error: summarizeError(error) });
+    }
+  }
+
+  /**
+   * Whether the instance that stamped a run is gone, by its run-owner lock:
+   * a lock nobody holds belongs to an instance that exited or closed, and its
+   * files are removed as it is read. A lock that cannot be checked is taken
+   * as held, so a live run is never settled by mistake.
+   */
+  private runOwnerGone(owner: KnowledgeJobRunOwner): boolean {
+    try {
+      return clearAbandonedCrossProcessLock(runOwnerLockPath(this.context.store.storagePath, owner.instanceId)) !== 'held';
+    } catch (error) {
+      logger.warn('Knowledge run owner could not be checked; its runs are left as they are', { error: summarizeError(error) });
+      return false;
+    }
   }
 
   /**
@@ -468,12 +535,12 @@ export class KnowledgeScheduleService {
   /**
    * Runs still `queued`/`running` whose owner is gone can never finish, and
    * pruneJobRuns never drops active runs, so they would read as running
-   * forever. Settle them as failed. A run stamped with its owner is settled as
-   * soon as that owner's process is dead. The instance id is compared first:
-   * a run stamped with this process's pid but another instance may belong to
-   * another live service here or to a dead process whose pid was recycled, so
-   * it falls back to the age rule, as does a run with no owner stamp (older
-   * builds).
+   * forever. Settle them as failed. A run stamped with an instance that held
+   * its run-owner lock is settled once that lock is free, whatever its age:
+   * the lock is held until the instance closes or its process exits, and it
+   * tells another instance in this same process apart as well. A run from an
+   * older build is settled once its owner's process is dead, or, when that
+   * cannot be told (no stamp, or this process's own pid), after six hours.
    */
   private async settleInterruptedRuns(now: number): Promise<void> {
     for (const run of this.context.store.listJobRuns(10_000)) {
@@ -482,7 +549,9 @@ export class KnowledgeScheduleService {
       const owner = readRunOwner(run);
       if (owner?.instanceId === this.owner.instanceId) continue;
       const age = now - Math.max(run.requestedAt, run.startedAt ?? 0);
-      if (owner) {
+      if (owner?.locked) {
+        if (!this.runOwnerGone(owner)) continue;
+      } else if (owner) {
         if ((owner.pid === process.pid || pidIsAlive(owner.pid)) && age < INTERRUPTED_RUN_MIN_AGE_MS) continue;
       } else {
         if (run.requestedAt >= this.startedAt) continue;

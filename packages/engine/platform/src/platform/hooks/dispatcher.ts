@@ -26,7 +26,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { requireStopped } from '../utils/owned-work.js';
 
 export type HookRunnerDeps = {
-  readonly agentManager?: (Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'> & Partial<Pick<AgentManager, 'spawnOwned' | 'join'>>) | undefined;
+  readonly agentManager?: Pick<AgentManager, 'spawnOwned'> | undefined;
   readonly toolLLM?: Pick<ToolLLM, 'chat'> | undefined;
   readonly projectRoot?: string | undefined;
 };

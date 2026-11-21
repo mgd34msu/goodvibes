@@ -17,8 +17,8 @@ export type ReviewedKind = 'persona' | 'skill' | 'skill bundle' | 'routine';
 /** The command the owner types to review a record of each kind. */
 const OWNER_REVIEW_COMMAND: Readonly<Record<ReviewedKind, string>> = {
   persona: '/personas review',
-  skill: '/skills review',
-  'skill bundle': '/skills bundle review',
+  skill: '/my-skills review',
+  'skill bundle': '/my-skills bundle-review',
   routine: '/routines review',
 };
 

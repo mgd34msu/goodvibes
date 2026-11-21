@@ -1,8 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
-import type { CommandActionContext, InputDescription } from './command-actions/types.js';
+import type { ActionDescription, CommandActionContext, InputDescription } from './command-actions/types.js';
 import { choiceInput, readAction, textInput } from './described-command-kit.js';
 import { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -141,19 +142,15 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
   readonly version: string;
   readonly check: (fetchImpl: UpdateFetchLike, version: string) => Promise<ReleaseUpdateCheck>;
   readonly apply: (options: SelfUpdateInvocation, context: Context) => Promise<void>;
-  readonly rollback: (options: Omit<SelfUpdateInvocation, 'fetchImpl' | 'currentVersion'>, context: Context) => void;
+  readonly rollback: (options: Omit<SelfUpdateInvocation, 'fetchImpl' | 'currentVersion'>, context: Context) => Promise<void>;
   readonly onRecovery?: ((error: unknown, context: Context) => void) | undefined;
   readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
   /** The connected daemon's own update loop, which this app's update does not cover. */
   readonly daemon?: ((context: Context) => DaemonUpdateVerbs) | undefined;
+  /** This install's update state; the review, save-review and read-review actions exist only with it. */
   readonly install?: InstallReviewPolicy<Context> | undefined;
-  /** Where the parts this app lacks are. */
-  readonly elsewhere: string;
 }): DescribedCommand<Context> {
-  const install = (): InstallReviewPolicy<Context> => {
-    if (!policy.install) throw commandRefusal('This program keeps no install review; nothing was done.', `It is in ${policy.elsewhere}.`);
-    return policy.install;
-  };
+  const install = policy.install;
   const inWorkspace = (): void => {
     if (policy.workspaceDistribution) throw commandRefusal(policy.workspaceGuidance);
   };
@@ -210,7 +207,7 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         async run(_values, context) {
           inWorkspace();
           try {
-            policy.rollback({ execPath: process.execPath, platform: process.platform, arch: process.arch, print: context.print }, context);
+            await policy.rollback({ execPath: process.execPath, platform: process.platform, arch: process.arch, print: context.print }, context);
           } catch (error) {
             if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
             throw commandRefusal(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -231,11 +228,12 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
           return describeDaemonUpdates(policy.daemon(context), values.now === 'yes');
         },
       }),
-      readAction<Context>({
+      // The install review actions exist only where the app keeps an install review.
+      ...(install ? ([readAction<Context>({
         id: 'review', label: 'See this install', word: 'review',
         sentence: 'Shows the version installed, the newest release, how it was installed, whether a previous version is kept and what an update keeps.',
         operator: terminal,
-        async run(_values, context) { return install().review(context); },
+        async run(_values, context) { return install.review(context); },
       }),
       {
         id: 'save-review', label: 'Save this install\'s update state to a file', word: 'save-review',
@@ -251,11 +249,10 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
         operator: terminal, example: { path: 'update-review.json' },
         async run(values, context) {
-          const policyInstall = install();
-          if (values.replace !== 'yes' && policyInstall.exists(context, values.path!)) {
+          if (values.replace !== 'yes' && install.exists(context, values.path!)) {
             throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /update save-review ${values.path} --replace`);
           }
-          return policyInstall.save(context, values.path!);
+          return install.save(context, values.path!);
         },
       },
       readAction<Context>({
@@ -263,13 +260,84 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         inputs: [pathInput('An update state saved earlier')],
         sentence: 'Reads the update state saved in {path} and shows what it recorded.',
         operator: terminal, example: { path: 'update-review.json' },
-        async run(values, context) { return install().read(context, values.path!); },
-      }),
+        async run(values, context) { return install.read(context, values.path!); },
+      })] satisfies ActionDescription<Context>[]) : []),
     ],
   });
 }
 
 export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes/engine/platform/platform/runtime/self-update';
+
+/** Runs a fixed program and reports its exit status and output; injectable so tests never shell out to a real systemctl. */
+export type RunCommand = (command: string, args: string[]) => { readonly status: number | null; readonly stdout: string };
+
+const defaultRunCommand: RunCommand = (command, args) => {
+  try {
+    const result = spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8' });
+    return { status: result.status, stdout: result.stdout ?? '' };
+  } catch {
+    return { status: null, stdout: '' };
+  }
+};
+
+export interface DaemonServiceRestartInfo {
+  readonly managed: boolean;
+  readonly unitName: string;
+  readonly restartCommand: string;
+}
+
+/** The settings the daemon's service name is read from; without them the platform's default name is used. */
+export interface DaemonServiceNameSource {
+  get?(key: string): unknown;
+  describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string | undefined } | undefined;
+}
+
+/**
+ * Whether the daemon is running as a systemd user service, so the message after
+ * an update can name the real restart command instead of assuming one. Only
+ * Linux/systemd is checked: launchd and Scheduled Tasks are not restarted with
+ * `systemctl`, so there this reports "not managed here" rather than printing a
+ * command that would not work.
+ */
+export async function detectDaemonServiceManaged(
+  platform: NodeJS.Platform,
+  configManager: DaemonServiceNameSource,
+  runCommand: RunCommand = defaultRunCommand,
+): Promise<DaemonServiceRestartInfo> {
+  // Loaded here, not at start-up: the service module is needed only after an update replaced the daemon.
+  const { resolveConfiguredServiceName } = await import('./managed-daemon-service.js');
+  const unitName = resolveConfiguredServiceName({
+    get: (key) => configManager.get?.(key),
+    // A source that cannot say where the name came from is read like one set by the owner: the stored value, else the default.
+    describeConfigKeySource: (key) => {
+      const source = configManager.describeConfigKeySource?.(key);
+      if (source === undefined) return { tier: 'unknown' };
+      return source.effectiveOrigin === undefined ? { tier: source.tier } : { tier: source.tier, effectiveOrigin: source.effectiveOrigin };
+    },
+  });
+  if (platform !== 'linux') {
+    return { managed: false, unitName, restartCommand: '' };
+  }
+  const result = runCommand('systemctl', ['--user', 'is-active', `${unitName}.service`]);
+  const managed = result.status === 0 && result.stdout.trim() === 'active';
+  return { managed, unitName, restartCommand: `systemctl --user restart ${unitName}.service` };
+}
+
+/**
+ * The footer of the update or rollback report: the daemon's restart command
+ * when the change replaced goodvibes-daemon and its service is managed here.
+ * The service is asked only when the daemon was replaced.
+ */
+export async function daemonRestartFooter(
+  result: { readonly programs: readonly string[] },
+  platform: NodeJS.Platform,
+  configManager: DaemonServiceNameSource,
+  runCommand?: RunCommand,
+): Promise<readonly string[]> {
+  if (!result.programs.includes('goodvibes-daemon')) return [];
+  const service = await detectDaemonServiceManaged(platform, configManager, runCommand);
+  return service.managed ? [`Daemon restart: ${service.restartCommand}`] : [];
+}
 /** Shared terminal report for the actual products/directories the suite changed. */
 export function formatSuiteUpdateReport(result: {
   readonly version: string; readonly programs: readonly string[];

@@ -7,7 +7,7 @@ import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { readFailureTransience, type FailureTransience } from '../integrations/delivery.js';
-import type { UnattendedAnswer, UnattendedRuns } from './unattended-runs.js';
+import type { UnattendedAnswer, UnattendedAnswerReceipt, UnattendedRuns } from './unattended-runs.js';
 import type { ScheduleRunOutcome } from '@goodvibes/engine/contracts';
 
 export interface AutomationFailureFollowUpContext {
@@ -15,12 +15,12 @@ export interface AutomationFailureFollowUpContext {
   readonly retryTimers: Map<string, ReturnType<typeof setTimeout>>;
   /** Whether new work is admitted (daemon/work-admission.ts); a retry due while it is not waits as at the concurrency limit. */
   readonly admitted?: (() => boolean) | undefined;
-  /** Retries held back at the concurrency limit, for the capacity report. */
-  readonly capacityWaits?: Map<string, AutomationCapacityWait> | undefined;
+  /** Retries held back at the concurrency limit; the manager starts each when a run slot frees (its `resume`). */
+  readonly capacityWaits: Map<string, AutomationCapacityWait>;
   readonly deliveryManager: AutomationDeliveryManager | null;
-  readonly activeRunCount: () => number;
-  readonly maxConcurrentRuns: () => number;
-  readonly executeJob: (job: AutomationJob, trigger: 'scheduled', dueRun: boolean, attempt?: number) => Promise<AutomationRun>;
+  /** Takes a run slot in the same step as it checks one is free: the release, or null at the concurrency limit. */
+  readonly tryReserveRun: () => (() => void) | null;
+  readonly executeJob: (job: AutomationJob, trigger: 'scheduled', dueRun: boolean, attempt: number, reserved: () => void) => Promise<AutomationRun>;
   readonly saveJobs: () => Promise<void>;
   readonly scheduleJob: (job: AutomationJob) => void;
   readonly deliverFailureNotice: (job: AutomationJob, run: AutomationRun) => void;
@@ -130,24 +130,37 @@ export function scheduleAutomationFailureFollowUp(
   if (existing) {
     clearTimeout(existing);
   }
-  const timer = setTimeout(() => {
+  /**
+   * Starts the retry. `reserved` is a run slot already taken for it (the
+   * manager hands one over when a slot frees for a waiting retry); every path
+   * that does not start the run gives it back.
+   */
+  const startRetry = (reserved?: () => void): void => {
     context.retryTimers.delete(retryKey);
     const waitKey = retryCapacityWaitKey(retryKey);
-    const waiting = context.capacityWaits?.get(waitKey);
-    context.capacityWaits?.delete(waitKey);
+    const waiting = context.capacityWaits.get(waitKey);
+    context.capacityWaits.delete(waitKey);
     const latestJob = context.jobs.get(job.id);
     // A one-shot job is disabled once its only occurrence has fired, which
     // must not cancel the retry of that occurrence; an operator or the
     // failure threshold pausing it does.
-    if (!latestJob || (!latestJob.enabled && latestJob.pausedReason !== 'one-shot-complete')) return;
-    if (context.activeRunCount() >= context.maxConcurrentRuns() || context.admitted?.() === false) {
-      scheduleAutomationFailureFollowUp(context, latestJob, run, retryAllowed, false);
-      if (context.retryTimers.has(retryKey)) {
-        context.capacityWaits?.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey });
-      }
+    if (!latestJob || (!latestJob.enabled && latestJob.pausedReason !== 'one-shot-complete')) {
+      reserved?.();
       return;
     }
-    void context.executeJob(latestJob, 'scheduled', false, run.attempt + 1).catch((error) => {
+    // The daemon takes no new work (a self-update's restart): the retry is put off by its own delay again.
+    if (context.admitted?.() === false) {
+      reserved?.();
+      scheduleAutomationFailureFollowUp(context, latestJob, run, retryAllowed, false);
+      return;
+    }
+    const release = reserved ?? context.tryReserveRun();
+    if (!release) {
+      // Every run slot is in use: the retry waits for one, and the manager starts it when a run ends.
+      context.capacityWaits.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey, resume: startRetry });
+      return;
+    }
+    void context.executeJob(latestJob, 'scheduled', false, run.attempt + 1, release).catch((error) => {
       logger.warn('AutomationManager: retry execution failed', {
         jobId: latestJob.id,
         runId: run.id,
@@ -155,7 +168,8 @@ export function scheduleAutomationFailureFollowUp(
         error: summarizeError(error),
       });
     });
-  }, Math.max(1_000, calculateRetryDelay(retryPolicy.delayMs, run.attempt, retryPolicy.strategy, retryPolicy.maxDelayMs, retryPolicy.jitterMs)));
+  };
+  const timer = setTimeout(() => startRetry(), Math.max(1_000, calculateRetryDelay(retryPolicy.delayMs, run.attempt, retryPolicy.strategy, retryPolicy.maxDelayMs, retryPolicy.jitterMs)));
   timer.unref?.();
   context.retryTimers.set(retryKey, timer);
 }
@@ -274,40 +288,69 @@ function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): stri
  *
  * The notice flows to the job's own delivery targets by default so a failed or
  * slept-through overnight job still reaches its human, not only to a separately
- * configured failure route. `onDeliveryGap` is invoked (once, at the caller's
- * discretion) when the job has no reachable target at all, so the gap is logged
- * honestly instead of failing silently. The returned promise settles when the
- * notice was sent or given up on, and never rejects.
+ * configured failure route. `onUndelivered` is called when the notice reached
+ * no one: the job names no target (no reason: the notice simply belongs in the
+ * owner inbox), or, with the reason, delivery is unavailable or no attempt
+ * across the primary and fallback targets was sent. The returned
+ * promise settles when the notice was sent or given up on, and never rejects.
  */
 export function maybeDeliverAutomationFailureNotice(
   deliveryManager: AutomationDeliveryManager | null,
   job: AutomationJob,
   run: AutomationRun,
-  onDeliveryGap?: (job: AutomationJob, run: AutomationRun) => void,
+  onUndelivered: (job: AutomationJob, run: AutomationRun, reason: string | undefined) => void,
 ): Promise<void> {
   const { primary, fallback } = resolveAutomationFailureNoticeTargets(job);
   if (primary.length === 0 && fallback.length === 0) {
-    onDeliveryGap?.(job, run);
+    onUndelivered(job, run, undefined);
     return Promise.resolve();
   }
-  if (!deliveryManager) return Promise.resolve();
+  if (!deliveryManager) {
+    onUndelivered(job, run, 'No delivery target of this job could be reached.');
+    return Promise.resolve();
+  }
   const message = buildFailureNoticeMessage(job, run);
   // Resolves when the notice was sent or given up on; never rejects, so the run it reports on never fails for it.
   return (async () => {
-    const attempts = primary.length > 0
-      ? await deliveryManager.deliverText(job, run, message, primary, { kind: 'failure-notice' })
+    const attempts: AutomationDeliveryAttempt[] = primary.length > 0
+      ? [...await deliveryManager.deliverText(job, run, message, primary, { kind: 'failure-notice' })]
       : [];
-    const delivered = attempts.some((attempt) => attempt.status === 'sent');
-    if (!delivered && fallback.length > 0) {
-      await deliveryManager.deliverText(job, run, message, fallback, { kind: 'failure-notice' });
+    if (!attempts.some((attempt) => attempt.status === 'sent') && fallback.length > 0) {
+      attempts.push(...await deliveryManager.deliverText(job, run, message, fallback, { kind: 'failure-notice' }));
     }
+    if (!attempts.some((attempt) => attempt.status === 'sent')) onUndelivered(job, run, undeliveredReason(attempts));
   })().catch((error) => {
     logger.warn('AutomationManager: failure notice delivery failed', {
       jobId: job.id,
       runId: run.id,
       error: summarizeError(error),
     });
+    onUndelivered(job, run, `Not delivered: ${summarizeError(error)}.`);
   });
+}
+
+/** Why no attempt reached anyone, as the owner inbox says it. */
+function undeliveredReason(attempts: readonly AutomationDeliveryAttempt[]): string {
+  return attempts.length === 0
+    ? 'No delivery target of this job could be reached.'
+    : `Not delivered: ${attempts.map((attempt) => attempt.error ?? attempt.status).join('; ')}.`;
+}
+
+/**
+ * Whether a settled run has an answer to deliver: to its job's targets, or to
+ * the owner inbox when the job names none. A cancelled run with no target and a
+ * run whose delivery is recorded and owes nothing more have nothing to deliver;
+ * a run whose attempts all failed and whose answer reached no inbox either
+ * still owes it.
+ */
+export function automationRunDeliveryWanted(
+  context: Pick<AutomationRunDeliveryContext, 'deliveryManager' | 'unattendedRuns'>,
+  job: AutomationJob,
+  run: AutomationRun,
+): boolean {
+  if (run.deliveryIds.length > 0 && run.delivery?.state !== 'owed') return false;
+  if (job.delivery.mode === 'none' || !context.deliveryManager) return context.unattendedRuns !== undefined && run.status !== 'cancelled';
+  return true;
 }
 
 /**
@@ -323,32 +366,44 @@ export function maybeDeliverAutomationRun(
   run: AutomationRun,
 ): boolean {
   if (context.deliveryInFlight.has(run.id)) return true;
-  if (run.deliveryIds.length > 0) return false;
-  const settleOwed = async (attempts: readonly AutomationDeliveryAttempt[]): Promise<void> => {
+  if (!automationRunDeliveryWanted(context, job, run)) return false;
+  /** Records the attempts on the run; `settled` clears what it owes (a run left owed is delivered again at the next start). */
+  const record = async (attempts: readonly AutomationDeliveryAttempt[], settled: boolean): Promise<void> => {
     const latest = context.runs.get(run.id);
-    if (!latest || (attempts.length === 0 && !latest.delivery)) return;
+    if (!latest || (attempts.length === 0 && (!settled || !latest.delivery))) return;
     const updated: AutomationRun = {
       ...latest,
       ...(attempts.length > 0 ? { deliveryIds: attempts.map((attempt) => attempt.id), deliveryAttempts: attempts } : {}),
-      delivery: undefined,
+      ...(settled ? { delivery: undefined } : {}),
       updatedAt: Date.now(),
     };
     context.runs.set(updated.id, updated);
     context.syncRunToRuntime(updated, 'automation.delivery');
     await context.saveRuns();
-    if (job.deleteAfterRun && run.status === 'completed') context.removeOneShotJob?.(job.id);
+    if (settled && job.deleteAfterRun && run.status === 'completed') context.removeOneShotJob?.(job.id);
+  };
+  const keptOwed = (receipt: UnattendedAnswerReceipt): void => {
+    logger.warn('AutomationManager: the run answer reached no one; it stays owed and is delivered again at the next start', {
+      runId: run.id, jobId: job.id, reason: receipt.to === 'nowhere' ? receipt.reason : receipt.to,
+    });
   };
   // A job that names no target: its answer goes to the owner inbox, never only to the run history.
   if (job.delivery.mode === 'none' || !context.deliveryManager) {
-    if (!context.unattendedRuns || run.status === 'cancelled') return false;
+    const inbox = context.unattendedRuns;
+    if (!inbox) return false;
     context.deliveryInFlight.add(run.id);
-    const posting = context.unattendedRuns.postToInbox(automationRunAnswer(job, run))
-      .then(async () => {
-        if (run.status === 'completed') context.noteJobOutcome?.(job.id, 'inbox');
-        await settleOwed([]);
+    const posting = inbox.postToInbox(automationRunAnswer(job, run))
+      .then(async (receipt) => {
+        const reached = receipt.to === 'inbox';
+        if (run.status === 'completed') context.noteJobOutcome?.(job.id, reached ? 'inbox' : 'not-delivered');
+        if (!reached) {
+          keptOwed(receipt);
+          return;
+        }
+        await record([], true);
       })
       .catch((error: unknown) => {
-        logger.warn('AutomationManager: the run answer could not be put in the owner inbox; it stays owed', { runId: run.id, jobId: job.id, error: summarizeError(error) });
+        logger.warn('AutomationManager: the run answer reached the owner inbox, but recording that failed; it stays owed', { runId: run.id, jobId: job.id, error: summarizeError(error) });
       })
       .finally(() => { context.deliveryInFlight.delete(run.id); });
     context.track?.(posting);
@@ -359,15 +414,14 @@ export function maybeDeliverAutomationRun(
     .then(async (deliveryAttempts) => {
       // Every named target failed (or none could be resolved): the answer goes to the owner inbox instead.
       const undelivered = deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
+      const fallback = context.unattendedRuns && undelivered
+        ? await context.unattendedRuns.postToInbox(automationRunAnswer(job, run), undeliveredReason(deliveryAttempts))
+        : undefined;
+      const reached = !undelivered || fallback?.to === 'inbox';
       if (run.status === 'completed') context.noteJobOutcome?.(job.id, undelivered ? 'not-delivered' : 'delivered');
-      if (context.unattendedRuns && undelivered) {
-        const reason = deliveryAttempts.length === 0
-          ? 'No delivery target of this job could be reached.'
-          : `Not delivered: ${deliveryAttempts.map((attempt) => attempt.error ?? attempt.status).join('; ')}.`;
-        await context.unattendedRuns.postToInbox(automationRunAnswer(job, run), reason);
-      }
-      // The attempts (or the inbox) are the delivery's record; the run owes nothing more.
-      await settleOwed(deliveryAttempts);
+      if (fallback && !reached) keptOwed(fallback);
+      // The attempts (or the inbox) are the delivery's record; the run owes nothing more once its answer reached someone.
+      await record(deliveryAttempts, reached || !context.unattendedRuns);
     })
     .catch((error) => {
       logger.warn('AutomationManager: delivery failed', {

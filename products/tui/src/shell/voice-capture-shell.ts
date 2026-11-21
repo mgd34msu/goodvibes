@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { writeVoiceDraft } from '@goodvibes/engine/terminal-shell/audio/voice-capture-composition';
 /**
  * voice-capture-shell.ts, the shell's side of microphone capture.
@@ -52,7 +53,7 @@ export function installVoiceCapture(deps: VoiceCaptureShellDeps): () => VoiceCap
     managedVoiceRoot: deps.shellPaths.resolveUserPath('voice'),
     // Surface-scoped: the extracted onnxruntime assets belong to this surface's
     // own directory, beside its other managed state.
-    assetDirectory: deps.shellPaths.resolveUserPath('tui', 'onnxruntime'),
+    assetDirectory: deps.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'onnxruntime'),
     homeDirectory: deps.homeDirectory,
     sessionId: deps.sessionId,
     readDraftRevision: () => deps.buffer.draftRevision ?? deps.buffer.prompt,

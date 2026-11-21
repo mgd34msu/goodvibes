@@ -47,6 +47,7 @@ import {
 } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { ContractEvent } from '../../events/contract.js';
+import type { AgentEvent } from '../../events/agents.js';
 import { computeUsageCostUsdCents, usageCostSource } from '../providers/model-pricing.js';
 import { HelperModel } from '../config/helper-model.js';
 import type { ModelDefinition } from '../providers/registry.js';
@@ -1142,7 +1143,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       return 'end';
     },
     // Delegation is a step inside the turn: after a round that started agents,
-    // the turn waits for them (woken by their completion, never by polling).
+    // the turn waits for them, woken by their start and their end, never by polling.
     awaitDelegates: async (delegateSignal, round) => {
       if (!round || !round.calls.some(call => call.name === 'agent' && ['spawn', 'batch-spawn'].includes(String(call.arguments.mode))
         && round.results.some(result => result.callId === call.id && result.success))) return false;
@@ -1151,7 +1152,15 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       context.requestRender();
       try {
         return await waitForResponseDelegates(context.conversation, context.agentManager, { signal: delegateSignal, assertCurrent: assertActiveTurn }, [], context.canWaitForDelegate,
-          notify => context.runtimeBus?.on<Extract<ContractEvent, { type: 'CONTRACT_STATUS_CHANGED' }>>('CONTRACT_STATUS_CHANGED', ({ payload }) => { if (payload.to === 'awaiting-owner') notify(); }));
+          notify => {
+            const bus = context.runtimeBus;
+            if (!bus) return undefined;
+            // A queued agent starting and a contract stopping on a question for
+            // the owner are the two changes no join can announce.
+            const stopStatus = bus.on<Extract<ContractEvent, { type: 'CONTRACT_STATUS_CHANGED' }>>('CONTRACT_STATUS_CHANGED', ({ payload }) => { if (payload.to === 'awaiting-owner') notify(); });
+            const stopRunning = bus.on<Extract<AgentEvent, { type: 'AGENT_RUNNING' }>>('AGENT_RUNNING', () => notify());
+            return () => { stopStatus(); stopRunning(); };
+          });
       } finally {
         context.requestRender();
       }

@@ -34,6 +34,10 @@ WITH_WEBUI="${GOODVIBES_WEBUI:-1}"
 RESTART_DAEMON="${GOODVIBES_RESTART_DAEMON:-1}"
 WITH_WAKE_MODEL="${GOODVIBES_WAKE_MODEL:-1}"
 DAEMON_SERVICE="${GOODVIBES_DAEMON_SERVICE:-1}"
+# Whether the service choice was stated (--service, --no-service or GOODVIBES_DAEMON_SERVICE). An
+# unstated choice never installs a service the owner removed: setup_daemon_service reads service.enabled.
+DAEMON_SERVICE_EXPLICIT=0
+[ -z "${GOODVIBES_DAEMON_SERVICE+set}" ] || DAEMON_SERVICE_EXPLICIT=1
 UNINSTALL="${GOODVIBES_UNINSTALL:-0}"
 AUTO_UPDATE="${GOODVIBES_AUTO_UPDATE:-1}"
 RELEASE_DIR="${GOODVIBES_RELEASE_DIR:-}"
@@ -56,6 +60,14 @@ WEBUI_ROOT="$INSTALL_DIR/webui"
 # receipt, never rebuilt here.
 WEBUI_INSTALLED=0
 WEBUI_URL=""
+
+# Set where a step after the programs were replaced printed a NOTE that the daemon or the web UI is not
+# running as asked; the closing lines repeat each one and the run exits 4 (installed, with problems).
+SERVICE_NOT_SET_UP=0
+SERVICE_NOT_RUNNING=0
+DAEMON_RESTART_FAILED=0
+WEBUI_NOT_CONFIGURED=0
+SERVICE_CHOICE_UNSAVED=0
 
 # The daemon native publisher checks the same executable transaction slots.
 # Keep private hardlink references until the whole suite has landed;
@@ -152,6 +164,11 @@ daemon_service_command() (
 # line: a string value without its quotes, or a bare word (true/false).
 daemon_service_string() { printf '%s\n' "$2" | sed -n 's/^ *"'"$1"'": *"\(.*\)",\{0,1\}$/\1/p' | head -n 1; }
 daemon_service_word() { printf '%s\n' "$2" | sed -n 's/^ *"'"$1"'": *\([a-z]*\),\{0,1\}$/\1/p' | head -n 1; }
+# A true/false or number setting as the installed daemon reports it (`config get <key> --json`); empty when it cannot.
+daemon_setting_value() {
+  _dsv_json=$("$INSTALL_DIR/goodvibes-daemon" config get "$1" --json 2>/dev/null) || _dsv_json=''
+  printf '%s\n' "$_dsv_json" | sed -n 's/^ *"value": *\([a-z0-9]*\),\{0,1\}$/\1/p' | head -n 1
+}
 
 # Ask the installed daemon about its service: the name (systemd unit without
 # .service, or the launchd label), the definition path, the platform, whether it
@@ -993,6 +1010,32 @@ If $INSTALL_CLAIM_DIR/$_abandoned_product is missing, put its saved copy back fi
   done
 }
 
+# A run killed between creating its private claim directory and linking its
+# first claim into it, or between releasing its claims and removing the
+# directory, leaves a directory no claim leads to. Once this run holds every
+# claim no other run can link into one (its claim creation fails and it exits),
+# so every other claim directory is such a leftover. One holding a non-empty
+# swap journal is named and kept; the rest are removed.
+sweep_orphan_install_claim_directories() {
+  for _orphan_dir in "$INSTALL_CLAIM_DIR"/.goodvibes-install-claim.*; do
+    [ "$_orphan_dir" != "$INSTALL_CLAIM_OWNER" ] && [ -d "$_orphan_dir" ] && [ ! -L "$_orphan_dir" ] || continue
+    _orphan_journal=''
+    for _orphan_name in swap-journal swap-journal.committed; do
+      if [ -f "$_orphan_dir/$_orphan_name" ] && [ ! -L "$_orphan_dir/$_orphan_name" ] && [ -s "$_orphan_dir/$_orphan_name" ]; then
+        _orphan_journal="$_orphan_dir/$_orphan_name"
+      fi
+    done
+    if [ -n "$_orphan_journal" ]; then
+      say "  NOTE: $_orphan_dir was left by an installation interrupted earlier and holds its journal, which no claim leads to; it was kept."
+      say "    $_orphan_journal lists each replaced file (R: put back <file>.goodvibes-previous) and each new file (N: remove it)."
+      say "    Once those are done, remove it: rm -rf -- $(shadow_quote "$_orphan_dir")"
+      continue
+    fi
+    rm -rf -- "${_orphan_dir:?}"
+    say "  removed    $_orphan_dir (a claim directory an earlier installation left without claims)"
+  done
+}
+
 claim_release_install() {
   _claim_purpose=${1:-install}
   case "$_claim_purpose" in install|uninstall) : ;; *) fail INSTALL_E028 'Unknown suite claim purpose.' ;; esac
@@ -1046,6 +1089,7 @@ claim_release_install() {
       && installer_open_file_matches "$_created_claim_fd" "$_claim_path" && installer_open_file_matches "$_created_claim_fd" "$INSTALL_CLAIM_OWNER/$_claim_product" \
       || fail INSTALL_E042 'The original installation claim changed before retention.'
   done
+  sweep_orphan_install_claim_directories
   if [ "$_claim_purpose" = uninstall ]; then assert_install_claims; return 0; fi
   # An interrupted updater may have retained a companion slot even when its
   # primary claim is missing. Never overwrite that recovery evidence.
@@ -1548,7 +1592,11 @@ restart_systemd_unit() {
 
   say ""
   say "Restarting the running ${unit%.service} (systemd user service) ..."
+  _rsu_state=''
   if systemctl --user restart "$unit" 2>/dev/null; then
+    _rsu_state=$(systemctl --user show "$unit" --property=ActiveState --value 2>/dev/null || :)
+  fi
+  if [ "$_rsu_state" = active ]; then
     say "  restarted  $unit"
     case "$exec_bin" in
       ""|*"$expected_bin"*) : ;;
@@ -1559,10 +1607,31 @@ restart_systemd_unit() {
         ;;
     esac
   else
-    say "  NOTE: restart failed; restart it yourself with:"
-    say "    systemctl --user restart $unit"
+    DAEMON_RESTART_FAILED=1
+    if [ -n "$_rsu_state" ]; then
+      say "  NOTE: $unit was restarted but is $_rsu_state, not active. Inspect it with:"
+      say "    systemctl --user status $unit"
+    else
+      say "  NOTE: restart failed; restart it yourself with:"
+      say "    systemctl --user restart $unit"
+    fi
   fi
   return 0
+}
+
+# Whether a process is alive: it exists and is not a zombie (a relaunched child
+# this shell has not reaped still answers kill -0).
+pid_alive() {
+  kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o stat= -p "$1" 2>/dev/null || :)" in Z*) return 1 ;; esac
+  return 0
+}
+
+# Whether the daemon's runtime record names a pid. The daemon writes the record
+# (detached-daemon.json in its daemon home) only once its listener is bound.
+daemon_record_names_pid() {
+  _drn_record="${GOODVIBES_DAEMON_HOME:-${GOODVIBES_HOME:-$HOME}/.goodvibes/daemon}/detached-daemon.json"
+  [ -f "$_drn_record" ] && grep -Eq '"pid": *'"$1"'([^0-9]|$)' "$_drn_record"
 }
 
 restart_bare_processes() {
@@ -1683,8 +1752,12 @@ restart_bare_processes() {
     say ""
     say "Restarting running ${new_bin##*/} (pid $pid) ..."
     kill "$pid" 2>/dev/null || continue
+    # The daemon ends itself at its shutdown deadline after draining, so it is
+    # waited for until it is gone; another program carries no such promise and
+    # gets 10 s.
     waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+    while kill -0 "$pid" 2>/dev/null; do
+      [ "$_is_daemon" = "1" ] || [ "$waited" -lt 10 ] || break
       sleep 1
       waited=$((waited + 1))
     done
@@ -1706,13 +1779,25 @@ restart_bare_processes() {
         exec nohup "$new_bin" >/dev/null 2>&1
       ) &
       newpid=$!
-    else
-      # shellcheck disable=SC2086  # args is intentionally word-split
-      nohup "$new_bin" ${args:-} >/dev/null 2>&1 &
-      newpid=$!
+      # Restarted once the daemon's runtime record names the new pid (it is
+      # written after the listener is bound); not started when the process ends first.
+      while pid_alive "$newpid" && ! daemon_record_names_pid "$newpid"; do
+        sleep 1
+      done
+      if daemon_record_names_pid "$newpid" && pid_alive "$newpid"; then
+        say "  restarted  pid $newpid"
+      else
+        DAEMON_RESTART_FAILED=1
+        say "  NOTE: the new daemon (pid $newpid) exited before it was serving. Run it in a terminal to see why:"
+        say "    $new_bin"
+      fi
+      continue
     fi
+    # shellcheck disable=SC2086  # args is intentionally word-split
+    nohup "$new_bin" ${args:-} >/dev/null 2>&1 &
+    newpid=$!
     sleep 1
-    if kill -0 "$newpid" 2>/dev/null; then
+    if pid_alive "$newpid"; then
       say "  restarted  pid $newpid${display_args:+ (args: $display_args)}"
     else
       say "  NOTE: the new process did not stay up; start it yourself and check its output:"
@@ -1749,6 +1834,7 @@ restart_launchd_agent() {
   if launchctl kickstart -k "gui/$(id -u)/$_label" 2>/dev/null; then
     say "  restarted  $_label"
   else
+    DAEMON_RESTART_FAILED=1
     say "  NOTE: restart failed; restart it yourself with:"
     say "    launchctl kickstart -k gui/$(id -u)/$_label"
   fi
@@ -1787,18 +1873,19 @@ reload_launchd_agent() {
   # Only the gui/<uid> verbs: the legacy load/unload act on the caller's own
   # domain (not this agent's from an SSH login) and exit 0 whatever happened,
   # so as a fallback they turned a failed load into "reloaded". bootout can
-  # return before launchd lets go of the job; wait for that (up to 5 s) so the
-  # bootstrap does not fail on the old job and put the previous plist back.
-  launchctl bootout "gui/$_rl_uid/$_rl_label" 2>/dev/null || true
-  _rl_wait=0
-  while [ "$_rl_wait" -lt 20 ] && launchctl print "gui/$_rl_uid/$_rl_label" >/dev/null 2>&1; do
-    sleep 0.25
-    _rl_wait=$((_rl_wait + 1))
-  done
+  # return before launchd lets go of the job, so the bootstrap waits until the
+  # old job is gone; a bootstrap that fails after that is the new plist's own.
+  if ! bootout_launchd_job "$_rl_uid" "$_rl_label"; then
+    DAEMON_RESTART_FAILED=1
+    say "  NOTE: launchd still lists $_rl_label after bootout, so the refreshed definition was not loaded. From a"
+    say "  logged-in session: launchctl bootout gui/$_rl_uid/$_rl_label ; launchctl bootstrap gui/$_rl_uid $_rl_path"
+    return 0
+  fi
   if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null; then
     say "  reloaded   $_rl_label"
     return 0
   fi
+  DAEMON_RESTART_FAILED=1
   _rl_backup=$(newest_definition_backup "$_rl_path")
   if [ -n "$_rl_backup" ] && [ -f "$_rl_backup" ] && cp -p "$_rl_backup" "$_rl_path" 2>/dev/null; then
     if launchctl bootstrap "gui/$_rl_uid" "$_rl_path" 2>/dev/null; then
@@ -1813,6 +1900,26 @@ reload_launchd_agent() {
     say "  NOTE: could not reload the LaunchAgent and the previous file could not be restored; load it yourself:"
     say "    launchctl bootstrap gui/$_rl_uid $_rl_path"
   fi
+  return 0
+}
+
+# Boot a launchd job out and wait until launchd has let go of it: its process
+# (read from launchctl print before the bootout) has exited and its label is no
+# longer listed. The daemon ends itself at its shutdown deadline and launchd
+# kills the job at its ExitTimeOut, so the wait ends on that event. Returns 1
+# when bootout failed and the label is still listed once the process is gone.
+bootout_launchd_job() {
+  _bl_pid=$(launchctl print "gui/$1/$2" 2>/dev/null | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\).*/\1/p' | head -n 1 || :)
+  _bl_rc=0
+  launchctl bootout "gui/$1/$2" 2>/dev/null || _bl_rc=$?
+  if [ -n "$_bl_pid" ]; then
+    while kill -0 "$_bl_pid" 2>/dev/null; do sleep 0.25; done
+  fi
+  if [ "$_bl_rc" -ne 0 ]; then
+    ! launchctl print "gui/$1/$2" >/dev/null 2>&1
+    return
+  fi
+  while launchctl print "gui/$1/$2" >/dev/null 2>&1; do sleep 0.25; done
   return 0
 }
 
@@ -1900,9 +2007,20 @@ setup_daemon_service() {
     return 0
   fi
 
-  # New-user only: if a daemon is already running, the upgrade-restart path
-  # (restart_running_daemon) already handled it — do not also set up a service.
+  # A daemon already running (its systemd unit reports active, or a process
+  # from this install directory) was handled by restart_running_daemon; no
+  # service is set up beside it.
   daemon_running && return 0
+
+  # Without a stated choice, a daemon whose service the owner removed
+  # (goodvibes-daemon uninstall-service records service.enabled=false) gets none back.
+  if [ "$DAEMON_SERVICE_EXPLICIT" != "1" ] \
+    && [ "$(daemon_setting_value service.enabled)" = "false" ]; then
+    say ""
+    say "Daemon service: off by your choice (service.enabled is false), so none was set up."
+    say "  To run the daemon as a service:  $INSTALL_DIR/goodvibes-daemon install-service"
+    return 0
+  fi
 
   say ""
   case "$os_tag" in
@@ -1918,6 +2036,7 @@ setup_daemon_service() {
     return 0
   fi
   if [ "$DAEMON_SERVICE_KNOWN" != "1" ]; then
+    SERVICE_NOT_SET_UP=1
     say "NOTE: goodvibes-daemon could not report on its service (is the user service manager reachable"
     say "  from this session?), so no service was set up. Set it up yourself from a logged-in session:"
     say "    $INSTALL_DIR/goodvibes-daemon install-service"
@@ -1942,10 +2061,12 @@ setup_daemon_service() {
     3)
       DAEMON_SERVICE_INSTALLED=1
       DAEMON_SERVICE_OWNER=product
+      SERVICE_NOT_RUNNING=1
       say "  NOTE: the service is installed but not running yet. Inspect it with:"
       say "    $INSTALL_DIR/goodvibes-daemon service-status"
       ;;
     *)
+      SERVICE_NOT_SET_UP=1
       say "  NOTE: goodvibes-daemon install-service exited $_sds_rc (see above), so the daemon is not set up as a service."
       say "  Once that is fixed, run it again from a logged-in session:"
       say "    $INSTALL_DIR/goodvibes-daemon install-service"
@@ -2311,6 +2432,7 @@ configure_webui() {
     done
   fi
   if [ "$webui_ok" != "1" ]; then
+    WEBUI_NOT_CONFIGURED=1
     say "  NOTE: the bundle is on disk but the daemon was not configured to serve it. Run:"
     say "    goodvibes-daemon webui enable --bundle-dir $webui_target"
     return 0
@@ -3075,8 +3197,11 @@ stop_bare_processes() {
   for pid in $pids; do
     say "Stopping $label (pid $pid) ..."
     kill "$pid" 2>/dev/null || continue
+    # The daemon ends itself at its shutdown deadline after draining, so it is
+    # waited for until it is gone; another program gets 10 s.
     waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+    while kill -0 "$pid" 2>/dev/null; do
+      [ "$label" = goodvibes-daemon ] || [ "$waited" -lt 10 ] || break
       sleep 1
       waited=$((waited + 1))
     done
@@ -3155,8 +3280,14 @@ uninstall_launchd_agent() {
 
   say "Stopping launchd user agent $label ..."
   # bootout names the agent's own domain; the legacy unload acts on the caller's
-  # domain and exits 0 whatever happened, so it was no fallback.
-  launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+  # domain and exits 0 whatever happened, so it was no fallback. The plist is
+  # removed only once launchd has let go of the job.
+  if ! bootout_launchd_job "$uid" "$label"; then
+    say "  NOTE: launchd still lists $label after bootout; it was left in place. From a logged-in session:"
+    say "    launchctl bootout gui/$uid/$label ; rm $plist_path"
+    record_kept "$plist_path ($label agent; launchd did not let it go)"
+    return 0
+  fi
 
   if [ "$managed" = "1" ]; then
     rm -f "$plist_path"
@@ -3174,7 +3305,25 @@ uninstall_launchd_agent() {
 # answer, read by run_uninstall (read_daemon_service) before the installation is
 # claimed; it is removed when the daemon wrote it and stopped and kept otherwise.
 uninstall_daemon_service() {
-  [ "$DAEMON_SERVICE_KNOWN" = "1" ] || return 0
+  if [ "$DAEMON_SERVICE_KNOWN" != "1" ]; then
+    # The daemon could not say whether it has a service, so none is removed; one
+    # left enabled would start a program this uninstall deletes at every login.
+    case "$os_tag" in
+      linux)
+        command -v systemctl >/dev/null 2>&1 || return 0
+        _uds_how="systemctl --user disable --now goodvibes.service, then remove its unit file (~/.config/systemd/user/goodvibes.service)" ;;
+      macos)
+        command -v launchctl >/dev/null 2>&1 || return 0
+        _uds_how="launchctl bootout gui/$(id -u)/sh.goodvibes.daemon, then remove the plist (~/Library/LaunchAgents/sh.goodvibes.daemon.plist)" ;;
+      *) return 0 ;;
+    esac
+    say "NOTE: goodvibes-daemon could not report its service (the user service manager was not reachable from this"
+    say "  session), so a daemon service, if there is one, was left in place. From a logged-in session run:"
+    say "    $_uds_how"
+    say "  (the default name; a daemon given another service.serviceName uses that name)"
+    record_kept "the daemon's service (goodvibes-daemon could not report it: the user service manager was not reachable from this session); from a logged-in session run: $_uds_how"
+    return 0
+  fi
   _uds_managed=0
   if [ "$DAEMON_SERVICE_OWNER" = "product" ]; then _uds_managed=1; fi
   if [ "$DAEMON_SERVICE_PLATFORM" = "systemd" ]; then
@@ -3478,6 +3627,7 @@ apply_service_choice() {
   if "$INSTALL_DIR/goodvibes-daemon" config set service.enabled false >/dev/null; then
     return 0
   fi
+  SERVICE_CHOICE_UNSAVED=1
   say ""
   say "  NOTE: the no-service choice could not be saved, so a daemon started by hand may install itself as a service."
   say "    Save it with: $INSTALL_DIR/goodvibes-daemon config set service.enabled false"
@@ -3504,14 +3654,15 @@ parse_options() {
         say '  --service             Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0.'
         say '  --no-auto-update      Keep the daemon, the terminal app and the Agent from updating themselves, from their'
         say '                        first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer.'
-        say '  --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or'
-        say '                        "No Decision Model" (sets judgment.policy).'
+        say '  --decision-policy POLICY  Save the decision model policy (the judgment.policy setting; the daemon refuses'
+        say '                        a value it does not accept and names the allowed ones; see the current one with'
+        say '                        goodvibes-daemon config get judgment.policy).'
         say '  --uninstall           Remove the installed programs and services; settings and data in ~/.goodvibes are kept.'
         say '  --help|-h             Print this help and exit.'
         exit 0 ;;
       --uninstall) UNINSTALL=1; shift ;;
-      --no-service) DAEMON_SERVICE=0; shift ;;
-      --service) DAEMON_SERVICE=1; shift ;;
+      --no-service) DAEMON_SERVICE=0; DAEMON_SERVICE_EXPLICIT=1; shift ;;
+      --service) DAEMON_SERVICE=1; DAEMON_SERVICE_EXPLICIT=1; shift ;;
       --no-auto-update) AUTO_UPDATE=0; shift ;;
       --version|--bin-dir|--install-dir|--decision-policy|--from-dir)
         [ "$#" -ge 2 ] && [ -n "$2" ] || fail INSTALL_E110 "$1 needs a value"
@@ -3519,8 +3670,9 @@ parse_options() {
           --version) REQUESTED_VERSION=$2; REQUESTED_DAEMON_VERSION=$2; REQUESTED_AGENT_VERSION=$2; REQUESTED_WEBUI_VERSION=$2 ;;
           --bin-dir|--install-dir) INSTALL_DIR=$2; WEBUI_ROOT="$INSTALL_DIR/webui" ;;
           --from-dir) RELEASE_DIR=$2 ;;
-          --decision-policy)
-            case "$2" in 'Decision Model Only'|Hybrid|'No Decision Model') DECISION_POLICY=$2 ;; *) fail INSTALL_E111 'Unknown decision policy' ;; esac ;;
+          # The daemon's settings schema is the one list of policies: apply_decision_policy's
+          # `config set` checks the value and names the allowed ones when it refuses.
+          --decision-policy) DECISION_POLICY=$2 ;;
         esac
         shift 2 ;;
       *) fail INSTALL_E112 "Unknown option: $1. Use --help for released-version installation; source builds use scripts/install-from-checkout.sh." ;;
@@ -3700,15 +3852,22 @@ main() {
   fi
 
   say ""
+  _install_problems=0
+  if [ "$SERVICE_NOT_SET_UP" = "1" ] || [ "$SERVICE_NOT_RUNNING" = "1" ] || [ "$DAEMON_RESTART_FAILED" = "1" ] \
+    || [ "$WEBUI_NOT_CONFIGURED" = "1" ] || [ "$SERVICE_CHOICE_UNSAVED" = "1" ]; then
+    _install_problems=1
+  fi
+  _install_word=Done.
+  [ "$_install_problems" = "0" ] || _install_word=Installed.
   if [ "$PATH_LINE_ADDED" = "1" ]; then
     # $INSTALL_DIR was just added to PATH in $RC_FILE_USED, but THIS shell
     # session hasn't re-sourced it yet — the bare 'goodvibes' command would
     # not resolve here. State a command that works RIGHT NOW instead of a
     # promise that depends on a shell restart the user hasn't done.
-    say "Done. Start with: $INSTALL_DIR/goodvibes   (health check: $INSTALL_DIR/goodvibes doctor)"
+    say "$_install_word Start with: $INSTALL_DIR/goodvibes   (health check: $INSTALL_DIR/goodvibes doctor)"
     say "PATH updated in $RC_FILE_USED; open a new shell (or run: . $RC_FILE_USED) to use the plain 'goodvibes' command from then on."
   else
-    say "Done. Start with: goodvibes   (health check: goodvibes doctor)"
+    say "$_install_word Start with: goodvibes   (health check: goodvibes doctor)"
   fi
   if [ "$WITH_AGENT" = "1" ]; then
     say "Personal agent:   goodvibes-agent"
@@ -3720,20 +3879,29 @@ main() {
     say "Decision policy:  NOT saved (the daemon refused the write); set it with: $INSTALL_DIR/goodvibes-daemon config set judgment.policy '$DECISION_POLICY'"
   fi
   if [ "$WEBUI_INSTALLED" = "1" ] && [ -n "$WEBUI_URL" ]; then
-    # The posture line follows the URL the daemon actually reported, so a host
-    # that was already bound to its network is never told it is on loopback.
-    case "$WEBUI_URL" in
-      http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*)
-        say "Web UI:           $WEBUI_URL   (this machine only: the daemon is bound to loopback)"
-        say "                  To reach it from another device on your network:"
-        say "                    goodvibes-daemon webui enable --lan"
-        ;;
-      *)
-        say "Web UI:           $WEBUI_URL   (reachable from your network: the daemon is bound to all interfaces)"
-        say "                  To take it back to this machine only:"
-        say "                    goodvibes-daemon webui enable --loopback"
-        ;;
-    esac
+    # Who can reach it, and the command that changes that, is in the daemon's
+    # own lines printed when the web UI was configured.
+    say "Web UI:           $WEBUI_URL"
+  fi
+  if [ "$WEBUI_NOT_CONFIGURED" = "1" ]; then
+    say "Web UI:           NOT configured (the daemon refused); serve it with: $INSTALL_DIR/goodvibes-daemon webui enable --bundle-dir $webui_target"
+  fi
+  if [ "$SERVICE_CHOICE_UNSAVED" = "1" ]; then
+    say "No-service choice: NOT saved; save it with: $INSTALL_DIR/goodvibes-daemon config set service.enabled false"
+  fi
+  if [ "$SERVICE_NOT_SET_UP" = "1" ]; then
+    say "Daemon service:   NOT set up; see the NOTE above. Then run: $INSTALL_DIR/goodvibes-daemon install-service"
+  fi
+  if [ "$SERVICE_NOT_RUNNING" = "1" ]; then
+    say "Daemon service:   installed but NOT running; inspect it with: $INSTALL_DIR/goodvibes-daemon service-status"
+  fi
+  if [ "$DAEMON_RESTART_FAILED" = "1" ]; then
+    say "Daemon restart:   NOT done; a daemon may still run the previous version, or none may be running. See the NOTE above."
+  fi
+  if [ "$_install_problems" = "1" ]; then
+    say ""
+    say "Installed, with the problems above."
+    exit 4
   fi
 }
 

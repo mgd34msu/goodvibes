@@ -1074,8 +1074,10 @@ export class Orchestrator {
         if (nativeTurn) {
           settleNativeConversationTurn(nativeTurn);
           this.activeNativeConversationPermit = undefined; this.nativeAdmissionAbort = null;
-          // The permit was the last thing holding a finished turn's execution.
+          // The permit was the last thing holding a finished turn's execution;
+          // follow-ups queued behind it flush now.
           if (this.phase === 'admitting' || this.phase === 'settling') this.phase = 'idle';
+          this.followUpRuntime.scheduleFlush();
         }
       }
     };
@@ -1644,17 +1646,21 @@ export class Orchestrator {
     // leave this orchestrator occupied by a turn that has ended.
     // The turn's whole phase ends here, whatever a stream or compaction left open. A native
     // turn's permit still holds execution until its owner settles it.
-    try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
-    // stopThinking() painted while the phase still held the turn, and its frame timer is gone:
-    // paint the ended turn now, or the screen keeps showing it as working until the next key.
-    this.requestRender();
-    const durationMs = Date.now() - turnStartTime;
-    const notifyEnabled = configManager.get('behavior.notifyOnComplete') as boolean | undefined;
-    if (outcome !== 'cancelled' && notifyEnabled !== false) {
-      notifyCompletion('GoodVibes', `Response ${outcome === 'complete' ? 'complete' : 'failed'} (${Math.round(durationMs / 1000)}s)`, durationMs);
+    // Queued follow-ups flush at the turn's end even when stopThinking(), the
+    // render or the notification throws.
+    try {
+      try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
+      // stopThinking() painted while the phase still held the turn, and its frame timer is gone:
+      // paint the ended turn now, or the screen keeps showing it as working until the next key.
+      this.requestRender();
+      const durationMs = Date.now() - turnStartTime;
+      const notifyEnabled = configManager.get('behavior.notifyOnComplete') as boolean | undefined;
+      if (outcome !== 'cancelled' && notifyEnabled !== false) {
+        notifyCompletion('GoodVibes', `Response ${outcome === 'complete' ? 'complete' : 'failed'} (${Math.round(durationMs / 1000)}s)`, durationMs);
+      }
+    } finally {
+      this.followUpRuntime.scheduleFlush();
     }
-
-    this.followUpRuntime.scheduleFlush();
   }
 
   /**

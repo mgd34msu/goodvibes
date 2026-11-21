@@ -1,17 +1,12 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
 export async function handleIMessageSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.imessage.token' },
-    { kind: 'registry', service: 'imessage', field: 'primary' },
-    { kind: 'env', name: 'IMESSAGE_BRIDGE_TOKEN' },
-  );
+  const credential = await resolveInboundCredential(context, 'imessage');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('imessage', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('imessage', credential.setting);
   if (credential.state === 'resolved') {
     const providedToken = readBearerOrHeaderToken(req, 'x-goodvibes-imessage-token');
     if (!constantTimeEquals(credential.value, providedToken)) {

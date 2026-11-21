@@ -1,5 +1,4 @@
 import { registerWorkCommand } from '@goodvibes/engine/terminal-shell/native/work-command';
-import '../../runtime/native-conversation-intake.ts';
 import { openAgentLegacyImport } from './legacy-work-ledger-import-runtime.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../agent-workspace-categories.ts';

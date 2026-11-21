@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
 import { scan, persistProviders } from '@goodvibes/engine/platform/platform/discovery';
@@ -40,7 +41,7 @@ export function registerDiscoveryRuntimeCommands(registry: CommandRegistry, scan
           lines.push(`Some servers could not be added as providers: ${summarizeError(err)}`);
         }
         if (result.servers.length > 0) {
-          persistProviders({ homeDirectory: requireShellPaths(ctx).homeDirectory, surfaceRoot: 'tui' }, result.servers);
+          persistProviders({ homeDirectory: requireShellPaths(ctx).homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT }, result.servers);
         }
         ctx.renderRequest();
         return lines.join('\n');

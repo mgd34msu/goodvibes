@@ -41,6 +41,13 @@ export interface SurfaceSecretReading {
   /** A value or reference is declared in some backend, whether or not it resolves. */
   readonly declared: boolean;
   readonly source: ChannelSecretSource;
+  /**
+   * The setting that holds the credential: the one whose reference did not
+   * resolve when `source` is `unresolved`, otherwise the target's first
+   * setting. Absent for a target with no setting (a webhook URL kept only in
+   * the service registry or the environment).
+   */
+  readonly configKey?: string | undefined;
 }
 
 const SERVICE_FIELDS: ReadonlySet<string> = new Set<ServiceSecretField>([
@@ -63,10 +70,13 @@ function present(value: unknown): boolean {
 }
 
 /**
- * Read one credential: the service registry, then each config key (a
- * `goodvibes://secrets/...` reference is resolved), then each environment
- * variable. A config value that resolves to nothing is still `declared`, which
- * is what lets status name the setting that points at a missing secret.
+ * Read one credential: the service registry (and, for a target whose metadata
+ * sets `serviceBaseUrl`, the service entry's base URL), then each config key
+ * (a `goodvibes://secrets/...` reference is resolved), then each environment
+ * variable. A config value that resolves to nothing is answered `unresolved`
+ * at once and the environment is not read: a broken reference never switches
+ * the surface to another account. That is also what lets status name the
+ * setting that points at a missing secret.
  *
  * References are resolved through the process's credential holder
  * (channels/credential-holder.ts), the same one delivery asks, so status, the
@@ -84,25 +94,41 @@ export async function readSurfaceSecret(
     const field = target.serviceField as ServiceSecretField;
     const registered = await channelCredentials.resolve(`service:${serviceName}:${field}`, registry.get?.(serviceName),
       () => registry.resolveSecret(serviceName, field), deps.secretsManager);
-    if (registered) return { value: registered, declared: true, source: 'service-registry' };
+    if (registered) return { value: registered, declared: true, source: 'service-registry', ...configKeyOf(target) };
   }
-  let configDeclared = false;
+  if (registry && target.serviceName && target.metadata.serviceBaseUrl === true) {
+    const baseUrl = serviceBaseUrl(registry.get?.(target.serviceName));
+    if (baseUrl) return { value: baseUrl, declared: true, source: 'service-registry', ...configKeyOf(target) };
+  }
   for (const key of target.configKeys ?? []) {
     const raw = deps.configManager.get(key);
     if (!present(raw)) continue;
-    configDeclared = true;
     const secrets = deps.secretsManager;
     const resolved = await channelCredentials.resolve(`config:${key}`, raw, () => resolveSecretInput(raw, {
+      diagnosticMode: 'structural',
       ...(secrets ? { resolveLocalSecret: (name: string) => secrets.get(name) } : {}),
       homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
+      configKey: key,
     }, 'dispatch'), secrets);
-    if (resolved) return { value: resolved, declared: true, source: 'config' };
+    if (resolved && resolved.trim()) return { value: resolved.trim(), declared: true, source: 'config', configKey: key };
+    return { value: null, declared: true, source: 'unresolved', configKey: key };
   }
   for (const name of target.envKeys ?? []) {
     const value = process.env[name];
-    if (value && value.trim()) return { value, declared: true, source: 'env' };
+    if (value && value.trim()) return { value: value.trim(), declared: true, source: 'env', ...configKeyOf(target) };
   }
-  return { value: null, declared: configDeclared, source: configDeclared ? 'unresolved' : 'missing' };
+  return { value: null, declared: false, source: 'missing', ...configKeyOf(target) };
+}
+
+function configKeyOf(target: ChannelSecretTargetDescriptor): { readonly configKey?: string } {
+  const key = target.configKeys?.[0];
+  return key === undefined ? {} : { configKey: key };
+}
+
+function serviceBaseUrl(entry: unknown): string | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const value = (entry as { readonly baseUrl?: unknown }).baseUrl;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 /** The credential value, or null. */
@@ -112,6 +138,24 @@ export async function resolveSurfaceSecret(
   targetId: string,
 ): Promise<string | null> {
   return (await readSurfaceSecret(deps, surface, targetId)).value;
+}
+
+/**
+ * The credential a send or an API call uses, or null when none is set. A
+ * setting whose reference does not resolve throws naming the setting, so the
+ * caller reports the broken reference instead of acting as another account or
+ * as if nothing were configured.
+ */
+export async function requireSurfaceSecret(
+  deps: SurfaceSecretReadDeps,
+  surface: ChannelSurface,
+  targetId: string,
+): Promise<string | null> {
+  const reading = await readSurfaceSecret(deps, surface, targetId);
+  if (reading.source === 'unresolved') {
+    throw new Error(`Could not resolve the ${surface} credential referenced by ${reading.configKey ?? targetId}`);
+  }
+  return reading.value;
 }
 
 /** The four ntfy topic names (each a credential), as the senders and the subscriber use them. */
@@ -169,7 +213,10 @@ export async function storeSurfaceSecret(
   deps.configManager.set(configKeyFor(target), goodVibesSecretUri(storeKey) as never);
 }
 
-/** Remove a credential setup stored: the secret-store value and the config reference. */
+/**
+ * Remove a credential GoodVibes stored: the secret-store value, and the config
+ * reference when the target names a setting (a webhook URL target has none).
+ */
 export async function clearSurfaceSecret(
   deps: SurfaceSecretWriteDeps,
   surface: ChannelSurface,
@@ -177,5 +224,6 @@ export async function clearSurfaceSecret(
 ): Promise<void> {
   const target = requireTarget(surface, targetId);
   await deps.secretsManager.delete(storeKeyFor(target));
-  deps.configManager.set(configKeyFor(target), '' as never);
+  const configKey = target.configKeys?.[0];
+  if (configKey !== undefined) deps.configManager.set(configKey as ConfigKey, '' as never);
 }

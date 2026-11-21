@@ -18,7 +18,7 @@ const FIXED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['/', 'Slash command mode'],
   ['?', 'Help: every command and keyboard shortcut'],
   ['Tab', 'Collapse/expand block; swap focus between input and the Agent workspace'],
-  ['F2', 'Process monitor'],
+  ['F2', 'Open Your agents'],
 ];
 
 /** Agent and process views (shell/session-views.ts); these keys are fixed. */

@@ -597,6 +597,7 @@ export class SecretsManager {
   private notifyCredentialInvalidation(): void {
     this.#credentialSnapshots.clear();
     this.#resolvedReferences.clear();
+    this.#inFlightReferences.clear();
     for (const listener of [...this.credentialInvalidationListeners]) {
       try { listener(); } catch { /* An observer cannot defeat credential revocation. */ }
     }
@@ -944,6 +945,8 @@ export class SecretsManager {
    * manager is picked up even by a reader that cannot tell a refusal apart.
    */
   readonly #resolvedReferences = new Map<string, { readonly value: string; readonly at: number }>();
+  /** Command-backed resolutions still running, by the same key; a credential change drops them so later reads start afresh. */
+  readonly #inFlightReferences = new Map<string, Promise<string | null>>();
 
   /**
    * Drop the values held for password-manager references, so the next read of
@@ -1389,6 +1392,18 @@ export class SecretsManager {
     const cacheKey = `${key}\0${value}`;
     const cached = commandBacked ? this.#resolvedReferences.get(cacheKey) : undefined;
     if (cached !== undefined && Date.now() - cached.at < RESOLVED_REFERENCE_MAX_AGE_MS) return cached.value;
+    if (!commandBacked) return this.resolveReference(key, value, seen, false, cacheKey);
+    // Concurrent reads of one command-backed key share one run: one process,
+    // one password-manager prompt.
+    const running = this.#inFlightReferences.get(cacheKey);
+    if (running) return running;
+    const resolution = this.resolveReference(key, value, seen, true, cacheKey)
+      .finally(() => { if (this.#inFlightReferences.get(cacheKey) === resolution) this.#inFlightReferences.delete(cacheKey); });
+    this.#inFlightReferences.set(cacheKey, resolution);
+    return resolution;
+  }
+
+  private async resolveReference(key: string, value: string, seen: Set<string>, commandBacked: boolean, cacheKey: string): Promise<string | null> {
     const revision = this.#revisionSource.revision();
     try {
       const resolved = await resolveSecretRef(value, {

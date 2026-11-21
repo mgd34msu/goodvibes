@@ -37,6 +37,6 @@ export function backgroundCommandsReport(ctx: CommandContext): string {
   return [
     summary.tracked === 0 ? 'No commands are running in the background.' : `Background commands: ${summary.running} running, ${summary.completed} finished.`,
     `A running one ${summary.stdinWriteStatus === 'supported-with-confirmation' ? 'can be given input, after you confirm' : 'cannot be given input'}; ${summary.ptyStatus === 'contract-discovered' ? 'one can run in a terminal' : 'none runs in a terminal'}; sudo runs only in the foreground.`,
-    'F2 opens the process monitor, where you can follow or stop each.',
+    'F2 opens Your agents; Enter on a background command\'s row there opens its live output.',
   ].join('\n');
 }

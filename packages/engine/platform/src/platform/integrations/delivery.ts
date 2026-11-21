@@ -71,12 +71,21 @@ export async function classifyDeliveryError(error: unknown, _site?: string): Pro
 /** Typed delivery error that carries an explicit failure classification. */
 export class DeliveryError extends GoodVibesError {
   declare readonly code: 'DELIVERY_ERROR';
+  /**
+   * `statusCode` is the HTTP status of an answer the far side gave and that
+   * refused the request (nothing was applied); absent for a failure raised
+   * before or without an answer.
+   */
   constructor(
     message: string,
     public readonly failureClass: DeliveryFailureClass,
     public readonly statusCode?: number,
+    options: { readonly cause?: unknown } = {},
   ) {
-    super(message, { code: 'DELIVERY_ERROR', category: 'internal', source: 'runtime', recoverable: failureClass === 'retryable' });
+    super(message, {
+      code: 'DELIVERY_ERROR', category: 'internal', source: 'runtime', recoverable: failureClass === 'retryable',
+      ...(options.cause !== undefined ? { cause: options.cause } : {}),
+    });
     this.name = 'DeliveryError';
   }
 }
@@ -209,7 +218,17 @@ interface PendingEntry<TPayload> {
   createdAt: number;
   attempts: number;
   nextAttemptAt: number;
-  deliver: () => Promise<void>;
+  deliver: (attempt: DeliveryAttempt) => Promise<void>;
+}
+
+/**
+ * What a delivery callback is told about the attempt: the entry's id, the
+ * same on every retry and on a resend from the dead-letter list, so a
+ * transport can hand it to a receiver that drops repeats (a Discord nonce,
+ * an Idempotency-Key header).
+ */
+export interface DeliveryAttempt {
+  readonly id: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +310,11 @@ export class DeliveryQueue<TPayload = string> {
   private readonly _structuralDiagnostics: boolean;
   private readonly _dlq: DeadLetterEntry<TPayload>[] = [];
   private _store: { readonly path: string; readonly codec: DeadLetterCodec<TPayload> } | undefined;
-  /** Dead letters being replayed now: they stay listed (and on disk) until the replay's delivery succeeded. */
+  /**
+   * Dead letters being resent now, by id: each stays listed (and on disk)
+   * until its resend is delivered or dead-lettered again, retries included,
+   * so a second resend of the same row cannot start a parallel send.
+   */
   private readonly _replaying = new Set<string>();
   private readonly _pending = new Map<string, PendingEntry<TPayload>>();
   private readonly _timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -342,18 +365,29 @@ export class DeliveryQueue<TPayload = string> {
    * @param channel - Integration channel identifier (e.g. "slack").
    * @param event   - Event name for tracing.
    * @param payload - Owned delivery payload; string by default for existing callers.
-   * @param deliver - Async function that performs the actual delivery.
+   * @param deliver - Async function that performs the actual delivery; it is
+   *   told the entry's id, the same on every attempt.
    * @returns The delivery outcome for the immediate attempt.
    */
   async enqueue(
     channel: string,
     event: string,
     payload: TPayload,
-    deliver: () => Promise<void>,
+    deliver: (attempt: DeliveryAttempt) => Promise<void>,
     options: { readonly target?: string | undefined } = {},
   ): Promise<DeliveryOutcome> {
+    return this._enqueue(channel, event, payload, deliver, options);
+  }
+
+  private async _enqueue(
+    channel: string,
+    event: string,
+    payload: TPayload,
+    deliver: (attempt: DeliveryAttempt) => Promise<void>,
+    options: { readonly target?: string | undefined; readonly id?: string | undefined },
+  ): Promise<DeliveryOutcome> {
     this._assertOpen();
-    const id = `${channel}:${event}:${Date.now()}:${randomUUID().slice(0, 8)}`;
+    const id = options.id ?? `${channel}:${event}:${Date.now()}:${randomUUID().slice(0, 8)}`;
     const entry: PendingEntry<TPayload> = {
       id,
       channel,
@@ -398,8 +432,11 @@ export class DeliveryQueue<TPayload = string> {
   /**
    * Replay dead-letter entries: all of them, or only those whose id is in `ids`.
    *
-   * Each entry is re-enqueued with a fresh retry budget. The DLQ is cleared
-   * on a per-entry basis as each replayed entry resolves.
+   * Each entry is re-enqueued under its own id with a fresh retry budget. A
+   * row leaves the list (and the file) only when its resend is delivered; a
+   * resend that fails for good replaces the row in place, and one still
+   * waiting to retry keeps it listed. The result is each entry's first
+   * outcome.
    *
    * @param deliver - The delivery function to replay with. The dead-letter
    *   queue keeps payloads, not the original delivery closures (they do not
@@ -430,24 +467,23 @@ export class DeliveryQueue<TPayload = string> {
       this._assertOpen();
       // Another replay or an explicit clear may have already consumed this row.
       if (this._replaying.has(dlqEntry.id) || !this._dlq.some((e) => e.id === dlqEntry.id)) continue;
-      // The row stays listed, and on disk, while it is replayed: a daemon that
-      // stops mid-replay still lists it after its restart.
+      // The row stays listed, and on disk, while it is resent: a daemon that
+      // stops mid-resend still lists it after its restart. It leaves the list
+      // when the resend is delivered (in _attempt) and is replaced in place
+      // when it is dead-lettered again; both end the resend.
       this._replaying.add(dlqEntry.id);
       try {
-        const outcome = await this.enqueue(
+        const outcome = await this._enqueue(
           dlqEntry.channel,
           dlqEntry.event,
           dlqEntry.payload,
           () => deliver(dlqEntry),
-          { target: retarget ? retarget(dlqEntry) : dlqEntry.target },
+          { target: retarget ? retarget(dlqEntry) : dlqEntry.target, id: dlqEntry.id },
         );
-        // Settled: delivered, or dead-lettered again as its own new row. Either
-        // way this row is done, and goes with one write.
-        this._removeDeadLetter(dlqEntry);
         results.push({ id: dlqEntry.id, outcome });
-      } finally {
-        // A replay with no settled outcome leaves the row where it was.
+      } catch (error) {
         this._replaying.delete(dlqEntry.id);
+        throw error;
       }
     }
 
@@ -519,23 +555,51 @@ export class DeliveryQueue<TPayload = string> {
   }
 
   /**
-   * Permanently close admission and cancel pending retries. Admitted deliveries
-   * may finish, but cannot start another attempt. Use close() to drain them.
+   * Permanently close admission and cancel pending retries. Every delivery
+   * still waiting to retry is kept as a dead letter (one write of the file),
+   * so it is listed and can be resent after a restart. Admitted deliveries may
+   * finish, but cannot start another attempt; one that fails is dead-lettered.
+   * Use close() to drain them.
    */
   dispose(): void {
     this._closed = true;
-    const abandoned = this._timers.size;
-    for (const timer of this._timers.values()) {
+    const waiting: PendingEntry<TPayload>[] = [];
+    for (const [id, timer] of this._timers) {
       clearTimeout(timer);
+      const entry = this._pending.get(id);
+      if (entry) waiting.push(entry);
+      this._pending.delete(id);
     }
     this._timers.clear();
-    this._pending.clear();
     this._retrying = 0;
     for (const tally of this._channelTallies.values()) tally.retrying = 0;
-    if (abandoned > 0) {
-      // These were reported to their callers as `retrying`; say they will not be.
-      logger.warn('DeliveryQueue: closed with deliveries still waiting to retry; they will not be sent', { abandoned });
+    if (waiting.length === 0) return;
+    const deadAt = Date.now();
+    for (const entry of waiting) {
+      this._replaying.delete(entry.id);
+      this._retainDeadLetter({
+        id: entry.id,
+        channel: entry.channel,
+        event: entry.event,
+        ...(entry.target !== undefined ? { target: entry.target } : {}),
+        payload: entry.payload,
+        createdAt: entry.createdAt,
+        deadAt,
+        attempts: entry.attempts,
+        finalError: 'The program stopped while this notification waited to retry; it was not sent. Resend it from the failed list.',
+        failureClass: 'retryable',
+      }, false);
     }
+    try {
+      this._writeDeadLetters(this._dlq);
+    } catch (error) {
+      logger.warn('DeliveryQueue: the dead-letter file could not be written at close; notifications waiting to retry were not kept', {
+        waiting: waiting.length,
+        error: summarizeError(error),
+      });
+      return;
+    }
+    logger.warn('DeliveryQueue: closed with deliveries waiting to retry; they are kept as failed notifications to resend', { waiting: waiting.length });
   }
 
   /**
@@ -579,10 +643,11 @@ export class DeliveryQueue<TPayload = string> {
     this._tally(entry.channel).totalAttempts += 1;
 
     try {
-      await entry.deliver();
+      await entry.deliver({ id: entry.id });
       this._delivered += 1;
       this._tally(entry.channel).delivered += 1;
       this._pending.delete(entry.id);
+      this._settleResend(entry);
       logger.debug('DeliveryQueue: delivered', {
         channel: entry.channel,
         event: entry.event,
@@ -590,7 +655,6 @@ export class DeliveryQueue<TPayload = string> {
       });
       return 'delivered';
     } catch (err: unknown) {
-      this._assertOpen();
       const errorMsg = this._describeError(err);
       const status = this._structuralDiagnostics ? deliveryHttpStatus(err) : undefined;
       const decided = deliveryTransience(err);
@@ -598,7 +662,8 @@ export class DeliveryQueue<TPayload = string> {
       const transience: FailureTransience = this._structuralDiagnostics ? { ...decided, detail: '' } : decided;
       const { failureClass } = transience;
 
-      if (failureClass === 'terminal' || entry.attempts > this._config.maxRetries) {
+      // A closed queue starts no retry: the failure is kept as a dead letter.
+      if (this._closed || failureClass === 'terminal' || entry.attempts > this._config.maxRetries) {
         return this._moveToDlq(entry, errorMsg, transience, status);
       }
 
@@ -664,6 +729,7 @@ export class DeliveryQueue<TPayload = string> {
 
     this._retainDeadLetter(dlqEntry);
     this._pending.delete(entry.id);
+    this._replaying.delete(entry.id);
 
     if (this._config.sloEnforced) {
       logger.error('DeliveryQueue: dead-lettered (SLO violated)', {
@@ -705,16 +771,40 @@ export class DeliveryQueue<TPayload = string> {
     return 'dead_letter';
   }
 
-  private _retainDeadLetter(entry: DeadLetterEntry<TPayload>, write = true): void {
-    // Bounded DLQ: evict oldest entry when limit exceeded.
-    if (this._dlq.length >= this._config.maxDlqSize) {
-      const evicted = this._dlq.shift();
-      this._deadLettered = Math.max(0, this._deadLettered - 1);
-      if (evicted) this._tally(evicted.channel).deadLettered = Math.max(0, this._tally(evicted.channel).deadLettered - 1);
+  /**
+   * A delivered entry that was a resent dead letter: its row leaves the list
+   * and the file (one write). A failed write keeps it listed.
+   */
+  private _settleResend(entry: PendingEntry<TPayload>): void {
+    this._replaying.delete(entry.id);
+    const row = this._dlq.find((candidate) => candidate.id === entry.id);
+    if (!row) return;
+    try {
+      this._removeDeadLetter(row);
+    } catch (error) {
+      logger.warn('DeliveryQueue: a resent notification was delivered but the dead-letter file could not be rewritten; it stays listed', {
+        id: entry.id,
+        error: summarizeError(error),
+      });
     }
-    this._dlq.push(entry);
-    this._deadLettered += 1;
-    this._tally(entry.channel).deadLettered += 1;
+  }
+
+  private _retainDeadLetter(entry: DeadLetterEntry<TPayload>, write = true): void {
+    const existing = this._dlq.findIndex((candidate) => candidate.id === entry.id);
+    if (existing !== -1) {
+      // A resent row that failed again replaces itself in place.
+      this._dlq[existing] = entry;
+    } else {
+      // Bounded DLQ: evict oldest entry when limit exceeded.
+      if (this._dlq.length >= this._config.maxDlqSize) {
+        const evicted = this._dlq.shift();
+        this._deadLettered = Math.max(0, this._deadLettered - 1);
+        if (evicted) this._tally(evicted.channel).deadLettered = Math.max(0, this._tally(evicted.channel).deadLettered - 1);
+      }
+      this._dlq.push(entry);
+      this._deadLettered += 1;
+      this._tally(entry.channel).deadLettered += 1;
+    }
     if (!write) return;
     try {
       this._writeDeadLetters(this._dlq);

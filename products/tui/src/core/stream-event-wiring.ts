@@ -45,17 +45,6 @@ interface StreamSystemMessageRouter {
   userReceipt?(message: string): void;
 }
 
-/**
- * Loosely-typed variant of the turns event feed, used only to subscribe to
- * STREAM_STALL, a proposed event the platform's TurnEvent union does not carry, so
- * `events.turns.on` rejects the name at compile time. See the subscription site
- * below. `events.turns.on` stays fully typed against the real union everywhere
- * else in this file, STREAM_RETRY included.
- */
-interface LooseTurnEventFeed {
-  on(type: string, listener: (payload: unknown) => void): () => void;
-}
-
 export interface WireStreamEventMetricsOptions {
   /** The UI runtime event bus (turns + tools sub-buses). */
   readonly events: UiRuntimeEvents;
@@ -330,17 +319,6 @@ export function wireStreamEventMetrics(
   unsubs.push(events.turns.on('STREAM_RETRY', (event) => {
     metrics.reconnectAttempt = event.attempt;
     metrics.reconnectMaxAttempts = event.maxAttempts;
-    render();
-  }));
-  // STREAM_STALL is a proposed platform event and is not on the TurnEvent union, so
-  // the typed feed rejects the name at compile time. Subscribing through the
-  // loose variant means the platform's own signal is observed the day it lands
-  // rather than silently dropped. Informational only: the local
-  // createStreamStallWatchdog above is the authoritative no-delta detector and
-  // already drives the visible indicator via streamMetrics.stallEpisode, so
-  // this repaints and does not duplicate or fight it.
-  const looseTurnsFeed = events.turns as unknown as LooseTurnEventFeed;
-  unsubs.push(looseTurnsFeed.on('STREAM_STALL', () => {
     render();
   }));
 

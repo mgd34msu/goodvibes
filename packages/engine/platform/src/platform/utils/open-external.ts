@@ -2,23 +2,28 @@ import { spawn } from 'node:child_process';
 import { summarizeError } from './error-display.js';
 import { logger } from './logger.js';
 
+/**
+ * How long a launcher is given to report failure. A launcher still running
+ * then is holding the browser it started (xdg-open runs a browser in the
+ * foreground when none was running), so the URL counts as opened.
+ */
 const OPEN_EXTERNAL_TIMEOUT_MS = 5000;
 
-function trimOutput(value: string): string | undefined {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 500) : undefined;
-}
-
+/**
+ * Starts one launcher detached in its own session, with no pipes to this
+ * process, so a browser it starts outlives it and never holds the terminal.
+ * An 'error' event or a non-zero exit is this launcher failing; exit 0, or
+ * still running when the window ends, is the URL opened.
+ */
 function spawnLauncher(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
-    let stdout = '';
-    let stderr = '';
     let settled = false;
 
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        stdio: 'ignore',
         windowsHide: true,
       });
     } catch (error) {
@@ -30,39 +35,29 @@ function spawnLauncher(command: string, args: string[]): Promise<boolean> {
       resolve(false);
       return;
     }
+    child.unref();
 
     const finish = (ok: boolean, detail?: Record<string, unknown>) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      clearTimeout(deadline);
       if (!ok) {
         logger.warn('External URL launcher failed', {
           command,
           argCount: args.length,
-          stdout: trimOutput(stdout),
-          stderr: trimOutput(stderr),
           ...detail,
         });
       }
       resolve(ok);
     };
 
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(false, { error: `timed out after ${OPEN_EXTERNAL_TIMEOUT_MS}ms` });
-    }, OPEN_EXTERNAL_TIMEOUT_MS);
-    timeout.unref?.();
+    const deadline = setTimeout(() => finish(true), OPEN_EXTERNAL_TIMEOUT_MS);
+    deadline.unref?.();
 
-    child.stdout?.on('data', (chunk: Buffer | string) => {
-      if (stdout.length < 4096) stdout += chunk.toString();
-    });
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      if (stderr.length < 4096) stderr += chunk.toString();
-    });
     child.once('error', (error) => {
       finish(false, { error: summarizeError(error) });
     });
-    child.once('close', (code, signal) => {
+    child.once('exit', (code, signal) => {
       finish(code === 0, { exitCode: code, signal });
     });
   });

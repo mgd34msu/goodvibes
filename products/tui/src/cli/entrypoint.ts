@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { startupNoticeWriter } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
 import {
   parseNativeShellCli,
@@ -112,7 +113,7 @@ export async function prepareShellCliRuntime(
   const configManager = new TuiConfigManager({
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,
-    surfaceRoot: 'tui',
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   });
   new GlobalNetworkTransportInstaller().install(configManager);
 

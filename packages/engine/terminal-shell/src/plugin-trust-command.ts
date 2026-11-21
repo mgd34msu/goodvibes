@@ -185,8 +185,8 @@ export async function runPluginTrustSubcommand(
 }
 
 // ---------------------------------------------------------------------------
-// The plugin actions both terminal apps describe: the terminal app's /plugin
-// and the Agent's /plugin-trust are built from these.
+// The plugin actions both terminal apps describe: each app's /plugin is built
+// from these.
 // ---------------------------------------------------------------------------
 
 export type PluginControls = PluginTrustControls & PluginLifecycleControls;
@@ -309,20 +309,22 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
 }
 
 /**
- * `/plugin-trust`: plugins in a shell with no plugin workspace of its own (the
- * Agent): the plugin list with each tier, switching plugins on and off, and
- * the trust lines. The tier is shared by every app on this machine, so a tier
- * set here also holds in the terminal app and daemon.
+ * `/plugin` in a shell with no plugin workspace of its own (the Agent): the
+ * plugin list with each tier, switching plugins on and off, and the trust
+ * lines, under the same name and action words as the terminal app's `/plugin`,
+ * so every plugin message that names `/plugin <action>` holds in both. The
+ * tier is shared by every app on this machine, so a tier set here also holds
+ * in the terminal app and daemon.
  */
-export function registerPluginTrustCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, manager: PluginManagerOf<Ctx>): void {
+export function registerPluginCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, manager: PluginManagerOf<Ctx>): void {
   registry.register(defineCommand<Ctx>({
-    name: 'plugin-trust',
+    name: 'plugin',
     // --yes confirms only right after the action word: the same word in the text is text.
     leadingFlagsOnly: true,
     title: 'Plugins and their trust',
     summary: 'Switch plugins on and off, and set what each one may do',
     group: 'Extensions',
     report: 'list',
-    actions: pluginActions(manager, 'plugin-trust'),
+    actions: pluginActions(manager, 'plugin'),
   }));
 }

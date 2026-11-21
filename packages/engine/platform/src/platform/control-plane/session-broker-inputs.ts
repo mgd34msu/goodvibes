@@ -443,6 +443,15 @@ export function applySurfaceInputDelivery(
  */
 export const CHANNEL_REPLY_METADATA_KEY = 'channelReply';
 
+/**
+ * Rows whose channel answer is stored and still owes its send. Beside the
+ * pending count, this is what keeps a session's history in memory: a session
+ * that owes a send is loaded at start and never released while it owes it.
+ */
+export function countOwedChannelReplies(records: readonly SharedSessionInputRecord[]): number {
+  return records.filter((entry) => entry.metadata?.[CHANNEL_REPLY_METADATA_KEY] === 'owed').length;
+}
+
 export function finalizeAgentSessionInputs(
   store: SharedSessionInputStore,
   sessionId: string,

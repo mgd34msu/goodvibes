@@ -330,6 +330,8 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             serviceField: 'webhookUrl',
             envKeys: ['GOOGLE_CHAT_WEBHOOK_URL'],
             configKeys: ['surfaces.googleChat.webhookUrl'],
+            // A google-chat service entry with no webhook secret posts to its base URL.
+            metadata: { serviceBaseUrl: true },
           }),
           secretTarget(surface, 'signingSecret', 'Verification token', false, 'Used to verify inbound Google Chat events.', {
             serviceName: 'google-chat',

@@ -1,6 +1,7 @@
 export * from './native-conversation-input.js';
 export * from './native-work-execution.js';
 export * from './native-work-submission-journal.js';
+export * from './native-journal-paths.js';
 export * from './native-work-submission-source.js';
 export * from './native-work-submission.js';
 export * from './native-work-submission-preflight.js';

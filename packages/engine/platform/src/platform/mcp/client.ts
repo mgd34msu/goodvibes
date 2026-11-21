@@ -95,8 +95,6 @@ const DEFAULT_TIMEOUT_MS = 0;
 const MAX_TOOL_LIST_PAGES = 100;
 /** Bound for one health probe; a server that cannot answer a ping this fast is reported unresponsive. */
 const PING_TIMEOUT_MS = 5_000;
-const RESTART_DELAY_MS = 2_000;
-const MAX_RESTART_ATTEMPTS = 3;
 /** Era-detection probe: a legacy stdio server answers `server/discover` quickly with method-not-found; this bound covers servers that stay silent instead. */
 const DISCOVER_PROBE_TIMEOUT_MS = 3_000;
 /** The handshake is bounded separately from tool calls, on both transports; OAuth-style servers can take a while to answer it. */
@@ -232,17 +230,14 @@ export class McpClient {
   private readLoopProc: ReturnType<typeof Bun.spawn> | null = null;
   /**
    * Every server process this client started and has not yet seen exit, each
-   * owned by its own scope. A restart's earlier process stays here until its
-   * exit is observed, so disconnect() stops it too and never forgets one.
+   * owned by its own scope. An earlier process stays here until its exit is
+   * observed, so disconnect() stops it too and never forgets one.
    */
   readonly #processScopes = new Map<ReturnType<typeof Bun.spawn>, OwnedScope>();
-  private restartCount = 0;
   #phase: McpClientPhase = 'idle';
   #lastError: string | null = null;
-  /** The pending crash-restart timer, held so a deliberate disconnect can cancel it. */
-  private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
-  /** Set true by disconnect() to suppress the read-loop's auto-restart. Reset on each successful _startProcess(). */
+  /** Set true by disconnect() so the read loop's exit is not reported as unexpected. Reset on each successful _startProcess(). */
   private intentionalClose = false;
 
   /** Streamable HTTP connection when the server is configured with a `url`. */
@@ -321,8 +316,7 @@ export class McpClient {
     try {
       await this.#connect();
     } catch (error) {
-      // A process that died mid-handshake may already have a restart queued.
-      this.#fail(this.restartTimer ? 'restart-wait' : 'gave-up', error);
+      this.#fail('gave-up', error);
       throw error;
     }
     this.#phase = 'ready';
@@ -360,8 +354,6 @@ export class McpClient {
     if (this.proc && this.isConnected) return;
     await this._startProcess();
     await this._negotiate();
-    // Only a negotiated connection counts as a successful start.
-    this.restartCount = 0;
   }
 
   /** Every page of tools/list: a server that pages is never silently cut to its first page. */
@@ -548,11 +540,10 @@ export class McpClient {
    * naming a process whose exit could not be confirmed.
    */
   async disconnect(): Promise<CloseReport> {
-    // Mark this as a deliberate shutdown so the read-loop finally does not
-    // resurrect the process via _scheduleRestart(). Set synchronously before
-    // any await so it is already true when the detached read loop runs.
+    // Mark this as a deliberate shutdown so the read loop's exit is not
+    // reported as unexpected. Set synchronously before any await so it is
+    // already true when the detached read loop runs.
     this.intentionalClose = true;
-    this._cancelRestart();
     this.retireConnection('the server was disconnected');
     if (this.http) {
       const http = this.http;
@@ -836,11 +827,10 @@ export class McpClient {
     }
     this.pendingRequests.clear();
     this.retireConnection('the server process exited');
-    // The process is gone; any restart must re-negotiate the protocol.
+    // The process is gone; a reconnect must re-negotiate the protocol.
     this.initialized = false;
     this.negotiated = null;
 
-    // Auto-restart only on an unexpected crash, never after a deliberate disconnect.
     if (this.intentionalClose) {
       this.#phase = 'closed';
       return;
@@ -850,23 +840,15 @@ export class McpClient {
     if (this.#isConnected()) {
       try { proc.kill(); } catch { /* already gone */ }
     }
-    // Keep a more specific failure (a timed-out restart handshake) when there is one.
+    // Keep a more specific failure (a timed-out handshake) when there is one.
     this.#lastError ??= 'the server process exited unexpectedly';
-    if (this.restartCount < this.#restartAttempts()) {
-      this._scheduleRestart();
-    } else {
-      this.#phase = 'gave-up';
-      // The exit status can land after stdout closes; a client that gave up holds no process.
-      this.proc = null;
-      this.buffer = '';
-      logger.info('McpClient: not restarting the server', { server: this.config.name, restarts: this.restartCount });
-      this.#reportUnexpectedExit();
-    }
-  }
-
-  /** Restarts this client makes itself; an owner that reconnects servers sets 0. */
-  #restartAttempts(): number {
-    return this.options?.restartAttempts ?? MAX_RESTART_ATTEMPTS;
+    // Reconnecting is the owner's job (the MCP registry's lifecycle); this client reports the exit.
+    this.#phase = 'gave-up';
+    // The exit status can land after stdout closes; a client that gave up holds no process.
+    this.proc = null;
+    this.buffer = '';
+    logger.info('McpClient: the server stopped unexpectedly', { server: this.config.name });
+    this.#reportUnexpectedExit();
   }
 
   #reportUnexpectedExit(): void {
@@ -1079,69 +1061,6 @@ export class McpClient {
         server: this.config.name,
         err: summarizeError(err),
       });
-    }
-  }
-
-  private _cancelRestart(): void {
-    if (this.restartTimer) {
-      clearTimeout(this.restartTimer);
-      this.restartTimer = null;
-    }
-  }
-
-  private _scheduleRestart(): void {
-    this._cancelRestart();
-    this.restartCount++;
-    const delay = (this.options?.restartDelayMs ?? RESTART_DELAY_MS) * this.restartCount;
-    logger.info('McpClient: scheduling restart', { server: this.config.name, attempt: this.restartCount, delayMs: delay });
-    this.#phase = 'restart-wait';
-
-    const timer = setTimeout(async () => {
-      if (this.restartTimer === timer) this.restartTimer = null;
-      if (this.intentionalClose) return; // Deliberately disconnected, do not restart
-      // Already restarted by something else (a live process nobody reads is not a restart).
-      if (this.proc && this.isConnected && this.readLoopProc === this.proc) return;
-      try {
-        await this._startProcess();
-        await this._negotiate();
-        // A restart only counts once the server has negotiated; a process that
-        // spawns and then crashes must still run out of attempts.
-        this.restartCount = 0;
-        // The restarted server may advertise a changed tool list.
-        this.#invalidateToolCatalog();
-        this.#phase = 'ready';
-        this.#lastError = null;
-        logger.info('McpClient: restart successful', { server: this.config.name });
-      } catch (err) {
-        logger.error('McpClient: restart failed', { server: this.config.name, err: summarizeError(err) });
-        this.#lastError = summarizeError(err);
-        this._handleFailedRestart();
-      }
-    }, delay);
-    timer.unref?.();
-    this.restartTimer = timer;
-  }
-
-  /**
-   * A restart attempt did not produce a negotiated server. Treat it like a crash:
-   * a live but un-negotiated process is killed so the read loop's exit path
-   * counts the attempt and either schedules the next one or gives up, leaving the
-   * client disconnected. A process that already exited is handled by that same
-   * path; only a failed spawn (no process at all) needs scheduling here.
-   */
-  private _handleFailedRestart(): void {
-    if (this.intentionalClose) return;
-    const proc = this.proc;
-    if (proc) {
-      try { proc.kill(); } catch { /* already gone; the read loop reports the exit */ }
-      return;
-    }
-    if (this.restartCount < this.#restartAttempts()) {
-      this._scheduleRestart();
-    } else {
-      this.#phase = 'gave-up';
-      logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
-      this.#reportUnexpectedExit();
     }
   }
 

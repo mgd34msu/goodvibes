@@ -23,7 +23,7 @@ import {
 } from './status.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT, TUI_TRUSTS_SAVED_SCANNED_SERVERS } from '../config/surface.ts';
 
-/** What `status`, `doctor` and `onboarding status` read: the prepared configuration and its roots. */
+/** What `status`, `doctor` and `setup status` read: the prepared configuration and its roots. */
 export interface StatusCommandRuntime {
   readonly cli: GoodVibesCliParseResult;
   readonly configManager: ConfigManager;
@@ -31,7 +31,7 @@ export interface StatusCommandRuntime {
   readonly homeDirectory: string;
 }
 
-/** `status`, `doctor` and `onboarding status`: prints the report and returns the exit code. */
+/** `status`, `doctor` and `setup status`: prints the report and returns the exit code. */
 export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<number> {
   const { cli, configManager, workingDirectory, homeDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });

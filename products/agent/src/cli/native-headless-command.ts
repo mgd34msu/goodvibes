@@ -1,3 +1,4 @@
+import { nativeIntakeJournalPath } from '@goodvibes/engine/terminal-shell/native';
 import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes/engine/terminal-shell/headless-command';
@@ -43,7 +44,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const nativeHost = createAgentNativeHostSelection({ configManager, homeDirectory, observation: new OwnedSelectionObservation() });
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
-  const journalPath = `${shellPaths.resolveUserPath('agent', 'native-work-submission.json')}.intake`;
+  const journalPath = nativeIntakeJournalPath(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT);
   const resolveHost = (): NativeHeadlessHost => {
     const host = nativeHost.resolve();
     return 'reason' in host ? host : { ...host, workspace: workingDirectory, journalPath };
@@ -103,7 +104,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
                   // Called as a method: the provider API's selectModel reads `this`.
                   selectModel: (model: string) => {
                     const api = ctx.commandContext.clients?.providerApi;
-                    if (!api) throw new Error('No provider API in this run; the saved model id stands.');
+                    if (!api) throw new Error('no provider API in this run');
                     return api.selectModel(model);
                   },
                   canResume: () => !ctx.commandContext.isGenerating?.(),

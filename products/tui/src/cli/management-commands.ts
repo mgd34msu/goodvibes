@@ -2,15 +2,9 @@ import { createCliSecretsCommand } from '@goodvibes/engine/terminal-shell/cli-se
 import { createCliWorkspaceCommands } from '@goodvibes/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes/engine/terminal-shell/cli-subscription-view';
 import { cliCommandRefusal } from '@goodvibes/engine/terminal-shell/cli-output';
-import '@goodvibes/engine/platform/platform/sessions';
-import 'node:fs';
 import { join } from 'node:path';
 import { createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@/runtime/index.ts';
 import {
   generateQrMatrix,
   renderQrToString,
@@ -80,7 +74,7 @@ export async function buildControlPlaneStatusResult(runtime: CliCommandRuntime):
   const issues: string[] = [];
   if (!binding.recognized)
     issues.push(
-      `controlPlane.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind until it is corrected.`,
+      `controlPlane.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon does not start until it is corrected.`,
     );
   if (daemonEnabled && binding.recognized && !reachable)
     issues.push(`The daemon is on but its control plane is not reachable on ${binding.host}:${binding.port}.`);

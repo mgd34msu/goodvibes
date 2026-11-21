@@ -5,9 +5,13 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
-import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, recoverPendingService, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, CommandError, PACKAGE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, readDaemonService, readDaemonSetting, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, recoverPendingService, recoverPendingSettings, run, serviceUnit, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type PendingSetting, type Run, type ServiceLayout } from './installation.ts';
 
-export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
+/**
+ * `portStated` and `serviceStated` say whether --port and --service/--no-service were given. On an update a
+ * choice not stated is the daemon's own current setting (read by {@link install}), never the receipt's record.
+ */
+export interface Options extends ServiceLayout { port: number; service: boolean; portStated: boolean; serviceStated: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
 export function parseOptions(args: string[], home = realpathSync(process.env.HOME ?? ''), runtime = {
   bunPath: process.execPath, findNode: (): string | null => Bun.which('node'),
@@ -29,6 +33,7 @@ export function parseOptions(args: string[], home = realpathSync(process.env.HOM
   const options = { home, prefix, binDir: resolve(values['--bin-dir'] ?? old?.binDir ?? join(home, '.local/bin')),
     dataDir: resolve(values['--data-dir'] ?? old?.dataDir ?? join(home, '.local/share/goodvibes-data')),
     port: Number(values['--port'] ?? old?.port ?? 3421), service: service ?? old?.service ?? true,
+    portStated: values['--port'] !== undefined, serviceStated: service !== undefined,
     workspace: realpathSync(resolve(values['--workspace'] ?? old?.workspace ?? ROOT)),
     runtimeDir, nodePath, ...(values['--decision-policy'] === undefined ? {} : { decisionPolicy: parseDecisionModelPolicy(values['--decision-policy']) }) };
   validateLayout(options);
@@ -45,7 +50,7 @@ export function preflight(options: Options, old: Installation | undefined, execu
   else {
     if (present(options.prefix) && readdirSync(options.prefix).length) throw new Error(`Program directory ${options.prefix} is not empty and has no GoodVibes installation receipt, so this installer does not own it; nothing was changed. Choose another --prefix, or remove it if nothing you need is there: rm -rf -- ${quote(options.prefix)}`);
     for (const name of COMMANDS) if (present(join(options.binDir, name))) throw new Error(`Command already exists: ${join(options.binDir, name)}; nothing was changed. Choose --bin-dir, or uninstall the installation that owns it first.`);
-    if (present(unitPath(options))) throw new Error(`A service definition this installer does not own already exists at ${unitPath(options)}; nothing was changed. Install with --no-service, or remove it after stopping it: systemctl --user disable --now ${SERVICE} && rm -- ${quote(unitPath(options))}`);
+    if (present(unitPath(options))) throw new Error(`A service definition this installer does not own already exists at ${unitPath(options)}; nothing was changed. Install with --no-service, or remove it after stopping it: systemctl --user disable --now ${serviceUnit(options)} && rm -- ${quote(unitPath(options))}`);
     if (present(options.dataDir) && readdirSync(options.dataDir).length && !readDataId(options)) throw new Error('Data directory is not empty and is not owned by the GoodVibes installer. Choose --data-dir.');
   }
   if (options.service || old?.service) {
@@ -54,8 +59,8 @@ export function preflight(options: Options, old: Installation | undefined, execu
       if (!(error instanceof CommandError)) throw error;
       throw new Error(`No systemd user service manager is reachable from this session (${error.message}); nothing was changed. Re-run with --no-service, or log in to a session with a user manager (systemctl --user), then retry.`);
     }
-    const fragment = execute('systemctl', ['--user', 'show', SERVICE, '--property=FragmentPath', '--value'], { capture: true });
-    if (fragment && (!old?.service || fragment !== unitPath(options))) throw new Error(`Another ${SERVICE} is already loaded.`);
+    const fragment = execute('systemctl', ['--user', 'show', serviceUnit(options), '--property=FragmentPath', '--value'], { capture: true });
+    if (fragment && (!old?.service || fragment !== unitPath(options))) throw new Error(`Another ${serviceUnit(options)} is already loaded.`);
   }
 }
 export function wrapper(options: Options, name: typeof COMMANDS[number], arch = process.arch): string {
@@ -83,8 +88,8 @@ const REAL_TIMING: ReadyTiming = { now: Date.now, sleep: milliseconds => Bun.sle
 export async function ready(options: Options, html: string, execute: Run, timing: ReadyTiming = REAL_TIMING): Promise<void> {
   const deadline = timing.now() + timing.timeoutMs;
   while (timing.now() < deadline) {
-    const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
-    if (state === 'failed' || state === 'inactive') throw new Error(`Daemon stopped during startup. Inspect: journalctl --user -u ${SERVICE}`);
+    const state = execute('systemctl', ['--user', 'show', serviceUnit(options), '--property=ActiveState', '--value'], { capture: true });
+    if (state === 'failed' || state === 'inactive') throw new Error(`Daemon stopped during startup. Inspect: journalctl --user -u ${serviceUnit(options)}`);
     if (state === 'active') {
       try {
         const response = await fetch(`http://127.0.0.1:${options.port}/`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
@@ -103,7 +108,7 @@ export async function ready(options: Options, html: string, execute: Run, timing
     }
     await timing.sleep(500);
   }
-  throw new Error(`Daemon/WebUI did not become ready in ${Math.round(timing.timeoutMs / 1000)} seconds. Inspect: journalctl --user -u ${SERVICE}`);
+  throw new Error(`Daemon/WebUI did not become ready in ${Math.round(timing.timeoutMs / 1000)} seconds. Inspect: journalctl --user -u ${serviceUnit(options)}`);
 }
 export async function build(root: string, execute: Run): Promise<string> {
   const git = (...args: string[]) => execute('git', args, { cwd: root, capture: true });
@@ -175,7 +180,7 @@ export function interruptInstall(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): numbe
   const recover = activeRecovery; activeRecovery = undefined;
   try { recover?.(); }
   catch (error) {
-    console.error(`Install interrupted and automatic recovery was incomplete; inspect ${SERVICE} before retrying. ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`Install interrupted and automatic recovery was incomplete; inspect the daemon's systemd user service (systemctl --user list-units 'goodvibes*') before retrying. ${error instanceof Error ? error.message : String(error)}`);
   }
   return signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143;
 }
@@ -183,14 +188,28 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
   const execute = hooks.execute ?? run;
   await withLock(options.prefix, () => withLock(options.dataDir, async () => {
     const old = readInstallation(options.prefix);
+    // A stand-in stage hook means no release holds a real daemon to ask or configure.
+    const realDaemon = !hooks.stage;
     // A first install stopped between writing its receipt and dropping its staging record leaves the record behind.
-    if (old) { recoverInterruptedUpdate(old); recoverPendingService(old, 'update', execute); rmSync(stagingRecordPath(options.prefix), { force: true }); }
+    if (old) { recoverInterruptedUpdate(old); recoverPendingSettings(old, execute); recoverPendingService(old, 'update', execute); rmSync(stagingRecordPath(options.prefix), { force: true }); }
     else discardAbandonedFirstInstall(options.prefix);
+    if (old?.serviceName !== undefined) options.serviceName = old.serviceName;
+    // The port the installed daemon listens on: its own setting, which the owner may have changed since the receipt.
+    let installedPort = old?.port;
+    if (old && realDaemon) {
+      // On an update the daemon's settings are the owner's choice; a flag states a new one.
+      const installed = join(options.prefix, 'commands/goodvibes-daemon');
+      const port = readDaemonSetting(execute, installed, options.dataDir, 'controlPlane.port');
+      if (!Number.isInteger(port) || (port as number) < 1024 || (port as number) > 65535) throw new Error(`The installed daemon reports controlPlane.port ${JSON.stringify(port)}, which this installer cannot use; nothing was changed. Re-run with --port.`);
+      installedPort = port as number;
+      if (!options.portStated) options.port = installedPort;
+      if (!options.serviceStated) options.service = readDaemonSetting(execute, installed, options.dataDir, 'service.enabled') === true;
+    }
     preflight(options, old, execute);
     // A port held by anything but this installation's own service is refused
     // before the build, not after it; the installed service's own port is
     // checked again once that service has stopped.
-    if (options.service && (!old?.service || old.port !== options.port)) await assertPortFree(options.port);
+    if (options.service && (!old?.service || installedPort !== options.port)) await assertPortFree(options.port);
     const commit = await (hooks.build ?? build)(ROOT, execute);
     // Check again after a potentially long build, before touching live files.
     preflight(options, old, execute);
@@ -206,12 +225,15 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     let wasRunning = false;
     let serviceAttempted = false;
     let pendingServiceWritten = false;
+    // The settings an update is about to write, recorded in the receipt first (see recoverPendingSettings).
+    let pendingSettings: PendingSetting[] | undefined;
     const settingsPaths = ['daemon', 'tui', 'shared'].map(surface => join(options.dataDir, '.goodvibes', surface, 'settings.json'));
     const metadataPaths = [dataOwner(options), join(options.dataDir, 'environment')];
     const previousMetadata = new Map(metadataPaths.map(path => { plainPath(path); return [path, present(path) ? readFileSync(path, 'utf8') : undefined] as const; }));
     let metadataTouched = false;
     const previousSettings = new Map<string, string | undefined>();
-    const previousUnit = present(unitPath(options)) ? readFileSync(unitPath(options), 'utf8') : undefined;
+    const previousUnitPath = unitPath(options);
+    const previousUnit = present(previousUnitPath) ? readFileSync(previousUnitPath, 'utf8') : undefined;
     const previousWrappers = new Map(COMMANDS.map(name => [name, old && present(join(options.prefix, 'commands', name)) ? readFileSync(join(options.prefix, 'commands', name), 'utf8') : undefined]));
     // One recovery, used by both a failure and an interrupt. It runs at most once.
     let recovered = false;
@@ -221,10 +243,10 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       recovered = true;
       // Do not delete binaries that a failed service stop might still be using.
       if (serviceAttempted) {
-        execute('systemctl', ['--user', 'stop', SERVICE]);
-        const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+        execute('systemctl', ['--user', 'stop', serviceUnit(options)]);
+        const state = execute('systemctl', ['--user', 'show', serviceUnit(options), '--property=ActiveState', '--value'], { capture: true });
         if (!['inactive', 'failed'].includes(state)) throw new Error('Replacement service did not stop.');
-        if (!old?.service) execute('systemctl', ['--user', 'disable', SERVICE]);
+        if (!old?.service || serviceUnit(options) !== serviceUnit(old)) execute('systemctl', ['--user', 'disable', serviceUnit(options)]);
       }
       if (published) {
         if (old) switchRelease(options.prefix, old.release);
@@ -249,13 +271,15 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         }
       }
       if (options.service || old?.service) {
-        if (previousUnit !== undefined) atomicWrite(unitPath(options), previousUnit, 0o644);
-        else rmSync(unitPath(options), { force: true });
+        if (previousUnit !== undefined) atomicWrite(previousUnitPath, previousUnit, 0o644);
+        else rmSync(previousUnitPath, { force: true });
+        // A unit the daemon wrote under another name (service.serviceName changed) is this run's own.
+        if (unitPath(options) !== previousUnitPath) rmSync(unitPath(options), { force: true });
         execute('systemctl', ['--user', 'daemon-reload']);
-        if (stopAttempted && wasRunning && old?.service) { execute('systemctl', ['--user', 'enable', SERVICE]); execute('systemctl', ['--user', 'start', SERVICE]); }
+        if (stopAttempted && wasRunning && old?.service) { execute('systemctl', ['--user', 'enable', serviceUnit(old)]); execute('systemctl', ['--user', 'start', serviceUnit(old)]); }
       }
-      // The unit is back as it was, so the receipt no longer says a service change is under way.
-      if (old && pendingServiceWritten) atomicWrite(receiptPath(options), JSON.stringify(old, null, 2) + '\n');
+      // The unit and settings are back as they were, so the receipt no longer says a change is under way.
+      if (old && (pendingServiceWritten || pendingSettings)) atomicWrite(receiptPath(options), JSON.stringify(old, null, 2) + '\n');
       if (old) rmSync(release, { recursive: true, force: true });
       else rmSync(options.prefix, { recursive: true, force: true });
     };
@@ -268,7 +292,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       // in the receipt once written.
       let unit = '';
       if (old?.service) {
-        const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+        const state = execute('systemctl', ['--user', 'show', serviceUnit(old), '--property=ActiveState', '--value'], { capture: true });
         wasRunning = !['inactive', 'failed'].includes(state);
         stopAttempted = true;
         // A first install killed before it wrote the unit left nothing loaded to stop.
@@ -294,7 +318,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         atomicWrite(environment, '# Private shell environment for GoodVibes.\n' + (key ? `TYPESAFE_API_KEY=${quote(key)}\n` : '# TYPESAFE_API_KEY=your-key\n'));
       }
       const wrappers: Record<string, string> = Object.fromEntries(COMMANDS.map(name => [name, wrapper(options, name)]));
-      const { runtimeDir: _runtimeDir, nodePath: _nodePath, ...installedOptions } = options;
+      const { runtimeDir: _runtimeDir, nodePath: _nodePath, portStated: _portStated, serviceStated: _serviceStated, ...installedOptions } = options;
       const receipt: Installation = { ...installedOptions, schema: 2, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
         service: options.service, unit, wrappers };
       // A first install owns everything it is about to publish from here on, so a run killed outright leaves an
@@ -311,12 +335,24 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         if (!present(link)) symlinkSync(join(options.prefix, 'commands', name), link);
       }
       const daemon = join(options.prefix, 'commands/goodvibes-daemon');
-      if (options.decisionPolicy !== undefined) execute(daemon, ['config', 'set', 'judgment.policy', options.decisionPolicy], { cwd: options.dataDir, capture: true });
-      execute(daemon, ['config', 'set', 'controlPlane.port', String(options.port)], { cwd: options.dataDir, capture: true });
-      execute(daemon, ['webui', 'enable', '--loopback', '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });
+      // A first install writes the port, the loopback posture and the service choice; an update writes only what a
+      // flag stated, so the owner's later settings (webui enable --lan, another port, uninstall-service) stand.
+      const writes: [key: string, value: string | number | boolean][] = [];
+      if (options.decisionPolicy !== undefined) writes.push(['judgment.policy', options.decisionPolicy]);
+      if (!old || options.portStated) writes.push(['controlPlane.port', options.port]);
       // Whether this machine has a daemon service, where the daemon (before it
       // would install itself as a service) and doctor read it.
-      execute(daemon, ['config', 'set', 'service.enabled', String(options.service)], { cwd: options.dataDir, capture: true });
+      if (!old || options.serviceStated) writes.push(['service.enabled', options.service]);
+      if (old && realDaemon) {
+        // `webui enable` turns serving on; record those two beside the explicit writes.
+        const recorded: [string, unknown][] = [...writes, ['controlPlane.webui.serve', true], ['web.enabled', true]];
+        pendingSettings = recorded.map(([key, written]) => ({ key, previous: readDaemonSetting(execute, daemon, options.dataDir, key), written }));
+        atomicWrite(receiptPath(options), JSON.stringify({ ...old, pendingSettings }, null, 2) + '\n');
+      }
+      for (const [key, value] of writes) execute(daemon, ['config', 'set', key, String(value)], { cwd: options.dataDir, capture: true });
+      const webuiOutput = execute(daemon, ['webui', 'enable', ...(old ? [] : ['--loopback']), '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });
+      // The URL the daemon reported in its own receipt: the command that wrote the settings knows where the bundle is served.
+      const webuiUrl = /^\s*(https?:\/\/\S+)/m.exec(webuiOutput)?.[1];
       if (!hooks.stage) {
         console.log('Verifying the Jev connection...');
         try {
@@ -332,20 +368,27 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       // Receipt first: before the unit is written or removed, the receipt on disk says a service change is under way,
       // so a run stopped before the final receipt is put back by the next one instead of refusing a unit it wrote.
       if (options.service || old?.service) {
-        atomicWrite(receiptPath(options), JSON.stringify({ ...(old ?? firstReceipt), pendingService: { service: options.service } }, null, 2) + '\n');
+        atomicWrite(receiptPath(options), JSON.stringify({ ...(old ?? firstReceipt), ...(pendingSettings ? { pendingSettings } : {}), pendingService: { service: options.service } }, null, 2) + '\n');
         pendingServiceWritten = true;
       }
       if (options.service) {
         if (hooks.renderUnit) atomicWrite(unitPath(options), await hooks.renderUnit(options), 0o644);
         // Writes the definition (through the installed launcher, which pins the
         // release and loads the private environment file) and reloads systemd.
-        else execute(daemon, ['refresh-service', '--working-dir', options.workspace ?? ROOT], { cwd: options.dataDir, capture: true });
+        else {
+          execute(daemon, ['refresh-service', '--working-dir', options.workspace ?? ROOT], { cwd: options.dataDir, capture: true });
+          // The unit is named by the daemon's service.serviceName; manage the one it wrote.
+          const written = readDaemonService(execute, daemon, options.dataDir);
+          options.serviceName = written.serviceName;
+          if (written.path !== unitPath(options)) throw new Error(`The daemon wrote its service definition at ${written.path}, not ${unitPath(options)}, where this installer manages it.`);
+        }
+        if (options.serviceName !== undefined) receipt.serviceName = options.serviceName;
         unit = readFileSync(unitPath(options), 'utf8');
         receipt.unit = unit;
         serviceAttempted = true;
         execute('systemctl', ['--user', 'daemon-reload']);
-        execute('systemctl', ['--user', 'enable', SERVICE]);
-        execute('systemctl', ['--user', 'restart', SERVICE]);
+        execute('systemctl', ['--user', 'enable', serviceUnit(options)]);
+        execute('systemctl', ['--user', 'restart', serviceUnit(options)]);
         await (hooks.ready ?? ready)(options, readFileSync(join(release, 'webui/index.html'), 'utf8'), execute);
         if (hooks.pairHost || !hooks.stage) {
           const pairArguments = [join(ROOT, 'products/tui/scripts/pair-installed-host.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT];
@@ -359,13 +402,23 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
             console.warn(`TUI pairing was skipped (it needs the owner's attention, see above); the installation itself is complete and the daemon is running.\nAfter clearing the recorded attempt, pair with: ${[quote(join(options.prefix, 'current/runtime/bun')), ...pairArguments.map(quote)].join(' ')}`);
           }
         }
-      } else if (old?.service) {
-        execute('systemctl', ['--user', 'disable', SERVICE]);
-        rmSync(unitPath(options)); execute('systemctl', ['--user', 'daemon-reload']);
+      } else if (old?.service && present(unitPath(old))) {
+        // Absent when the owner already removed it (goodvibes-daemon uninstall-service).
+        execute('systemctl', ['--user', 'disable', serviceUnit(old)]);
+        rmSync(unitPath(old)); execute('systemctl', ['--user', 'daemon-reload']);
       }
       if (old || options.service) atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
       // The receipt names the new release from here on; a rollback now would leave it pointing at a deleted one.
       committed = true; activeRecovery = undefined;
+      // A unit the previous release ran under another name (service.serviceName changed since) is replaced by the new one.
+      if (old?.service && options.service && unitPath(old) !== unitPath(options) && present(unitPath(old))) {
+        try {
+          execute('systemctl', ['--user', 'disable', serviceUnit(old)]);
+          rmSync(unitPath(old), { force: true }); execute('systemctl', ['--user', 'daemon-reload']);
+        } catch (error) {
+          console.warn(`Update succeeded; the previous service ${serviceUnit(old)} could not be removed (${error instanceof Error ? error.message : String(error)}). Remove it: systemctl --user disable --now ${serviceUnit(old)} && rm -- ${quote(unitPath(old))}`);
+        }
+      }
       // Keep every earlier release until all publication and readiness checks pass, then drop the ones nothing runs from.
       // A release kept for a running terminal on one update is reconsidered on the next.
       for (const earlier of readdirSync(join(options.prefix, 'releases'))) {
@@ -379,13 +432,14 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       }
       console.log(`Installed GoodVibes (${commit.slice(0, 12)}). Commands: ${options.binDir}`);
       if (options.service) console.log(`Workspace: ${options.workspace ?? ROOT}`);
-      console.log(options.service ? `WebUI: http://127.0.0.1:${options.port}\nService: systemctl --user status ${SERVICE}` : `Start the daemon: ${join(options.binDir, 'goodvibes-daemon')} serve`);
+      if (webuiUrl) console.log(`WebUI: ${webuiUrl}`);
+      console.log(options.service ? `Service: systemctl --user status ${serviceUnit(options)}` : `Start the daemon: ${join(options.binDir, 'goodvibes-daemon')} serve`);
       console.log(`Credentials: ${environment}\nUninstall: ${join(options.binDir, 'goodvibes-uninstall')} (add --purge to remove data)`);
       if (!(process.env.PATH ?? '').split(':').includes(options.binDir)) console.log(`Add commands to your shell PATH: export PATH=${quote(options.binDir)}:"$PATH"`);
       if (options.service) console.log('For startup before login and after logout: loginctl enable-linger "$USER"');
     } catch (error) {
       try { recover(); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], `Install failed and automatic recovery was incomplete. Files retained at ${options.prefix}; inspect ${SERVICE} before retrying.`);
+        throw new AggregateError([error, rollbackError], `Install failed and automatic recovery was incomplete. Files retained at ${options.prefix}; inspect ${serviceUnit(options)} before retrying.`);
       }
       throw error;
     } finally {

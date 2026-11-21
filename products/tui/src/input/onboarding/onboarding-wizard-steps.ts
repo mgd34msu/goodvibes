@@ -15,7 +15,7 @@ import { getBlockingFieldLabels } from './onboarding-wizard-state.ts';
 import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';
 import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubscriptionPosture } from './onboarding-provider-key-fields.ts';
-import { getDaemonSource, pushDaemonAdoptionFields } from './onboarding-wizard-network-adopt.ts';
+import { DAEMON_SOURCE_FIELD_ID, getDaemonSource, pushDaemonAdoptionFields } from './onboarding-wizard-network-adopt.ts';
 import type { OnboardingWizardControllerLike, OnboardingWizardTopic } from './onboarding-wizard-types.ts';
 import type { OnboardingStep1CapabilityId } from '../../runtime/onboarding/index.ts';
 import { SETUP_TOPICS } from '@goodvibes/engine/terminal-shell/setup-command';
@@ -33,8 +33,8 @@ const TOPIC_CAPABILITY: Partial<Record<OnboardingWizardTopic, string>> = {
 
 /** The network rows each reach topic shows (the rest of the network page belongs to the others). */
 const TOPIC_NETWORK_FIELDS: Partial<Record<OnboardingWizardTopic, readonly string[]>> = {
-  'browser': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.browser-', 'network.daemon', 'network.adopt', 'network.tls-warn'],
-  'other-devices': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.daemon', 'network.adopt', 'network.tls-warn'],
+  'browser': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.browser-', 'network.tls-warn'],
+  'other-devices': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.tls-warn'],
   'webhooks': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.webhook-', 'network.cors-note', 'network.tls-warn'],
 };
 
@@ -101,6 +101,11 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
           ? 'Let your other devices reach GoodVibes, and choose the addresses and ports. Someone must sign in from those devices.'
           : 'Turn on the receiver for webhooks and events from other tools, and choose where it listens.';
       return { id: 'network', description, fields: [...capabilityRow, ...network, ...(capabilityOn ? adminRows() : [])] };
+    }
+    case 'connect-daemon': {
+      // Which daemon this terminal dials is a client-side choice: no capability, no exposure of this machine, no sign-in account.
+      const network = pick(buildNetworkStep(controller), (id) => id === DAEMON_SOURCE_FIELD_ID || id.startsWith('network.adopt-'));
+      return { id: 'network', description: 'Point this terminal at a GoodVibes daemon already running on another computer, with its address and token, or go back to the daemon on this computer. Nothing here opens this computer to the network.', fields: network };
     }
     case 'chat-apps': {
       const services = capabilityOn ? pick(buildExternalServicesStep(controller), (id) => id !== 'external-services.secret-policy') : [];

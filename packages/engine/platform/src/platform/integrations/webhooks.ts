@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { deliveryHttpStatus, describeStructuralDeliveryError } from './delivery-diagnostics.js';
 import { NotificationEnvelope, type NotificationPrivacyReader } from '../runtime/notification-envelope.js';
 import type { NotificationDelivery } from '../runtime/turn-notification.js';
@@ -194,8 +195,8 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
   private async queueEnvelope(event: string, envelope: NotificationEnvelope, urls: readonly string[]): Promise<WebhookNotifierSendResult> {
     const lastErrors = new Map<string, unknown>();
     const results = await mapSettledWithConcurrency(urls, this.maxConcurrent, (url) =>
-      this.queue.enqueue('webhook', event, envelope, async () => {
-        try { await this.postOne(url, envelope, {}); }
+      this.queue.enqueue('webhook', event, envelope, async (attempt) => {
+        try { await this.postOne(url, envelope, {}, attempt.id); }
         catch (error) { lastErrors.set(url, error); throw error; }
       }, { target: url }));
     const failure = (url: string, reason: unknown) => {
@@ -243,7 +244,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
       if (!target || !this.urls.includes(target)) {
         throw new DeliveryError('The webhook this notification was for is no longer configured.', 'terminal');
       }
-      await this.postOne(target, this.queuedEnvelope(entry.payload), {});
+      await this.postOne(target, this.queuedEnvelope(entry.payload), {}, entry.id);
     }, ids));
     const found = new Set(results.map((result) => result.id));
     for (const id of ids ?? []) {
@@ -367,7 +368,13 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private async postOne(entry: string, envelope: NotificationEnvelope, lifetime: DeliveryLifetime): Promise<void> {
+  /**
+   * `idempotencyKey`, when given, is the queue entry's identity, the same on
+   * every retry and resend of one notification to one URL: it is sent as the
+   * `Idempotency-Key` header so a receiver can drop a repeat whose first
+   * delivery arrived but whose answer was lost.
+   */
+  private async postOne(entry: string, envelope: NotificationEnvelope, lifetime: DeliveryLifetime, idempotencyKey?: string): Promise<void> {
     assertDeliveryCurrent(lifetime);
     this.assertOpen();
     // A configured entry is a goodvibes://secrets/ reference to the URL (the URL
@@ -421,6 +428,8 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
         this.assertOpen(controller.signal);
         const body = truncateUtf8(prepared.text, this.maxBodyBytes);
         const headers: Record<string, string> = { 'Content-Type': 'text/plain' };
+        // A digest of the identity: always a valid header value, whatever the event name.
+        if (idempotencyKey !== undefined) headers['Idempotency-Key'] = createHash('sha256').update(idempotencyKey).digest('hex');
         if (this.signingSecret) {
           Object.assign(headers, await createWebhookSignatureHeaders(body, this.signingSecret));
         }

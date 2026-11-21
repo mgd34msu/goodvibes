@@ -27,7 +27,6 @@ import { renderOnboardingWizard } from './onboarding/onboarding-wizard.ts';
 import { replaceViewportWithOverlay } from './conversation-layout.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 import { layerToLines } from './surface-kit-extra.ts';
-import './surface-kit-parts.ts';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;

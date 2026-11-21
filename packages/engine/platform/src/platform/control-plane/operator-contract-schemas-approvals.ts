@@ -47,6 +47,8 @@ const SHARED_APPROVAL_AUDIT_SCHEMA = objectSchema({
   actorNode: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   note: STRING_SCHEMA,
+  // The request id of a claim or cancel relayed from another node, so a resend of it is answered as applied.
+  relayRequestId: STRING_SCHEMA,
 }, ['id', 'action', 'actor', 'createdAt']);
 
 const APPROVAL_CAUSE_SCHEMA = enumSchema([

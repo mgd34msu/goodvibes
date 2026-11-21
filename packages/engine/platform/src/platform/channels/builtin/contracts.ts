@@ -31,6 +31,7 @@ import {
 } from './shared.js';
 import { renderBuiltinPolicy, surfaceLabelForBuiltin } from './presentation.js';
 import { builtinSendCredentials, getBuiltinSetupSchema } from './setup-schema.js';
+import { INBOUND_CREDENTIAL_SOURCES, resolveInboundCredential, type InboundCredentialSurface } from '../../adapters/surface-credential.js';
 
 interface BuiltinContractContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -257,6 +258,23 @@ export async function getBuiltinDoctorReport(
   }
   if (surface === 'homeassistant' && !secretResolves('primary')) {
     pushCheck('access-token', 'Long-lived access token', 'warn', 'Home Assistant state, service, template, and event-delivery tools require an access token.', 'setup');
+  }
+
+  // The credential the surface's inbound webhook checks callers against, read
+  // from the same source list the webhook reads. A warning, not a failure:
+  // Slack Socket Mode needs none, and a surface used only to send has no
+  // webhook to protect.
+  if (Object.hasOwn(INBOUND_CREDENTIAL_SOURCES, surface)) {
+    const inbound = await resolveInboundCredential(context.deps, surface as InboundCredentialSurface);
+    if (inbound.state === 'absent') {
+      pushCheck('inbound-credential', 'Inbound webhook credential', 'warn',
+        `Inbound messages are refused until ${inbound.setting} is set.`, 'setup');
+    } else if (inbound.state === 'unresolvable') {
+      pushCheck('inbound-credential', 'Inbound webhook credential', 'warn',
+        `Inbound messages are refused: ${inbound.configKey} names a secret that does not resolve in the store this process reads.`, 'setup');
+    } else {
+      pushCheck('inbound-credential', 'Inbound webhook credential', 'pass', 'The inbound webhook has a credential to verify callers.');
+    }
   }
 
   // The live path, as its own check and as the basis for the reported state.

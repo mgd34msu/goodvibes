@@ -112,7 +112,7 @@ export function DaemonUpdates() {
       {unavailable && (
         <EmptyState
           title="This daemon does not report its updates"
-          description="The connected daemon build has no update status. Update it with goodvibes-daemon update, or update the suite, to see it here."
+          description="The connected daemon build has no update status. Update it by running the GoodVibes installer again on the daemon's machine, then it shows here."
         />
       )}
       {status.isError && !unavailable && <ErrorState error={status.error} onRetry={() => void status.refetch()} title="Daemon update status unavailable" />}

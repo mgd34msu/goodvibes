@@ -119,7 +119,8 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
     reading: outcome.record ? readApproval(outcome.record, viewer, now()) : null,
   });
   /** An action on another node's approval goes to that node; a release is the home node's raisers' own. */
-  const relayed = async (ref: string, input: { readonly expectedRevision: number | undefined; readonly reason?: string | undefined; readonly note?: string | undefined; readonly selectedHunks?: readonly number[] | undefined },
+  const relayed = async (ref: string, input: { readonly expectedRevision: number | undefined; readonly reason?: string | undefined; readonly note?: string | undefined; readonly selectedHunks?: readonly number[] | undefined;
+    readonly remember?: boolean | undefined; readonly rememberTier?: ResolveSharedApprovalInput['rememberTier'] },
     action: 'claim' | 'approve' | 'deny' | 'amend' | 'cancel', viewer: ApprovalViewer): Promise<ApprovalActionResult> => {
     const parsed = parse(ref);
     const relay = broker.relay;
@@ -129,6 +130,9 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
       ...(input.selectedHunks !== undefined ? { selectedHunks: input.selectedHunks } : {}),
+      // Remembering travels with the answer, so the owning node keeps the rule (or refuses it) as a local answer would.
+      ...(input.remember !== undefined ? { remember: input.remember } : {}),
+      ...(input.rememberTier !== undefined ? { rememberTier: input.rememberTier } : {}),
     }, viewer);
   };
   const local = (ref: string): string | null => {

@@ -3,8 +3,6 @@ import { createBasicShellCommands, createShellNavigationCommands } from '@goodvi
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import '@goodvibes/engine/platform/platform/utils';
-import '@goodvibes/engine/platform/platform/utils';
 import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
 import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes/engine/platform/platform/core';
 import { createHelpCommand } from '@goodvibes/engine/terminal-shell/help-command';

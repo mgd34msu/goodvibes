@@ -35,6 +35,7 @@ export async function runHostedContinuation(
   const { task, input, routeBinding } = request;
   const handoff = await deps.hostedHandoff.promote({
     sessionId: input.sessionId,
+    inputId: input.id,
     task,
     body: input.body,
     ...(input.surfaceKind ? { surfaceKind: input.surfaceKind } : {}),

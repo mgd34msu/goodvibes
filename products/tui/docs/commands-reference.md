@@ -930,7 +930,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/setup` | None | `model \| sign-in \| add-provider <name> <address> \| store-key \| local-only \| browser \| other-devices \| webhooks \| chat-apps \| cloudflare \| who-signs-in \| how-it-works \| safety \| memory \| telemetry \| automation \| devices-voice \| provider-behaviour \| advanced \| history \| import-settings \| first-run \| pair [--name <name>] [--apply] \| unpair` | Set GoodVibes up, one topic at a time |
+| `/setup` | None | `model \| sign-in \| add-provider <name> <address> \| store-key \| local-only \| browser \| other-devices \| connect-daemon \| webhooks \| chat-apps \| cloudflare \| who-signs-in \| how-it-works \| safety \| memory \| telemetry \| automation \| devices-voice \| provider-behaviour \| advanced \| history \| import-settings \| first-run \| pair [--name <name>] [--apply] \| unpair` | Set GoodVibes up, one topic at a time |
 | `/startup` | None | `review \| doctor \| services \| hooks \| remote \| sandbox \| support-bundle <folder> [--overwrite] \| support-bundle-inspect <folder> \| export <file> [--overwrite] \| transfer-export <file> [--overwrite] \| transfer-inspect <file> \| transfer-import <file> \| link <view> [<item>] \| open-link <link>` | Check this setup, or save and bring in a setup |
 
 ### /setup: Set up GoodVibes
@@ -946,6 +946,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | Keep everything on this computer | `/setup local-only` | Opens the form that turns off the browser, network and webhook access. | None |
 | Open GoodVibes in a browser | `/setup browser` | Opens the form for using GoodVibes from a web browser on this computer or your network. | None |
 | Use it from other devices | `/setup other-devices` | Opens the form for letting your other devices reach GoodVibes: addresses and ports. | None |
+| Use a daemon on another computer | `/setup connect-daemon` | Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network. | None |
 | Receive webhooks | `/setup webhooks` | Opens the form for receiving webhooks and events from other tools. | None |
 | Connect chat apps and services | `/setup chat-apps` | Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services. | None |
 | Use Cloudflare | `/setup cloudflare` | Opens the form for using Cloudflare for batch and remote work. | None |
@@ -1390,7 +1391,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | See the whole security review | `/security review` | Shows every count the review reads: tokens, subscriptions, policy findings, MCP servers and their routes, and plugins. | None |
 | See paired-device tokens | `/security tokens` | Lists each paired device's token with its policy, whether it stays in scope, when it is due for rotation and whether it is blocked. | None |
 | See risky routes through MCP servers | `/security attack-paths` | Shows the routes by which an MCP server could reach files, the network or other tools further than its trust allows. | None |
-| See what is trusted | `/security trust` | Shows the permission mode, how many secrets and services are set up, and how far each plugin and MCP server is trusted. | None |
+| See what is trusted | `/security trust` | Shows the permission mode in force (and the chosen one, with why, when they differ), how many secrets and services are set up, and how far each plugin and MCP server is trusted. | None |
 | See whether this folder is trusted | `/security folder` | Shows whether this folder is trusted, restricted or not decided, and what each means here. | None |
 | Trust this folder | `/security trust-folder` | This folder becomes trusted: its own hooks and MCP servers may run and tools may change it, until you change it. | loosens a protection |
 | Restrict this folder | `/security restrict-folder` | This folder becomes restricted: its own hooks and MCP servers stay off, until you change it. | None |

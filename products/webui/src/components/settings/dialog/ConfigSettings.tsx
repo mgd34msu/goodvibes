@@ -104,8 +104,6 @@ interface ConfigSettingsValue {
   retryRestartStatus: () => void;
 }
 
-const FEATURE_RESTART_STATUS_KEY = ['flags', 'status'] as const;
-
 /** Enablement keys of restart-gated features: only a save of one of these can change flags.status. */
 const RESTART_GATED_KEYS: ReadonlySet<string> = new Set(
   FEATURE_SETTINGS.filter((feature) => feature.restartRequired).map((feature) => feature.enablement.key),
@@ -132,7 +130,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   // failed or refused read is said where restart-gated features are listed, so
   // missing markers are never taken for "nothing pending"; config still shows.
   const restartStatus = useQuery({
-    queryKey: FEATURE_RESTART_STATUS_KEY,
+    queryKey: queryKeys.featureRestartStatus,
     queryFn: () => platformClient.operator.flags.status(),
     enabled,
     retry: false,
@@ -172,7 +170,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.config }),
-          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: queryKeys.featureRestartStatus }) : undefined,
         ]);
         toast({
           title: 'Config saved',
@@ -199,7 +197,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         }));
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.config }),
-          keys.some((key) => RESTART_GATED_KEYS.has(key)) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+          keys.some((key) => RESTART_GATED_KEYS.has(key)) ? queryClient.invalidateQueries({ queryKey: queryKeys.featureRestartStatus }) : undefined,
         ]);
         toast({ title: 'Config saved', description: `${keys.join(' and ')} updated together.`, tone: 'success' });
       } catch (error) {
@@ -218,7 +216,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.config }),
-          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+          RESTART_GATED_KEYS.has(key) ? queryClient.invalidateQueries({ queryKey: queryKeys.featureRestartStatus }) : undefined,
         ]);
         toast({ title: 'Setting reset', description: `${key} is back to its default.`, tone: 'success' });
       } catch (error) {

@@ -504,6 +504,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
   let ownerAnswers: AgentInlet | null = null;
   const runProcessIds = new Set<string>();
   runProcessesByRecord.set(record, runProcessIds);
+  // Steers (and contract nudges) and other messages taken into the request
+  // being prepared; reported delivered only once a request carrying them succeeds,
+  // and released back to the bus when the run fails before one does.
+  const awaitingDelivery = { steers: [] as string[], others: [] as string[] };
 
   try {
     const ownsCancelledConversation = captureCancelledConversationOwner(context, record);
@@ -659,9 +663,6 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const injectedMessageIds = new Set<string>();
     // Private contract nudges are consumed only after the next model call succeeds.
     const heldNudgeIdsAwaitingTurn: string[] = [];
-    // Steers (and contract nudges) and other messages taken into the request
-    // being prepared; reported delivered only once a request carrying them succeeds.
-    const awaitingDelivery = { steers: [] as string[], others: [] as string[] };
     const runSession = session;
     const runSignal = context.getCancellationSignal?.(record.id);
     /** The injected code no longer matches its files: later requests carry the memory part alone, and the record says so. */
@@ -1324,6 +1325,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     await finalizeAgentRun(context, record, session, runProcessIds, terminal, assertFinalCompletionCurrent);
   } catch (err) {
     ownerAnswers?.close();
+    // No request carried these messages to the model: the bus stops holding them as taken, and one still
+    // in the store expires as a message no request delivered.
+    const undelivered = [...awaitingDelivery.steers.splice(0), ...awaitingDelivery.others.splice(0)];
+    if (undelivered.length > 0) context.messageBus.releaseTaken?.(undelivered);
     await handleAgentRunFailure(context, record, conversation, session, runProcessIds, terminal, err);
   } finally {
     ownerAnswers?.close();

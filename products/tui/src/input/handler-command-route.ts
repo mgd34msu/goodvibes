@@ -1,6 +1,5 @@
 import { createCommandModeTokenHandler } from '@goodvibes/engine/terminal-shell/command-mode-route';
 import { splitSlashCommand } from '@goodvibes/engine/terminal-shell/slash-command-parser';
-import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
 import type { ConversationManager } from '../core/conversation';
@@ -64,8 +63,6 @@ function withComposerBindings(context: CommandContext, state: CommandModeRouteSt
 
 export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
   surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
-  unknownCommand: (name) => `Unknown command: /${name}. Type /help for available commands.`,
-  commandError: (error, name) => `Command /${name} failed: ${summarizeError(error)}`,
   prepare(context, state, raw) {
     // One split for both apps: an unclosed quote refuses the line instead of being closed silently.
     const split = splitSlashCommand(raw, (name) => state.commandRegistry?.get(name));

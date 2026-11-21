@@ -94,9 +94,13 @@ export function resolveInsideRoot(inputPath: string, root: string): string {
   return resolve(root, inputPath);
 }
 
+/**
+ * A file's text, or null when it cannot be read. A captured run's refusal of
+ * the file is not a read error: it is thrown and refuses the whole call.
+ */
 export async function readTextFile(filePath: string): Promise<string | null> {
+  await assertCapturedToolReadAccess(filePath);
   try {
-    await assertCapturedToolReadAccess(filePath);
     return await Bun.file(filePath).text();
   } catch {
     return null;
@@ -111,6 +115,8 @@ export async function collectInputFiles(
     limit?: number | undefined;
     deadline?: number | undefined;
     walkOptions?: WalkDirOptions | undefined;
+    /** Filled with every file that could not be read: a walked one, or a named path that cannot be found or opened. */
+    unreadable?: string[] | undefined;
   } = {},
 ): Promise<string[]> {
   const expandDirectories = options.expandDirectories ?? false;
@@ -118,7 +124,7 @@ export async function collectInputFiles(
   const deadline = options.deadline;
 
   if (!inputFiles || inputFiles.length === 0) {
-    return collectTextFiles(projectRoot, limit, deadline, options.walkOptions);
+    return collectTextFiles(projectRoot, limit, deadline, options.walkOptions, options.unreadable);
   }
 
   const files: string[] = [];
@@ -131,12 +137,13 @@ export async function collectInputFiles(
     try {
       info = await stat(resolved);
     } catch {
-      continue; // Missing or unreadable path.
+      options.unreadable?.push(resolved); // Missing or unreadable path.
+      continue;
     }
     if (info.isDirectory()) {
       if (expandDirectories) {
         const remaining = limit - files.length;
-        const collected = await collectTextFiles(resolved, remaining, deadline, options.walkOptions);
+        const collected = await collectTextFiles(resolved, remaining, deadline, options.walkOptions, options.unreadable);
         files.push(...collected);
       }
       continue;

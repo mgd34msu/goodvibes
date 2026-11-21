@@ -18,12 +18,14 @@ export interface SchedulerCapacityReport {
 
 /**
  * A scheduled occurrence or a retry that came due while every run slot was in
- * use and was put off. A scheduled wait is current while its job is enabled and
- * still set to the deferred time; a retry wait while its retry timer is armed.
+ * use and waits for one. A scheduled wait is current while its job is enabled
+ * and still set to the occurrence's time; a retry wait while its job exists.
+ * When a run slot frees, the manager takes it and hands it to `resume`, which
+ * starts the work (or gives the slot back when the work is no longer due).
  */
 export type AutomationCapacityWait =
-  | { readonly kind: 'schedule'; readonly jobId: string; readonly since: number; readonly nextRunAt: number }
-  | { readonly kind: 'retry'; readonly jobId: string; readonly since: number; readonly retryKey: string };
+  | { readonly kind: 'schedule'; readonly jobId: string; readonly since: number; readonly nextRunAt: number; readonly resume: (reserved: () => void) => void }
+  | { readonly kind: 'retry'; readonly jobId: string; readonly since: number; readonly retryKey: string; readonly resume: (reserved: () => void) => void };
 
 export function scheduleCapacityWaitKey(jobId: string): string {
   return `schedule:${jobId}`;

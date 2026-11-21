@@ -29,6 +29,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
 import { validateSchedule } from '../automation/schedules.js';
+import { CHECKIN_JOB_OWNER } from '../automation/job-mutations.js';
 import { isQuietHours, parseQuietHours } from './quiet-hours.js';
 import { readConsumerSetting } from '../config/profile-fallback.js';
 import { deliveryChannelProblem } from '../channels/delivery/types.js';
@@ -218,9 +219,26 @@ export class CheckinService {
     };
   }
 
-  /** The outcome of the last attempt to put the config on the scheduler. */
+  /**
+   * Whether the scheduler holds a check-in job matching the config, read from
+   * the live job list so it can never disagree with what will run. A failed
+   * attempt to install the job keeps its reason until the job is in step.
+   */
   scheduleStatus(): CheckinScheduleStatus {
-    return this.schedule;
+    const automation = this.deps.automation;
+    if (!automation) return this.schedule;
+    const config = this.getConfig();
+    const job = automation.listJobs().find((j) => j.kind === 'checkin');
+    const inStep = job !== undefined && job.enabled === config.enabled && job.schedule.kind === 'cron' && job.schedule.expression === config.cadence;
+    if (inStep) return config.enabled ? { state: 'scheduled' } : { state: 'not-needed' };
+    if (this.schedule.state === 'failed') return this.schedule;
+    if (!config.enabled) return job?.enabled ? { state: 'failed', reason: 'The check-in job is still enabled although check-ins are off. Save checkin.config.set enabled false again to switch it off.' } : { state: 'not-needed' };
+    return {
+      state: 'failed',
+      reason: job
+        ? 'The check-in job on the scheduler does not match the check-in settings. Save checkin.config.set again to bring it in step.'
+        : 'The check-in job is missing from the scheduler. Save checkin.config.set again, or restart the daemon, to install it.',
+    };
   }
 
   /** Refuse values that would be stored and then do nothing, before anything is written. */
@@ -342,7 +360,7 @@ export class CheckinService {
           kind: 'checkin',
           schedule: { kind: 'cron', expression: config.cadence },
           enabled: config.enabled,
-        });
+        }, { owner: CHECKIN_JOB_OWNER });
       }
       return this.schedule = config.enabled ? { state: 'scheduled' } : { state: 'not-needed' };
     } catch (error) {
@@ -471,10 +489,13 @@ export class CheckinService {
           };
           return unrecorded;
         }
-        // An interrupted response cannot prove that an already-entered transport did not send.
-        if (deliveryEntered) return await this.record(trigger, ranAt, 'error', briefingSummary, {
-          error: 'Check-in delivery outcome was not confirmed; delivery may have begun', judgment,
-        });
+        // An interrupted response cannot prove that an already-entered transport did not send, so the run is not retried.
+        if (deliveryEntered) {
+          const unconfirmed = await this.record(trigger, ranAt, 'error', briefingSummary, {
+            error: 'Check-in delivery outcome was not confirmed; delivery may have begun', judgment,
+          });
+          return { ...unconfirmed, deliveryMayHaveBegun: true };
+        }
         if (run.stoppedBy === 'settings' || run.stoppedBy === 'job') {
           // A run the settings stopped is repeated once, unless the caller or the service is done.
           run.rerun = mayRerun && run.stoppedBy === 'settings' && !this.disposed && callerSignal?.aborted !== true;

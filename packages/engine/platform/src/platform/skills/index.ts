@@ -45,6 +45,7 @@ export {
   SKILL_FOLDER_DOCUMENT,
   type LocatedSkill,
   type LocatedSkillIndex,
+  type SkillDocumentSource,
   type SkillFormat,
 } from './discovery.js';
 export {

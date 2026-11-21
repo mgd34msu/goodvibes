@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
-import { ProcessLockUnavailableError, withProcessLockSync } from '../utils/process-lock.js';
+import { withSyncFileLock } from './sync-file-lock.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigKey } from './schema.js';
 import { USER_SHARED_WINS_CONFIG_KEYS } from './config-ownership.js';
@@ -37,25 +37,17 @@ export function isSharedConfigKey(key: string): key is ConfigKey {
   return SHARED_CONFIG_KEY_SET.has(key);
 }
 
-/** How long a settings write waits for another process's write to the same file. */
-const SETTINGS_LOCK_WAIT_MS = 1_000;
-
 /**
  * Hold the one lock every writer of a settings file takes around its read and
  * rename, so a key another process saved in between is never dropped. The lock
  * is released by the kernel when its holder exits, so a crash leaves nothing
- * held. A file whose directory cannot hold the lock (a filesystem without byte
+ * held, and a nested call on the same file in this process joins the outer
+ * hold. A file whose directory cannot hold the lock (a filesystem without byte
  * locks) is written unlocked with a warning: the owner's change is the intent.
  * Throws ProcessLockBusyError when another process holds it past the wait.
  */
 export function withSettingsFileLock<T>(path: string, operation: () => T): T {
-  try {
-    return withProcessLockSync(`${path}.writer.sqlite`, operation, { waitMs: SETTINGS_LOCK_WAIT_MS });
-  } catch (error) {
-    if (!(error instanceof ProcessLockUnavailableError)) throw error;
-    logger.warn('Settings file lock is unavailable here; saving without it', { path, reason: error.message });
-    return operation();
-  }
+  return withSyncFileLock(path, operation, { onBusy: 'refuse' });
 }
 
 /**

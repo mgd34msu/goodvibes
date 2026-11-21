@@ -248,52 +248,53 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
   'support-bundle': [{ tokens: ['--include-security'], takesValue: false }],
   plugin: [
     { tokens: ['--ref'], takesValue: true },
-    { tokens: ['--sha'], takesValue: true },
-    // The old retyped answer to a failed signature check; the confirmation now asks instead.
-    { tokens: ['--override'], takesValue: false },
+    { tokens: ['--sha256'], takesValue: true },
   ],
 };
 
-/** Every command word this vocabulary accepts. */
+/**
+ * Every command word this vocabulary accepts: its name, its other spellings,
+ * and the sub-words it takes (offered by shell completion and listed by help).
+ */
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[] = ([
-  ['tui', ['app']],
-  ['open', []],
-  ['run', ['exec', 'e']],
-  ['serve', ['daemon', 'server']],
-  ['web', []],
-  ['service', ['services']],
-  ['status', []],
-  ['doctor', []],
-  ['setup', []],
-  ['models', ['model']],
-  ['providers', ['provider']],
-  ['auth', []],
-  ['subscription', ['subscriptions']],
-  ['secrets', ['secret']],
-  ['sessions', ['session']],
-  ['tasks', ['task']],
-  ['pair', ['qrcode', 'qr']],
-  ['surfaces', ['surface']],
-  ['listener', ['http-listener', 'webhook']],
-  ['control-plane', ['controlplane', 'cp']],
+  ['tui', ['app'], []],
+  ['open', [], []],
+  ['run', ['exec', 'e'], []],
+  ['serve', ['daemon', 'server'], []],
+  ['web', [], []],
+  ['service', ['services'], ['status', 'check', 'install', 'start', 'stop', 'restart', 'uninstall']],
+  ['status', [], []],
+  ['doctor', [], ['explain', 'routing', 'hooks']],
+  ['setup', [], ['status']],
+  ['models', ['model'], ['list', 'current', 'use', 'set', 'pin', 'unpin', 'pinned', 'recent', 'chain']],
+  ['providers', ['provider'], ['list', 'current', 'inspect', 'use']],
+  ['auth', [], ['status', 'users', 'sessions', 'add-user', 'delete-user', 'rotate-password', 'revoke-session', 'revoke-sessions', 'clear-bootstrap']],
+  ['subscription', ['subscriptions'], ['list', 'providers', 'inspect', 'login', 'refresh', 'logout']],
+  ['secrets', ['secret'], ['list', 'providers', 'test', 'set', 'link', 'delete']],
+  ['sessions', ['session'], ['list', 'show', 'export', 'resume']],
+  ['tasks', ['task'], ['list', 'show', 'submit']],
+  ['pair', ['qrcode', 'qr'], []],
+  ['surfaces', ['surface'], ['list', 'check', 'show', 'enable', 'disable']],
+  ['listener', ['http-listener', 'webhook'], ['test']],
+  ['control-plane', ['controlplane', 'cp'], ['status']],
   // `bundle`/`bundles` are retained as backward-compat aliases for the shipped
   // command word; the primary, unambiguous name is `support-bundle` (distinct
   // from the `plugin bundles` capability-bundle surface).
-  ['support-bundle', ['bundle', 'bundles']],
-  ['remote', []],
-  ['bridge', []],
-  ['hooks', ['hook']],
-  ['plugin', ['plugins']],
-  ['completion', ['completions']],
-  ['help', []],
-  ['version', []],
-] as const).map(([name, aliases]) => ({
+  ['support-bundle', ['bundle', 'bundles'], ['export', 'inspect', 'import']],
+  ['remote', [], []],
+  ['bridge', [], []],
+  ['hooks', ['hook'], ['validate']],
+  ['plugin', ['plugins'], ['init', 'validate', 'bundles', 'trust', 'verify', 'capabilities']],
+  ['completion', ['completions'], ['bash', 'zsh', 'fish']],
+  ['help', [], []],
+  ['version', [], []],
+] as const).map(([name, aliases, subcommands]) => ({
   name,
   aliases,
   flags: [],
   passthrough: false,
   options: COMMAND_OPTIONS[name] ?? [],
-  subcommands: [],
+  subcommands,
 })) as readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>[];
 
 /**

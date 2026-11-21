@@ -27,13 +27,14 @@ goodvibes --resume=user-sess-1234   # inline-value form
 
 Fork a session into a new branch.
 
-- **Bare `--fork`** (no id) forks the session that is already active when the TUI starts.
+- **Bare `--fork`** (no id) resumes the last session (the one `--continue` opens), then forks it. With no previous session it says so and starts a new one.
 - **`--fork <id>`** resumes the named session first, then forks it.
+- A session that cannot be resumed (no such id, or open in another running copy) is reported with the reason and its next step, and the TUI starts as a plain launch would; nothing is forked.
 
 Sessions whose id happens to be the string `current` can be forked by passing the id explicitly (`--fork current`), which is distinct from the bare `--fork` form.
 
 ```sh
-goodvibes --fork                       # fork active session
+goodvibes --fork                       # resume the last session, then fork it
 goodvibes --fork user-source-session   # resume then fork
 goodvibes --fork=user-source-session   # inline-value form
 goodvibes --fork current               # fork the session literally named "current"

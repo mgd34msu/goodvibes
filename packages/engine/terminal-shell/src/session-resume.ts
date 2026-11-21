@@ -75,9 +75,11 @@ export interface SessionResumeDeps {
    */
   readonly surface?: SessionSurface | undefined;
   /**
-   * Reselects the saved model through the live provider registry, falling
-   * back to the raw saved id on failure (a saved model may no longer exist
-   * locally). Omit to use the saved id directly without reselection.
+   * Reselects the saved model through the live provider registry. On success
+   * the runtime names the selected model; on failure (a saved model may no
+   * longer exist here) the runtime keeps the registry's current model, the
+   * one that answers, and the outcome carries a warning saying so. Omit (a
+   * harness with no registry) to take the saved id directly.
    */
   readonly selectModel?:
     | ((model: string) => Promise<{
@@ -140,10 +142,14 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
   // so no turn or other resume can slip in between the check and the commit.
   deps.beforeRestore?.();
   const leftOut = restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
-  // The model and provider move with the committed transcript; the sidecar
-  // steps below are recoveries that must not leave it running on the old model.
-  if (meta.provider) deps.runtime.provider = meta.provider;
-  if (meta.model) deps.runtime.model = meta.model;
+  // Without a provider registry to select through (a harness), the saved model
+  // and provider move with the committed transcript. With one, the runtime
+  // names the saved model only once the registry has selected it below, since
+  // the registry's current model is the one that answers the next turn.
+  if (!deps.selectModel) {
+    if (meta.provider) deps.runtime.provider = meta.provider;
+    if (meta.model) deps.runtime.model = meta.model;
+  }
   const warnings: string[] = [];
   const attempt = <Result>(what: string, run: () => Result, fallback: (message: string) => Result): Result => {
     try {
@@ -179,8 +185,12 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
         deps.runtime.model = selected.registryKey;
         deps.runtime.provider = selected.providerId;
       }
-    } catch {
-      /* A saved model may no longer exist locally; the saved id stands. */
+    } catch (error) {
+      // A saved model may no longer exist here: the runtime keeps naming the
+      // registry's current model, the one that will answer, and the person is told.
+      const reason = summarizeError(error);
+      logger.warn('session resume: the saved model could not be selected', { sessionId, model: meta.model, error: reason });
+      warnings.push(`The saved model ${meta.model} could not be selected here (${reason}); this session continues on ${deps.runtime.model}`);
     }
   }
   // Hydrate the footer's token counters from the resumed history now, before

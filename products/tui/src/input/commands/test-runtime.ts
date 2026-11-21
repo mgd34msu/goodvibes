@@ -26,10 +26,13 @@ export class TestRuns {
     if (this.active?.signal === signal) this.active = null;
   }
 
-  /** Stop the running test; true when one was running. */
+  /**
+   * Stop the running test; true when one was running. The slot stays taken
+   * until the stopped run has printed its end and called `finish`, so a new
+   * run cannot interleave with the stopped one's last lines.
+   */
   cancel(): boolean {
     const active = this.active;
-    this.active = null;
     active?.abort();
     return active !== null;
   }
@@ -208,7 +211,7 @@ export async function runTestCommand(
   const runs = ctx.testRuns;
   const signal = runs ? runs.begin() : new AbortController().signal;
   if (!signal) {
-    ctx.print('A test run is already going; Esc stops it, then run /test again.');
+    ctx.print('A test run is still going, or still finishing after a stop; Esc stops it, then run /test again once it has ended.');
     return;
   }
   try {

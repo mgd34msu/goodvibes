@@ -59,8 +59,6 @@ export interface PluginManifest {
   author?: string | undefined;
   /** Entry point relative to plugin directory. Defaults to "index.js". */
   main?: string | undefined;
-  /** Optional list of runtime event names the plugin subscribes to. */
-  hooks?: string[] | undefined;
   /**
    * Capabilities the plugin needs (`register.tool`, `register.provider`,
    * `register.hook`, `register.panel`, `filesystem.read`, and the high-risk
@@ -109,6 +107,9 @@ export interface DiscoveredPlugin {
  * discoverPlugins, Scan the configured plugin directories for valid plugin folders.
  * Each subdirectory with a readable manifest.json is a candidate.
  */
+/** Manifests already warned about carrying an unread `hooks` field, so each is named once per process. */
+const unreadHooksNoted = new Set<string>();
+
 function scanPluginDirectory(rootDir: string): DiscoveredPlugin[] {
   if (!existsSync(rootDir)) return [];
   const results: DiscoveredPlugin[] = [];
@@ -156,6 +157,11 @@ function scanPluginDirectory(rootDir: string): DiscoveredPlugin[] {
           logger.warn(`[plugins] ${entry}: manifest.json 'main' must be a relative path, not absolute`);
           continue;
         }
+      }
+      // Subscriptions are made in code; a top-level `hooks` list subscribes to nothing.
+      if ('hooks' in manifest && !unreadHooksNoted.has(manifestPath)) {
+        unreadHooksNoted.add(manifestPath);
+        logger.warn(`[plugins] ${manifestPath}: hooks is not read; subscribe with api.onEvent and declare register.hook in capabilities`);
       }
 
       results.push({ pluginDir, manifest });

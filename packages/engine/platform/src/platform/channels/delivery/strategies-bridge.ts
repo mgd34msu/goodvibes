@@ -3,6 +3,7 @@ import { ConfigManager } from '../../config/manager.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ChannelDeliveryStrategy } from './types.js';
+import { readSurfaceSecret, requireSurfaceSecret } from '../builtin/surface-secrets.js';
 import {
   deliveryFetch,
   extractResponseId,
@@ -14,7 +15,6 @@ import {
   requireOkResponse,
   resolveAttachments,
   resolveBridgeUrl,
-  resolveDeliveryCredential,
   resolveChannelDeliverySurfaceKind,
   stableSendId,
   success,
@@ -54,12 +54,7 @@ export function createSignalDeliveryStrategy(
       if (!bridgeUrl) throw new Error('Missing Signal bridge URL');
       if (!recipient) throw new Error('Missing Signal recipient');
       const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.signal);
-      const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'signal',
-        serviceField: 'primary',
-        configKey: 'surfaces.signal.token',
-        environmentValue: process.env.SIGNAL_BRIDGE_TOKEN,
-      });
+      const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'signal', 'primary') ?? undefined;
       const responseId = await postBridgePayload(bridgeUrl, {
         surface: 'signal',
         account: firstNonEmpty(String(configManager.get('surfaces.signal.account') ?? '')),
@@ -113,14 +108,14 @@ export function createWhatsAppDeliveryStrategy(
           configured: [String(configManager.get('surfaces.whatsapp.bridgeUrl') ?? ''), serviceRegistry.get('whatsapp')?.baseUrl, process.env.WHATSAPP_BRIDGE_URL],
         });
         if (!bridgeUrl) throw new Error('Missing WhatsApp bridge URL: set surfaces.whatsapp.bridgeUrl');
-        const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-          serviceName: 'whatsapp',
-          serviceField: 'primary',
-          configKey: 'surfaces.whatsapp.accessToken',
-          // The bridge's own token first; the Meta access token is only the
-          // fallback older bridge setups relied on.
-          environmentValue: firstNonEmpty(process.env.WHATSAPP_BRIDGE_TOKEN, process.env.WHATSAPP_ACCESS_TOKEN),
-        });
+        // A token from the service entry or the setting is used as for any send;
+        // from the environment, the bridge's own token comes before the Meta
+        // access token that older bridge setups relied on.
+        const reading = await readSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'whatsapp', 'primary');
+        if (reading.source === 'unresolved') throw new Error(`Could not resolve the whatsapp credential referenced by ${reading.configKey ?? 'primary'}`);
+        const token = reading.source === 'env' || reading.source === 'missing'
+          ? firstNonEmpty(process.env.WHATSAPP_BRIDGE_TOKEN, reading.value ?? undefined)
+          : reading.value ?? undefined;
         const responseId = await postBridgePayload(bridgeUrl, {
           surface: 'whatsapp',
           provider,
@@ -140,12 +135,7 @@ export function createWhatsAppDeliveryStrategy(
       }
 
       const phoneNumberId = firstNonEmpty(String(configManager.get('surfaces.whatsapp.phoneNumberId') ?? ''));
-      const accessToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'whatsapp',
-        serviceField: 'primary',
-        configKey: 'surfaces.whatsapp.accessToken',
-        environmentValue: process.env.WHATSAPP_ACCESS_TOKEN,
-      });
+      const accessToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'whatsapp', 'primary') ?? undefined;
       if (!phoneNumberId) throw new Error('Missing WhatsApp phone number id');
       if (!accessToken) throw new Error('Missing WhatsApp access token');
       const apiBaseUrl = firstNonEmpty(process.env.WHATSAPP_BASE_URL, 'https://graph.facebook.com/v17.0')!;
@@ -222,10 +212,7 @@ export function createTelephonyDeliveryStrategy(
           ],
         });
         if (!bridgeUrl) throw new Error('Missing telephony bridge URL');
-        const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-          serviceName: 'telephony', serviceField: 'primary', configKey: 'surfaces.telephony.token',
-          environmentValue: process.env.TELEPHONY_BRIDGE_TOKEN,
-        });
+        const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'telephony', 'primary') ?? undefined;
         const responseId = await postBridgePayload(bridgeUrl, {
           surface: 'telephony',
           mode,
@@ -247,10 +234,7 @@ export function createTelephonyDeliveryStrategy(
       }
 
       const accountSid = firstNonEmpty(String(configManager.get('surfaces.telephony.accountSid') ?? ''), process.env.TWILIO_ACCOUNT_SID);
-      const authToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'telephony', serviceField: 'authToken', configKey: 'surfaces.telephony.authToken',
-        environmentValue: process.env.TWILIO_AUTH_TOKEN,
-      });
+      const authToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'telephony', 'authToken') ?? undefined;
       const fromNumber = firstNonEmpty(String(configManager.get('surfaces.telephony.fromNumber') ?? ''), process.env.TWILIO_FROM_NUMBER, process.env.TELEPHONY_FROM_NUMBER);
       if (!accountSid) throw new Error('Missing Twilio account SID');
       if (!authToken) throw new Error('Missing Twilio auth token');
@@ -315,12 +299,7 @@ export function createIMessageDeliveryStrategy(
       if (!bridgeUrl) throw new Error('Missing iMessage bridge URL');
       if (!chatId) throw new Error('Missing iMessage chat id');
       const fitted = fitForSurface(request.body, attachments, SURFACE_TEXT_LIMITS.imessage);
-      const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'imessage',
-        serviceField: 'primary',
-        configKey: 'surfaces.imessage.token',
-        environmentValue: process.env.IMESSAGE_BRIDGE_TOKEN,
-      });
+      const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'imessage', 'primary') ?? undefined;
       const responseId = await postBridgePayload(bridgeUrl, {
         surface: 'imessage',
         account: firstNonEmpty(String(configManager.get('surfaces.imessage.account') ?? '')),
@@ -363,12 +342,7 @@ export function createBlueBubblesDeliveryStrategy(
         serviceRegistry.get('bluebubbles')?.baseUrl,
         process.env.BLUEBUBBLES_SERVER_URL,
       );
-      const password = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'bluebubbles',
-        serviceField: 'password',
-        configKey: 'surfaces.bluebubbles.password',
-        environmentValue: process.env.BLUEBUBBLES_PASSWORD,
-      });
+      const password = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'bluebubbles', 'password') ?? undefined;
       const chatGuid = firstNonEmpty(
         request.target.address,
         typeof request.binding?.metadata.chatGuid === 'string' ? request.binding.metadata.chatGuid : undefined,

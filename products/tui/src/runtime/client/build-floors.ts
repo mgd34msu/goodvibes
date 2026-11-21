@@ -45,16 +45,20 @@ import type { ClientCompatibilityVerdict, DaemonCompatibilityVerdict } from '@go
 /**
  * The oldest daemon build this terminal will adopt.
  *
- * 3.1.2 is the oldest daemon build that serves the verbs this terminal calls:
- * the session register, hosted sessions, the conversation rewind verbs and the
- * inbound steer queue. 3.1.1 and earlier answer some of those with a 404 and not
- * others, which is the half-working state this floor exists to stop.
+ * 3.3.2 is the oldest daemon build that serves every verb this terminal calls.
+ * 3.1.2 added the session register, hosted sessions, the conversation rewind
+ * verbs and the inbound steer queue; 3.3.0 added `inbox.answer`; 3.3.2 added
+ * `mcp.servers.reload` and the MCP trust, role, quarantine and tool-block verbs,
+ * `relay.codes.list` and `relay.codes.revoke`, and `automation.schedules.pause`,
+ * `automation.schedules.resume` and `automation.schedules.preview`. An older
+ * daemon answers some of those with a 404 and not others, which is the
+ * half-working state this floor exists to stop.
  *
  * Raise this only for a daemon behavior this terminal MUST have, and say in the
  * release notes what it was raised for. It costs a daemon update for anyone
  * running an older one.
  */
-export const TUI_DAEMON_BUILD_FLOOR = '3.1.2';
+export const TUI_DAEMON_BUILD_FLOOR = '3.3.2';
 
 export interface ClientBuildGuardOptions {
   readonly clientVersion: string;

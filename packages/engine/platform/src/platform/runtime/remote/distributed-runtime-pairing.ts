@@ -235,20 +235,25 @@ export async function verifyDistributedPairRequest(
   // operator decides. A request that can no longer be verified says why, to
   // the holder of its challenge only, so the device stops polling.
   if (request.status === 'pending') return null;
-  if (request.status !== 'approved') {
+  // A verify whose answer was lost is sent again with the same challenge: while
+  // the request lasts and the token it issued was never used, the holder of
+  // the challenge gets a new token and the unused one is revoked.
+  const retried = unusedVerifiedToken(state, request);
+  if (request.status !== 'approved' && !retried) {
     throw new DistributedRuntimeRefusalError(
       `${refusalReason(pairRequestLifecycle.check(request.status, 'verified'))}. Request pairing again.`,
       'REMOTE_PAIR_REQUEST_SETTLED',
       410,
     );
   }
-  const peerBefore = findPeerForRequest(state, request);
-  const peer = ensurePeerFromRequest(state, request, input.metadata);
+  const peerBefore = retried ? retried.peer : findPeerForRequest(state, request);
+  const peer = retried ? retried.peer : ensurePeerFromRequest(state, request, input.metadata);
   const issued = issueToken(state, peer.id, 'pair-verified-token', { kind: 'default' });
   const verifiedRequest: StoredPairRequest = {
     ...request,
     status: 'verified',
-    verifiedAt: Date.now(),
+    verifiedAt: retried ? request.verifiedAt : Date.now(),
+    verifiedTokenId: issued.token.id,
     updatedAt: Date.now(),
     peerId: peer.id,
     remoteAddress: input.remoteAddress ?? request.remoteAddress,
@@ -264,7 +269,9 @@ export async function verifyDistributedPairRequest(
   recordDistributedRuntimeAudit(state, buildAudit('pair-verified', 'remote-peer', {
     requestId,
     peerId: peer.id,
-    note: connectedPeer.label,
+    note: retried
+      ? `${connectedPeer.label}: verify sent again; the token issued before was never used and is replaced`
+      : connectedPeer.label,
   }));
   try {
     await pruneAndPersistDistributedRuntime(state);
@@ -310,13 +317,21 @@ export async function rotateDistributedPeerToken(
   const peer = state.peers.get(peerId);
   if (!peer) return null;
   const issued = issueToken(state, peerId, input.label ?? 'rotated-access-token', input.scopes ?? { kind: 'default' });
+  const afterIssue = state.peers.get(peerId);
+  // The authority record first: the replaced token is refused on every machine
+  // of the group, the new one accepted. A failed write leaves this store as it
+  // was, so the error matches the state.
+  try {
+    await publishDistributedPeerTokens(state, peerId, { issued: issued.token, revoked: issued.replaced, by: input.actor ?? 'operator', reason: 'rotated' });
+  } catch (error) {
+    if (state.peers.get(peerId) === afterIssue) state.peers.set(peerId, peer);
+    throw error;
+  }
   recordDistributedRuntimeAudit(state, buildAudit('token-rotated', input.actor ?? 'operator', {
     peerId,
     note: issued.token.label,
   }));
   await pruneAndPersistDistributedRuntime(state);
-  // The replaced token is refused on every machine of the group, the new one accepted.
-  await publishDistributedPeerTokens(state, peerId, { issued: issued.token, revoked: issued.replaced, by: input.actor ?? 'operator', reason: 'rotated' });
   const updatedPeer = state.peers.get(peerId)!;
   publishDistributedRuntimeEvent(state, 'remote-token-rotated', {
     peer: sanitizePeer(updatedPeer),
@@ -343,27 +358,26 @@ export async function revokeDistributedPeerToken(
   await startDistributedRuntime(state);
   const peer = state.peers.get(peerId);
   if (!peer) return null;
-  const now = Date.now();
-  let changed = false;
-  const nextTokens = peer.tokens.map((token) => {
-    if (input.tokenId && token.id !== input.tokenId) return token;
-    if (token.revokedAt) return token;
-    changed = true;
-    return {
-      ...token,
-      revokedAt: now,
-    };
-  });
-  const revokedIds = peer.tokens.filter((token) => !token.revokedAt && (!input.tokenId || token.id === input.tokenId)).map((token) => token.id);
-  if (!changed) {
+  const named = (token: StoredPeerTokenRecord): boolean => !input.tokenId || token.id === input.tokenId;
+  const revokedIds = peer.tokens.filter((token) => !token.revokedAt && named(token)).map((token) => token.id);
+  if (revokedIds.length === 0) {
     // Revoked here already: make sure the record says so too (an earlier write may have failed).
-    await publishDistributedPeerTokens(state, peerId, { revoked: peer.tokens.filter((token) => !input.tokenId || token.id === input.tokenId).map((token) => token.id), by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
+    await publishDistributedPeerTokens(state, peerId, { revoked: peer.tokens.filter(named).map((token) => token.id), by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
     return sanitizePeer(peer);
   }
+  // Terminal on the authority record first: refused on every machine of the
+  // group, including one that was asleep or restarts later. A failed write
+  // changes nothing here, so the error matches the state; once it is written,
+  // a failed local save is safe because the record refuses the token and
+  // applyDistributedPeerTokenRevocations marks it here.
+  await publishDistributedPeerTokens(state, peerId, { revoked: revokedIds, by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
+  const current = state.peers.get(peerId) ?? peer;
+  const now = Date.now();
+  const nextTokens = current.tokens.map((token) => revokedIds.includes(token.id) && !token.revokedAt ? { ...token, revokedAt: now } : token);
   const activeToken = nextTokens.find((token) => !token.revokedAt && token.id !== input.tokenId) ?? null;
   const updated: StoredPeerRecord = {
-    ...peer,
-    status: activeToken ? peer.status : 'revoked',
+    ...current,
+    status: activeToken ? current.status : 'revoked',
     activeTokenId: activeToken?.id,
     tokens: nextTokens,
   };
@@ -373,9 +387,6 @@ export async function revokeDistributedPeerToken(
     note: input.note ?? input.tokenId ?? updated.label,
   }));
   await pruneAndPersistDistributedRuntime(state);
-  // Terminal on the authority record: refused on every machine of the group,
-  // including one that was asleep or restarts later.
-  await publishDistributedPeerTokens(state, peerId, { revoked: revokedIds, by: input.actor ?? 'operator', reason: input.note ?? 'revoked' });
   publishDistributedRuntimeEvent(state, 'remote-token-revoked', { peer: sanitizePeer(updated), tokenId: input.tokenId ?? null });
   return sanitizePeer(updated);
 }
@@ -423,6 +434,31 @@ export async function disconnectDistributedPeer(
   return sanitizePeer(peer);
 }
 
+/**
+ * A token this store holds as revoked is refused whatever the authority record
+ * says, so a local revocation (one whose record write failed, or a token a
+ * verify replaced) is never undone by taking the token in from the record. The
+ * revocation is written to the record again when the record still holds it live.
+ */
+function refuseLocallyRevoked(
+  state: DistributedRuntimeManagerState,
+  tokenValue: string,
+  matches: (secretHash: string) => boolean,
+): boolean {
+  for (const peer of state.peers.values()) {
+    const revoked = peer.tokens.find((candidate) => candidate.revokedAt !== undefined && matches(candidate.secretHash));
+    if (!revoked) continue;
+    if (!peerTokenOnRecord(state, hashSecret(tokenValue), revoked.id).refused) {
+      void publishDistributedPeerTokens(state, peer.id, { revoked: [revoked.id], by: 'distributed-runtime', reason: 'revoked on this machine' })
+        .catch((error: unknown) => {
+          logger.warn('A revoked peer token could not be written to the authority record again', { peerId: peer.id, tokenId: revoked.id, error: String(error) });
+        });
+    }
+    return true;
+  }
+  return false;
+}
+
 export async function authenticateDistributedPeerToken(
   state: DistributedRuntimeManagerState,
   tokenValue: string,
@@ -436,6 +472,7 @@ export async function authenticateDistributedPeerToken(
     const token = peer.tokens.find((candidate) => !candidate.revokedAt && matches(candidate.secretHash));
     if (token) { found = { peer, token }; break; }
   }
+  if (!found && refuseLocallyRevoked(state, tokenValue, matches)) return null;
   // The authority record answers whether the token is current: revoked there
   // (on any machine of the group) is refused here whatever this store says,
   // and a token it holds as live that this store never saw is a peer paired
@@ -613,6 +650,21 @@ function newPeerId(kind: DistributedPeerKind): string {
 function findPeerForRequest(state: DistributedRuntimeManagerState, request: StoredPairRequest): StoredPeerRecord | undefined {
   return (request.peerId ? state.peers.get(request.peerId) : undefined)
     ?? [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
+}
+
+/**
+ * A verified request whose verify may be answered again: the request has not
+ * reached its expiry, and the token its verify issued is still the peer's
+ * active token and has never authenticated. Returns that peer, or null.
+ */
+function unusedVerifiedToken(state: DistributedRuntimeManagerState, request: StoredPairRequest): { readonly peer: StoredPeerRecord } | null {
+  if (request.status !== 'verified' || request.verifiedTokenId === undefined || request.peerId === undefined) return null;
+  if (request.expiresAt <= Date.now()) return null;
+  const peer = state.peers.get(request.peerId);
+  if (!peer || peer.status === 'revoked' || peer.activeTokenId !== request.verifiedTokenId) return null;
+  const token = peer.tokens.find((entry) => entry.id === request.verifiedTokenId);
+  if (!token || token.revokedAt !== undefined || token.lastUsedAt !== undefined) return null;
+  return { peer };
 }
 
 /** An operator's label and metadata on an existing peer; the unauthenticated request changes nothing on it. */

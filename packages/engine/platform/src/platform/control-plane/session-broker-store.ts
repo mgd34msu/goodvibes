@@ -44,6 +44,7 @@ import {
   type SetAsideSessionEntry,
 } from './session-broker-state.js';
 import { withSessionCloseReason } from './session-broker-sessions.js';
+import { countOwedChannelReplies } from './session-broker-inputs.js';
 
 export type { SetAsideSessionEntry } from './session-broker-state.js';
 
@@ -96,9 +97,11 @@ export interface SessionBrokerStorage {
  * the index. Any other session's log is not read at start (the index lists
  * it), so its message count and last message time are the index's to carry: a
  * message appended after close rewrites the index, and the list shows it after
- * a restart without loading the history.
+ * a restart without loading the history. The same holds for the channel
+ * answers it still owes a send (`owedReplyCount`, index only): a session that
+ * owes one is loaded at start, so the send is made again.
  */
-function indexedFields(record: SharedSessionRecord): string {
+function indexedFields(record: SharedSessionRecord, owed: number): string {
   const {
     updatedAt: _updatedAt, lastActivityAt: _lastActivityAt, lastMessageAt, messageCount,
     retainedMessageCount: _retained, pendingInputCount: _pending, activeAgentId: _active, lastAgentId: _lastAgent,
@@ -108,8 +111,18 @@ function indexedFields(record: SharedSessionRecord): string {
     ...listed,
     // The same rule as the deferral at start: a session that is not active is listed from here.
     ...(record.status !== 'active' ? { messageCount, lastMessageAt } : {}),
+    ...(record.status !== 'active' && owed > 0 ? { [OWED_REPLY_COUNT_KEY]: owed } : {}),
     participants: participants.map(({ lastSeenAt: _seen, ...participant }) => participant),
   });
+}
+
+/** The index entry's count of channel answers a non-active session still owes a send; not part of the session record. */
+const OWED_REPLY_COUNT_KEY = 'owedReplyCount';
+
+/** The owed count an index entry states; 0 for an entry without one (every index 3.3.4 wrote). */
+function indexedOwedReplyCount(raw: unknown): number {
+  const value = isRecord(raw) ? raw[OWED_REPLY_COUNT_KEY] : undefined;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
 }
 
 /** The newest completion in a session's messages, as the broker's completeAgent stamps it. */
@@ -197,6 +210,8 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
   readonly #logDir: string;
   readonly #logs = new Map<string, SessionLogState>();
   readonly #indexed = new Map<string, string>();
+  /** Channel answers each session still owes a send, as its loaded inputs last stated (or its index entry, while deferred). */
+  readonly #owed = new Map<string, number>();
   /** Session records this build could not read, carried forward verbatim in every index write. */
   #unreadableRecords: readonly unknown[] = [];
   #indexDirty = false;
@@ -218,6 +233,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
   async load(): Promise<SessionBrokerLoadResult> {
     this.close();
     this.#indexed.clear();
+    this.#owed.clear();
     this.#setAside = [];
     this.#indexDirty = false;
     const document = readDocument<Record<string, unknown>>(this.path, {
@@ -253,14 +269,17 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
         messages.delete(record.id);
         inputs.delete(record.id);
       }
-      this.#indexed.set(record.id, indexedFields(record));
-      // Active sessions and any with work still owed load now; the rest wait until asked for.
-      if (record.status !== 'active' && record.pendingInputCount === 0) {
+      const owed = indexedOwedReplyCount(raw);
+      this.#owed.set(record.id, owed);
+      this.#indexed.set(record.id, indexedFields(record, owed));
+      // Active sessions and any with work or a channel send still owed load now; the rest wait until asked for.
+      if (record.status !== 'active' && record.pendingInputCount === 0 && owed === 0) {
         sessions.set(record.id, record);
         deferred.add(record.id);
         continue;
       }
       const history = this.loadSession(record.id);
+      this.#owed.set(record.id, countOwedChannelReplies(history.inputs));
       if (history.messages.length > 0) messages.set(record.id, history.messages);
       if (history.inputs.length > 0) inputs.set(record.id, history.inputs);
       sessions.set(record.id, withLoggedFacts(record, history.messages, history.inputs));
@@ -323,7 +342,8 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
       const appended = this.#appendChanges(sessionId, messages, inputs);
       if (appended) syncs.push(appended);
       if (record) {
-        const listed = indexedFields(record);
+        if (inputs) this.#owed.set(sessionId, countOwedChannelReplies(inputs));
+        const listed = indexedFields(record, this.#owed.get(sessionId) ?? 0);
         if (this.#indexed.get(sessionId) !== listed) {
           this.#indexed.set(sessionId, listed);
           this.#indexDirty = true;
@@ -432,6 +452,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
 
   #dropSession(sessionId: string): void {
     this.unload(sessionId);
+    this.#owed.delete(sessionId);
     if (this.#indexed.delete(sessionId)) this.#indexDirty = true;
     const path = join(this.#logDir, logFileName(sessionId));
     try { unlinkSync(path); } catch (error) {
@@ -442,7 +463,10 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
   #writeIndex(sessions: ReadonlyMap<string, SharedSessionRecord>): void {
     writeDocument(this.path, {
       version: SESSION_INDEX_VERSION,
-      sessions: [...sessions.values()],
+      sessions: [...sessions.values()].map((record) => {
+        const owed = this.#owed.get(record.id) ?? 0;
+        return record.status !== 'active' && owed > 0 ? { ...record, [OWED_REPLY_COUNT_KEY]: owed } : record;
+      }),
       ...(this.#unreadableRecords.length > 0 ? { setAside: this.#unreadableRecords } : {}),
     });
     this.#indexDirty = false;
@@ -506,7 +530,8 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
       sessions.set(sessionId, record);
       if (loaded.messages.length > 0) messages.set(sessionId, loaded.messages);
       if (loaded.inputs.length > 0) inputs.set(sessionId, loaded.inputs);
-      this.#indexed.set(sessionId, indexedFields(record));
+      this.#owed.set(sessionId, countOwedChannelReplies(loaded.inputs));
+      this.#indexed.set(sessionId, indexedFields(record, this.#owed.get(sessionId) ?? 0));
       this.#indexDirty = true;
       logger.warn('[session-broker] a session log the index did not list was listed again, closed', { sessionId, messages: loaded.messages.length });
     }

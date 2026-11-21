@@ -37,8 +37,6 @@ import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 
 import { readFileSync } from 'node:fs';
 import net from 'node:net';
-import 'node:child_process';
-import 'node:os';
 import type { ConfigManager, GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
@@ -51,7 +49,6 @@ import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell'
 import { applyRuntimeEndpointFlagOverrides } from '@goodvibes/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
 import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
-import '../utils/browser.ts';
 
 export function readPassword(args: readonly string[]): string | null {
   const explicit = readOptionValue(args, '--password');

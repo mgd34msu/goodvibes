@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { createSetupReviewCollector } from '@goodvibes/engine/terminal-shell/setup-review';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -9,8 +10,6 @@ import {
   renderSandboxRecommendation,
   renderSandboxReview,
 } from '@goodvibes/engine/platform/platform/runtime/sandbox';
-import '@goodvibes/engine/platform/platform/plugins';
-import '@goodvibes/engine/platform/platform/config';
 import { VERSION } from '../../version.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
 import { maskLiteralSecrets, type SetupReviewSnapshot } from './local-setup-transfer.ts';
@@ -83,7 +82,7 @@ export async function exportSetupSupportBundle(targetDirArg: string, snapshot: S
   writeFileSync(join(targetDir, 'startup-review.json'), JSON.stringify(maskLiteralSecrets(snapshot, masked), null, 2) + '\n', 'utf-8');
   writeFileSync(join(targetDir, 'platform-review.json'), JSON.stringify(maskLiteralSecrets(platformReview, masked, 'platform-review.json'), null, 2) + '\n', 'utf-8');
   const copies: ReadonlyArray<readonly [string, string]> = [
-    [shellPaths.resolveUserPath('tui', 'services.json'), 'services.json'],
+    [shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'services.json'), 'services.json'],
     [shellPaths.resolveProjectPath('hooks.managed.json'), 'hooks.managed.json'],
   ];
   for (const [source, name] of copies) {

@@ -50,16 +50,27 @@
  *
  * The one case that gets a second try is a mapping that has gone stale: a
  * hosted session that was killed, retired or lost to a restart answers a steer
- * with 404/409, and this re-creates the conversation with the message in hand
- * as its opening prompt rather than reporting a failure for work that can still
- * be done.
+ * with SESSION_NOT_FOUND or HOSTED_SESSION_TERMINATED, and this re-creates the
+ * conversation with the message in hand as its opening prompt rather than
+ * reporting a failure for work that can still be done.
+ *
+ * ── A message is handed over once ─────────────────────────────────────────
+ *
+ * A hand-off whose answer was lost is held, and the dispatcher offers the same
+ * input again on its next tick. Every request carries a key derived from the
+ * input's id, so that repeat is answered by the daemon instead of acted on
+ * twice: a steer sends `messageId` (the daemon returns the input it already
+ * recorded), a create sends an `Idempotency-Key` (the daemon returns the
+ * session it already made). An input whose unanswered attempt was a create is
+ * retried as that same keyed create, never as find-then-steer, which would put
+ * the opening prompt into the new session a second time.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
-import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { HostedSessionRecord } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
-import { ConnectedHostVerbError, describeConnectedHostVerbError, isDefiniteHostRefusal } from './daemon-verbs.ts';
+import { isOperationKey, MAX_OPERATION_KEY_LENGTH } from '@goodvibes/engine/errors';
+import { ConnectedHostVerbError, describeConnectedHostVerbError, isDefiniteHostRefusal, type AgentDaemonVerbCaller } from './daemon-verbs.ts';
 
 /** How many characters of the owner's message become the hosted session's title. */
 const TITLE_LENGTH = 60;
@@ -131,6 +142,8 @@ export function createHostedHandoffFileStore(path: string): HostedHandoffMapping
 export interface HostedHandoffRequest {
   /** The shared session the message arrived for. */
   readonly sessionId: string;
+  /** The inbound input's id: every request for this message carries a key derived from it. */
+  readonly inputId: string;
   /** The enriched continuation task the broker built. */
   readonly task: string;
   /** The owner's own words, which is what a hosted session should open with. */
@@ -152,7 +165,7 @@ export interface HostedConversationHandoff {
 }
 
 export interface HostedConversationHandoffOptions {
-  readonly verbs: DaemonVerbCaller;
+  readonly verbs: AgentDaemonVerbCaller;
   /**
    * Read fresh per continuation, `hostedSessions.promoteInboundConversations`.
    * A capture would make the setting a restart-only key, which it is not.
@@ -204,8 +217,10 @@ export function hostedSessionTitle(request: HostedHandoffRequest): string {
  * Whether a steer failure means "that hosted session is not there any more"
  * rather than "the daemon could not do this right now".
  *
- * 404 is the engine's own not-found. Of the 409s ("the session exists and here
- * is why it cannot serve you") only `HOSTED_SESSION_TERMINATED` is permanent.
+ * `SESSION_NOT_FOUND` is the daemon's answer for a session it does not have; a
+ * 404 with another code (an unknown verb on an older host) says nothing about
+ * the session. Of the 409s ("the session exists and here is why it cannot
+ * serve you") only `HOSTED_SESSION_TERMINATED` is permanent.
  * Other 409s (its loop could not be composed, it was shut down mid-delivery)
  * describe a session that may still be live, and re-creating would fork the
  * conversation into a second session. Those, a 429 (the cap) and any 5xx are
@@ -213,7 +228,16 @@ export function hostedSessionTitle(request: HostedHandoffRequest): string {
  */
 function isStaleHostedSession(error: unknown): boolean {
   if (!(error instanceof ConnectedHostVerbError)) return false;
-  return error.status === 404 || error.code === 'HOSTED_SESSION_TERMINATED';
+  return error.code === 'SESSION_NOT_FOUND' || error.code === 'HOSTED_SESSION_TERMINATED';
+}
+
+/**
+ * A request key from its parts, in the operation-key alphabet (letters, digits,
+ * ".", "_", ":" and "-", at most 255): any other character becomes "_".
+ */
+export function hostedHandoffKey(...parts: readonly string[]): string {
+  const key = ['agent-handoff', ...parts].join(':').replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, MAX_OPERATION_KEY_LENGTH);
+  return isOperationKey(key) ? key : 'agent-handoff';
 }
 
 /**
@@ -249,14 +273,30 @@ export function createHostedConversationHandoff(
   }
   /** Per shared session, the tail of its queued promotions: one at a time, in arrival order. */
   const queues = new Map<string, Promise<unknown>>();
+  /**
+   * Inputs whose last attempt was a create that got no definite answer, by
+   * input id: a retry re-sends that keyed create. In memory: after a restart the
+   * daemon's attachedClients find the session and the keyed steer is answered
+   * from the input it recorded.
+   */
+  const unconfirmedCreates = new Set<string>();
 
   const refuse = (reason: string): HostedHandoffOutcome => ({ promoted: false, reason, disabled: false });
   /** A failure that is a definite refusal falls back to the local answer; any other may have been acted on. */
   const failed = (error: unknown): HostedHandoffOutcome => {
     const reason = describeConnectedHostVerbError(error);
-    return isDefiniteHostRefusal(error)
+    // The first request under this key is still running on the daemon: not a refusal, the answer is on its way.
+    const inFlight = error instanceof ConnectedHostVerbError && error.code === 'IDEMPOTENCY_KEY_IN_FLIGHT';
+    return isDefiniteHostRefusal(error) && !inFlight
       ? refuse(reason)
       : { promoted: false, reason: `${reason} The daemon may already have taken this message.`, disabled: false, unconfirmed: true };
+  };
+  /** A create's failure: an unconfirmed one is remembered so its retry is the same keyed create. */
+  const createFailed = (request: HostedHandoffRequest, error: unknown): HostedHandoffOutcome => {
+    const outcome = failed(error);
+    if (!outcome.promoted && outcome.unconfirmed) unconfirmedCreates.add(request.inputId);
+    else unconfirmedCreates.delete(request.inputId);
+    return outcome;
   };
 
   /**
@@ -297,7 +337,8 @@ export function createHostedConversationHandoff(
       // reads as a work order for a message that was a sentence.
       initialPrompt: request.body.trim().length > 0 ? request.body : request.task,
       clientId: conversationClientId(request.sessionId),
-    });
+    }, { idempotencyKey: hostedHandoffKey(request.sessionId, request.inputId) });
+    unconfirmedCreates.delete(request.inputId);
     const hostedSessionId = reply?.session?.id;
     if (typeof hostedSessionId !== 'string' || hostedSessionId.length === 0) {
       // A reply this build cannot read is a real answer about the host, not a
@@ -329,6 +370,15 @@ export function createHostedConversationHandoff(
       );
     }
 
+    if (unconfirmedCreates.has(request.inputId)) {
+      // This input's create got no answer: the same keyed create is answered with the session it made, if it made one.
+      try {
+        return await createHosted(request, workspaceRoot, 'created');
+      } catch (error) {
+        return createFailed(request, error);
+      }
+    }
+
     let existing = promoted.get(request.sessionId);
     if (existing === undefined) {
       const found = await findHostedAfterRestart(request.sessionId);
@@ -336,7 +386,7 @@ export function createHostedConversationHandoff(
         try {
           return await createHosted(request, workspaceRoot, 'created');
         } catch (error) {
-          return failed(error);
+          return createFailed(request, error);
         }
       }
       promoted.set(request.sessionId, found);
@@ -363,6 +413,8 @@ export function createHostedConversationHandoff(
       await options.verbs.invoke<unknown>('sessions.steer', {
         sessionId: existing,
         body: request.body.trim().length > 0 ? request.body : request.task,
+        // The steer's replay key: a resend after a lost answer returns the input the session already recorded.
+        messageId: hostedHandoffKey(request.inputId),
         ...(request.surfaceKind ? { surfaceKind: request.surfaceKind } : {}),
         ...(request.surfaceId ? { surfaceId: request.surfaceId } : {}),
       });
@@ -383,7 +435,7 @@ export function createHostedConversationHandoff(
       try {
         return await createHosted(request, workspaceRoot, 'recreated');
       } catch (recreateError) {
-        return failed(recreateError);
+        return createFailed(request, recreateError);
       }
     }
   };

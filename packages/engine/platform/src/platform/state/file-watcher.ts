@@ -340,10 +340,10 @@ export class FileWatcher {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         deleted = true;
         this.projectIndex.removeFile(absPath);
-        // A file that comes back is a new incarnation; the root watcher or a
-        // later addPath opens it again.
-        const watcher = this.watchers.get(absPath);
-        if (watcher) { try { watcher.close(); } catch { /* already closed */ } this.watchers.delete(absPath); }
+        // A deleted file is forgotten. One that comes back is a new incarnation:
+        // in the project root the root watcher registers it again, elsewhere
+        // the next tool read of it does (watchIndexedFile).
+        this.removePath(absPath);
       } else {
         this.projectIndex.upsertFile(absPath);
       }

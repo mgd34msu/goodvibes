@@ -45,7 +45,6 @@ import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platfo
 import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
-import '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
 import { type RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';

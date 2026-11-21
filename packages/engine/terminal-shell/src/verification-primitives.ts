@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
-import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { deriveControlPlaneBaseUrl, parseDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { daemonConfigPathForHome, readDaemonTierFile, readDotPath } from '@goodvibes/engine/platform/platform/config';
 import { isThisMachineHost } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { bindCredential, daemonAuthHeaders, daemonTarget, type BoundCredentialSource, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
@@ -325,15 +326,19 @@ function readLocalOperatorToken(tokenPath: string, readJson: (path: string) => u
   return undefined;
 }
 
-/** The control-plane port the product's own settings file names, else 3421. */
-function verificationLocalPort(settingsPath: string, readJson: (path: string) => unknown): number {
-  if (!existsSync(settingsPath)) return 3421;
-  try {
-    const value = (readJson(settingsPath) as { controlPlane?: { port?: unknown } })?.controlPlane?.port;
-    return typeof value === 'number' && Number.isFinite(value) ? value : 3421;
-  } catch {
-    return 3421;
-  }
+/**
+ * The origin this machine's daemon serves, derived from the daemon's own
+ * settings tier (`controlPlane` is daemon-owned): scheme from tls.mode, host
+ * from hostMode/host, port. An absent or unreadable file means the daemon's
+ * defaults, which is what the daemon itself binds then.
+ */
+function localDaemonOrigin(homeDir: string): DaemonOrigin {
+  let tier: Record<string, unknown> = {};
+  try { tier = readDaemonTierFile(daemonConfigPathForHome(verificationDaemonHome(homeDir))); } catch { tier = {}; }
+  const baseUrl = deriveControlPlaneBaseUrl(readControlPlaneBinding((key) => readDotPath(tier, key).value), 'loopback');
+  const origin = parseDaemonOrigin(baseUrl);
+  if (!origin) throw new TypeError(`The daemon settings name no usable address (${baseUrl}).`);
+  return origin;
 }
 
 export interface VerificationHostTargetInput {
@@ -347,8 +352,6 @@ export interface VerificationHostTargetInput {
   /** Environment variables holding this machine's daemon token (GOODVIBES_DAEMON_TOKEN). */
   readonly localEnvKeys?: readonly string[] | undefined;
   readonly readJson: (path: string) => unknown;
-  /** The product's own settings file, whose `controlPlane.port` is this machine's daemon port. */
-  readonly settingsPath?: string | undefined;
   /** Overrides the operator token file of the daemon home (see verificationDaemonHome). */
   readonly tokenPath?: string | undefined;
 }
@@ -357,16 +360,16 @@ export interface VerificationHostTargetInput {
  * The daemon a verification run talks to and the credential bound to it: a
  * token passed or set for the host being checked goes to that host; this
  * machine's daemon token (its environment override or the operator token
- * file) only when the URL is this machine's daemon, a local address at the
- * port the settings name. Any other daemon gets no credential, so its checks
+ * file) only when the URL is this machine's daemon: an address of this
+ * machine at the scheme and port the daemon's own settings bind. Any other daemon gets no credential, so its checks
  * are skipped instead of carrying this machine's token there.
  */
 export function verificationHostTarget(input: VerificationHostTargetInput): DaemonTarget {
   let origin: ReturnType<typeof parseDaemonOrigin> = null;
   try { origin = parseDaemonOrigin(new URL(input.url).origin); } catch { origin = null; }
   if (!origin) throw new TypeError(`${input.url} is not a daemon address (scheme://host:port).`);
-  const thisMachine = isThisMachineHost(origin.host)
-    && origin.port === verificationLocalPort(input.settingsPath ?? join(input.homeDir, 'tui', 'settings.json'), input.readJson);
+  const local = localDaemonOrigin(input.homeDir);
+  const thisMachine = isThisMachineHost(origin.host) && origin.port === local.port && origin.scheme === local.scheme;
   const bound = (token: string, source: BoundCredentialSource): DaemonTarget => daemonTarget(origin!, bindCredential(origin!, token, source), thisMachine);
   if (input.explicitToken?.trim()) return bound(input.explicitToken, 'explicit');
   for (const key of input.hostEnvKeys ?? []) {
@@ -378,33 +381,25 @@ export function verificationHostTarget(input: VerificationHostTargetInput): Daem
     const value = process.env[key]?.trim();
     if (value) return bound(value, 'environment');
   }
-  const local = readLocalOperatorToken(input.tokenPath ?? operatorTokenPath(verificationDaemonHome(input.homeDir)), input.readJson);
-  return local ? bound(local, 'local-daemon') : daemonTarget(origin, null, true);
+  const localToken = readLocalOperatorToken(input.tokenPath ?? operatorTokenPath(verificationDaemonHome(input.homeDir)), input.readJson);
+  return localToken ? bound(localToken, 'local-daemon') : daemonTarget(origin, null, true);
 }
-/** `settingsPath` is the calling product's own settings file; it defaults to the terminal product's. */
+/**
+ * The daemon URL a verification run checks: the one passed, else the first
+ * environment variable set, else this machine's daemon as its own settings
+ * bind it (scheme, host and port).
+ */
 export function resolveVerificationHostUrl(
   homeDir: string,
   explicit: string | undefined,
   envKeys: readonly string[],
-  readJson: (path: string) => unknown,
-  settingsPath: string = join(homeDir, 'tui', 'settings.json'),
 ): string {
   if (explicit) return explicit.replace(/\/+$/, '');
   for (const key of envKeys) {
     const value = process.env[key];
     if (value) return value.replace(/\/+$/, '');
   }
-  let port = 3421;
-  if (existsSync(settingsPath)) {
-    try {
-      const settings = readJson(settingsPath);
-      const value = (settings as { controlPlane?: { port?: unknown } })?.controlPlane?.port;
-      if (typeof value === 'number' && Number.isFinite(value)) port = value;
-    } catch {
-      /* Discovery reports host state even when legacy settings are unreadable. */
-    }
-  }
-  return `http://127.0.0.1:${port}`;
+  return localDaemonOrigin(homeDir).baseUrl;
 }
 
 export function createVerificationCompactor(redact: (text: string) => string) {

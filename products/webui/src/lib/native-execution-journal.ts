@@ -155,7 +155,8 @@ function encodedBytes(value: unknown): number {
 /**
  * A record that fails the current strict shape (damaged, or written by another build) is
  * skipped, never allowed to make every other retained target unreadable or to block
- * saving a new one. It stays in the store untouched.
+ * saving a new one. It stays in the store untouched. Reading has no cap: the cap
+ * refuses only a new record (save), so listing and releasing work at any count.
  */
 function readRecords(values: unknown[]): NativeExecutionBrowserRecord[] {
   const records: NativeExecutionBrowserRecord[] = [];
@@ -165,13 +166,6 @@ function readRecords(values: unknown[]): NativeExecutionBrowserRecord[] {
     } catch {
       // Skipped, see above.
     }
-  }
-  if (
-    records.length > NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_RECORDS ||
-    records.reduce((total, record) => total + encodedBytes(record), 0) >
-      NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_BYTES
-  ) {
-    throw new NativeExecutionBrowserJournalError("capacity");
   }
   const inputs = new Set<string>();
   const requests = new Set<string>();

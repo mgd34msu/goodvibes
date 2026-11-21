@@ -362,11 +362,13 @@ export class WorkspaceTrustManager {
       return null;
     });
     if (this.loaded || this.revision !== revision) return;
+    // Every completed read states its own outcome: a readable register clears
+    // an earlier fault, an unreadable one sets it.
+    this.loadFault = fault;
     if (fault !== null) {
       // The register exists but is unusable, so a decision may have been
       // recorded (possibly a restriction). Autonomous callers stay restricted
       // until the owner decides again; a person at the keyboard is simply asked.
-      this.loadFault = fault;
       logger.warn('workspace trust: the saved trust decision could not be read; autonomous actions stay restricted until it is replaced', { file: this.registerPath, fault });
     }
     this.registerIdentity = identity;

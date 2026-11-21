@@ -11,6 +11,16 @@ token from another machine, and while `controlPlane.publicBaseUrl`,
 counts as `local`, so on a published daemon the Agent pairs here too. Pairing is
 for an Agent on another machine (attribution and revocation per device).
 
+The selected host is the daemon on this machine, or the origin stated in
+`daemon.connectedHost.url` (for one run, `--runtime-url`). A host on another
+machine must be stated with its scheme, `https://` or `http://`: when
+`controlPlane.host` names another machine and no origin is stated, preview
+refuses and sends nothing, because the migration request and the minted
+credential would otherwise cross the network unencrypted on a guess. This
+machine's daemon token is never sent to another machine, by preview, by
+`--apply` or by the repeat of an unresolved attempt; the credential sent there
+is `GOODVIBES_CONNECTED_HOST_TOKEN` (or `GOODVIBES_DAEMON_TOKEN`).
+
 `goodvibes-agent setup pair` previews migration of the selected host's existing
 legacy shared operator credential into a named per-device Agent credential.
 `--name <name>` selects the device label (default `GoodVibes Agent`). Preview is
@@ -24,7 +34,9 @@ host, effective source credential, Agent home, name and observed local pairing
 state. Before mutation, the source must still be verified by `auth.current` as
 an admin legacy shared-token principal with `write:control-plane` or `*`.
 Changed selection, credentials, local state, revocation or cancellation aborts
-before the migration request.
+before the migration request; when that happens after the attempt marker was
+written, the marker is released, so the next preview starts fresh and sends
+nothing on its own.
 
 Inside the interactive Agent, `/setup pair` remains read-only. The owner can type
 `/setup pair --apply` (optionally `--name "Device name"`) to preview the selected
@@ -60,7 +72,8 @@ it sends the same request again under the same id, and the host answers it with
 the credential that attempt produced (same token id, new secret) while nobody
 has used it, or mints the first one if the earlier request never arrived. The
 result is stored and verified as usual; a second credential is never created.
-If the repeat cannot be made, `--apply` offers a `CLEAR ...` phrase that
+If the repeat cannot be made (for a host on another machine with no
+environment token, the result says why), `--apply` offers a `CLEAR ...` phrase that
 forgets the local marker; a credential the host made for the attempt was never
 received, so it cannot sign in and lapses unused within 15 minutes.
 

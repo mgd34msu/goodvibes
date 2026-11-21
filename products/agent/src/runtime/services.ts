@@ -21,10 +21,9 @@ import { createSessionConversationRewindPort } from './conversation-rewind-port.
 import { createClientApprovalRaiser, createConversationRewindHost, createDaemonConfigClient, createDaemonCredentialsClient, createDevicesClient, createWireSessionDispatch, readSurfaceAgentOutcome, watchApprovalUpdates } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { ConversationRewindHostClient, DaemonConfigClient, DaemonCredentialsClient, DaemonVerbCaller, DevicesClient, WireSessionDispatch } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { ApprovalRaiser, ProviderRegistryConstructionOptions, UserPermissionRuleAccess } from '@goodvibes/engine/platform/platform/runtime/client-services';
-import { createAgentDaemonVerbCaller, resolveConnectedHostConnection } from './client/daemon-verbs.ts';
+import { createAgentDaemonVerbCaller, resolveConnectedHostConnection, type AgentDaemonVerbCaller } from './client/daemon-verbs.ts';
 import { createApprovalsView, type ApprovalsView } from './client/approvals-view.ts';
 import { createAgentFleetUnion, type AgentFleetUnion } from './client/fleet-union.ts';
-import './client/session-inputs.ts';
 import { createHostedSessionRegistry, type HostedSessionRegistry } from './client/hosted-sessions.ts';
 import { HOSTED_HANDOFF_CLIENT_ID, createHostedConversationHandoff, createHostedHandoffFileStore, type HostedConversationHandoff } from './client/hosted-handoff.ts';
 import { readNotificationsMetadataOnly } from '@goodvibes/engine/platform/platform/runtime/notification-privacy';
@@ -686,7 +685,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // Every other connected-host path of this process (schedules, operator tools, slash-command routes, owner
   // questions, Activity, occasions) builds its own selection; the one build verdict reaches them all here.
   useConnectedHostRefusal(() => connectedHostRefusal());
-  const daemonVerbs: DaemonVerbCaller = createAgentDaemonVerbCaller(connectedHostAccess);
+  const daemonVerbs: AgentDaemonVerbCaller = createAgentDaemonVerbCaller(connectedHostAccess);
   // What this process is actually running, answered from itself rather than from
   // the daemon's cross-surface register. Feeds inbound dispatch, the
   // conversation-rewind host and the consolidation idle gate.

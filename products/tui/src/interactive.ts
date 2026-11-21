@@ -16,23 +16,16 @@ import type { ProductInputContext } from '@goodvibes/engine/terminal-shell/nativ
 import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
-import './renderer/compositor.ts';
 
 import { UIFactory } from './renderer/ui-factory.ts';
 import { resolveThrobberActivity } from './renderer/throbber.ts';
 import { SPINNER_FRAMES } from './renderer/ui-primitives.ts';
 import { ActivityAnimation } from './core/activity-animation.ts';
-import '@goodvibes/engine/platform/platform/core';
 import { InputHandler } from './input/handler.ts';
-import '@goodvibes/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
 import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import { bindOwnerInput } from '@goodvibes/engine/terminal-shell/companion-input';
-import '@goodvibes/engine/platform/platform/tools';
-import '@goodvibes/engine/platform/platform/tools';
-import '@goodvibes/engine/platform/platform/state';
 import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
-import '@goodvibes/engine/platform/platform/acp';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
 import {
   handleBrokerApprovalChange,
@@ -40,15 +33,10 @@ import {
   createApprovalCardQueue,
   settledAskDecision,
 } from './permissions/broker-approval-card.ts';
-import './input/command-registry.ts';
 
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { createContractQuestionComposer } from '@goodvibes/engine/terminal-shell/contract-question-composer';
-import './input/commands.ts';
-import '@goodvibes/engine/platform/platform/tools';
-import './input/input-history.ts';
 import { describeContextWindowSource } from '@goodvibes/engine/platform/platform/providers';
-import './renderer/git-status.ts';
 
 import { createShellLayout } from './renderer/layout-engine.ts';
 import { buildShellFooter, estimateShellFooterHeight, promptCursorOffset, statusCostText } from './renderer/shell-surface.ts';
@@ -559,28 +547,29 @@ async function main(prepared: PreparedShellCliRuntime) {
   const dispatchNativeTurn = async (
     state: NativeConversationIntakeState,
     spokenOutput = false,
-    current: () => boolean = () => true,
   ): Promise<void> => {
     if (!isNativeConversationTurnReady(state)) return;
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
     streamResult.startNewTurn();
+    // A native turn is owner input too: a newer prompt owns the footer status.
+    const epoch = ++inputEpoch;
     await runNativeTurnDispatch({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
-      current,
       begin: () => {
-        submissionStatus = null;
+        if (epoch === inputEpoch) submissionStatus = null;
         render();
       },
       start: () => dispatchNativeConversationTurn(state, orchestrator, inputOptions),
       failed: async (error) => {
         // A turn that provably never started gives its claim back so /work intake-retry can run it.
-        submissionStatus =
+        const status =
           await describeFailedNativeDispatch(
             state,
             error,
             `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake-status before retrying.`,
           );
-        systemMessageRouter.high(submissionStatus);
+        systemMessageRouter.high(status);
+        if (epoch === inputEpoch) submissionStatus = status;
         render();
       },
     });
@@ -746,7 +735,23 @@ async function main(prepared: PreparedShellCliRuntime) {
   };
   commandContext.beginConcealedInput = (req) => input.beginConcealedInput(req);
   permissionPromptRef.requestPermission = wrapRequestPermissionWithAlert(
-    (request) => new Promise((resolve) => { localCards.offer({ request, resolve, queuedAt: Date.now() }); }),
+    // The broker aborts the signal when the ask is cancelled, expires or is decided elsewhere: a waiting ask
+    // leaves the queue, its card comes down if it is on screen, and the call settles as a denial.
+    (request, options) => new Promise((resolve) => {
+      const signal = options?.signal;
+      const deny = (): void => resolve({ approved: false, remember: false });
+      if (signal?.aborted) { deny(); return; }
+      const card: LocalCard = { request, resolve, queuedAt: Date.now() };
+      signal?.addEventListener('abort', () => {
+        if (localCards.withdraw(card)) { deny(); render(); return; }
+        if (pendingPermission?.callId !== request.callId) return;
+        pendingPermission = null;
+        deny();
+        localCards.next();
+        render();
+      }, { once: true });
+      localCards.offer(card);
+    }),
     {
       focusTracker: ctx.services.focusTracker,
       configGet: (k: string) => readTuiConfigValue(configManager, k),

@@ -163,8 +163,8 @@ export async function listAutomationRunsSince(
     return { runs: runs.map((run) => ({ ...run, jobName: names.get(run.jobId) ?? run.jobName })), deliveries };
   } catch (error) {
     if (!isHostFailure(error)) return unavailableResult(error instanceof Error ? error.message : String(error), 'no_answer');
-    const notConfigured = error.kind === 'auth_required'
-      && (error.refusal.code === 'no_credential' || error.refusal.code === 'dial_disabled');
+    const notConfigured = error.refusal.code === 'address_unstated' || (error.kind === 'auth_required'
+      && (error.refusal.code === 'no_credential' || error.refusal.code === 'dial_disabled'));
     const unreadable = error.kind === 'auth_required' && error.refusal.code === 'credential_unreadable';
     return unavailableResult(error.refusal.reason, notConfigured ? 'not_configured' : unreadable ? 'unreadable' : 'no_answer');
   }

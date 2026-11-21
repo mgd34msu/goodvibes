@@ -6,6 +6,9 @@
  * only ever handed back once, at mint time (create/migrate/handoff.create),
  * which is why this list never shows one.
  *
+ * Pair a new device (PairNewDevice) runs the owner's pairing flow from here,
+ * the same one `goodvibes pair` runs, and shows its link and QR code once.
+ *
  * Two extra affordances, each with a plain-language description of what it
  * actually does:
  *
@@ -37,6 +40,7 @@ import { EmptyState } from '../feedback/EmptyState';
 import { ErrorState } from '../feedback/ErrorState';
 import { SkeletonBlock } from '../feedback/SkeletonBlock';
 import { SettingsBlock } from './dialog/parts';
+import { PairNewDevice } from '../pairing/PairNewDevice';
 import { whenLabel } from '../../lib/when-label';
 import { getActiveRoute, unpairRelay } from '../../lib/relay-connection';
 import { describeRelayPairingForConfirmation, getStoredRelayPairing } from '../../lib/relay-pairing';
@@ -330,6 +334,8 @@ export function PairingTokensSettings() {
             ))}
           </RowList>
         )}
+
+        <PairNewDevice confirm={confirm} />
 
         {tokens.isSuccess && rows.some((token) => `pairing:${token.id}` === currentPrincipal && token.origin !== 'owner-pairing') && (
           <p className="pairing-token-row__note" role="note">

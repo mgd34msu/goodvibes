@@ -7,9 +7,6 @@ import {
 import { isLoopbackHost } from '@goodvibes/engine/terminal-shell';
 import { deriveReopenEditAcknowledgementState as deriveAcknowledgements } from '@goodvibes/engine/terminal-shell/onboarding-signals';
 import { countConfiguredSurfaceKinds, hasExternalIntegrations } from '@goodvibes/engine/terminal-shell/onboarding-signals';
-import '@goodvibes/engine/terminal-shell/onboarding-values';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/providers';
 import type {
   OnboardingNetworkMode,
   OnboardingReopenEditAcknowledgementState,

@@ -56,8 +56,7 @@ export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval' | 
     metadata: { [OWNER_ACT_METADATA_KEY]: true, requestedBy: request.requestedBy },
     timeoutMs: OWNER_ACT_TIMEOUT_MS,
   });
-  const forget = broker.onApproved(raised.approval.id, request.apply);
-  // Denied, expired or cancelled: nothing is applied, and the effect is let go.
-  raised.decision.then(forget, forget);
+  // The broker runs it inside the owner's approve and lets it go when the ask ends any other way.
+  broker.onApproved(raised.approval.id, request.apply);
   return { approvalId: raised.approval.id };
 }

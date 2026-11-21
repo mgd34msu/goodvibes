@@ -203,14 +203,19 @@ function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetch
 }
 
 /**
- * Render a thrown operator-rpc error honestly: a 404 means this daemon has not
- * wired a handler for the verb (a live daemon that simply doesn't implement it
- * yet), never "no result" or a fabricated empty state.
+ * Render a thrown operator-rpc error honestly. A 404 whose code names an
+ * unknown method or route (METHOD_NOT_FOUND, NOT_FOUND, or none) means this
+ * daemon has not wired a handler for the verb; any other 404 is the daemon
+ * saying a record does not exist, shown in its own words with its next step.
  */
 export function describeOperatorRpcError(error: unknown): string {
   if (error instanceof GoodVibesError) {
-    if (error.status === 404) {
+    if (error.status === 404 && (error.code === 'METHOD_NOT_FOUND' || error.code === 'NOT_FOUND')) {
       return 'the connected daemon returned 404; this operator verb is not wired up on that daemon yet.';
+    }
+    if (error.status === 404) {
+      const next = error.next?.[0] ?? error.hint;
+      return `the connected daemon has no such record (${error.code}): ${error.message}${next ? `; ${next}` : ''}`;
     }
     if (error.status === 401 || error.status === 403) {
       return `the connected daemon rejected the request (${error.status}): ${error.message}`;
@@ -256,10 +261,16 @@ async function invokeGatewayMethodOverHttp<T>(
   });
   const payload = await response.json().catch(() => null) as unknown;
   if (!response.ok) {
-    const described = payload && typeof payload === 'object' && 'error' in payload
-      ? String((payload as { error: unknown }).error)
-      : `HTTP ${response.status}`;
+    const body = payload && typeof payload === 'object' ? payload as { error?: unknown; code?: unknown; next?: unknown; hint?: unknown } : undefined;
+    const described = body && 'error' in body ? String(body.error) : `HTTP ${response.status}`;
+    // The daemon's own code and next step travel on the error, as on the typed client path.
+    const code = typeof body?.code === 'string' && body.code.length > 0 ? body.code : undefined;
+    const next = Array.isArray(body?.next) ? body.next.filter((step): step is string => typeof step === 'string') : [];
+    const hint = typeof body?.hint === 'string' && body.hint.length > 0 ? body.hint : undefined;
     throw new GoodVibesError(`'${methodId}' failed: ${described}`, {
+      ...(code ? { code } : {}),
+      ...(next.length > 0 ? { next } : {}),
+      ...(hint ? { hint } : {}),
       // Mapped from the status rather than fixed, so `describeOperatorRpcError`
       // and every caller that branches on category sees the same classification
       // it would have seen through the typed client path.

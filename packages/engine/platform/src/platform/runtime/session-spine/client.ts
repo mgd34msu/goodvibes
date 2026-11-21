@@ -457,6 +457,7 @@ export class SessionSpineClient {
       this.heartbeatTimers.delete(sessionId);
     }
     if (this.lastSessionId === sessionId) this.lastSessionId = [...this.records.keys()].at(-1) ?? null;
+    this.retireRegisterCount(sessionId);
     // The close goes to the daemon that holds the registration, never to one adopted since.
     const holder = this.registeredOn.get(sessionId) ?? null;
     this.registeredOn.delete(sessionId);
@@ -700,8 +701,25 @@ export class SessionSpineClient {
         break;
       }
     }
-    if (this.queue.length >= this.queueLimit) this.queue.shift()?.onSettled?.(false); // drop-oldest
+    if (this.queue.length >= this.queueLimit) {
+      // drop-oldest
+      const dropped = this.queue.shift();
+      if (dropped?.type === 'close') this.heldCloses.delete(heldCloseKey(dropped));
+      dropped?.onSettled?.(false);
+    }
     this.queue.push(op);
+  }
+
+  /**
+   * Forget a session's register count once nothing can compare against it:
+   * the session is not open here, no flush is running (it may hold fold closes
+   * it already took out of the queues), and no queued fold close names it.
+   */
+  private retireRegisterCount(sessionId: string): void {
+    if (this.flushing || this.records.has(sessionId) || !this.registerCount.has(sessionId)) return;
+    const foldClosePending = (op: QueuedOp): boolean => op.type === 'close' && op.sessionId === sessionId && op.registeredAt !== undefined;
+    if (this.foldQueue.some(foldClosePending) || this.queue.some(foldClosePending)) return;
+    this.registerCount.delete(sessionId);
   }
 
   /**
@@ -728,7 +746,7 @@ export class SessionSpineClient {
             try {
               if (op.type === 'close' && !this.goesTo(transport, op.targetId)) {
                 held.push(op);
-                const key = `${op.sessionId}\0${op.targetId}`;
+                const key = heldCloseKey(op);
                 if (!this.heldCloses.has(key)) {
                   this.heldCloses.add(key);
                   this.log.info('session spine: a close is held for the daemon that holds the registration; it is sent when that daemon is adopted again', { sessionId: op.sessionId, daemon: op.targetId });
@@ -745,6 +763,7 @@ export class SessionSpineClient {
               } else {
                 // A flush that took this fold close before the reopen cannot be reached by dropFoldCloses.
                 if (op.registeredAt !== undefined && op.registeredAt !== (this.registerCount.get(op.sessionId) ?? 0)) {
+                  this.heldCloses.delete(heldCloseKey(op));
                   op.onSettled?.(true);
                   continue;
                 }
@@ -773,6 +792,7 @@ export class SessionSpineClient {
               if (result.conflict === 'closed') this.noteClosedOnDaemon(op.sessionId);
               else this.noteRefusal(result.error);
             }
+            if (op.type === 'close') this.heldCloses.delete(heldCloseKey(op));
             op.onSettled?.(!refused);
             if (detached) {
               source.unshift(...pending.slice(index + 1));
@@ -784,8 +804,15 @@ export class SessionSpineClient {
     } finally {
       this.queue.unshift(...held);
       this.flushing = false;
+      // Counts this flush kept alive for the fold closes it held are retired now.
+      for (const sessionId of [...this.registerCount.keys()]) this.retireRegisterCount(sessionId);
     }
   }
+}
+
+/** The held-close note's key: one per session and the daemon that holds its registration. */
+function heldCloseKey(op: QueuedOp): string {
+  return `${op.sessionId}\0${op.targetId}`;
 }
 
 function errorMessage(error: unknown): string {

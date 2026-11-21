@@ -14,6 +14,7 @@
 import { PlugZap, RefreshCw } from 'lucide-react';
 import { Disclosure } from '../data-view/DataView';
 import { Button } from '../ui/Button';
+import { GOODVIBES_BASE_URL } from '../../lib/goodvibes';
 import '../../styles/components/auth-gate.css';
 
 export interface DaemonUnreachableGateProps {
@@ -48,6 +49,8 @@ export function DaemonUnreachableGate({ detail, retrying, onRetry, serverFault }
           {retrying ? ' Reconnecting…' : ' Waiting for the daemon to come back…'}
         </div>
 
+        <p className="signed-out-note">Trying <code>{GOODVIBES_BASE_URL}</code>.</p>
+
         {detail && <p className="signed-out-note">{detail}</p>}
 
         <Button onClick={onRetry} disabled={retrying}>
@@ -57,7 +60,10 @@ export function DaemonUnreachableGate({ detail, retrying, onRetry, serverFault }
         <Disclosure summary="Why am I seeing this?">
           <ul className="signed-out-help">
             <li>The daemon may have stopped, restarted, or is still booting.</li>
-            <li>Check that the daemon process is running and bound to the expected port.</li>
+            <li>
+              On the daemon&rsquo;s machine: <code>goodvibes-daemon status</code> shows what it is doing;{' '}
+              <code>goodvibes-daemon start-service</code> starts the installed service.
+            </li>
             <li>
               Nothing here signs you out: this browser keeps your sign-in and uses it
               again automatically once the daemon responds.

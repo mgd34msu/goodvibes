@@ -45,6 +45,9 @@ import {
 import { daemonSecretKeyFor, listDaemonOwnedSecretKeys } from '../platform/src/platform/config/daemon-secret-keys.ts';
 import { looksLikeSecretKey, undeclaredSchemaKeys } from './credential-key-names.ts';
 import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
+import { getBuiltinSetupSchema } from '../platform/src/platform/channels/builtin/setup-schema.ts';
+import { DEFAULT_POLICY } from '../platform/src/platform/channels/reply-policy.ts';
+import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
 import { structuredCredentialConfigSchemaFailures } from '../platform/src/platform/config/structured-credential-config.ts';
 
 const REPO_ROOT = process.env['CREDENTIAL_SCOPE_ROOT'] ?? resolve(import.meta.dir, '..');
@@ -419,48 +422,66 @@ function checkDeclarationsCoverCredentials(): Finding[] {
 }
 
 /**
- * Every bare credential name the channel account surface declares must be
- * classified.
+ * Every bare credential name a channel stores under must be classified.
  *
  * These are the names an operator's credential is actually stored under,
- * `TELEGRAM_BOT_TOKEN`, not the derived `GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN`
- *, and nothing derives them, so nothing could notice one going undeclared.
- * TELEGRAM_BOT_TOKEN was: the derived spelling migrated and the bare one, the
- * spelling the config reference points at and the one on the owner's disk,
- * never moved from any surface because the registry did not recognise it.
+ * `TELEGRAM_BOT_TOKEN`, not the derived `GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN`,
+ * and nothing derives them, so nothing else would notice one going undeclared.
  *
- * Read out of the source rather than from a list kept here, so adding a channel
- * without classifying its credential fails the build.
+ * The names come from where the product declares them: every surface's
+ * setup-schema secret targets (`getBuiltinSetupSchema(surface).secretTargets[].envKeys`)
+ * over every channel surface, plus the name lists the account surface passes to
+ * `describeConfigSecret` in accounts.ts. A check that collects no names, or
+ * cannot read accounts.ts, is itself a finding: it would otherwise pass while
+ * checking nothing.
  */
 function checkChannelSecretNamesAreClassified(): Finding[] {
-  const accountsPath = resolve(REPO_ROOT, 'platform/src/platform/channels/builtin/accounts.ts');
+  const registryFile = 'platform/src/platform/config/credential-scope-registry.ts';
+  const accountsFile = 'platform/src/platform/channels/builtin/accounts.ts';
+  const names = new Set<string>();
+  for (const surface of Object.keys(DEFAULT_POLICY) as ChannelSurface[]) {
+    for (const target of getBuiltinSetupSchema(surface).secretTargets) {
+      for (const name of target.envKeys ?? []) names.add(name);
+    }
+  }
+
   let source: string;
   try {
-    source = readFileSync(accountsPath, 'utf-8');
-  } catch {
-    return [];
+    source = readFileSync(resolve(REPO_ROOT, accountsFile), 'utf-8');
+  } catch (error) {
+    return [{
+      file: accountsFile,
+      line: 0,
+      snippet: '',
+      reason: `the channel credential check could not read ${accountsFile}: ${error instanceof Error ? error.message : String(error)}`,
+    }];
+  }
+  // `describeConfigSecret(deps, field, label, value, ['NAME', ...])`
+  const nameList = /\bdescribeConfigSecret\(([^()]|\([^()]*\))*?\[([^\]]*)\]\s*\)/g;
+  for (const match of source.matchAll(nameList)) {
+    for (const quoted of match[2]!.matchAll(/'([A-Z][A-Z0-9_]{2,})'/g)) names.add(quoted[1]!);
+  }
+
+  if (names.size === 0) {
+    return [{
+      file: accountsFile,
+      line: 0,
+      snippet: '',
+      reason: 'the channel credential check collected no credential names from the setup schema or accounts.ts, so it checked nothing',
+    }];
   }
 
   const findings: Finding[] = [];
-  const seen = new Set<string>();
-  // `describeBuiltinSecret(deps, slot, label, value, ['NAME', ...], surface, ...)`
-  const nameList = /describeBuiltinSecret\([\s\S]{0,400}?\[([^\]]*)\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = nameList.exec(source)) !== null) {
-    for (const quoted of match[1]!.matchAll(/'([A-Z][A-Z0-9_]{2,})'/g)) {
-      const name = quoted[1]!;
-      if (seen.has(name)) continue;
-      seen.add(name);
-      if (isClassified(name)) continue;
-      findings.push({
-        file: 'platform/src/platform/config/credential-scope-registry.ts',
-        line: 0,
-        snippet: name,
-        reason:
-          `"${name}" is a credential the channel account surface stores under, and nothing classifies it. `
-          + 'Nothing derives a bare name, so it will never migrate off a surface silo, declare it in CREDENTIAL_SCOPE_DECLARATIONS.',
-      });
-    }
+  for (const name of names) {
+    if (isClassified(name)) continue;
+    findings.push({
+      file: registryFile,
+      line: 0,
+      snippet: name,
+      reason:
+        `"${name}" is a credential a channel stores under, and nothing classifies it. `
+        + 'Nothing derives a bare name, so it will never migrate off a surface silo, declare it in CREDENTIAL_SCOPE_DECLARATIONS.',
+    });
   }
   return findings;
 }

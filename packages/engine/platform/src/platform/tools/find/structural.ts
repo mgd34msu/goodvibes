@@ -1,27 +1,12 @@
 import type { FindSearchOptions } from './shared.js';
 import { DEFAULT_PAGE_SIZE, paginateFindResult } from './pagination.js';
-import { extname } from 'node:path';
 import type { OutputOptions, StructuralQuery } from './shared.js';
 import { addBudgetStopWarning, addDiscoveryCutWarning, addFindWarning, collectFilesForSearch, createFindDiagnostics, makeCountResult, makeFilesResult, makeLocationsResult, readTextFile, validateSearchPath, withFindWarnings, withholdRestrictedFiles } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
 
-type AstGrepModule = typeof import('@ast-grep/napi');
-
-let astGrepModulePromise: Promise<AstGrepModule> | null = null;
-
-async function loadAstGrep(): Promise<AstGrepModule> {
-  astGrepModulePromise ??= import('@ast-grep/napi');
-  return astGrepModulePromise;
-}
+import { astGrepLangOf, astGrepParser as sharedAstGrepParser, loadAstGrep, type AstGrepModule } from '../shared/ast-grep.js';
 
 type StructuralLang = NonNullable<StructuralQuery['lang']>;
-
-/** The parser for each extension structural mode reads; anything else is not a candidate. */
-const LANG_BY_EXTENSION: Readonly<Record<string, StructuralLang>> = {
-  ts: 'ts', mts: 'ts', cts: 'ts', tsx: 'tsx',
-  js: 'js', mjs: 'js', cjs: 'js', jsx: 'jsx',
-  css: 'css', html: 'html', htm: 'html',
-};
 
 /**
  * The language a file is parsed as, decided from its name before it is
@@ -30,7 +15,8 @@ const LANG_BY_EXTENSION: Readonly<Record<string, StructuralLang>> = {
  * language's own extensions; neither uses the extension.
  */
 function structuralLang(filePath: string, override: StructuralLang | undefined, glob: string | undefined): StructuralLang | null {
-  const byExtension = LANG_BY_EXTENSION[extname(filePath).slice(1).toLowerCase()] ?? null;
+  // The extension table is the edit tool's too (tools/shared/ast-grep.ts); anything else is not a candidate.
+  const byExtension = astGrepLangOf(filePath);
   if (!override) return byExtension;
   if (glob) return override;
   return byExtension === override ? override : null;
@@ -39,14 +25,7 @@ function structuralLang(filePath: string, override: StructuralLang | undefined, 
 type StructuralParser = { parse: (src: string) => { root(): { findAll(pat: string): Array<{ text(): string; range(): { start: { line: number } } }> } } };
 
 function astGrepParser(astGrep: AstGrepModule, lang: StructuralLang): StructuralParser {
-  switch (lang) {
-    case 'ts': return astGrep.ts;
-    case 'tsx': return astGrep.tsx;
-    case 'js': return astGrep.js;
-    case 'jsx': return astGrep.jsx;
-    case 'css': return astGrep.css;
-    case 'html': return astGrep.html;
-  }
+  return sharedAstGrepParser(astGrep, lang);
 }
 
 async function scanStructuralQuery(

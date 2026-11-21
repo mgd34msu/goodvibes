@@ -65,7 +65,7 @@ export async function delegatedOperatorConnection(connection: CapturedOperatorCo
   signal?.throwIfAborted();
   const host = store.canonicalizePairingHost(connection.baseUrl);
   if (!host) {
-    throw new Error(`The connected host address ${connection.baseUrl} is not an http(s) origin, so this Agent's delegated credential cannot be bound to it; nothing was sent. Correct controlPlane.host and controlPlane.port.`);
+    throw new Error(`The connected host address ${connection.baseUrl} is not an http(s) origin, so this Agent's delegated credential cannot be bound to it; nothing was sent. Set daemon.connectedHost.url to the host's origin.`);
   }
   const stored = store.readHostPairing(homeDirectory, host);
   if (stored.status === 'unavailable') throw new Error(`${stored.reason} Nothing was sent.`);

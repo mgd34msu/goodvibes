@@ -496,6 +496,12 @@ function modeWhy(facts: AskFacts): string {
   return mode.inForce !== undefined ? mode.sentence : `${mode.chosen}: ${mode.asksBefore}`;
 }
 
+/** Where the asked call runs: an exec call's own working directory, else the request's, else the surface's. */
+function askDirectory(request: PermissionPromptRequest, facts: Pick<AskFacts, 'workingDirectory'>): string | undefined {
+  const runPlace = request.tool === 'exec' ? execRunPlace(request.args).workingDirectory : undefined;
+  return runPlace ?? request.workingDirectory ?? facts.workingDirectory;
+}
+
 /**
  * The question of a permission ask on its own ("Run this command?", "Delete
  * files? This can't be undone."), for a surface that shows only the heading.
@@ -504,7 +510,8 @@ export function approvalQuestion(request: PermissionPromptRequest, facts: Pick<A
   const kind = askKindOf(request);
   const subjectValues = permissionSubject(request.tool, request.args).values;
   const words = questionOf(kind, request, facts, subjectValues);
-  if (!undoFactOf(request.tool, request.args, request.analysis.reading, request.ownerOnly).cannotUndo) return words.question;
+  const directory = askDirectory(request, facts);
+  if (!undoFactOf(request.tool, request.args, request.analysis.reading, request.ownerOnly, directory).cannotUndo) return words.question;
   const destroys = kind === 'run-command' && subjectValues.length === 1 ? commandEffect(subjectValues[0]!)?.undoQuestion : undefined;
   return `${destroys ?? words.question} ${CANNOT_UNDO}`;
 }
@@ -517,10 +524,9 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   const kind = askKindOf(request);
   const subjectValues = permissionSubject(request.tool, request.args).values;
   const reading = request.analysis.reading;
-  const undo = undoFactOf(request.tool, request.args, reading, request.ownerOnly);
+  const directory = askDirectory(request, facts);
+  const undo = undoFactOf(request.tool, request.args, reading, request.ownerOnly, directory);
   const cannotUndo = undo.cannotUndo;
-  const runPlace = request.tool === 'exec' ? execRunPlace(request.args).workingDirectory : undefined;
-  const directory = runPlace ?? request.workingDirectory ?? facts.workingDirectory;
   const place = placeOf(directory, facts.homeDirectory);
   const words = questionOf(kind, request, facts, subjectValues);
   const commands = kind === 'run-command' ? subjectValues : [];

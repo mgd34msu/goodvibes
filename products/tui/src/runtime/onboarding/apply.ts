@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { createOnboardingConfigApply } from '@goodvibes/engine/terminal-shell/onboarding-config-apply';
 import {
   createOnboardingApplyPipeline,
@@ -14,9 +15,6 @@ import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes/eng
 const { readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
   createOnboardingFileHelpers();
 import { existsSync, readFileSync } from 'node:fs';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
 import { getOnboardingRuntimeStatePath, readOnboardingRuntimeState, writeOnboardingAcknowledgementState } from './state.ts';
 import { verifyOnboardingRequest } from './verify.ts';
 import type {
@@ -65,7 +63,7 @@ const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation
   Extract<OnboardingApplyOperation, { kind: 'set-config' }>
 >({
   validate: validateConfigValue,
-  projectPath: (deps) => deps.shellPaths.resolveProjectPath('tui', 'settings.json'),
+  projectPath: (deps) => deps.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'),
   readJsonObject,
   writeJsonObject,
   setNestedValue,

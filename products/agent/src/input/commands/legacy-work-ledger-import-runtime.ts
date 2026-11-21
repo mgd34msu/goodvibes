@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
 import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext } from '../command-registry.ts';
-import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
@@ -20,7 +20,9 @@ export const openAgentLegacyImport: OpenLegacyImportCommandSession = async (cont
     try {
       const current = requireShellPaths(context), config = context.platform.configManager;
       if (!resolveConnectedHostDialEnabled(config)) return unavailable('Connected-host dialing is disabled.');
-      const baseUrl = canonicalizePairingHost(connectedHostBaseUrl(config.get('controlPlane.host'), config.get('controlPlane.port')));
+      const address = resolveConnectedHostAddress(config);
+      if (address.refusal) return unavailable(address.refusal);
+      const baseUrl = canonicalizePairingHost(address.baseUrl);
       if (!baseUrl) return unavailable('Select an exact HTTP(S) daemon origin.');
       const pairing = readAgentHostPairing(current.homeDirectory, baseUrl);
       if (pairing.status === 'missing' && isLoopbackHost(new URL(baseUrl).hostname)) {

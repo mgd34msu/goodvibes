@@ -27,3 +27,30 @@
 .pairing-token-row .gv-row__meta {
   white-space: normal;
 }
+
+/* Pair a new device: the name form, then the link, its QR code and the one-time code. */
+.pair-new-device__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.pair-new-device {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.pair-new-device__qr {
+  width: min(240px, 100%);
+  height: auto;
+}
+
+.pair-new-device__link,
+.pair-new-device__code code {
+  overflow-wrap: anywhere;
+}

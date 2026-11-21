@@ -1,9 +1,20 @@
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes/engine/platform/platform/channels/telegram-cursor';
-import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { describeRetainedConnectionFailure, RetainedOperatorConnection, RetainedOperatorConnectionError } from './retained-operator-connection.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import type { SelectionItem, SelectionResult } from './selection-modal.js';
 import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
+
+/**
+ * Why a cursor-recovery step failed, in words a person can act on: a connection
+ * failure is named by its kind, anything else (an owner refusal, a refusal the
+ * host named) carries its own reason, terminal controls removed.
+ */
+function failureReason(error: unknown, again: string): string {
+  if (error instanceof RetainedOperatorConnectionError) return describeRetainedConnectionFailure(error, again);
+  return `${stripDangerousAnsi(summarizeError(error)).replace(/[.\s]+$/, '')}.`;
+}
 
 /** One controller shared by both terminals; products only choose their own
  * host/credential policy. Typed owner gestures cannot be supplied by a model. */
@@ -55,9 +66,11 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
         const result = readTelegramCursorMigrationResult(response.result);
         if (result.accountId !== preview.accountId || result.offset !== preview.offset) throw new Error('Different cursor acknowledgement');
         report(`[telegram] ${result.message}`); finish();
-      } catch {
-        report(dispatched ? '[telegram] Could not confirm migration. Refresh cursor recovery and channel status before trying again.'
-          : '[telegram] The host or credential changed. Reopen cursor recovery.'); finish();
+      } catch (error) {
+        logger.warn('[telegram] cursor migration commit failed', { dispatched, error: summarizeError(error) });
+        report(dispatched
+          ? `[telegram] Could not confirm migration: ${failureReason(error, 'refresh cursor recovery')} Refresh cursor recovery and channel status before trying again.`
+          : `[telegram] The migration was not sent: ${failureReason(error, 'reopen cursor recovery')} Reopen cursor recovery.`); finish();
       }
     };
     try {
@@ -72,6 +85,9 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
         { id: 'keep-blocked', label: 'Leave polling stopped', detail },
         { id: 'migrate', label: `This cursor belongs to @${username} — migrate and restart`, detail },
       ], result => { if (result.item.id === 'migrate') void commit(preview); else finish(); });
-    } catch { report('[telegram] Could not prepare cursor recovery. Check polling mode, the selected bot and its locally stored credential.'); finish(); }
+    } catch (error) {
+      logger.warn('[telegram] cursor recovery preview failed', { error: summarizeError(error) });
+      report(`[telegram] Could not prepare cursor recovery: ${failureReason(error, 'reopen cursor recovery')} Check polling mode, the selected bot and its locally stored credential.`); finish();
+    }
   };
 }

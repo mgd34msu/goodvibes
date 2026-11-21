@@ -200,7 +200,7 @@ export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
       operator: { terminalOnly: 'Background commands run in this terminal.' },
       async run(_values, ctx) {
         const policy = policyOf();
-        if (!policy.processes) throw commandRefusal('The terminal app shows background commands in its process monitor (F2).');
+        if (!policy.processes) throw commandRefusal('The terminal app shows background commands in Your agents (F2).');
         return policy.processes(ctx);
       },
     }),

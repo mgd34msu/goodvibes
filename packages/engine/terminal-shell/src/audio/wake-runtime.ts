@@ -209,28 +209,35 @@ export function createTerminalWakeRuntime(policy: {
       lifetime = controller;
       const owned = () => lifetime === controller && !controller.signal.aborted;
       let settings = initialSettings;
+      // Wake is enabled but its models are not usable, so nothing listens: the
+      // notice is kept as the stopped chip's reason, never shown as "wake off".
+      const stopWithoutModels = (message: string): void => {
+        controller.abort();
+        lifetime = null;
+        refusal = { kind: 'wake-latched', message: message.replace(/^\[Wake\]\s*/, '') };
+        deps.notify(message);
+        deps.render();
+      };
       if (!provision.ready) {
         if (!policy.provisionOnEnable || !deps.ensureProvisioned) {
-          deps.notify(policy.missingModels(provision.reason ?? 'not-provisioned'));
-          deps.render();
+          stopWithoutModels(policy.missingModels(provision.reason ?? 'not-provisioned'));
           return;
         }
         deps.notify('[Wake] The wake models are not on this host yet, fetching and verifying them now.');
         deps.render();
         const outcome = await deps.ensureProvisioned();
         if (!owned()) return;
-        deps.notify(`[Wake] ${outcome.message}`);
         if (!outcome.ready) {
-          deps.render();
+          stopWithoutModels(`[Wake] ${outcome.message}`);
           return;
         }
+        deps.notify(`[Wake] ${outcome.message}`);
         const after = readProvision();
         vadReady = after.vadReady;
         if (!after.ready) {
-          deps.notify(
+          stopWithoutModels(
             `[Wake] The wake models still do not verify on disk (${after.reason ?? 'not-provisioned'}), so nothing is listening.`,
           );
-          deps.render();
           return;
         }
         settings = resolve();

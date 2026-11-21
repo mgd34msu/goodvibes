@@ -12,7 +12,7 @@
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
  */
-import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes/engine/platform/platform/calendar';
+import { providerProfile, type CalendarProviderId, type DeviceCodeFlowStart, type EventWindow, type MergedCalendarEvent } from '@goodvibes/engine/platform/platform/calendar';
 import type { CalendarProvider } from '@goodvibes/engine/terminal-shell/calendar-command';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
@@ -21,7 +21,6 @@ import { commandRefusal } from './confirmation.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
 import type { ConfigKey } from '../../config/index.ts';
-import { CALENDAR_OAUTH_CLIENT_ID_KEYS, CALENDAR_OAUTH_CLIENT_SECRET_KEYS } from '../../agent/calendar/calendar-oauth-service.ts';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
@@ -157,7 +156,7 @@ export async function useCalendarApp(ctx: CommandContext, account: CalendarProvi
   const configManager = ctx.platform.configManager;
   const homeDir = configManager.getHomeDirectory();
   try {
-    await routeConfigWrite(configManager, CALENDAR_OAUTH_CLIENT_ID_KEYS[provider], id, homeDir ? { homeDir } : {});
+    await routeConfigWrite(configManager, providerProfile(provider).clientIdConfigKey, id, homeDir ? { homeDir } : {});
   } catch (error) {
     throw commandRefusal(`Nothing was kept: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -165,7 +164,7 @@ export async function useCalendarApp(ctx: CommandContext, account: CalendarProvi
     // The secret-backed writer needs the settings store's dynamic setter.
     const settings = configManager as unknown as { get: (key: ConfigKey) => unknown; setDynamic: (key: ConfigKey, value: unknown) => void; save: () => void };
     try {
-      await persistSecretBackedConfigValue(settings, requireSecretsManager(ctx), CALENDAR_OAUTH_CLIENT_SECRET_KEYS[provider] as unknown as ConfigKey, clientSecret);
+      await persistSecretBackedConfigValue(settings, requireSecretsManager(ctx), providerProfile(provider).clientSecretRefConfigKey, clientSecret);
       settings.save();
     } catch (error) {
       throw commandRefusal(`The client id was kept; the client secret was not: ${error instanceof Error ? error.message : String(error)}`, `Give the secret again: /calendar use-app ${account} ${id} --secret`);

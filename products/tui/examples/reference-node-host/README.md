@@ -48,9 +48,10 @@ whatever state was already saved, and `once` runs a single
 heartbeat-and-work-pull pass and prints its summary.
 
 The client dials the local daemon's control plane: `baseUrl` in the config
-when set, else `GOODVIBES_DAEMON_URL`, else `http://127.0.0.1:<controlPlane.port>`
-from `~/.goodvibes/tui/settings.json` (under `GOODVIBES_HOME` when that is
-set), else port 3421.
+when set, else `GOODVIBES_DAEMON_URL`, else the address the daemon's own
+settings bind (`controlPlane.hostMode`, `host`, `port` and `tls.mode` in
+`~/.goodvibes/daemon/settings.json`, under `GOODVIBES_HOME` or
+`GOODVIBES_DAEMON_HOME` when set), else `http://127.0.0.1:3421`.
 
 For a first pairing run, the daemon must approve the pair request before verification succeeds. If you supply an `operatorToken` in your config, the reference client can approve its own request through the operator endpoint for local testing.
 

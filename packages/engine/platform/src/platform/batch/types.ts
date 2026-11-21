@@ -29,6 +29,9 @@ export type DaemonBatchJobStatus =
  *  - start-up reconcile of a submitting job left by a stopped daemon: found at
  *    the provider -> submitted | running | failed; not there -> queued; the
  *    provider cannot be asked -> failed
+ *  - start-up recovery of a queued row whose submission file holds the
+ *    provider's answer: the file proves the job reached submitting, so it
+ *    moves queued -> submitting -> submitted | running | failed
  *  - cancelJob: queued | submitting -> cancelled
  *  - poll: submitted -> running; provider terminal -> completed | failed | cancelled | expired;
  *    unretryable poll failure -> dead_lettered

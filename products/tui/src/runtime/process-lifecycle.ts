@@ -10,7 +10,8 @@
  * shutdown. All asynchronous cleanup races a 3s hard timeout, the recovery
  * file is deleted only when the durable save completed,
  * signal exit codes are preserved (SIGHUP -> 129, otherwise 143; uncaught -> 1;
- * exitApp -> 0), and repeated exit requests join one teardown promise.
+ * exitApp -> 0), a termination signal runs the same teardown as exitApp, and
+ * repeated exit requests join one teardown promise.
  *
  * Some captured values are late-bound or mutable in main(): the InputHandler, the
  * render closure, and the terminal output guard are constructed AFTER this factory
@@ -39,7 +40,7 @@ import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { VERSION } from '../version.ts';
 import type { BootstrapContext } from './bootstrap.ts';
-import { ShutdownReleaseError } from './bootstrap-shutdown.ts';
+import { ShutdownReleaseError } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 import type { InputHandler } from '../input/handler.ts';
 import type { ConversationMessageSnapshot } from '../core/conversation.ts';
 
@@ -116,7 +117,8 @@ export interface ProcessLifecycleDeps {
 }
 
 export interface ProcessLifecycleHandlers {
-  readonly exitApp: () => Promise<void>;
+  /** The graceful teardown; `code` is the process exit code (0 when omitted). */
+  readonly exitApp: (code?: number) => Promise<void>;
   readonly enterTerminal: () => void;
   readonly suspendTerminal: () => void;
   readonly restoreTerminal: () => void;
@@ -308,7 +310,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
       .finally(() => { clearTimeout(deadline); process.exit(code); });
   };
 
-  // Signals and crashes never reach ctx.shutdown, and a graceful shutdown can
+  // A crash never reaches ctx.shutdown, and a signal or graceful shutdown can
   // lose its deadline: write the recovery snapshot first, synchronously, so the
   // next launch can restore the in-flight turn. Only when the conversation
   // changed since its last write (a store save or a snapshot): otherwise what
@@ -348,11 +350,14 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     writeExitRecoverySnapshot();
     bestEffort('termination signal logging', () => logger.error(`Received ${signal}: terminal restored, exiting`, {}));
     bestEffort('activity log flush', flushActivityLogSync);
-    exitAfterRelease(signal === 'SIGHUP' ? 129 : 143);
+    // The full teardown: ! commands, /test runs and task-lifetime processes run in their own process groups, so
+    // the terminal's hangup never reaches them; the unsubscribes and ctx.shutdown stop them. A repeated signal
+    // joins the same teardown.
+    void exitApp(signal === 'SIGHUP' ? 129 : 143);
   };
   const exitListener = (): void => { restoreTerminal(); void releaseSession(); };
 
-  const performExit = async (): Promise<void> => {
+  const performExit = async (code: number): Promise<void> => {
     writeExitRecoverySnapshot();
     // Start each owner in order, attach rejection handlers immediately, and let
     // asynchronous drains finish together after the synchronous terminal hand-back.
@@ -437,18 +442,18 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     }
     bestEffort('session lock release', () => closeSessionHere(ctx.services.surface, ctx.runtime.sessionId));
     bestEffort('activity log flush', flushActivityLogSync);
-    process.exit(0);
+    process.exit(code);
   };
 
   let exitPromise: Promise<void> | undefined;
-  const exitApp = (): Promise<void> => {
+  const exitApp = (code = 0): Promise<void> => {
     if (exitPromise) return exitPromise;
     let resolveExit!: () => void;
     let rejectExit!: (error: unknown) => void;
     // Publish ownership before invoking a cleanup callback: one can reenter
     // exitApp synchronously, and every caller must wait for this same drain.
     exitPromise = new Promise<void>((resolve, reject) => { resolveExit = resolve; rejectExit = reject; });
-    void performExit().then(resolveExit, rejectExit);
+    void performExit(code).then(resolveExit, rejectExit);
     return exitPromise;
   };
 

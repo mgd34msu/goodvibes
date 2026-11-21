@@ -6,16 +6,19 @@
  * method catalog, where the daemon's email handlers own IMAP, SMTP, settings
  * resolution, the credential read and the confirmation gate. A send asks
  * first (the description marks it as sending something outside this machine)
- * and only then sets both flags the daemon's gate demands. The wire has no
- * idempotency key, so this process refuses to send the exact same message
- * twice unless "Send it again" (`--again`) is chosen, which covers a retry
- * after a timeout.
+ * and only then sets both flags the daemon's gate demands. Each message gets
+ * one `clientSendId` when it is first sent, and every repeat of that message
+ * carries the same id, so the daemon answers a repeat within ten minutes with
+ * the first answer instead of mailing the recipients again. A message that was
+ * sent is not sent again unless "Send it again" (`--again`) is chosen, which
+ * then sends a new copy under a new id.
  *
  * Message bodies are attacker-controlled text. They are printed as transcript
  * output, which is display-only and never enters the model's message history,
  * so a body cannot smuggle instructions into a turn by being read here.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
 import { registerMailCommand, type MailMessage } from '@goodvibes/engine/terminal-shell/mail-command';
@@ -23,8 +26,8 @@ import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
-  claimIrreversibleWrite,
   READ_INVOCATION_CONTEXT,
+  daemonErrorCode,
   errorText,
   probeConnection,
   renderConnectionStatus,
@@ -156,17 +159,49 @@ async function compose(ctx: CommandContext, verb: 'draft' | 'send', message: Mai
     });
   }
   // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
-  if (!claimIrreversibleWrite(gateway, `mail.send\0${message.to}\0${message.subject}\0${message.body}`, again)) {
-    throw commandRefusal('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again.',
-      'Check the Sent folder first; to send it anyway choose "Send it again" (/mail send ... --again)');
+  const sends = sendIdsOf(gateway);
+  const fingerprint = JSON.stringify([message.to, message.subject, message.body]);
+  const earlier = sends.get(fingerprint);
+  if (earlier?.sent && !again) {
+    throw commandRefusal('This exact message was already sent from this session, so it was not sent again.',
+      'Check the Sent folder first; to send another copy choose "Send it again" (/mail send ... --again)');
   }
-  return await withStatusOnFailure(gateway, 'The message was not sent', async () => {
+  // A message not yet confirmed sent keeps its id on every repeat, --again included; only a new copy of a sent one gets a new id.
+  const attempt = earlier && !earlier.sent ? earlier : { clientSendId: randomUUID().replaceAll('-', ''), sent: false };
+  sends.set(fingerprint, attempt);
+  try {
     const result = await gateway.invoke('email.send', {
       ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: { to: message.to, subject: message.subject, body: message.body, confirm: true },
+      body: { to: message.to, subject: message.subject, body: message.body, confirm: true, clientSendId: attempt.clientSendId },
     }) as OperatorMethodOutput<'email.send'>;
+    attempt.sent = true;
     return `Sent to ${message.to} at ${result.sentAt} (message id ${result.messageId}).`;
-  });
+  } catch (error) {
+    if (error instanceof Error && 'refusal' in error) throw error;
+    if (daemonErrorCode(error) === 'EMAIL_DELIVERY_UNCONFIRMED') {
+      throw commandRefusal(`The send was not confirmed; it may have gone (${errorText(error)}).`,
+        'Check the Sent folder; sending it again with /mail send repeats the same message, which is not delivered twice within ten minutes');
+    }
+    throw commandRefusal(`The message was not sent: ${errorText(error)}\n${renderConnectionStatus(await probeConnection(gateway, 'mail'))}`);
+  }
+}
+
+/** One mail send attempt: the id every repeat of the message carries, and whether it was confirmed sent. */
+interface MailSendAttempt {
+  readonly clientSendId: string;
+  sent: boolean;
+}
+
+/** Per gateway, each message (recipient, subject and body) this process has sent or tried to send. */
+const mailSendIds = new WeakMap<object, Map<string, MailSendAttempt>>();
+
+function sendIdsOf(gateway: object): Map<string, MailSendAttempt> {
+  let sends = mailSendIds.get(gateway);
+  if (!sends) {
+    sends = new Map();
+    mailSendIds.set(gateway, sends);
+  }
+  return sends;
 }
 
 export function registerMailRuntimeCommands(registry: CommandRegistry): void {

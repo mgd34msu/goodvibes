@@ -1,5 +1,5 @@
-import { constantTimeEquals, noticeUnsupportedAttachment, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, noticeUnsupportedAttachment, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
@@ -38,15 +38,8 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
   );
   if (verifyCredential.state === 'unresolvable') return surfaceCredentialUnavailable('whatsapp', verifyCredential);
   const verifyToken = verifyCredential.state === 'resolved' ? verifyCredential.value : '';
-  const signingCredential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.whatsapp.signingSecret' },
-    { kind: 'registry', service: 'whatsapp', field: 'signingSecret' },
-    { kind: 'env', name: 'WHATSAPP_SIGNING_SECRET' },
-    { kind: 'env', name: 'WHATSAPP_BRIDGE_TOKEN' },
-  );
+  const signingCredential = await resolveInboundCredential(context, 'whatsapp');
   if (signingCredential.state === 'unresolvable') return surfaceCredentialUnavailable('whatsapp', signingCredential);
-  const signingSecret = signingCredential.state === 'resolved' ? signingCredential.value : '';
   const url = new URL(req.url);
   if (req.method === 'GET') {
     const mode = url.searchParams.get('hub.mode') ?? '';
@@ -60,9 +53,8 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
 
   const rawBody = await readTextBodyWithinLimit(req);
   if (rawBody instanceof Response) return rawBody;
-  if (!signingSecret) {
-    return Response.json({ error: 'Webhook not configured' }, { status: 503 });
-  }
+  if (signingCredential.state === 'absent') return surfaceCredentialAbsent('whatsapp', signingCredential.setting);
+  const signingSecret = signingCredential.value;
   if (provider === 'meta-cloud') {
     const signature = req.headers.get('x-hub-signature-256') ?? '';
     if (!verifySha256HmacSignature(rawBody, signingSecret, signature)) {

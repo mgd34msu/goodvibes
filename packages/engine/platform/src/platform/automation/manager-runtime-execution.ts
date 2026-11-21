@@ -17,11 +17,11 @@ import {
   buildAutomationExecutionIntent,
   buildAutomationExecutionContext,
   canSettleStoredRun,
-  jobEnablement,
+  nextJobEnablement,
 } from './manager-runtime-helpers.js';
 import { executeCheckinJob, type AutomationCheckinEvaluator } from './checkin-execution.js';
 import { markWorkAuthorized } from '../agents/conversation-continuation.js';
-import type { AutomationRunSettlement } from './manager-runtime-reconcile.js';
+import type { AutomationRunEnding, AutomationRunSettlement } from './manager-runtime-reconcile.js';
 import type { Fence } from '../utils/owner-fence.js';
 
 export interface AutomationManagerExecutionContext {
@@ -74,8 +74,8 @@ export interface AutomationManagerExecutionContext {
   readonly emitJobAutoDisabled?: ((job: AutomationJob, reason: string) => void) | undefined;
   readonly cancelTask?: ((agentId: string) => void) | undefined;
   readonly applyFailureToJob: (job: AutomationJob, timestamp: number, countRun?: boolean) => AutomationJob;
-  /** Ends a running run the one way every run ends (see settleAutomationRun). */
-  readonly settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string) => AutomationRun;
+  /** Ends a running run the one way every run ends (see settleAutomationRun); the caller saves, then calls `followUp`. */
+  readonly settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string) => AutomationRunEnding;
   readonly jobs: Map<string, AutomationJob>;
   readonly runs: Map<string, AutomationRun>;
   /**
@@ -713,8 +713,7 @@ export function applyFailureToJob(job: AutomationJob, timestamp: number, countRu
     lastRunAt: timestamp,
     runCount: countRun ? job.runCount + 1 : job.runCount,
     failureCount: nextFailureCount,
-    ...(shouldPause ? jobEnablement(false) : {}),
-    pausedReason: shouldPause ? 'failure-threshold-reached' : job.pausedReason,
+    ...(shouldPause ? nextJobEnablement(job, false, job.schedule, timestamp, 'failure-threshold-reached') : {}),
     updatedAt: timestamp,
   };
 }

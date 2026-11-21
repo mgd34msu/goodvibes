@@ -20,6 +20,7 @@ export type SetupTopicId =
   | 'local-only'
   | 'browser'
   | 'other-devices'
+  | 'connect-daemon'
   | 'webhooks'
   | 'chat-apps'
   | 'cloudflare'
@@ -52,6 +53,7 @@ export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
   'local-only': { label: 'Keep everything on this computer', word: 'local-only', sentence: 'Opens the form that turns off the browser, network and webhook access.' },
   'browser': { label: 'Open GoodVibes in a browser', word: 'browser', sentence: 'Opens the form for using GoodVibes from a web browser on this computer or your network.' },
   'other-devices': { label: 'Use it from other devices', word: 'other-devices', sentence: 'Opens the form for letting your other devices reach GoodVibes: addresses and ports.' },
+  'connect-daemon': { label: 'Use a daemon on another computer', word: 'connect-daemon', sentence: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.' },
   'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens the form for receiving webhooks and events from other tools.' },
   'chat-apps': { label: 'Connect chat apps and services', word: 'chat-apps', sentence: 'Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services.' },
   'cloudflare': { label: 'Use Cloudflare', word: 'cloudflare', sentence: 'Opens the form for using Cloudflare for batch and remote work.' },
@@ -70,7 +72,7 @@ export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
 };
 
 /** The topics gathered under one row of the first screen, so the list stays short. */
-const REACH_GROUP: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'webhooks', 'cloudflare'];
+const REACH_GROUP: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'connect-daemon', 'webhooks', 'cloudflare'];
 const FEATURE_GROUP: readonly SetupTopicId[] = ['safety', 'memory', 'telemetry', 'automation', 'devices-voice', 'provider-behaviour', 'advanced'];
 
 /** What a program does when one of `/setup`'s actions is chosen; it returns the line to print, if any. */

@@ -17,7 +17,8 @@ import { attachRuntimeNotifications, RUNTIME_NOTIFICATION_EVENTS, type RuntimeNo
 import { ServiceRegistry } from '../config/service-registry.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
-import { resolveSecretInput } from '../config/secret-refs.js';
+import { resolveSurfaceSecret, type SurfaceSecretReadDeps } from '../channels/builtin/surface-secrets.js';
+import { channelCredentials } from '../channels/credential-holder.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 
 const NOTIFICATION_EVENT_IDS: ReadonlySet<string> = new Set(RUNTIME_NOTIFICATION_EVENTS);
@@ -46,7 +47,12 @@ type NotificationDestination = TargetRef<'notification-destination'>;
 
 interface ChannelTransport {
   readonly channel: NotifierChannel;
-  readonly send: (text: string) => Promise<void>;
+  /**
+   * Posts `text`. `id` is the queue entry's identity, the same on every retry
+   * and resend: the Discord bot sends it as the message nonce, so Discord drops
+   * a repeat whose first post arrived but whose answer was lost.
+   */
+  readonly send: (text: string, id: string) => Promise<void>;
   /** Where `send` posts. A queued retry or a resend goes only to this destination. */
   readonly destination: NotificationDestination;
 }
@@ -124,36 +130,32 @@ type NotifierSettings = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager,
  */
 const CHANNELS_MAX_AGE_MS = 10 * 60_000;
 
-/** Resolve the Slack and Discord notification channels from the services, settings and environment. */
+/**
+ * Resolve the Slack and Discord notification channels from the services,
+ * settings and environment, each credential read from its setup-schema target
+ * the way status, delivery and the inbound webhooks read it
+ * (channels/builtin/surface-secrets.ts): a setting whose reference does not
+ * resolve gives no channel, never the environment's account.
+ */
 async function resolveNotifierChannels(
-  serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
+  credentials: SurfaceSecretReadDeps,
   configManager: NotifierSettings | null,
-  resolveConfigSecret: (value: unknown) => Promise<string | null>,
 ): Promise<NotifierChannelSetup> {
-  const [
-    slackWebhookFromService,
-    slackTokenFromService,
-    discordWebhookFromService,
-    discordTokenFromService,
-    slackTokenFromConfig,
-    discordTokenFromConfig,
-  ] = await Promise.all([
-    serviceRegistry.resolveSecret('slack', 'webhookUrl'),
-    serviceRegistry.resolveSecret('slack', 'primary'),
-    serviceRegistry.resolveSecret('discord', 'webhookUrl'),
-    serviceRegistry.resolveSecret('discord', 'primary'),
-    configManager ? resolveConfigSecret(configManager.get('surfaces.slack.botToken')) : null,
-    configManager ? resolveConfigSecret(configManager.get('surfaces.discord.botToken')) : null,
+  const [slackWebhookUrl, slackBotToken, discordWebhookUrl, discordBotToken] = await Promise.all([
+    resolveSurfaceSecret(credentials, 'slack', 'webhookUrl'),
+    resolveSurfaceSecret(credentials, 'slack', 'primary'),
+    resolveSurfaceSecret(credentials, 'discord', 'webhookUrl'),
+    resolveSurfaceSecret(credentials, 'discord', 'primary'),
   ]);
   const setting = (key: 'surfaces.slack.defaultChannel' | 'surfaces.discord.defaultChannelId'): string | undefined => {
     const value = configManager?.get(key);
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   };
 
-  const slackWebhook = slackWebhookFromService ?? process.env.SLACK_WEBHOOK_URL;
-  const slackToken = slackTokenFromService ?? slackTokenFromConfig ?? process.env.SLACK_BOT_TOKEN;
-  const discordWebhook = discordWebhookFromService ?? process.env.DISCORD_WEBHOOK_URL;
-  const discordToken = discordTokenFromService ?? discordTokenFromConfig ?? process.env.DISCORD_BOT_TOKEN;
+  const slackWebhook = slackWebhookUrl ?? undefined;
+  const slackToken = slackBotToken ?? undefined;
+  const discordWebhook = discordWebhookUrl ?? undefined;
+  const discordToken = discordBotToken ?? undefined;
   // The webhook wins when both exist: it is the address the owner gave for notifications.
   const slackChannel = slackWebhook ? undefined : slackToken ? setting('surfaces.slack.defaultChannel') : undefined;
   const discordChannelId = discordWebhook ? undefined : discordToken ? setting('surfaces.discord.defaultChannelId') : undefined;
@@ -188,7 +190,12 @@ async function resolveNotifierChannels(
 function transportFor(channel: NotifierChannel, integration: SlackIntegration | DiscordIntegration, target: string | undefined, webhookUrl: string | undefined): ChannelTransport {
   // A default channel means the bot posts it; otherwise the incoming webhook.
   const destination = destinationOf(channel, target, webhookUrl);
-  if (target) return { channel, destination, send: (text) => integration.postMessage(target, text) };
+  if (target) {
+    if (integration instanceof DiscordIntegration) {
+      return { channel, destination, send: (text, id) => integration.postMessage(target, text, undefined, {}, `notification:${id}`) };
+    }
+    return { channel, destination, send: (text) => integration.postMessage(target, text) };
+  }
   return { channel, destination, send: (text) => integration.postWebhook(text) };
 }
 
@@ -263,7 +270,7 @@ export class Notifier implements NotificationDeadLetterSource {
    * Create a Notifier from configured services, settings and environment variables.
    */
   static async fromConfig(
-    serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
+    serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'> & Partial<Pick<ServiceRegistry, 'get'>>,
     options: {
       featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null;
       metadataOnly?: NotificationPrivacyReader;
@@ -275,21 +282,21 @@ export class Notifier implements NotificationDeadLetterSource {
        * channels are resolved again on each one.
        */
       configManager?: NotifierSettings | null;
-      /** Resolves a config value that is a secret reference; defaults to {@link resolveSecretInput}. */
-      resolveConfigSecret?: (value: unknown) => Promise<string | null>;
       /**
        * Resolves the `goodvibes://secrets/...` references an account setup flow stores
-       * as bot tokens. Without it (or `resolveConfigSecret`) a stored reference cannot
-       * be read and the channel is not built from config.
+       * as bot tokens. Without it a stored reference cannot be read and the channel
+       * is not built from config.
        */
       secretsManager?: (Pick<SecretsManager, 'get' | 'getGlobalHome'> & Partial<Pick<SecretsManager, 'onDidChange'>>) | null;
     } = {},
   ): Promise<Notifier> {
-    const resolveConfigSecret = options.resolveConfigSecret ?? ((value: unknown) => resolveSecretInput(value, options.secretsManager
-      ? { resolveLocalSecret: (key) => options.secretsManager!.get(key), homeDirectory: options.secretsManager.getGlobalHome() }
-      : undefined, 'dispatch'));
     const configManager = options.configManager ?? null;
-    const resolveChannels = (): Promise<NotifierChannelSetup> => resolveNotifierChannels(serviceRegistry, configManager, resolveConfigSecret);
+    const credentials: SurfaceSecretReadDeps = {
+      configManager: configManager ?? { get: () => undefined },
+      serviceRegistry,
+      secretsManager: options.secretsManager ?? undefined,
+    };
+    const resolveChannels = (): Promise<NotifierChannelSetup> => resolveNotifierChannels(credentials, configManager);
     const notifier = new Notifier({
       ...await resolveChannels(),
       resolveChannels,
@@ -397,7 +404,7 @@ export class Notifier implements NotificationDeadLetterSource {
         // the notification was queued for: a channel changed or removed meanwhile
         // ends it in the failed list with the reason, never at the new place.
         const outcome = await this._queue.enqueue(transport.channel, event, envelope,
-          () => this.sendToDestination(envelope, transport.channel, transport.destination),
+          (attempt) => this.sendToDestination(envelope, transport.channel, transport.destination, attempt.id),
           { target: encodeDestination(transport.destination) });
         if (outcome === 'dead_letter') {
           failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; resend it with /notify resend or notifications.deadLetters.replay.`, 'terminal'));
@@ -469,7 +476,7 @@ export class Notifier implements NotificationDeadLetterSource {
       const reviewed = options.toCurrent === true
         ? current.get(dlqEntry.channel)?.destination ?? decodeDestination(dlqEntry.channel, dlqEntry.target)
         : decodeDestination(dlqEntry.channel, dlqEntry.target);
-      await this.sendToDestination(envelope, dlqEntry.channel, reviewed);
+      await this.sendToDestination(envelope, dlqEntry.channel, reviewed, dlqEntry.id);
     }, sendable, options.toCurrent === true
       ? (dlqEntry) => {
         const now = current.get(dlqEntry.channel);
@@ -491,21 +498,23 @@ export class Notifier implements NotificationDeadLetterSource {
    * both, so the queue ends it in the failed list instead of retrying it at a
    * place nobody chose for it.
    */
-  private async sendToDestination(envelope: NotificationEnvelope, channel: string, reviewed: TargetRef | null): Promise<void> {
+  private async sendToDestination(envelope: NotificationEnvelope, channel: string, reviewed: TargetRef | null, id: string): Promise<void> {
     if (this.channelsMayBeStale()) await this.refresh();
     const transport = this.transports.find((candidate) => candidate.channel === channel);
     const changes = destinationChanges(channel, reviewed, transport);
     if (changes.length > 0 || !transport) {
       throw new DeliveryError(`${describeChanges(channel, changes)}; the notification was not sent. Resend it with /notify resend <id> --to-current to send it there.`, 'terminal');
     }
-    await this.postEnvelope(envelope, transport.send);
+    await this.postEnvelope(envelope, (text) => transport.send(text, id));
   }
 
   private async postEnvelope(envelope: NotificationEnvelope, send: (text: string) => Promise<void>): Promise<void> {
     try { await send(envelope.prepare().text); }
     catch (error) {
-      // A refused token or a moved webhook: the next delivery resolves the channels again.
+      // A refused token or a moved webhook: the next delivery resolves the channels
+      // again, and a refused credential is no longer served from the process's holder.
       this._stale = true;
+      channelCredentials.releaseOnRefusal(error);
       throw error;
     }
     finally { envelope.refreshPrivacy(); }

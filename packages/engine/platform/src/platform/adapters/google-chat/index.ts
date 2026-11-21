@@ -1,7 +1,7 @@
 import type { SurfaceAdapterContext } from '../types.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
-import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit, readRecord, readString, ingressAnswer, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit, readRecord, readString, ingressAnswer, noticeUnsupportedAttachment, hasAttachments, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
 /**
  * Whether the message addresses the bot: the bridge's own `mentioned` flag, else
@@ -25,14 +25,9 @@ function googleChatMentioned(
 }
 
 export async function handleGoogleChatSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.googleChat.verificationToken' },
-    { kind: 'registry', service: 'google-chat', field: 'signingSecret' },
-    { kind: 'env', name: 'GOOGLE_CHAT_VERIFICATION_TOKEN' },
-  );
+  const credential = await resolveInboundCredential(context, 'google-chat');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('google-chat', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('google-chat', credential.setting);
   const rawBody = await readTextBodyWithinLimit(req);
   if (rawBody instanceof Response) return rawBody;
   const body = parseJsonRecord(rawBody);

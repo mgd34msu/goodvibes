@@ -341,7 +341,7 @@ export async function classifyKnowledgeError(error: unknown, connection: AgentKn
         ? { ok: false, kind: 'connected_host_incompatible', ...base, status, error: message,
           next: ['Update GoodVibes on the connected host to the version this Agent was built with.'] }
         : { ok: false, kind: 'connected_host_route_unavailable', ...base, status, error: message,
-          next: ['Check that controlPlane.host and controlPlane.port point at the GoodVibes daemon, then retry.'] };
+          next: ['Check that daemon.connectedHost.url (or, for the daemon on this machine, controlPlane.host and controlPlane.port) points at the GoodVibes daemon, then retry.'] };
     }
     return { ok: false, kind: 'connected_host_error', ...base, status, error: message,
       next: [status >= 500 ? 'Retry; if it keeps failing, read the daemon log on the host.' : 'Correct the request as the host says, then retry.'] };
@@ -349,7 +349,7 @@ export async function classifyKnowledgeError(error: unknown, connection: AgentKn
   const classified = classifyFailure(error);
   if (classified?.category === 'network' || classified?.category === 'timeout') {
     return { ok: false, kind: 'connected_host_unavailable', ...base, error: hostMessage(error),
-      next: ['Start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port, then retry.'] };
+      next: ['Start the GoodVibes daemon (goodvibes-daemon), or check daemon.connectedHost.url (for the daemon on this machine, controlPlane.host and controlPlane.port), then retry.'] };
   }
   return { ok: false, kind: 'connected_host_error', ...base, error: hostMessage(error) };
 }

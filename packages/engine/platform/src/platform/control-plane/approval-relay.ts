@@ -12,8 +12,10 @@
  * `APPROVAL_DECIDE` to A, resent at 0.5, 1 and 2 s until A answers or 5 s
  * pass. A applies it through its own broker, the same transition path a local
  * decision takes, with the actor `<person>@<B>` and the request id on the
- * decision: a resend after A applied it is recognised by that id and answered
- * "applied", so a decision applies once with no dedupe table. With no answer
+ * decision (an answer) or on the audit entry it writes (a claim or cancel): a
+ * resend that arrives while the first apply runs waits for it and answers with
+ * its outcome, and one that arrives after it is recognised by that id on the
+ * record and answered "applied", so an action applies once. With no answer
  * in 5 s B reports `NODE_UNREACHABLE` with state `unknown`, never failed or
  * done.
  *
@@ -36,6 +38,7 @@ import { randomUUID } from 'node:crypto';
 import type { ClusterEnvelope } from '../cluster/protocol-envelope.js';
 import type { GroupTenantHost } from '../cluster/group-tenants.js';
 import { logger } from '../utils/logger.js';
+import { REMEMBER_TIER_VALUES, type RememberTier } from '../permissions/approval-rules.js';
 import type { ApprovalActionInput, ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
@@ -85,7 +88,9 @@ export interface RelayedDecisionInput {
   readonly reason?: string | undefined;
   readonly note?: string | undefined;
   readonly selectedHunks?: readonly number[] | undefined;
+  /** An answer that keeps itself: the home node saves the rule before it records the answer, as for a local one. */
   readonly remember?: boolean | undefined;
+  readonly rememberTier?: RememberTier | undefined;
 }
 
 /** A relayed action's outcome on B: the home node's outcome, or NODE_UNREACHABLE. */
@@ -150,6 +155,8 @@ export class ApprovalRelay {
   readonly #heard = new Map<string, { readonly boot: string; readonly setRevision: number }>();
   /** Relayed decisions waiting for the home node's answer. */
   readonly #waiting = new Map<string, (result: Record<string, unknown>) => void>();
+  /** On the home node: relayed actions being applied, by sending node and request id, for the length of the apply. */
+  readonly #applying = new Map<string, Promise<RelayApplyOutcome>>();
   readonly #stops: (() => void)[] = [];
 
   constructor(host: GroupTenantHost, broker: ApprovalRelayBroker, options: ApprovalRelayOptions = {}) {
@@ -230,7 +237,7 @@ export class ApprovalRelay {
     const known = this.get(node, id);
     if (result['timedOut'] === true) {
       return { applied: false, record: known, reading: known ? readApproval(known, viewer, this.#now(), false) : null,
-        refusal: approvalRefusal('NODE_UNREACHABLE', known, `${formatApprovalRef({ node, id })} belongs to a node that did not answer in 5 seconds; whether the ${input.action} was applied is not known.`) };
+        refusal: approvalRefusal('NODE_UNREACHABLE', known, `${formatApprovalRef({ node, id })} belongs to a node that did not answer in ${this.#decideTimeoutMs / 1_000} seconds; whether the ${input.action} was applied is not known.`) };
     }
     const summary = readSummary(result['summary']);
     if (summary) this.#remember(summary);
@@ -302,40 +309,64 @@ export class ApprovalRelay {
     }
   }
 
-  /** On the home node: apply a relayed decision through this broker's own transition path. */
+  /**
+   * On the home node: apply a relayed decision through this broker's own
+   * transition path, once per request id. A resend that arrives while the
+   * first apply is still running waits for that apply and answers with its
+   * outcome; one that arrives after it is recognised on the record.
+   */
   async #decide(body: Record<string, unknown>, from: string): Promise<void> {
     const requestId = typeof body['requestId'] === 'string' ? body['requestId'] : null;
     const id = typeof body['id'] === 'string' ? body['id'] : null;
     if (!requestId || !id) return;
-    const reply = async (outcome: { applied: boolean; record: SharedApprovalRecord | null; refusal?: Refusal | undefined }): Promise<void> => {
-      await this.#host.send(APPROVAL_RELAY_TYPES.decideResult, {
-        requestId, applied: outcome.applied,
-        ...(outcome.record ? { summary: summarize(outcome.record) } : {}),
-        ...(outcome.refusal ? { refusal: outcome.refusal } : {}),
-      }, from);
-    };
+    const key = `${from}\u0000${requestId}`;
+    let applying = this.#applying.get(key);
+    if (!applying) {
+      // Set before the apply's first await, so a resend arriving meanwhile finds it.
+      applying = this.#apply(body, requestId, id, from);
+      this.#applying.set(key, applying);
+      const started = applying;
+      void started.finally(() => { if (this.#applying.get(key) === started) this.#applying.delete(key); }).catch(() => undefined);
+    }
+    const outcome = await applying;
+    await this.#host.send(APPROVAL_RELAY_TYPES.decideResult, {
+      requestId, applied: outcome.applied,
+      ...(outcome.record ? { summary: summarize(outcome.record) } : {}),
+      ...(outcome.refusal ? { refusal: outcome.refusal } : {}),
+    }, from);
+  }
+
+  async #apply(body: Record<string, unknown>, requestId: string, id: string, from: string): Promise<RelayApplyOutcome> {
     const principal = (body['principal'] ?? {}) as Partial<RelayPrincipal>;
     const action = body['action'] as RelayedAction;
     const expectedRevision = typeof body['expectedRevision'] === 'number' ? body['expectedRevision'] : undefined;
     const record = this.#broker.getApproval(id);
-    if (!record) { await reply({ applied: false, record: null, refusal: approvalRefusal('UNKNOWN_APPROVAL', null) }); return; }
-    // A resend of a decision this node already applied is that decision, applied once.
-    if (record.decision?.relayRequestId === requestId) { await reply({ applied: true, record }); return; }
+    if (!record) return { applied: false, record: null, refusal: approvalRefusal('UNKNOWN_APPROVAL', null) };
+    // A resend of an action this node already applied is that action, applied once: an answer carries the
+    // request id on its decision, a claim or cancel on the audit entry it wrote.
+    if (record.decision?.relayRequestId === requestId
+      || record.audit.some((entry) => entry.relayRequestId === requestId && entry.actorNode === from)) {
+      return { applied: true, record };
+    }
     if (principal.node !== from || typeof principal.id !== 'string' || !Array.isArray(principal.scopes) || !holdsWriteApprovals(principal.scopes)) {
-      await reply({ applied: false, record, refusal: refusal({ code: 'FORBIDDEN', state: record.status, status: 403,
-        reason: 'The node that relayed this decision did not vouch for a person holding write:approvals.', next: ['Act on it from a credential that holds write:approvals.'] }) });
-      return;
+      return { applied: false, record, refusal: refusal({ code: 'FORBIDDEN', state: record.status, status: 403,
+        reason: 'The node that relayed this decision did not vouch for a person holding write:approvals.', next: ['Act on it from a credential that holds write:approvals.'] }) };
     }
     const answering = action === 'approve' || action === 'deny' || action === 'amend';
     if (answering && principal.mayAnswer !== true) {
-      await reply({ applied: false, record, refusal: refusal({ code: 'OWNER_ONLY', state: record.status, status: 403,
-        reason: 'Answering an approval is the owner\'s own act; the person this decision was relayed for may not answer it.', next: ['The owner answers it.'] }) });
-      return;
+      return { applied: false, record, refusal: refusal({ code: 'OWNER_ONLY', state: record.status, status: 403,
+        reason: 'Answering an approval is the owner\'s own act; the person this decision was relayed for may not answer it.', next: ['The owner answers it.'] }) };
+    }
+    const rememberTier = body['rememberTier'];
+    if (rememberTier !== undefined && !(typeof rememberTier === 'string' && (REMEMBER_TIER_VALUES as readonly string[]).includes(rememberTier))) {
+      return { applied: false, record, refusal: refusal({ code: 'INVALID_ARGUMENT', state: record.status, status: 400,
+        reason: `rememberTier must be one of: ${REMEMBER_TIER_VALUES.join(', ')}.`, next: ['Answer it again with one of those tiers, or without remembering.'] }) };
     }
     const actor: ApprovalActionInput = {
       actor: `${principal.id}@${from}`, actorSurface: `node:${from}`, actorNode: from,
       ...(typeof body['note'] === 'string' ? { note: body['note'] } : {}),
       expectedRevision,
+      relayRequestId: requestId,
     };
     let outcome: TransitionOutcome;
     try {
@@ -349,15 +380,25 @@ export class ApprovalRelay {
           disposition: action === 'approve' ? 'approved' : action === 'amend' ? 'amended' : 'denied',
           ...(typeof body['reason'] === 'string' ? { reason: body['reason'] } : {}),
           ...(action === 'approve' && selectedHunks ? { selectedHunks } : {}),
-          relayRequestId: requestId,
+          ...(typeof body['remember'] === 'boolean' ? { remember: body['remember'] } : {}),
+          ...(rememberTier !== undefined ? { rememberTier: rememberTier as RememberTier } : {}),
         };
         outcome = await this.#broker.resolveApproval(id, input);
       }
     } catch (error) {
-      await reply({ applied: false, record: this.#broker.getApproval(id), refusal: refusal({ code: 'NOT_APPLIED', state: record.status, status: 400,
-        reason: error instanceof Error ? error.message : String(error), next: ['Read the approval again.'] }) });
-      return;
+      // The broker's own code travels back (REMEMBER_NOT_SAVED, APPROVED_NOT_APPLIED, INVALID_ARGUMENT), as a local answer would show it.
+      const tagged = (error ?? {}) as { readonly code?: unknown; readonly status?: unknown };
+      return { applied: false, record: this.#broker.getApproval(id), refusal: refusal({ code: typeof tagged.code === 'string' ? tagged.code : 'NOT_APPLIED', state: record.status,
+        status: typeof tagged.status === 'number' ? tagged.status : 400,
+        reason: error instanceof Error ? error.message : String(error), next: ['Read the approval again.'] }) };
     }
-    await reply(outcome.applied ? { applied: true, record: outcome.record } : { applied: false, record: outcome.record, refusal: outcome.refusal });
+    return outcome.applied ? { applied: true, record: outcome.record } : { applied: false, record: outcome.record, refusal: outcome.refusal };
   }
+}
+
+/** What the home node answers a relayed action with. */
+interface RelayApplyOutcome {
+  readonly applied: boolean;
+  readonly record: SharedApprovalRecord | null;
+  readonly refusal?: Refusal | undefined;
 }

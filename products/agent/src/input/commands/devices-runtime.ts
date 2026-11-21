@@ -5,8 +5,34 @@ import { CHANNELS_LIST } from '@goodvibes/engine/terminal-shell/channels-command
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
+import {
+  formatRelayStatus, listRelayCodes, mintRelayPairing, readRelayStatus, relayHostFailure, relayPairingOutcome, revokeRelayCode,
+  type RelayActionWords,
+} from '../../runtime/relay-host.ts';
 import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
+import { readAgentHostPairingStatus, runAgentHostPair, runAgentHostUnpair } from './onboarding-runtime.ts';
 import { requirePlatform, requireShellPaths } from './runtime-services.ts';
+
+const DEVICES_RELAY_WORDS: RelayActionWords = {
+  status: '/devices relay-status',
+  pair: '/devices pair relay',
+  codes: '/devices relay-codes',
+  revoke: '/devices relay-revoke <code>',
+};
+
+function hostVerbs(ctx: CommandContext) {
+  return createAgentDaemonVerbCaller({ configManager: requirePlatform(ctx).configManager, homeDirectory: requireShellPaths(ctx).homeDirectory });
+}
+
+/** One relay verb, its failure turned into the refusal /devices prints. */
+async function relayCall<T>(what: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    const failure = relayHostFailure(what, error);
+    throw commandRefusal(`${failure.what} failed: ${failure.reason}`, failure.next);
+  }
+}
 
 /**
  * `/devices` is one description shared with the terminal app
@@ -14,8 +40,11 @@ import { requirePlatform, requireShellPaths } from './runtime-services.ts';
  * connected host's (`pairing.tokens.*`), "Pair something" pairs a phone or
  * another device by minting a named device token on the host and showing its
  * link and QR, and the paired phones, grants and captures come from the
- * daemon's `devices.*` verbs. Pairing this terminal, the relay and channel
- * setup are the terminal app's, and are refused here saying where they are.
+ * daemon's `devices.*` verbs. Pairing this Agent with its connected host is
+ * the same owner-checked flow as `/setup pair` and `/setup unpair`; the relay
+ * is the connected host's, reached through its `relay.*` verbs. Channel setup
+ * and the shared-token actions are the terminal app's, and are refused here
+ * saying where they are.
  */
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
   registerDevicesCommand<CommandContext>(registry, {
@@ -28,10 +57,22 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     revoke: async (ctx, id) => (await invokeConnectedHostMethod(ctx, 'pairing.tokens.delete', { id })).revoked,
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {
-      const verbs = createAgentDaemonVerbCaller({ configManager: requirePlatform(ctx).configManager, homeDirectory: requireShellPaths(ctx).homeDirectory });
-      const outcome = await mintAgentDevicePairing(verbs, name ? { name } : {});
+      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), name ? { name } : {});
       if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
       return outcome.text;
     },
+    pairHost: async (ctx, request) => await runAgentHostPair(ctx, { apply: request.apply, name: request.name }, 'devices'),
+    hostStatus: async (ctx) => await readAgentHostPairingStatus(ctx),
+    unpairHost: async (ctx) => await runAgentHostUnpair(ctx, 'devices'),
+    async pairRelay(ctx, name) {
+      const answer = await relayCall('Minting a relay pairing payload on the connected host', () => mintRelayPairing(hostVerbs(ctx), name || undefined));
+      const outcome = relayPairingOutcome(answer, DEVICES_RELAY_WORDS);
+      if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
+      return outcome.text;
+    },
+    relayStatus: async (ctx) => formatRelayStatus(await relayCall('Reading the connected host\'s relay status',
+      () => readRelayStatus(hostVerbs(ctx), requirePlatform(ctx).configManager))),
+    relayCodes: async (ctx) => await relayCall('Listing the connected host\'s relay codes', () => listRelayCodes(hostVerbs(ctx))),
+    revokeRelayCode: async (ctx, id) => await relayCall(`Revoking relay code ${id}`, () => revokeRelayCode(hostVerbs(ctx), id)),
   }, CHANNELS_LIST);
 }

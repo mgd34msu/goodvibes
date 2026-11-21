@@ -682,6 +682,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
         return;
       }
       framed = joined;
+    } else {
+      joiners.get(channel)?.interrupt();
     }
     const header = framed.header;
     if (header.kind === 'request' || header.kind === 'stream-open') notePipeCode(pipeKey, header.headers);

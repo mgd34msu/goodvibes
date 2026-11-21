@@ -15,6 +15,7 @@
 
 import { client as platformClient } from '../goodvibes';
 import type { PublicPushSubscription, PushReconcileDrift } from '../goodvibes';
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import { errorCode, formatError } from '../errors';
 import { randomUuid } from '../uuid';
 import { detectPushSupport, urlBase64ToUint8Array } from './push-support';
@@ -24,7 +25,9 @@ export type PushSubscribeFailure =
   | 'unsupported'
   | 'permission-denied'
   | 'no-registration'
-  | 'subscribe-failed';
+  | 'subscribe-failed'
+  /** A test push the daemon sent that the push service did not take (failed or pruned); the message is the daemon's reason. */
+  | 'not-delivered';
 
 export class PushSubscribeError extends Error {
   readonly reason: PushSubscribeFailure;
@@ -52,6 +55,8 @@ export function describePushSubscribeError(error: unknown): string {
         return 'This browser does not support Web Push. On iOS, install the app to the Home Screen first (iOS 16.4+ delivers push only to an installed app).';
       case 'no-registration':
         return 'The service worker is not ready yet. Reload the page and try again.';
+      case 'not-delivered':
+        return error.message;
       default:
         return 'Could not complete the push subscription. Please try again.';
     }
@@ -372,11 +377,22 @@ export async function reconcilePushSubscriptionOnOpen(): Promise<PushReconcileOn
   return { drift, subscription: stored };
 }
 
-/** Send a live test push to this device's registered subscription. */
-export async function sendTestPush(): Promise<void> {
+/** What the daemon's push service did with a test push. */
+export type TestPushReceipt = OperatorMethodOutput<'push.subscriptions.verify'>['receipt'];
+
+/**
+ * Send a live test push to this device's registered subscription. Resolves with the
+ * receipt only when the push service took it; a push it refused, could not be sent
+ * or whose device was removed (pruned) rejects with the daemon's reason.
+ */
+export async function sendTestPush(): Promise<TestPushReceipt> {
   const storedId = recallSubscriptionId() ?? hostRecordFor((await platformClient.operator.push.list()).subscriptions)?.id ?? null;
   if (!storedId) {
     throw new PushSubscribeError('no-registration', 'This device is not registered for push yet.');
   }
-  await platformClient.operator.push.verify(storedId);
+  const { receipt } = await platformClient.operator.push.verify(storedId);
+  if (receipt.outcome !== 'delivered') {
+    throw new PushSubscribeError('not-delivered', receipt.detail ?? `The push was ${receipt.outcome}.`);
+  }
+  return receipt;
 }

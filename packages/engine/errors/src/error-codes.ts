@@ -29,8 +29,6 @@
  *       await delay(err.retryAfterMs ?? 1000);
  *     } else if (isErrorCode(err, EngineErrorCodes.AUTH_REQUIRED)) {
  *       await refreshToken();
- *     } else if (isErrorCode(err, EngineErrorCodes.TOKEN_EXPIRED)) {
- *       await refreshToken();
  *     }
  *   }
  * }
@@ -39,7 +37,6 @@
 export type EngineErrorCode =
   // Authentication / authorization
   | 'AUTH_REQUIRED'
-  | 'TOKEN_EXPIRED'
   | 'PERMISSION_DENIED'
   | 'PAYMENT_REQUIRED'
   // Rate limiting
@@ -91,7 +88,6 @@ export type EngineErrorCode =
  */
 export const EngineErrorCodes = {
   AUTH_REQUIRED: 'AUTH_REQUIRED',
-  TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   PERMISSION_DENIED: 'PERMISSION_DENIED',
   PAYMENT_REQUIRED: 'PAYMENT_REQUIRED',
   RATE_LIMITED: 'RATE_LIMITED',

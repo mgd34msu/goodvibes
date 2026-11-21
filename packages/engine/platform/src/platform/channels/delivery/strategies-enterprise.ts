@@ -3,6 +3,7 @@ import { ConfigManager } from '../../config/manager.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ChannelDeliveryStrategy } from './types.js';
+import { requireSurfaceSecret } from '../builtin/surface-secrets.js';
 import {
   deliveryFetch,
   extractResponseId,
@@ -11,7 +12,6 @@ import {
   normalizeBaseUrl,
   requireOkResponse,
   resolveAttachments,
-  resolveDeliveryCredential,
   resolveChannelDeliverySurfaceKind,
   resolveMSTeamsAccessToken,
   stableSendId,
@@ -107,12 +107,7 @@ export function createMattermostDeliveryStrategy(
         serviceRegistry.get('mattermost')?.baseUrl,
         process.env.MATTERMOST_BASE_URL,
       );
-      const botToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'mattermost',
-        serviceField: 'primary',
-        configKey: 'surfaces.mattermost.botToken',
-        environmentValue: process.env.MATTERMOST_BOT_TOKEN,
-      });
+      const botToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'mattermost', 'primary') ?? undefined;
       const channelId = firstNonEmpty(
         request.target.address,
         request.binding?.channelId,
@@ -152,6 +147,10 @@ export function createMatrixDeliveryStrategy(
     supportsGuardedDelivery: true,
     supportsPublication: true,
     supportsAttachments: true,
+    // Every send carries a stable transaction id, which the homeserver drops when repeated.
+    repeatSafe() {
+      return true;
+    },
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'matrix';
     },
@@ -162,12 +161,7 @@ export function createMatrixDeliveryStrategy(
         serviceRegistry.get('matrix')?.baseUrl,
         process.env.MATRIX_HOMESERVER,
       );
-      const accessToken = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
-        serviceName: 'matrix',
-        serviceField: 'primary',
-        configKey: 'surfaces.matrix.accessToken',
-        environmentValue: process.env.MATRIX_ACCESS_TOKEN,
-      });
+      const accessToken = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'matrix', 'primary') ?? undefined;
       const roomId = firstNonEmpty(
         request.target.address,
         request.binding?.channelId,

@@ -5,6 +5,7 @@ import { consolidationReading } from './batteries/consolidation.js';
 import type { MemoryClass, MemoryRegistry, MemoryScope } from '../state/index.js';
 import { assertValidMemoryFields } from '../state/memory-store-helpers.js';
 import type { KnowledgeStore } from './store.js';
+import type { KnowledgeRefreshResult } from './ingest-inputs.js';
 import { knowledgeConsolidationCandidateLifecycle } from './types.js';
 import type {
   KnowledgeConsolidationCandidateRecord,
@@ -24,8 +25,8 @@ export interface KnowledgeConsolidationContext {
   readonly store: KnowledgeStore;
   readonly memoryRegistry: Pick<MemoryRegistry, 'add' | 'getStore'>;
   readonly syncReviewedMemory: () => Promise<void>;
-  /** Re-fetches one source now (what the refresh-stale job does for it); resolves to the number refreshed. */
-  readonly refreshSource?: ((sourceId: string) => Promise<number>) | undefined;
+  /** Re-fetches one source now (what the refresh-stale job does for it), when it is due. */
+  readonly refreshSource?: ((sourceId: string) => Promise<KnowledgeRefreshResult>) | undefined;
 }
 
 interface CandidateDecisionInput {
@@ -105,8 +106,11 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
   let actionResult: Record<string, unknown> = {};
   if (decision === 'accept' && candidate.candidateType === 'source-refresh') {
     if (candidate.subjectKind !== 'source') throw new Error('A source-refresh candidate must name a source. Nothing was changed.');
-    const refreshed = await context.refreshSource!(candidate.subjectId);
-    if (refreshed < 1) throw new Error(`Source ${candidate.subjectId} was not refreshed (it is no longer due, or the fetch failed). The candidate stays open; check the source and try again.`);
+    const refresh = await context.refreshSource!(candidate.subjectId);
+    if (refresh.attempted === 0) throw new Error(`Source ${candidate.subjectId} was not refreshed: it is no longer due for a refresh, or it is gone. The candidate stays open; reject or supersede it if the source needs nothing.`);
+    const failure = refresh.failed[0];
+    if (failure) throw new Error(`Source ${candidate.subjectId} was not refreshed: ${failure.reason}. The candidate stays open; check the source and try again.`);
+    if (refresh.refreshed < 1) throw new Error(`Source ${candidate.subjectId} was fetched but is not indexed yet. The candidate stays open; try again once it is.`);
     actionResult = { refreshedAt: Date.now() };
   }
   if (decision === 'accept' && candidate.candidateType === 'memory-review') {

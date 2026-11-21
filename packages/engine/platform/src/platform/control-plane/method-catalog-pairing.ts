@@ -16,6 +16,7 @@
  * packages/contracts/src/core-verbs.ts.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { EffectId } from '../security/effect-authority.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -24,6 +25,13 @@ import {
   methodDescriptor,
   objectSchema,
 } from './method-catalog-shared.js';
+
+/**
+ * What completing a pairing hand-off needs: it can register a step-up passkey,
+ * so it is held to what stepup.credentials.register is. pairing.handoff.create
+ * offers only what a pairing that holds these may complete.
+ */
+export const PAIRING_HANDOFF_COMPLETE_EFFECTS: readonly [EffectId, ...EffectId[]] = ['control-plane.write', 'owner.act', 'stepup.credential.register'];
 
 /** Browser-push subscription key material (p256dh + auth), for the notifications offer. */
 const PUSH_SUBSCRIPTION_KEYS_SCHEMA = objectSchema({
@@ -148,7 +156,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
     repeat: 'unsafe',
     effects: ['control-plane.write', 'owner.act'],
     title: 'Create Pairing Hand-off',
-    description: 'The owner\'s pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin\'s honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. The device it pairs is recorded as the owner\'s own (origin owner-pairing) when the caller holds the owner\'s own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent\'s credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner\'s own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).',
+    description: 'The owner\'s pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin\'s honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner\'s own (origin owner-pairing) when the caller holds the owner\'s own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent\'s credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner\'s own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).',
     category: 'pairing',
     transport: ['ws'],
     inputSchema: objectSchema({
@@ -181,10 +189,9 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.handoff.complete',
     repeat: 'safe',
-    // It can register a step-up passkey, so it is held to what stepup.credentials.register is.
-    effects: ['control-plane.write', 'owner.act', 'stepup.credential.register'],
+    effects: PAIRING_HANDOFF_COMPLETE_EFFECTS,
     title: 'Complete Pairing Hand-off',
-    description: 'Apply the surface\'s per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent\'s credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off\'s token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority is not offered a passkey.',
+    description: 'Apply the surface\'s per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent\'s credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off\'s token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority cannot complete a hand-off, so pairing.handoff.create offers it nothing to complete.',
     category: 'pairing',
     transport: ['ws'],
     inputSchema: objectSchema({

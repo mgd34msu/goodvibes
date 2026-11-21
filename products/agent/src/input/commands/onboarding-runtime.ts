@@ -14,32 +14,43 @@ function openRows(topic: SetupTopicId): SetupRun<CommandContext> {
   };
 }
 
-async function pair(values: Readonly<Record<string, string>>, ctx: CommandContext): Promise<void> {
-  const apply = values.apply === 'apply';
-  const name = values.name || 'GoodVibes Agent';
-  if (apply && (!isDirectOwnerCommandContext(ctx, 'setup') || !ctx.beginSetupPairing)) {
-    ctx.print('Pairing --apply requires the owner to type /setup pair --apply in the live Agent terminal. Model, harness and nested commands cannot grant persistent administrative access.');
-    return;
+/**
+ * Pair this Agent with its connected host: `/setup pair` and `/devices pair host`.
+ * With `apply`, the owner's own keystrokes open the confirmation in the live
+ * terminal; anything else gets the read-only preview as text.
+ */
+export async function runAgentHostPair(ctx: CommandContext, request: { readonly apply: boolean; readonly name: string }, command: string): Promise<string | void> {
+  const name = request.name || 'GoodVibes Agent';
+  if (request.apply && (!isDirectOwnerCommandContext(ctx, command) || !ctx.beginSetupPairing)) {
+    return `Pairing --apply requires the owner to type ${command === 'devices' ? '/devices pair host --apply' : '/setup pair --apply'} in the live Agent terminal. Model, harness and nested commands cannot grant persistent administrative access.`;
   }
-  if (isDirectOwnerCommandContext(ctx, 'setup') && ctx.beginSetupPairing) {
-    await ctx.beginSetupPairing({ apply, name });
+  if (isDirectOwnerCommandContext(ctx, command) && ctx.beginSetupPairing) {
+    await ctx.beginSetupPairing({ apply: request.apply, name });
     return;
   }
   const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
-  if (!homeDirectory) { ctx.print('Pairing preview is unavailable without an Agent home.'); return; }
+  if (!homeDirectory) return 'Pairing preview is unavailable without an Agent home.';
   const preview = await previewAgentHostPairing({ configManager: ctx.platform.configManager, homeDirectory }, name);
-  ctx.print(`${formatSetupPairing(preview.result)}\n  Preview only. The owner can type /setup pair --apply in the live Agent terminal to review and confirm.`);
+  return `${formatSetupPairing(preview.result)}\n  Preview only. The owner can type /setup pair --apply in the live Agent terminal to review and confirm.`;
 }
 
-async function unpair(_values: Readonly<Record<string, string>>, ctx: CommandContext): Promise<void> {
+/** How this Agent reaches its connected host: the pairing preview, read-only. */
+export async function readAgentHostPairingStatus(ctx: CommandContext): Promise<string> {
+  const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
+  if (!homeDirectory) return 'The host pairing is unavailable without an Agent home.';
+  const preview = await previewAgentHostPairing({ configManager: ctx.platform.configManager, homeDirectory });
+  return formatSetupPairing(preview.result);
+}
+
+/** Forget this Agent's device credential for its connected host: `/setup unpair` and `/devices unpair-host`. */
+export async function runAgentHostUnpair(ctx: CommandContext, command: string): Promise<string> {
   // Forgetting the credential cuts this Agent off from the host: the owner's own keystrokes only.
-  if (!isDirectOwnerCommandContext(ctx, 'setup')) {
-    ctx.print('Unpairing requires the owner to type /setup unpair in the live Agent terminal. Nothing was forgotten.');
-    return;
+  if (!isDirectOwnerCommandContext(ctx, command)) {
+    return `Unpairing requires the owner to type /${command} in the live Agent terminal. Nothing was forgotten.`;
   }
   const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
-  if (!homeDirectory) { ctx.print('Unpairing is unavailable without an Agent home. Nothing was forgotten.'); return; }
-  ctx.print(formatSetupPairing(await unpairAgentHost({ configManager: ctx.platform.configManager, homeDirectory })));
+  if (!homeDirectory) return 'Unpairing is unavailable without an Agent home. Nothing was forgotten.';
+  return formatSetupPairing(await unpairAgentHost({ configManager: ctx.platform.configManager, homeDirectory }));
 }
 
 /** Topics the Agent sets up in one of its workspace areas. */
@@ -69,8 +80,11 @@ export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescripti
       if (!ctx.openFirstRun) return 'First run is not available here.';
       ctx.openFirstRun();
     },
-    'pair': async (values, ctx) => { await pair(values, ctx); },
-    'unpair': async (values, ctx) => { await unpair(values, ctx); },
+    'pair': async (values, ctx) => {
+      const text = await runAgentHostPair(ctx, { apply: values.apply === 'apply', name: values.name ?? '' }, 'setup');
+      if (text) ctx.print(text);
+    },
+    'unpair': async (_values, ctx) => { ctx.print(await runAgentHostUnpair(ctx, 'setup')); },
   },
   // Network access, sign-in accounts and the runtime switches belong to the daemon the Agent connects to.
   elsewhere: (id, label) => `${label} is set where the daemon runs: run goodvibes setup there and choose it (/setup ${id}).`,

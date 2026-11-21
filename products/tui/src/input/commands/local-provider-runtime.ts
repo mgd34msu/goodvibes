@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { registerProviderCommand } from '@goodvibes/engine/terminal-shell/provider-command';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireProviderApi, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
@@ -12,7 +13,7 @@ export function registerLocalProviderRuntimeCommands(registry: CommandRegistry):
     requireSubscriptionManager,
     requireServiceRegistry,
     beforeSelection: ensureProviderKeyThenSelect,
-    surfaceRoot: 'tui',
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
     signInListens: true,
     codeEditing: true,
     formatSource: (source) => source,

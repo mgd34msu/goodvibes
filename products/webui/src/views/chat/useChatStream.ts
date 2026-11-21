@@ -400,7 +400,7 @@ export function useChatStream({
           // prior turn's tool calls into this one's fold).
           turnToolActivityRef.current = [];
           pendingToolInputRef.current.clear();
-          syncedSetTurnState('running');
+          syncedSetTurnState((current) => nextTurnStatus(current, 'running'));
           void invalidateChatState(activeSessionId);
           return;
         }

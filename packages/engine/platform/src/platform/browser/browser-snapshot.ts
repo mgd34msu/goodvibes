@@ -610,20 +610,6 @@ export class SnapshotStore {
   clearSession(sessionId: string): void {
     for (const [key, snapshot] of this.snapshots) if (snapshot.sessionId === sessionId) this.snapshots.delete(key);
   }
-
-  /**
-   * Drops the session's snapshots for pages that are no longer open, and
-   * returns those page ids. Used after a tab list shows tabs closed by the person.
-   */
-  retainPages(sessionId: string, livePageIds: ReadonlySet<string>): readonly string[] {
-    const dropped: string[] = [];
-    for (const [key, snapshot] of this.snapshots) {
-      if (snapshot.sessionId !== sessionId || livePageIds.has(snapshot.pageId)) continue;
-      this.snapshots.delete(key);
-      dropped.push(snapshot.pageId);
-    }
-    return dropped;
-  }
 }
 
 /** Capture only selected identities from an actual immutable native snapshot.

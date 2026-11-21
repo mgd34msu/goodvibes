@@ -1,13 +1,13 @@
 import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
 import { createSupportBundleCommand } from '@goodvibes/engine/terminal-shell/support-bundle-command';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { existsSync } from 'node:fs';
 import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { readConnectedHostOperatorToken, readConnectedHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveDaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import type { DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
-import { RefusalError } from '@goodvibes/engine/errors';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/markers.ts';
 import { CONFIG_SCHEMA } from '@goodvibes/engine/platform/platform/config/schema';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
@@ -27,7 +27,11 @@ import { appendTemporalLabel } from './temporal-label.ts';
  * its own is refused before anything is sent: this machine's token never goes there.
  */
 function remoteHostTarget(runtime: CliCommandRuntime): DaemonTarget | undefined {
-  const baseUrl = resolveConnectedHostBaseUrl(runtime.configManager);
+  const address = resolveConnectedHostAddress(runtime.configManager);
+  if (address.refusal) {
+    throw new RefusalError(refusal({ code: 'VALIDATION_FAILED', state: 'nothing was sent', reason: address.refusal, next: ['set daemon.connectedHost.url to the host\'s https:// or http:// origin, then retry'], retryable: false }));
+  }
+  const { baseUrl } = address;
   let host: string;
   try { host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, ''); } catch { return undefined; }
   // The one loopback rule (parsed, not prefix-matched): `127.example.test` is another machine.
@@ -52,7 +56,7 @@ function readAuthPosture(runtime: CliCommandRuntime) {
   });
   const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
   const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
-  const operatorToken = readConnectedHostOperatorToken(runtime.homeDirectory, resolveConnectedHostBaseUrl(runtime.configManager));
+  const operatorToken = readConnectedHostOperatorToken(runtime.homeDirectory, resolveConnectedHostAddress(runtime.configManager).baseUrl);
   return {
     userStorePath,
     userStorePresent: existsSync(userStorePath),

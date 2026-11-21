@@ -1,6 +1,6 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments, surfaceCredentialAbsent } from '../helpers.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
 /** The data message a bridge forwards, at the top level or inside a signal-cli style envelope. */
@@ -48,14 +48,9 @@ function signalMentionsAccount(payload: Record<string, unknown>, message: string
 }
 
 export async function handleSignalSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.signal.token' },
-    { kind: 'registry', service: 'signal', field: 'primary' },
-    { kind: 'env', name: 'SIGNAL_BRIDGE_TOKEN' },
-  );
+  const credential = await resolveInboundCredential(context, 'signal');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('signal', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('signal', credential.setting);
   if (credential.state === 'resolved') {
     const providedToken = readBearerOrHeaderToken(req, 'x-goodvibes-signal-token');
     if (!constantTimeEquals(credential.value, providedToken)) {

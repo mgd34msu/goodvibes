@@ -83,7 +83,8 @@ function parseRouteTarget(raw: string): AgentChannelDeliveryTarget {
   return surfaceTarget(parseRouteDeliveryTarget(raw));
 }
 
-function parseWebhookTarget(raw: string | Secret): AgentChannelDeliveryTarget {
+/** A webhook URL read once and checked; the address shown is its scheme and host only. */
+function readWebhookUrl(raw: string | Secret): { readonly normalized: string; readonly shown: string } {
   // Read once to check the address the dispatch will use; kept as a Secret from here on.
   const normalized = readText(isSecret(raw) ? raw.reveal('dispatch') : raw);
   if (!normalized) throw new Error('Webhook delivery target requires a URL.');
@@ -94,7 +95,32 @@ function parseWebhookTarget(raw: string | Secret): AgentChannelDeliveryTarget {
   } catch {
     throw new Error('Webhook delivery target must be a valid http(s) URL.');
   }
-  return { kind: 'webhook', address: Secret.of(normalized, 'webhook URL'), addressShown: `${url.protocol}//${url.host}/…` };
+  return { normalized, shown: `${url.protocol}//${url.host}/…` };
+}
+
+function parseWebhookTarget(raw: string | Secret): AgentChannelDeliveryTarget {
+  const { normalized, shown } = readWebhookUrl(raw);
+  return { kind: 'webhook', address: Secret.of(normalized, 'webhook URL'), addressShown: shown };
+}
+
+/**
+ * The target the caller named, for display in hold reasons and results: a
+ * channel, route or link as typed, a webhook as its scheme and host only
+ * (`webhook https://hooks.example/… (secret)`), never the token-bearing URL.
+ */
+export function describeNamedDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): string {
+  const channel = readText(input.channel);
+  if (channel) return channel;
+  const route = readText(input.route);
+  if (route) return route;
+  if (input.webhook !== undefined && readTargetText(input.webhook) !== undefined) {
+    try {
+      return `webhook ${readWebhookUrl(input.webhook).shown} (secret)`;
+    } catch {
+      return 'a webhook (not a valid http(s) URL)';
+    }
+  }
+  return readText(input.link) ?? 'the named target';
 }
 
 /** The target as the router dispatches it: a secret address is revealed here, and only here. */
@@ -187,14 +213,32 @@ export function channelDeliveriesInFlight(): number {
   return inFlightDeliveries;
 }
 
+/**
+ * A send that failed before the router was handed the message: the card
+ * screen refused it, the send was stopped, a current-authority check failed or
+ * the target did not parse. Nothing reached any provider, so a caller may
+ * record the send as failed and let it be sent again. `cause` is the failure.
+ */
+export class ChannelDeliveryNotStartedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'ChannelDeliveryNotStartedError';
+  }
+}
+
 export async function deliverAgentChannelMessage(
   router: AgentChannelDeliveryRouter,
   input: AgentChannelDeliveryInput,
   options: { readonly signal?: AbortSignal; readonly assertCurrent?: () => void } = {},
 ): Promise<AgentChannelDeliveryResult> {
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
-  assertCurrent();
-  const preview = buildAgentChannelDeliveryPreview(input);
+  let preview: AgentChannelDeliveryPreview;
+  try {
+    assertCurrent();
+    preview = buildAgentChannelDeliveryPreview(input);
+  } catch (error) {
+    throw new ChannelDeliveryNotStartedError(error);
+  }
 
   // Counted from here, not from router.deliver: the screening below can await
   // a model, and a send waiting inside it has already left the conversation. A
@@ -213,13 +257,17 @@ export async function deliverAgentChannelMessage(
     // throws rather than returning a result, so no caller can treat a refusal as
     // a successful send. The thrown message is the platform's refusal wording and
     // contains no part of what was refused, see agent/payments-channel-guard.ts.
-    const refusal = await screenOutboundForCardMaterial({
-      surface: resolveDeliverySurfaceName(preview.target),
-      message: preview.message,
-      title: preview.title,
-    }, options);
-    if (refusal) throw new CardMaterialRefusedError(refusal);
-    assertCurrent();
+    try {
+      const refusal = await screenOutboundForCardMaterial({
+        surface: resolveDeliverySurfaceName(preview.target),
+        message: preview.message,
+        title: preview.title,
+      }, options);
+      if (refusal) throw new CardMaterialRefusedError(refusal);
+      assertCurrent();
+    } catch (error) {
+      throw new ChannelDeliveryNotStartedError(error);
+    }
 
     responseId = await router.deliver({ ...preview.request,
       target: dispatchTarget(preview.request.target),

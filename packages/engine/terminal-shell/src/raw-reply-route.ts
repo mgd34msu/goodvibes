@@ -3,7 +3,7 @@
  *
  * `callDaemonVerb` in @goodvibes/engine/terminal-shell reads the wrapped
  * convention every `/api/cluster/*` route follows: `{ ok: true, data }` on
- * success, `{ ok: false, error, fix }` on a refusal. Three routes this daemon
+ * success, `{ ok: false, error, fix, code? }` on a refusal. Three routes this daemon
  * serves do not, `/status`, `/api/health` and `/api/channels/status` answer
  * with the payload ITSELF and put the verdict in the HTTP status. Reading one
  * as the other is not a subtle failure: a raw payload has no `ok` field, so the
@@ -63,9 +63,13 @@ export function rawReplyReader(target: RemoteDaemonTarget, fetchImpl: DaemonFetc
     if (response.ok) {
       return new Response(JSON.stringify({ ok: true, data: payload }), { status: RESTATED_OK });
     }
+    // The daemon's error body carries `error`, `code`, `hint` and `next`
+    // (daemon-api error-response.ts); its own next step is kept, and the
+    // generic one is used only when it names none.
     const body = payload !== null && typeof payload === 'object'
-      ? payload as { error?: unknown; fix?: unknown }
+      ? payload as { error?: unknown; fix?: unknown; hint?: unknown; next?: unknown; code?: unknown }
       : {};
+    const next = Array.isArray(body.next) && typeof body.next[0] === 'string' ? body.next[0] : undefined;
     return new Response(JSON.stringify({
       ok: false,
       error: typeof body.error === 'string'
@@ -73,7 +77,10 @@ export function rawReplyReader(target: RemoteDaemonTarget, fetchImpl: DaemonFetc
         : `${where} answered ${response.status} for ${pathOf(input)}`,
       fix: typeof body.fix === 'string'
         ? body.fix
-        : 'run `goodvibes-daemon status` to see what that daemon is doing',
+        : typeof body.hint === 'string'
+          ? body.hint
+          : next ?? 'run `goodvibes-daemon status` to see what that daemon is doing',
+      ...(typeof body.code === 'string' ? { code: body.code } : {}),
     }), { status: RESTATED_REFUSAL });
   };
 }

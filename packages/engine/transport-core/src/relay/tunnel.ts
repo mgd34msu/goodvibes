@@ -226,46 +226,45 @@ export type TunnelFragmentResult =
 /**
  * Joins the fragments of one direction of one secure channel. Fragments of a
  * frame arrive consecutively and in order (the sender queues them together and
- * the channel keeps order), so one partial frame per id is held, bounded in
- * total by `maxBytes`.
+ * the channel keeps order), so at most one partial frame is held, bounded by
+ * `maxBytes`. A sender stops between fragments when the frame is no longer
+ * wanted (its request was cancelled), so any other frame arriving means the
+ * held partial was abandoned: a fragment of another frame replaces it, and the
+ * receiver calls {@link interrupt} for every whole frame it decodes.
  */
 export class TunnelFragmentJoiner {
-  private readonly partial = new Map<string, { readonly count: number; next: number; bytes: number; readonly parts: Uint8Array<ArrayBuffer>[] }>();
-  private held = 0;
+  private partial: { readonly id: string; readonly count: number; next: number; bytes: number; readonly parts: Uint8Array<ArrayBuffer>[] } | undefined;
 
   constructor(private readonly maxBytes: number) {}
 
   push(header: TunnelFragmentHeader, body: Uint8Array<ArrayBuffer>): TunnelFragmentResult {
-    let entry = this.partial.get(header.id);
+    let entry = this.partial?.id === header.id ? this.partial : undefined;
     if (!entry) {
+      this.partial = undefined;
       if (header.index !== 0) return { kind: 'malformed', id: header.id };
-      entry = { count: header.count, next: 0, bytes: 0, parts: [] };
-      this.partial.set(header.id, entry);
+      entry = { id: header.id, count: header.count, next: 0, bytes: 0, parts: [] };
+      this.partial = entry;
     }
     if (header.index !== entry.next || header.count !== entry.count) {
-      this.drop(header.id);
+      this.partial = undefined;
       return { kind: 'malformed', id: header.id };
     }
-    if (this.held + body.length > this.maxBytes) {
-      this.drop(header.id);
+    if (entry.bytes + body.length > this.maxBytes) {
+      this.partial = undefined;
       return { kind: 'too-large', id: header.id };
     }
     entry.parts.push(body);
     entry.bytes += body.length;
     entry.next += 1;
-    this.held += body.length;
     if (entry.next < entry.count) return { kind: 'pending' };
-    this.drop(header.id);
+    this.partial = undefined;
     const whole = decodeTunnelFrame(concatBytes(...entry.parts));
     if (!whole || whole.header.kind === 'fragment' || whole.header.id !== header.id) return { kind: 'malformed', id: header.id };
     return { kind: 'frame', header: whole.header, body: whole.body };
   }
 
-  /** Forget a partial frame (its pipe or request ended). */
-  drop(id: string): void {
-    const entry = this.partial.get(id);
-    if (!entry) return;
-    this.partial.delete(id);
-    this.held -= entry.bytes;
+  /** A whole frame arrived: a partial frame held now was abandoned by its sender and is discarded. */
+  interrupt(): void {
+    this.partial = undefined;
   }
 }

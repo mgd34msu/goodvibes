@@ -19,11 +19,13 @@
  *      the revert is itself reversible, restore that checkpoint to undo it.
  */
 
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import type { WorkspaceCheckpoint } from './checkpoint/types.js';
 import { parseUnifiedHunks } from '../git/structured-diff.js';
 import { noteProjectFilesChanged } from '../intelligence/project-files-epoch.js';
+import { resolveWritablePath } from '../utils/path-safety.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /** Thrown when a hunk cannot be reverse-applied cleanly (stale/drifted/malformed). */
 export class HunkRevertConflictError extends Error {
@@ -181,42 +183,25 @@ export function reverseApplyHunk(fileContent: string, hunk: string): RevertHunkR
   };
 }
 
-/** The real path of `path` when it exists, else the path as given. */
-function realOrSelf(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 /**
- * Resolve `relPath` under `root`, refusing any path that escapes the workspace
- * root. Judged on real paths (the root, and the file or, when it does not
- * exist yet, its directory), so a symlink inside the workspace that points
- * outside it is refused too. Returns the real path the read and write use.
+ * Resolve `relPath` under `root` as a tool write would: a workspace-relative
+ * path whose real landing place stays inside the workspace and is not the
+ * daemon's verification journals. Any refusal is a conflict the caller reports.
  */
-function resolveInsideRoot(root: string, relPath: string): string {
+function resolveRevertPath(root: string, relPath: string): string {
   if (isAbsolute(relPath)) {
     throw new HunkRevertConflictError(`path must be workspace-relative, got absolute path: ${relPath}`);
   }
-  const lexical = resolve(root, relPath);
-  let real: string;
   try {
-    real = realpathSync(lexical);
-  } catch {
-    real = join(realOrSelf(dirname(lexical)), basename(lexical));
+    return resolveWritablePath(relPath, root);
+  } catch (error) {
+    throw new HunkRevertConflictError(summarizeError(error));
   }
-  const fromRoot = relative(realOrSelf(root), real);
-  if (fromRoot === '..' || fromRoot.startsWith('../') || fromRoot.startsWith('..\\') || isAbsolute(fromRoot)) {
-    throw new HunkRevertConflictError(`path escapes the workspace root: ${relPath}`);
-  }
-  return real;
 }
 
 /** Read a workspace file's content, mapping a missing file to a conflict (the diff is stale). */
 function readWorkspaceFile(root: string, relPath: string): string {
-  const abs = resolveInsideRoot(root, relPath);
+  const abs = resolveRevertPath(root, relPath);
   try {
     return readFileSync(abs, 'utf8');
   } catch {
@@ -319,7 +304,7 @@ export async function applyHunkRevert(
   if (readWorkspaceFile(root, path) !== content) {
     throw new HunkRevertConflictError(`${path} changed while the safety checkpoint was being taken; nothing was written. Preview the hunk again and retry.`);
   }
-  writeFileSync(resolveInsideRoot(root, path), result.nextContent, 'utf8');
+  writeFileSync(resolveRevertPath(root, path), result.nextContent, 'utf8');
   // A cached import graph built before the revert must not answer the next relationship query.
   noteProjectFilesChanged();
   return {

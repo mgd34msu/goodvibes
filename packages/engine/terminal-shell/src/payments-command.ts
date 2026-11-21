@@ -11,7 +11,7 @@
  * credential, and closes the connection when it is done. No amount, card or
  * shop is read by a model: the owner types or picks each one.
  */
-import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes/engine/platform/platform/payments';
+import { mayOfferCardEntryFlow, describeCardEntryRefusal, formatMinorUnits, parseCurrencyCode } from '@goodvibes/engine/platform/platform/payments';
 import type { OperatorApiClient } from '@goodvibes/engine/operator-client';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
@@ -104,8 +104,10 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }
 
+/** An amount the daemon holds in its currency's minor units, rendered by the platform's one money formatter (its exponent, its symbol). */
 function minor(units: unknown, currency: unknown): string {
-  return typeof units === 'number' ? `${(units / 100).toFixed(2)} ${text(currency)}` : '?';
+  const code = typeof currency === 'string' ? parseCurrencyCode(currency) : null;
+  return typeof units === 'number' && Number.isSafeInteger(units) && units >= 0 && code ? formatMinorUnits(units, code) : '?';
 }
 
 function repeatSummary(row: Readonly<Record<string, unknown>>): string {

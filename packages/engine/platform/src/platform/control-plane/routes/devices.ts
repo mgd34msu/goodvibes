@@ -35,7 +35,7 @@ import {
 import type { DeviceCapabilityService } from '../../devices/device-capability-service.js';
 import type { DeviceCaptureArtifact, DeviceCaptureArtifactStore } from '../../devices/device-capture-artifacts.js';
 import { encodeDeviceCapabilityMedia } from '../../devices/device-peer-work.js';
-import type { DeviceGrantStore } from '../../devices/device-grants.js';
+import { DeviceGrantNotFoundError, type DeviceGrantStore } from '../../devices/device-grants.js';
 import type { DeviceHousekeeper } from '../../devices/device-housekeeping.js';
 
 /** The device slice the verbs need, bound by whichever runtime owns it. */
@@ -302,6 +302,15 @@ export function createDevicesGrantsRevokeHandler(service: DevicesGatewayService)
     const nodeId = typeof params.nodeId === 'string' ? params.nodeId.trim() : '';
     const capabilityId = typeof params.capabilityId === 'string' ? params.capabilityId.trim() : '';
     const note = typeof params.note === 'string' ? params.note.trim() : '';
+    // A revoke that names nothing is a mistake, never a success that revoked nothing.
+    if (!grantId && !nodeId && !capabilityId) {
+      throw new GatewayVerbError(
+        'Name what to revoke: grantId, nodeId or capabilityId (or a combination). Nothing was revoked. Read devices.grants.list for them.',
+        'INVALID_ARGUMENT',
+        400,
+        'grantId',
+      );
+    }
     // A narrowing filter that names nothing real must not be dropped: dropping
     // it would widen the revoke to every grant of the device, or revoke nothing
     // while reporting success.
@@ -314,13 +323,20 @@ export function createDevicesGrantsRevokeHandler(service: DevicesGatewayService)
         'capabilityId',
       );
     }
-    const removals = await service.grants.revoke({
-      ...(grantId ? { grantId } : {}),
-      ...(nodeId ? { nodeId } : {}),
-      ...(capability ? { capabilityId: capability } : {}),
-      actor: invocation.context.principalId ?? 'operator',
-      ...(note ? { note } : {}),
-    });
+    let removals: Awaited<ReturnType<DevicesGatewayService['grants']['revoke']>>;
+    try {
+      removals = await service.grants.revoke({
+        ...(grantId ? { grantId } : {}),
+        ...(nodeId ? { nodeId } : {}),
+        ...(capability ? { capabilityId: capability } : {}),
+        actor: invocation.context.principalId ?? 'operator',
+        ...(note ? { note } : {}),
+      });
+    } catch (error) {
+      // A grant id the record never held; one it holds as already revoked answers revoked: 0, so a repeat is safe.
+      if (error instanceof DeviceGrantNotFoundError) throw new GatewayVerbError(error.message, error.code, error.status, 'grantId');
+      throw error;
+    }
     return {
       revoked: removals.length,
       removals: removals.map((removal) => ({

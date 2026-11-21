@@ -49,26 +49,27 @@ These need the daemon and a credential, and refuse without them:
 - Agent Knowledge (`knowledge`, `ask`, `search`, `/knowledge`), `delegate`, `owner-profile` (`/about-me` inside the Agent), `ci`, `principals`, `channel-profiles`, `fleet`, `relay`, `tasks`, `compat`.
 - Schedules and reminders (`/schedule`, `routines promote`), approvals, channels and deliveries, `/work`.
 
-The Agent dials the connected host at `http://<controlPlane.host>:<controlPlane.port>`. The two values are settled in this order at start; each step that applies replaces the one before:
+The Agent dials its connected host at one origin, settled in this order at start; each step that applies replaces the one before:
 
-1. The settings `controlPlane.host` (default `127.0.0.1`) and `controlPlane.port` (default `3421`). They are daemon settings, shared by every program on the machine; the daemon part describes them.
+1. The setting `daemon.connectedHost.url` (empty by default), an origin with its scheme such as `https://10.0.0.7:3421`. When it is empty, the daemon on this machine, at the address its bind settings give: `controlPlane.hostMode`, `controlPlane.host` (default `127.0.0.1`), `controlPlane.port` (default `3421`), with `https` when `controlPlane.tls.mode` is not `off`. Those are daemon settings, shared by every program on the machine; the daemon part describes them. With `controlPlane.hostMode` `local` the address is `127.0.0.1`; a wildcard bind host (`0.0.0.0`, `::`) is dialled as `127.0.0.1`.
 2. The environment variable `GOODVIBES_AGENT_RUNTIME_URL`; when it is not set, `GOODVIBES_AGENT_BASE_URL` (an older name). Only one of the two is read.
-3. `-c controlPlane.host=<host>` and `-c controlPlane.port=<port>` on the command line.
+3. `-c daemon.connectedHost.url=<origin>` on the command line.
 4. `--runtime-url <url>` on the command line.
 
-A runtime URL (from step 2 or 4) must be `http://host[:port]` with no path, query or fragment; a bare `host:port` is read as `http://host:port`, and a missing port means `3421`. It sets `controlPlane.host`, `controlPlane.port` and `controlPlane.hostMode` for this launch only and saves nothing.
+When no origin is stated and `controlPlane.host` names another machine, the Agent does not dial it: every connected-host feature refuses with `controlPlane.host names <host>, which is another machine, and how to reach it was not stated. Set daemon.connectedHost.url to https://<host>:<port> (encrypted), or to http://<host>:<port> to send this Agent's credentials unencrypted over the network; ...`. Nothing is sent.
+
+A runtime URL (from step 2 or 4) must be `http://host[:port]` or `https://host[:port]` with no path, query, fragment or user name; a bare `host:port` is read as `http://host:port`, and a missing port means `3421`. It sets `daemon.connectedHost.url` for this launch only and saves nothing.
 A bad value stops the Agent before it starts, with exit `2`:
 
 ```text
-$ goodvibes-agent --runtime-url https://host.example compat
---runtime-url must use http:// because Agent connects to the local GoodVibes API.
+$ goodvibes-agent --runtime-url ftp://host.example compat
+--runtime-url must use http:// or https://.
 
 $ goodvibes-agent --runtime-url http://127.0.0.1:3421/api compat
---runtime-url must point at the connected GoodVibes API root, not a path, query, or hash.
+--runtime-url must point at the connected GoodVibes API root, not a path, query, hash or user name.
 ```
 
-The same messages name `GOODVIBES_AGENT_RUNTIME_URL` or `GOODVIBES_AGENT_BASE_URL` when the bad value came from the environment. Other refusals: `requires a non-empty http://host:port value`, `must be a valid http://host:port URL`, `must include a hostname`, `port must be from 1 to 65535`.
-When the dialed host would be a wildcard bind address (`0.0.0.0`, `::`) or empty, the Agent dials `127.0.0.1` instead; an IPv6 host is put in brackets; a port that is not a whole number from 1 to 65535 becomes `3421`.
+The same messages name `GOODVIBES_AGENT_RUNTIME_URL` or `GOODVIBES_AGENT_BASE_URL` when the bad value came from the environment. Other refusals: `requires a non-empty http(s)://host:port value`, `must be a valid http(s)://host:port URL`, `must include a hostname`, `port must be from 1 to 65535`.
 
 The Agent picks its credential for the connected host in this order, taking the first that is present:
 
@@ -117,7 +118,7 @@ $ goodvibes-agent web
 Unsupported command: web. GoodVibes Agent does not start web servers or expose browser routes.
 ```
 
-`goodvibes-agent` has no `acp`, `open`, `hooks validate`, `host pair` (it uses `setup pair`), `support-bundle` (it uses `bundle`), `plugin init`, `plugin validate`, or `plugin trust` on the command line (trust is set with `/plugin-trust trust` inside the Agent).
+`goodvibes-agent` has no `acp`, `open`, `hooks validate`, `host pair` (it uses `setup pair`), `support-bundle` (it uses `bundle`), `plugin init`, `plugin validate`, or `plugin trust` on the command line (trust is set with `/plugin trust` inside the Agent).
 `goodvibes-agent tasks submit` is refused with exit code `2`:
 
 ```text
@@ -245,22 +246,18 @@ Undoing a file change and restoring a checkpoint use the same lines as the termi
 ### Hooks in the Agent
 
 The Agent loads hooks exactly as the terminal app does (see "Hooks" in the terminal-app part): from the file its own setting `tools.hooksFile` names, resolved against the working directory, `<project>/hooks.json` by default, with the same event paths, command hook contract, rules in every mode and trust rules. A hooks file in a workspace that is not trusted waits for trust, and the Agent says so once at start; `/security trust-folder` trusts the workspace and loads the waiting file at once, with no restart.
-The Agent has no `/hooks` command and no `hooks validate`. To manage its hooks:
-
-1. Edit `<project>/hooks.json` by hand (the terminal app's `/hooks scaffold` writes the same file when both programs use the default `tools.hooksFile`).
-2. Check it with the terminal app: `goodvibes hooks validate` in the same directory, and `goodvibes doctor hooks`.
-3. Restart the Agent after editing the file: it reads the hooks file at start (and when the workspace becomes trusted), and has no `/hooks reload`.
+The Agent has the terminal app's `/hooks` command, with the same actions: `contracts` lists the hook points and the managed hooks file, `scaffold`, `chain`, `enable`, `disable` and `remove` change managed hooks, `simulate` shows which hooks an event would run, `reload` reads a hand-edited file again, and `export`, `inspect` and `import` move hooks between machines. `open` is refused: the hooks screen is the terminal app's, and `/hooks contracts` lists the same. The Agent has no `hooks validate` on the command line; check a file with the terminal app's `goodvibes hooks validate` in the same directory, or `goodvibes doctor hooks`.
 
 Besides `exec`, the Agent runs commands through `terminal` (`args.command`), `process` (`args.command` for `action: "start"`, and `args.data` written to a running process's standard input for `action: "write"`), `agent_harness` (for example `mode: "run_background_process"`) and `agent_operator_method` (daemon methods that run a command on a paired peer or backend). A hook fires for the tool called, whether the model called it or another tool ran it, in every permission mode, so a hook that guards commands needs an entry for each tool that runs one. The `git push` example under "Hooks" in the terminal-app part registers all of them. To make sure a command never runs, use a never-run rule instead: `/permissions never git push` (see "Never-run rules" in "Permissions and decisions"); the rule is kept in the one rules file every program reads (`~/.goodvibes/shared/permission-rules.json`), so it holds for the Agent's own turns, the terminal app and turns the Agent hands to a hosted session on the daemon.
 
 ### Plugins in the Agent
 
 The Agent loads plugins from the same two directories as the terminal app (`<project>/.goodvibes/plugins/` and `~/.goodvibes/plugins/`), with the same manifest, entry file and trust tiers (see "Plugins" in the terminal-app part). The trust tier is shared by both programs (`~/.goodvibes/plugin-trust.json`); the enabled list is not: the Agent starts only the plugins enabled in its own `~/.goodvibes/agent/plugins.json`.
-The Agent's `/plugin-trust` takes `list`, `enable <plugin>`, `disable <plugin>`, `reload`, `quarantine <plugin> [reason]`, `lift <plugin>`, `trust`, `trust-key`, `verify` and `capabilities`, the same actions and answers as the terminal app's `/plugin`. `goodvibes-agent plugin` on the command line has only `bundles`. To run a plugin in the Agent:
+The Agent's `/plugin` takes `list`, `enable <plugin>`, `disable <plugin>`, `reload`, `quarantine <plugin> [reason]`, `lift <plugin>`, `trust`, `trust-key`, `verify` and `capabilities`, the same actions and answers as the terminal app's `/plugin`. `goodvibes-agent plugin` on the command line has only `bundles`. To run a plugin in the Agent:
 
-1. Set its tier if it needs one: `/plugin-trust trust word-count limited` (or `goodvibes plugin trust word-count limited`).
-2. `/plugin-trust enable word-count` loads and starts it at once and records the choice, with the directory it was enabled from, in `~/.goodvibes/agent/plugins.json`: `Plugin 'word-count' switched on and started.`, or the reason it did not start.
-3. `/plugin-trust list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent. `/plugin-trust disable word-count` stops it.
+1. Set its tier if it needs one: `/plugin trust word-count limited` (or `goodvibes plugin trust word-count limited`).
+2. `/plugin enable word-count` loads and starts it at once and records the choice, with the directory it was enabled from, in `~/.goodvibes/agent/plugins.json`: `Plugin 'word-count' switched on and started.`, or the reason it did not start.
+3. `/plugin list` marks each plugin `[active]` (loaded and running), `[enabled]` (enabled but not running: still starting, refused, or failed to load; the start-up warnings say why) or `[disabled]`, followed by its name, version and `tier <tier>`. The terminal app's `[loading]` mark does not appear in the Agent. `/plugin disable word-count` stops it.
 
 ### Instructions and personality
 
@@ -287,11 +284,12 @@ VIBE.md is managed with `/personas`: `vibe` (which files apply and which are blo
 | `/memory` | The same command as the terminal app's `/memory` (see "Memory and knowledge" in the terminal app's part): bare, it opens the list of actions, "See your memory" first; `open` opens the workspace's Memory page; `injections` refuses, because the Agent records no per-turn memory. |
 | `/session` | The same command as the terminal app's `/session`. It reads the cross-session task graph (`graph`) and refuses `link-task`, `hand-off`, `accept`, `withdraw` and `cancel` (hand work over with `/agents hand-off <the work>`); `save-file` writes Markdown or text only; `save-saved` prints the redacted transcript here and writes no file (`goodvibes-agent sessions export <id> <path>` writes JSON); `upload` and the branch actions are refused. |
 | `/my-skills` | The Agent's own skills (see "`goodvibes-agent skills` (aliases `skill`, `agent-skills`)" below); the terminal app's `/skills` lists skill files instead. |
-| `/plugin-trust` | The terminal app's plugin actions without `dirs`, `inspect`, `review`, publishing or the plugins screen: `list`, `enable`, `disable`, `reload`, `quarantine`, `lift`, `trust <plugin> <untrusted|limited|trusted> [note]`, `trust-key`, `verify`, `capabilities`. |
+| `/hooks` | The terminal app's hook actions without its screen: `contracts`, `scaffold`, `chain`, `enable`, `disable`, `remove`, `simulate`, `reload`, `export`, `inspect`, `import`. |
+| `/plugin` | The terminal app's plugin actions without `dirs`, `inspect`, `review`, publishing or the plugins screen: `list`, `enable`, `disable`, `reload`, `quarantine`, `lift`, `trust <plugin> <untrusted|limited|trusted> [note]`, `trust-key`, `verify`, `capabilities`. |
 | `/schedule` | The same description as the terminal app's, on the connected host's schedules: `list`, `add`, `run`, `pause`, `resume`, `change`, `remove`, `stop-run <run>` and `retry-run <run>` (see "Automation and host actions" below). |
 | `/calendar` | The same command as the terminal app's, on the Agent's own events, its calendar feeds and its calendar accounts; `change` and `status` (the daemon's calendar) are the terminal app's (see "Personal operations" below). |
 | `/payments` | Adds `address <billing|shipping>`. |
-| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`), "Pair something" (`pair device [--name <name>]` mints a named device token and shows its link and QR), and the paired phones (`nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture`). Pairing this terminal, the relay, channel setup and the shared token are the terminal app's and are refused here saying so. |
+| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`), "Pair something" (`pair device [--name <name>]` mints a named device token and shows its link and QR; `pair host [--apply]` pairs this Agent with its connected host, the same owner-checked flow as `/setup pair`), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the relay through the connected host's relay verbs (`pair relay [--name <name>]`, `relay-status`, `relay-codes`, `relay-revoke <code>`, as `goodvibes-agent relay`), and the paired phones (`nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture`). Channel setup and the shared token are the terminal app's and are refused here saying so. |
 | `/intelligence` | The same description as the terminal app's: the lookups (`symbols`, `outline`, `definition`, `references`, `hover`) and `install`; `review` and `diagnostics` are the terminal app's and are refused here. |
 | `/voice` | The same description as the terminal app's (`speak`, `stop`, `on`, `off`, the local voice runtime, the wake word and the settings file); the runtime and the wake word are read and set up through the Agent's own voice service. |
 | `/undo`, `/redo`, `/retry` | The same descriptions as the terminal app's; `rewind` is refused, since the Agent does not go back to a turn; `/retry` re-sends the last message. |
@@ -304,16 +302,16 @@ VIBE.md is managed with `/personas`: `vibe` (which files apply and which are blo
 | `/services` | The same command as the terminal app's; `open` refuses because the Agent has no services screen. |
 | `/tasks` | The same description as the terminal app's; tasks are read only here (`list`, `open`, `show`, `output`), and a change is refused with the reason. |
 | `/workstream` | `start` is refused: work is started by planning it (`/workstream plan`, `approve`, `launch`), by asking for it in a message, or with `/work submit-file`. |
-| `/setup` | A guided command with the same topics as the terminal app's `/setup`. `Choose a model`, `Sign in or out of a provider`, `Store a password or key`, `History and privacy` and `Bring over settings from the terminal app` open the workspace with only that topic's rows; `Add a provider of your own` runs `/provider add <name> <address>`; `Connect chat apps and services`, `How GoodVibes works with you`, `Safety and sandboxing`, `Memory and context`, `Paired devices and voice` and `Scheduled routines, watchers and triggers` open the matching workspace area; the topics marked `on the daemon` say to run `goodvibes setup` where the daemon runs. `Pair the Agent with a GoodVibes host` (`/setup pair [--name <name>] [--apply]`) and `Unpair the Agent from the GoodVibes host` (`/setup unpair`) (applying a pairing and unpairing only when the owner types it); `Run first-run again` opens the three steps. |
+| `/setup` | A guided command with the same topics as the terminal app's `/setup`. `Choose a model`, `Sign in or out of a provider`, `Store a password or key`, `History and privacy`, `Bring over settings from the terminal app` and `Use a daemon on another computer` (the connected-daemon address `daemon.connectedHost.url`, whether the Agent may dial it, and `/setup pair`) open the workspace with only that topic's rows; `Add a provider of your own` runs `/provider add <name> <address>`; `Connect chat apps and services`, `How GoodVibes works with you`, `Safety and sandboxing`, `Memory and context`, `Paired devices and voice` and `Scheduled routines, watchers and triggers` open the matching workspace area; the topics marked `on the daemon` say to run `goodvibes setup` where the daemon runs. `Pair the Agent with a GoodVibes host` (`/setup pair [--name <name>] [--apply]`) and `Unpair the Agent from the GoodVibes host` (`/setup unpair`) (applying a pairing and unpairing only when the owner types it); `Run first-run again` opens the three steps. |
 | `/auth` | `review`, `show <provider>`, `repair <provider>`, `bundle export <path>`, `bundle inspect <path>` only; no daemon sign-in or local users. |
-| `/update` | The same description as the terminal app's; `review`, `save-review` and `read-review` are refused and name the terminal app. |
+| `/update` | The same description as the terminal app's, without `review`, `save-review` and `read-review` (the terminal app's install review): `check`, `apply`, `rollback`, `daemon [--check]`. |
 | `/save` | Saves to `<project>/.goodvibes/agent/sessions/`. |
 | `/security` | The same description as the terminal app's; folder trust here decides whether the folder's hooks file loads and the MCP servers its files name start. Sandbox sessions and the screens are refused and name the terminal app. |
 | `/help`, `?` | Open help: every command as a plain title with its slash name, grouped by task, and the keyboard shortcuts as the last group; the same list as `Ctrl+P`. `/help <command>` prints one command's actions and lines. |
 
 Every command the Agent has is on its first screen (the bare `/` list) and in `/help`.
 
-Terminal-app slash commands the Agent does not have: `/changes`, `/checkin`, `/cluster`, `/codebase`, `/communication`, `/deeplink`, `/editor`, `/eval`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/hosted`, `/local-auth`, `/managed`, `/marketplace`, `/plan`, `/plugin`, `/power`, `/presets`, `/queue`, `/release`, `/remote`, `/replay`, `/review`, `/scan`, `/settings-sync`, `/skills`, `/startup`, `/template`, `/test`, `/tools`, `/usage`, `/web-search`, `/worktree`. Their nearest Agent equivalents: `/network-scan` for `/scan`, `/my-skills` for `/skills`, `/plugin-trust` for `/plugin`, `goodvibes-agent relay` for the relay actions of `/devices`.
+Terminal-app slash commands the Agent does not have: `/changes`, `/checkin`, `/cluster`, `/codebase`, `/communication`, `/deeplink`, `/editor`, `/eval`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hosted`, `/local-auth`, `/managed`, `/marketplace`, `/plan`, `/power`, `/presets`, `/queue`, `/release`, `/remote`, `/replay`, `/review`, `/scan`, `/settings-sync`, `/skills`, `/startup`, `/template`, `/test`, `/tools`, `/usage`, `/web-search`, `/worktree`. Their nearest Agent equivalents: `/network-scan` for `/scan`, `/my-skills` for `/skills`.
 
 ## The Agent's command line
 

@@ -8,7 +8,7 @@
  */
 import { createSecurityCommand } from '@goodvibes/engine/terminal-shell/security-command';
 import { createTrustReviewTools } from '@goodvibes/engine/terminal-shell/trust-review';
-import { registerPluginTrustCommand } from '@goodvibes/engine/terminal-shell/plugin-trust-command';
+import { registerPluginCommand } from '@goodvibes/engine/terminal-shell/plugin-trust-command';
 import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import type { PolicyCommandContext } from '@goodvibes/engine/platform/platform/gate/policy';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
@@ -21,12 +21,14 @@ import {
   requireTokenAuditor,
 } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
+import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { readExecutionModeInForce } from '../../permissions/execution-mode.ts';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
   serviceNames: (ctx) => Object.keys(requireServiceRegistry(ctx).getAll()),
   security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
-  permissionMode: (ctx) => ctx.platform.configManager.get('permissions.mode'),
+  permissionMode: (ctx) => readExecutionModeInForce(ctx.platform.configManager) ?? describePermissionModeInForce(ctx.platform.configManager),
   serviceLabel: 'integrations',
 });
 
@@ -103,5 +105,5 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
     elsewhere: 'the terminal app (goodvibes)',
   }));
   // Plugins load here as in the terminal app, so their trust tier is set here too.
-  registerPluginTrustCommand<CommandContext>(registry, (ctx) => ctx.extensions.pluginManager);
+  registerPluginCommand<CommandContext>(registry, (ctx) => ctx.extensions.pluginManager);
 }

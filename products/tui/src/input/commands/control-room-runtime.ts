@@ -1,6 +1,4 @@
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
-import '@/runtime/index.ts';
-import '@goodvibes/engine/platform/platform/config';
 import { requireReadModels } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { AgentsHost } from '@goodvibes/engine/terminal-shell/agents-command';

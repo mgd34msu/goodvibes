@@ -97,9 +97,12 @@ export interface WatcherSnapshotSaveFailure {
 
 /**
  * The watcher lifecycle, declared from the moves this registry makes:
- * start (stopped/failed -> running), a run outcome (-> running | failed),
+ * start (stopped/failed -> running), a run outcome (-> running | degraded | failed),
  * freshness (running -> degraded, derived in `sourceStatusFor`), stop (-> stopped).
- * A run on a stopped manual watcher may also end failed.
+ * `failed` means nothing drives the watcher and its last run failed (a run on a
+ * stopped watcher, or a manual run of one that is not running). A driven
+ * watcher whose run failed is `degraded` with `lastError`, stays live and is
+ * run again; its next successful run returns it to running.
  *
  * `starting` is declared but never assigned: `startWatcher` is synchronous and
  * goes straight to running, so no start is ever in flight. It is still read
@@ -948,14 +951,14 @@ export class WatcherRegistry {
     // The generation this run belongs to; a re-registration, stop or removal aborts it and drops its outcome.
     const fence = this.generation(id).peek();
     this.inFlight.set(id, fence.epoch);
+    // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
+    // The same holds for a timer-driven watcher whose manual run failed first (stopped, then failed): with no timer it is not running.
+    const undriven = watcher.record.state === 'stopped'
+      || (watcher.record.state === 'failed' && !this.timers.has(id) && watcher.record.kind !== 'manual');
     try {
       const checkpoint = await run(fence.signal);
       // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
       const current = this.watchers.get(id);
-      // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
-      // The same holds for a timer-driven watcher whose manual run failed first (stopped, then failed): with no timer it is not running.
-      const undriven = watcher.record.state === 'stopped'
-        || (watcher.record.state === 'failed' && !this.timers.has(id) && watcher.record.kind !== 'manual');
       const successState: WatcherState = undriven ? 'stopped' : 'running';
       if (!current || !runOutcomeApplies(fence, current.record.state, successState)) return;
       const updated: WatcherRecord = this.normalizeRecord({
@@ -1003,15 +1006,18 @@ export class WatcherRegistry {
       }
     } catch (error) {
       const current = this.watchers.get(id);
-      if (!current || !runOutcomeApplies(fence, current.record.state, 'failed')) {
+      // A driven watcher stays live (degraded, with the error) and its timer runs it again;
+      // only one that nothing drives is recorded as failed.
+      const failureState: WatcherState = undriven ? 'failed' : 'degraded';
+      if (!current || !runOutcomeApplies(fence, current.record.state, failureState)) {
         logger.warn('Watcher run failed after the watcher was stopped, removed or registered again; outcome discarded', { watcherId: id, error: summarizeError(error) });
         return;
       }
       const failed: WatcherRecord = this.normalizeRecord({
         ...current.record,
-        state: 'failed',
+        state: failureState,
         lastError: summarizeError(error),
-        sourceStatus: 'failed',
+        sourceStatus: undriven ? 'failed' : 'degraded',
         degradedReason: summarizeError(error),
       });
       this.watchers.set(id, { ...current, record: failed });

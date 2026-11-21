@@ -276,13 +276,13 @@ http://127.0.0.1:3421
 Override for one launch:
 
 ```sh
-goodvibes-agent --runtime-url http://host:port
+goodvibes-agent --runtime-url https://host:port
 ```
 
 Persistent shell/session override:
 
 ```sh
-export GOODVIBES_AGENT_RUNTIME_URL=http://host:port
+export GOODVIBES_AGENT_RUNTIME_URL=https://host:port
 ```
 
 Host diagnostics:

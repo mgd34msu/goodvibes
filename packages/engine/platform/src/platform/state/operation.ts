@@ -36,7 +36,10 @@ export type EffectKey = string & { readonly [effectBrand]: true };
 /** A record that is on disk. Made only by {@link durableAfter}, after the sync it was handed resolved. */
 export type Durable<R> = R & { readonly [durableBrand]: true };
 
-/** The client's key as an operation id. Throws a 400 `INVALID_ARGUMENT` refusal for a key outside the one rule (`isOperationKey`: `[A-Za-z0-9._:-]{1,255}`). */
+/**
+ * The client's key as an operation id. Throws a 400 `INVALID_ARGUMENT` refusal for a key outside the one rule (`isOperationKey`: `[A-Za-z0-9._:-]{1,255}`).
+ * An operation log dedupes this id only while the operation is open or not yet compacted; a client-keyed retry of settled work belongs to control-plane/idempotent-replay.ts.
+ */
 export function operationIdFromClient(key: string): OperationId {
   if (!isOperationKey(key)) {
     throw new RefusalError(refusal({

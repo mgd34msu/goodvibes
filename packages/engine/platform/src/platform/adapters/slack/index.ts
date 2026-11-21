@@ -5,19 +5,16 @@ import { slackMentionedUserIds } from '../../integrations/slack.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
-import { resolveSecretInput, type SecretRefResolutionOptions } from '../../config/secret-refs.js';
-import { hasAttachments, ingressAnswer, ingressAnswerResponse, noticeUnsupportedAttachment, readRecord, readTextBodyWithinLimit } from '../helpers.js';
+import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
+import { hasAttachments, ingressAnswer, ingressAnswerResponse, noticeUnsupportedAttachment, readRecord, readTextBodyWithinLimit, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { answerSurfaceControl, runSurfaceMessage, savedWithin, submitSurfaceMessageSaved, SURFACE_ACK_DEADLINE_MS, surfaceAckStillSaving, surfaceOutcomeResponse } from '../surface-message.js';
 
 export async function handleSlackSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const signingSecret =
-    await context.serviceRegistry.resolveSecret('slack', 'signingSecret')
-    ?? await resolveSlackConfigSecret(context, 'surfaces.slack.signingSecret')
-    ?? process.env.SLACK_SIGNING_SECRET;
-  if (!signingSecret) {
-    logger.warn('handleSlackSurfaceWebhook: SLACK_SIGNING_SECRET not set, rejecting');
-    return Response.json({ error: 'Webhook not configured' }, { status: 503 });
-  }
+  const credential = await resolveInboundCredential(context, 'slack');
+  if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('slack', credential);
+  if (credential.state === 'absent') return surfaceCredentialAbsent('slack', credential.setting);
+  const signingSecret = credential.value;
 
   const timestamp = req.headers.get('x-slack-request-timestamp') ?? '';
   const signature = req.headers.get('x-slack-signature') ?? '';
@@ -25,10 +22,8 @@ export async function handleSlackSurfaceWebhook(req: Request, context: SurfaceAd
   if (rawBody instanceof Response) return rawBody;
 
   const slack = new SlackIntegration(
-    await context.serviceRegistry.resolveSecret('slack', 'webhookUrl') ?? process.env.SLACK_WEBHOOK_URL,
-    await context.serviceRegistry.resolveSecret('slack', 'primary')
-      ?? await resolveSlackConfigSecret(context, 'surfaces.slack.botToken')
-      ?? process.env.SLACK_BOT_TOKEN,
+    await resolveSurfaceSecret(context, 'slack', 'webhookUrl') ?? undefined,
+    await resolveSurfaceSecret(context, 'slack', 'primary') ?? undefined,
   );
 
   if (!slack.verifySignature(rawBody, timestamp, signature, signingSecret)) {
@@ -347,22 +342,6 @@ export async function handleSlackSurfacePayload(
   }
 
   return new Response(null, { status: 200 });
-}
-
-async function resolveSlackConfigSecret(
-  context: SurfaceAdapterContext,
-  key: 'surfaces.slack.botToken' | 'surfaces.slack.signingSecret',
-): Promise<string | null> {
-  return resolveSecretInput(context.configManager.get(key), slackSecretRefOptions(context), 'dispatch');
-}
-
-function slackSecretRefOptions(context: SurfaceAdapterContext): SecretRefResolutionOptions {
-  return {
-    resolveLocalSecret: context.secretsManager
-      ? (key) => context.secretsManager!.get(key)
-      : undefined,
-    homeDirectory: context.secretsManager?.getGlobalHome?.() ?? undefined,
-  };
 }
 
 /** The `channel_type` of an Events API callback's event (`im` for a direct message), when it names one. */

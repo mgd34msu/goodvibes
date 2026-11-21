@@ -3,7 +3,7 @@ import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import type { AutomationRunTrigger } from './types.js';
-import { computeNextRun, jobEnablement } from './manager-runtime-helpers.js';
+import { computeNextRun, nextJobEnablement } from './manager-runtime-helpers.js';
 import { summarizeError } from '../utils/error-display.js';
 import { scheduleCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
@@ -25,13 +25,24 @@ interface AutomationSchedulingContext {
   readonly jobs: Map<string, AutomationJob>;
   readonly timers: Map<string, ReturnType<typeof setTimeout>>;
   readonly heartbeatWakes: Map<string, AutomationHeartbeatWake>;
-  /** Occurrences held back at the concurrency limit, for the capacity report. */
-  readonly capacityWaits?: Map<string, AutomationCapacityWait> | undefined;
+  /**
+   * Occurrences held back at the concurrency limit. Each is started again by
+   * the manager when a run slot frees (its `resume`), not by a timer.
+   */
+  readonly capacityWaits: Map<string, AutomationCapacityWait>;
   readonly running: () => boolean;
   readonly saveJobs: () => Promise<void>;
-  readonly activeRunCount: () => number;
-  readonly maxConcurrentRuns: () => number;
-  readonly executeJob: (job: AutomationJob, trigger: AutomationRunTrigger, dueRun: boolean, attempt?: number) => Promise<AutomationRun>;
+  /**
+   * Takes a run slot in the same step as it checks one is free: the release, or
+   * null at the concurrency limit. Held across the group claim and handed to
+   * executeJob, so no other start can take the slot in between.
+   */
+  readonly tryReserveRun: () => (() => void) | null;
+  readonly executeJob: (job: AutomationJob, trigger: AutomationRunTrigger, dueRun: boolean, attempt: number, reserved: () => void) => Promise<AutomationRun>;
+  /** Puts a job the scheduler changed on its own (a finished one-shot) into the runtime store. */
+  readonly syncJobToRuntime: (job: AutomationJob, source: string) => void;
+  /** Announces a job the scheduler changed on its own, as an owner's edit is announced. */
+  readonly emitJobUpdated: (job: AutomationJob, changedFields: string[]) => void;
   /**
    * Record that a scheduled occurrence was missed, the planned run time is now
    * further in the past than the catch-up window, so the run never fired (the
@@ -65,17 +76,27 @@ interface AutomationSchedulingContext {
   readonly admitted?: (() => boolean) | undefined;
 }
 
-function completeOneShotJob(context: Pick<AutomationSchedulingContext, 'jobs' | 'timers' | 'saveJobs'>, current: AutomationJob, reason: string): void {
+/**
+ * A one-shot job whose only occurrence has fired (or was missed) is switched
+ * off with `one-shot-complete`, saved, and announced like any other change.
+ */
+function completeOneShotJob(
+  context: Pick<AutomationSchedulingContext, 'jobs' | 'timers' | 'saveJobs' | 'syncJobToRuntime' | 'emitJobUpdated'>,
+  current: AutomationJob,
+  reason: string,
+): void {
+  const now = Date.now();
   const completedOneShot: AutomationJob = {
     ...current,
-    ...jobEnablement(false),
-    pausedReason: 'one-shot-complete',
-    nextRunAt: undefined,
-    updatedAt: Date.now(),
+    ...nextJobEnablement(current, false, current.schedule, now, 'one-shot-complete'),
+    updatedAt: now,
   };
   context.jobs.set(current.id, completedOneShot);
   cancelAutomationTimer(context.timers, current.id);
   saveJobsAsync(context, reason, current.id);
+  const stored = context.jobs.get(current.id) ?? completedOneShot;
+  context.syncJobToRuntime(stored, 'automation.one-shot-complete');
+  context.emitJobUpdated(stored, ['enabled']);
 }
 
 function saveJobsAsync(context: Pick<AutomationSchedulingContext, 'saveJobs'>, reason: string, jobId?: string): void {
@@ -93,6 +114,9 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
   if (!context.running() || !job.enabled) return;
   // In a group, only the machine holding the automation role arms a timer.
   if (context.runsHere && !context.runsHere(job)) return;
+  // An occurrence waiting for a run slot is started when one frees; it needs no timer.
+  const slotWait = context.capacityWaits.get(scheduleCapacityWaitKey(job.id));
+  if (slotWait?.kind === 'schedule' && slotWait.nextRunAt === job.nextRunAt) return;
 
   const now = Date.now();
   const catchUpWindowMs = Number(context.configManager.get('automation.catchUpWindowMinutes') ?? 30) * 60_000;
@@ -138,36 +162,42 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     return;
   }
 
-  const fire = (): void => {
+  /**
+   * Starts the due occurrence. `reserved` is a run slot already taken for it
+   * (the manager hands one over when a slot frees for a waiting occurrence);
+   * every path that does not start a run gives it back.
+   */
+  const fire = (reserved?: () => void): void => {
     // The daemon takes no new work (a self-update's restart): the occurrence stays due and is asked about again.
     if (context.admitted?.() === false) {
-      const recheck = setTimeout(fire, WORK_ADMISSION_RECHECK_MS);
+      reserved?.();
+      const recheck = setTimeout(() => fire(), WORK_ADMISSION_RECHECK_MS);
       recheck.unref?.();
       context.timers.set(job.id, recheck);
       return;
     }
     const waitKey = scheduleCapacityWaitKey(job.id);
-    const waiting = context.capacityWaits?.get(waitKey);
-    context.capacityWaits?.delete(waitKey);
+    const waiting = context.capacityWaits.get(waitKey);
+    context.capacityWaits.delete(waitKey);
     const latest = context.jobs.get(job.id);
-    if (!latest?.enabled) return;
-    // The role moved while the timer waited: the new holder runs this occurrence.
-    if (context.runsHere && !context.runsHere(latest)) return;
+    // Disabled meanwhile, or the role moved while the timer waited (the new holder runs this occurrence).
+    if (!latest?.enabled || (context.runsHere && !context.runsHere(latest))) {
+      reserved?.();
+      return;
+    }
     if (latest.execution.wakeMode === 'next-heartbeat') {
+      reserved?.();
       queueHeartbeatWake(context.heartbeatWakes, latest, 'scheduled', true, 1, 'scheduled-due');
       return;
     }
-    if (context.activeRunCount() >= context.maxConcurrentRuns()) {
-      const deferredTo = Date.now() + 15_000;
-      const deferred: AutomationJob = {
-        ...latest,
-        nextRunAt: deferredTo,
-        updatedAt: Date.now(),
-      };
-      context.jobs.set(latest.id, deferred);
-      context.capacityWaits?.set(waitKey, { kind: 'schedule', jobId: latest.id, since: waiting?.since ?? Date.now(), nextRunAt: deferredTo });
-      saveJobsAsync(context, 'defer-capacity', latest.id);
-      scheduleAutomationJob(context, deferred);
+    const release = reserved ?? context.tryReserveRun();
+    if (!release) {
+      // Every run slot is in use: the occurrence waits for one and the manager
+      // starts it when a run ends. Its stored next run time stays the due time,
+      // so nothing is written and a restart finds it due.
+      context.capacityWaits.set(waitKey, {
+        kind: 'schedule', jobId: latest.id, since: waiting?.since ?? Date.now(), nextRunAt: latest.nextRunAt ?? nextRunAt, resume: fire,
+      });
       return;
     }
     // The next occurrence is armed once this one has been handled, whether it
@@ -192,6 +222,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       completeOneShotJob(context, current, 'complete-one-shot');
     };
     if (context.hasRunningRun?.(job.id)) {
+      release();
       logger.info('AutomationManager: scheduled occurrence skipped, a run of this job is still in flight', { jobId: job.id });
       advance();
       return;
@@ -200,16 +231,19 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     // itself; the scheduler only needs to log it and move on.
     // An occurrence not claimed here (the role moved, or the group's record
     // could not be written) is neither run nor passed over: the holder runs
-    // it, or the next reconcile pass tries again.
+    // it, or the next reconcile pass tries again. The slot taken above is held
+    // across the claim and handed to the run, so no other start takes it meanwhile.
     let claimedHere = true;
     const claimed = context.claimOccurrence ? context.claimOccurrence(latest) : Promise.resolve(latest);
     void claimed
       .then((claimedJob) => {
-        if (claimedJob) return context.executeJob(claimedJob, 'scheduled', true);
+        if (claimedJob) return context.executeJob(claimedJob, 'scheduled', true, 1, release);
         claimedHere = false;
+        release();
         return undefined;
       })
       .catch((error) => {
+        release();
         logger.error('AutomationManager: scheduled execution failed', {
           jobId: latest.id,
           error: summarizeError(error),
@@ -217,7 +251,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       })
       .finally(() => { if (claimedHere) advance(); });
   };
-  const timer = setTimeout(fire, delayMs);
+  const timer = setTimeout(() => fire(), delayMs);
   timer.unref?.();
   context.timers.set(job.id, timer);
 }
@@ -267,7 +301,7 @@ export function queueHeartbeatWake(
 }
 
 export function advanceScheduledHeartbeatAutomationJob(
-  context: Pick<AutomationSchedulingContext, 'jobs' | 'saveJobs'>,
+  context: Pick<AutomationSchedulingContext, 'jobs' | 'saveJobs' | 'syncJobToRuntime' | 'emitJobUpdated'>,
   timers: Map<string, ReturnType<typeof setTimeout>>,
   jobId: string,
   reschedule: (job: AutomationJob) => void,
@@ -286,5 +320,5 @@ export function advanceScheduledHeartbeatAutomationJob(
     reschedule(updated);
     return;
   }
-  completeOneShotJob({ jobs: context.jobs, timers, saveJobs: context.saveJobs }, current, 'heartbeat-complete-one-shot');
+  completeOneShotJob({ ...context, timers }, current, 'heartbeat-complete-one-shot');
 }

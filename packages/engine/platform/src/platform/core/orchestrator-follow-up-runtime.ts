@@ -104,11 +104,10 @@ export class OrchestratorFollowUpRuntime {
   private async flush(): Promise<void> {
     if (this.disposed || this.queue.length === 0) return;
     const state = this.options.getThinkingState();
-    if (state.isThinking || state.isCompacting || this.isRunning || this.options.getQueuedUserMessageCount() > 0) {
-      const timer = setTimeout(() => this.scheduleFlush(), FOLLOW_UP_RETRY_DELAY_MS);
-      timer.unref?.();
-      return;
-    }
+    // A busy orchestrator flushes the queue itself when it goes idle: the turn's
+    // end, the drained message queue and this runtime's own batch end each call
+    // scheduleFlush.
+    if (state.isThinking || state.isCompacting || this.isRunning || this.options.getQueuedUserMessageCount() > 0) return;
 
     const batch = this.takeBatch();
     if (batch.length === 0) return;
@@ -117,6 +116,7 @@ export class OrchestratorFollowUpRuntime {
     this.activeAbortController = controller;
     this.activeBatch = batch;
     const { signal } = controller;
+    let failed = false;
     try {
       signal.throwIfAborted();
       // Neither completed results nor failure notices may publish an unchecked
@@ -125,14 +125,18 @@ export class OrchestratorFollowUpRuntime {
       for (const item of batch) this.failedAttempts.delete(item.key);
     } catch (error) {
       if (signal.aborted) return;
+      failed = true;
       this.handleFailure(batch, error);
     } finally {
       this.activeAbortController = null;
       this.activeBatch = [];
       this.isRunning = false;
-      if (this.queue.length > 0) {
+      if (failed && this.queue.length > 0) {
+        // A failed recovery backs off before its next attempt.
         const timer = setTimeout(() => this.scheduleFlush(), this.nextRetryDelayMs);
         timer.unref?.();
+      } else {
+        this.scheduleFlush();
       }
       this.nextRetryDelayMs = this.baseDelayMs();
     }

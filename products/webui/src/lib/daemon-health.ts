@@ -3,6 +3,7 @@
  * Derives state from data already exposed by the platform / queries.
  * No `any`. No side effects.
  */
+import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import type { ClientCompatibilityVerdict } from './client-compatibility';
 import {
   evaluateDaemonStatusCompatibility,
@@ -117,55 +118,18 @@ export const DAEMON_HEALTH_DEFAULTS: DaemonHealth = {
   daemonCompatibility: null,
 };
 
-interface TaskItem {
-  status?: string;
-  state?: string;
-  [key: string]: unknown;
-}
-
-interface TasksListResponse {
-  tasks?: TaskItem[];
-  items?: TaskItem[];
-  data?: TaskItem[];
-  [key: string]: unknown;
-}
-
-interface ModelCurrentResponse {
-  name?: string;
-  displayName?: string;
-  registryKey?: string;
-  id?: string;
-  [key: string]: unknown;
-}
-
 // ---------------------------------------------------------------------------
 // Pure helpers, derive state from raw API responses
 // ---------------------------------------------------------------------------
 
-/** Extract task counts from a tasks.list response. */
-export function taskCountsFromList(response: unknown): { activeTurns: number; queuedTasks: number } {
-  if (!response || typeof response !== 'object') return { activeTurns: 0, queuedTasks: 0 };
-  const r = response as TasksListResponse;
-  const items: TaskItem[] = r.tasks ?? r.items ?? r.data ?? [];
-  if (!Array.isArray(items)) return { activeTurns: 0, queuedTasks: 0 };
-
-  let activeTurns = 0;
-  let queuedTasks = 0;
-
-  for (const item of items) {
-    const s = (item.status ?? item.state ?? '').toLowerCase();
-    if (s === 'running' || s === 'active' || s === 'in_progress') activeTurns++;
-    else if (s === 'queued' || s === 'pending' || s === 'waiting') queuedTasks++;
-  }
-
-  return { activeTurns, queuedTasks };
+/** Running and queued task counts, as the daemon's tasks.list snapshot counts them. */
+export function taskCountsFromList(response: OperatorMethodOutput<'tasks.list'>): { activeTurns: number; queuedTasks: number } {
+  return { activeTurns: response.running, queuedTasks: response.queued };
 }
 
-/** Extract a human-readable model name from a models/current response. */
-export function modelNameFromCurrent(response: unknown): string | null {
-  if (!response || typeof response !== 'object') return null;
-  const r = response as ModelCurrentResponse;
-  return r.displayName ?? r.name ?? r.registryKey ?? r.id ?? null;
+/** The current model's registry key from models.current.get, or null when no model is set. */
+export function modelNameFromCurrent(response: OperatorMethodOutput<'models.current.get'>): string | null {
+  return response.model?.registryKey ?? null;
 }
 
 /**

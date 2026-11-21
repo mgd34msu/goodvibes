@@ -13,6 +13,7 @@
  *     goodvibes:// reference.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { CommandRegistry } from '../command-registry.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
@@ -21,7 +22,7 @@ import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './confirmation.ts';
 import { registerMailCommand, type MailMessage } from '@goodvibes/engine/terminal-shell/mail-command';
 import type { ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { EmailService } from '@goodvibes/engine/platform/platform/email';
+import { EmailService, SmtpDeliveryUnconfirmedError } from '@goodvibes/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes/engine/platform/platform/email/node';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { openEffectiveConfigView, routeConfigWrite } from '../../config/daemon-config-routing.ts';
@@ -178,18 +179,37 @@ async function draftMail(ctx: CommandContext, message: MailMessage): Promise<str
   return `Draft saved to the account (${result.uid !== null ? `uid ${result.uid}` : `folder ${result.mailbox}`}). Nothing was sent.`;
 }
 
-/** Messages this process sent (or tried to): a send has no idempotency key, so an identical one needs "Send it again". */
-const sentThisSession = new Set<string>();
+/** One send of a message: the Message-ID every repeat of it carries, and whether it was confirmed sent. */
+interface MailSendAttempt {
+  readonly messageIdLocalPart: string;
+  sent: boolean;
+}
+
+/** Each message (recipient, subject and body) this process has sent or tried to send. */
+const sendAttempts = new Map<string, MailSendAttempt>();
 
 async function sendMail(ctx: CommandContext, message: MailMessage, again: boolean): Promise<string> {
-  const fingerprint = `${message.to}\0${message.subject}\0${message.body}`;
-  if (sentThisSession.has(fingerprint) && !again) {
-    throw commandRefusal('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again.',
-      'Check the Sent folder first; to send it anyway choose "Send it again" (/mail send ... --again)');
+  const fingerprint = JSON.stringify([message.to, message.subject, message.body]);
+  const earlier = sendAttempts.get(fingerprint);
+  if (earlier?.sent && !again) {
+    throw commandRefusal('This exact message was already sent from this session, so it was not sent again.',
+      'Check the Sent folder first; to send another copy choose "Send it again" (/mail send ... --again)');
   }
-  sentThisSession.add(fingerprint);
+  // A message not yet confirmed sent keeps its Message-ID on every repeat, --again included, so a
+  // recipient's mail program sees one message; only a new copy of a sent one gets a new id.
+  const attempt = earlier && !earlier.sent ? earlier : { messageIdLocalPart: `gv.${randomUUID().replaceAll('-', '')}`, sent: false };
+  sendAttempts.set(fingerprint, attempt);
   // The registry has asked the owner by now (the description marks a send as sending something out).
-  await (await buildEmailService(ctx)).sendMail({ ...message, confirm: true });
+  try {
+    await (await buildEmailService(ctx)).sendMail({ ...message, confirm: true, messageIdLocalPart: attempt.messageIdLocalPart });
+  } catch (error) {
+    if (error instanceof SmtpDeliveryUnconfirmedError) {
+      throw commandRefusal(`The send was not confirmed; it may have gone (${error.message}).`,
+        'Check the Sent folder; sending it again with /mail send repeats the same message under the same Message-ID', 'COMMAND_FAILED');
+    }
+    throw error;
+  }
+  attempt.sent = true;
   return `Email sent to ${message.to} with subject "${message.subject}".`;
 }
 

@@ -195,7 +195,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     repeat: 'safe',
     title: 'Withdraw a Standing Authorisation',
     description:
-      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments repeats remove sends both. The owner\'s own act.',
+      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments stop-repeat sends both. The owner\'s own act.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,

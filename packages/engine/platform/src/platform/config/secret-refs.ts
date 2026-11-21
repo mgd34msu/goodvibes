@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { runProcess } from '../utils/process-runner.js';
 import { GOODVIBES_URI_PREFIX } from './secret-ref-refusal.js';
 
 
@@ -612,43 +613,29 @@ function summarizeCommandStderr(stderr: string): string {
   return trimmed.length > 0 ? `: ${trimmed.slice(0, 500)}` : '';
 }
 
+/** How long a secret command may run when its reference sets no limit. */
+const SECRET_COMMAND_TIMEOUT_MS = 10_000;
+
+/**
+ * Runs a secret command as its own process group. At the deadline the whole
+ * group is killed and its output readers cancelled, so a helper that keeps
+ * the pipes open (gpg waiting on a pinentry) cannot hold the read.
+ */
 async function defaultRunCommand(
   command: string,
   args: readonly string[],
   options: SecretCommandRunOptions = {},
 ): Promise<SecretCommandRunResult> {
-  const proc = Bun.spawn([command, ...args], {
-    env: { ...process.env, ...(options.env ?? {}) },
-    stdin: options.stdin === undefined ? 'ignore' : 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const result = await runProcess({
+    args: [command, ...args],
+    ...(options.env !== undefined ? { env: options.env } : {}),
+    ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
+    timeoutMs: options.timeoutMs !== undefined && options.timeoutMs > 0 ? options.timeoutMs : SECRET_COMMAND_TIMEOUT_MS,
   });
-  if (options.stdin !== undefined && proc.stdin) {
-    proc.stdin.write(options.stdin);
-    proc.stdin.end();
+  if (result.timedOut) {
+    return { exitCode: result.exitCode || 124, stdout: result.stdout, stderr: result.stderr || 'command timed out' };
   }
-
-  let timedOut = false;
-  const timeout = options.timeoutMs && options.timeoutMs > 0
-    ? setTimeout(() => {
-        timedOut = true;
-        proc.kill();
-      }, options.timeoutMs)
-    : undefined;
-  timeout?.unref?.();
-  try {
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    if (timedOut) {
-      return { exitCode: exitCode || 124, stdout, stderr: stderr || 'command timed out' };
-    }
-    return { exitCode, stdout, stderr };
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
 async function runChecked(
@@ -713,7 +700,7 @@ function buildOnePasswordRef(ref: OnePasswordSecretRef): string {
 async function resolveOnePasswordRef(ref: OnePasswordSecretRef, options: SecretRefResolutionOptions): Promise<string | null> {
   const args = ['read', buildOnePasswordRef(ref)];
   if (ref.account) args.push('--account', ref.account);
-  const output = await runChecked(ref, hostConfig(options).onePassword?.cli || 'op', args, options, { timeoutMs: ref.timeoutMs ?? 10_000 });
+  const output = await runChecked(ref, hostConfig(options).onePassword?.cli || 'op', args, options, { timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS });
   return output.length > 0 ? output : null;
 }
 
@@ -745,7 +732,7 @@ async function validateBitwardenStatus(ref: BitwardenSecretRef, options: SecretR
   if (!shouldValidate) return;
   const output = await runChecked(ref, bitwardenCli(options), ['status', '--nointeraction'], options, {
     env: bitwardenEnv(options),
-    timeoutMs: ref.timeoutMs ?? 10_000,
+    timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS,
   });
   const status = JSON.parse(output || '{}') as { serverUrl?: string; status?: string };
   if (status.status && status.status !== 'unlocked') {
@@ -800,14 +787,14 @@ async function resolveBitwardenRef(ref: BitwardenSecretRef, options: SecretRefRe
   if (canUseDirectGet) {
     const output = await runChecked(ref, bitwardenCli(options), ['get', field, ref.item, '--raw', '--nointeraction'], options, {
       env,
-      timeoutMs: ref.timeoutMs ?? 10_000,
+      timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS,
     });
     return output.length > 0 ? output : null;
   }
 
   const itemJson = await runChecked(ref, bitwardenCli(options), ['get', 'item', ref.item, '--raw', '--nointeraction'], options, {
     env,
-    timeoutMs: ref.timeoutMs ?? 10_000,
+    timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS,
   });
   return extractBitwardenItemField(itemJson, ref);
 }
@@ -826,7 +813,7 @@ async function resolveBitwardenSecretsManagerRef(
   if (host?.configFile) args.push('--config-file', expandUserPath(host.configFile, options.homeDirectory));
   if (host?.serverUrl) args.push('--server-url', host.serverUrl);
 
-  const output = await runChecked(ref, host?.cli || 'bws', args, options, { env, timeoutMs: ref.timeoutMs ?? 10_000 });
+  const output = await runChecked(ref, host?.cli || 'bws', args, options, { env, timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS });
   const parsed = JSON.parse(output) as unknown;
   const secret = Array.isArray(parsed) ? parsed[0] : parsed;
   const record = asRecord(secret);
@@ -856,7 +843,7 @@ export async function resolveSecretRef(
       const output = await runChecked(ref, ref.command, ref.args ?? [], options, {
         env: ref.env,
         stdin: ref.stdin,
-        timeoutMs: ref.timeoutMs ?? 10_000,
+        timeoutMs: ref.timeoutMs ?? SECRET_COMMAND_TIMEOUT_MS,
       });
       return { source: ref.source, value: output.length > 0 ? held(output) : null };
     }

@@ -288,6 +288,27 @@ export function isOwnerAcceptance(escalation: Pick<Escalation, 'failurePause' | 
 }
 
 /**
+ * Leaves the owner wait in either of its forms. A contract waiting on its owner
+ * (`awaiting-owner`) moves to `to`, else the status it left for the owner, else
+ * `fallback`. A contract that waits for an active-contract slot after a restart
+ * while it also waited on its owner (`queued`, resuming into `awaiting-owner`)
+ * is set to resume into that same status instead, so when its slot opens it
+ * goes back to its work rather than to a wait with no question open.
+ */
+export function leaveOwnerWait(run: ContractRun, to?: ContractStatus, fallback: ContractStatus = 'running'): void {
+  const { contract } = run;
+  const target = to ?? contract.statusBeforeOwner ?? fallback;
+  if (contract.status === 'awaiting-owner') run.moveContract(target);
+  else if (contract.status === 'queued' && contract.resumeFrom === 'awaiting-owner') contract.resumeFrom = target;
+  contract.statusBeforeOwner = undefined;
+}
+
+/** Whether the contract waits on its owner, now or once its active-contract slot opens. */
+function inOwnerWait(contract: Pick<Contract, 'status' | 'resumeFrom'>): boolean {
+  return contract.status === 'awaiting-owner' || (contract.status === 'queued' && contract.resumeFrom === 'awaiting-owner');
+}
+
+/**
  * Closes a publication pause as retried: the contract goes back to judging,
  * the status it paused from. The caller then publishes (on a reply, the
  * deliverable step, which reuses the recorded acceptance; on resume, the
@@ -296,8 +317,7 @@ export function isOwnerAcceptance(escalation: Pick<Escalation, 'failurePause' | 
 export function retryPublicationPause(run: ContractRun, escalation: Escalation, how: string): boolean {
   if (!isPublicationPause(escalation)) return false;
   const { contract } = run;
-  if (contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'judging');
-  contract.statusBeforeOwner = undefined;
+  leaveOwnerWait(run, undefined, 'judging');
   contract.statusLine = undefined;
   escalation.reply = { text: how, reading: 'amend', outcome: 'act', decisionId: undefined };
   escalation.resolvedAt = run.env.now();
@@ -584,9 +604,8 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   /** Back to the status the contract left for the owner, once nothing else waits on them. */
   function resume(run: ContractRun, to?: ContractStatus): void {
-    if (open(run).length > 0 || run.contract.status !== 'awaiting-owner') return;
-    run.moveContract(to ?? run.contract.statusBeforeOwner ?? 'running');
-    run.contract.statusBeforeOwner = undefined;
+    if (open(run).length > 0 || !inOwnerWait(run.contract)) return;
+    leaveOwnerWait(run, to);
     context.ownerProgress(run);
   }
 
@@ -874,8 +893,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (answer === 'retry') {
       // The contract moves first; a refused move leaves the question open.
       const unit = run.unit(escalation.targetId);
-      if (contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'running');
-      contract.statusBeforeOwner = undefined;
+      leaveOwnerWait(run);
       // A nudge that was waiting for the next turn is still queued: the unit goes back to waiting on it, not to a plain run.
       if (unit !== undefined && unit.status === 'awaiting-owner') run.moveUnit(unit, (run.runtime(unit).session?.queued.length ?? 0) > 0 ? 'nudged' : 'running');
     }
@@ -906,8 +924,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const { contract } = run;
     const reading: OwnerReplyReading = answer === 'accept' ? 'approve' : 'reject';
     const action: OwnerReplyAction = answer === 'accept' ? 'approved' : 'stopped';
-    if (answer === 'accept' && contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'judging');
-    if (answer === 'accept') contract.statusBeforeOwner = undefined;
+    if (answer === 'accept') leaveOwnerWait(run, undefined, 'judging');
     escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
     escalation.resolvedAt = run.env.now();
     run.decide('owner-replied', contract.id, answer === 'accept'

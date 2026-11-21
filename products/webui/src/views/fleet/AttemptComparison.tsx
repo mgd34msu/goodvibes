@@ -23,6 +23,7 @@ import { Chip } from '../../components/ui/Chip';
 import { Dialog } from '../../components/ui/Dialog';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Radio } from '../../components/ui/Radio';
+import { costAmountLabel } from '../../lib/cost-source';
 import '../../styles/components/attempt-comparison.css';
 
 interface AttemptComparisonProps {
@@ -34,10 +35,7 @@ interface AttemptComparisonProps {
 }
 
 function candidateCost(candidate: FleetAttemptCandidate): string {
-  const { costUsd, costState } = candidate.usage;
-  if (costState === 'unpriced' || costUsd == null) return costState === 'estimated' ? 'estimating…' : 'unpriced';
-  const amount = `$${costUsd.toFixed(costUsd < 1 ? 4 : 2)}`;
-  return costState === 'estimated' ? `~${amount}` : amount;
+  return costAmountLabel(candidate.usage.costUsd, candidate.usage.costState);
 }
 
 export function AttemptComparison({ open, group, onClose, onPicked }: AttemptComparisonProps) {

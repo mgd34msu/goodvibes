@@ -11,7 +11,6 @@ import {
   hasCustomizedWorkspaceDefaults,
   hasExternalIntegrations,
 } from '@goodvibes/engine/terminal-shell/onboarding-signals';
-import '@goodvibes/engine/terminal-shell/onboarding-values';
 import { DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config/schema';
 import type {
   OnboardingSnapshotState,

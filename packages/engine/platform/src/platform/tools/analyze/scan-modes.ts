@@ -77,13 +77,15 @@ async function exportedSymbolsOf(file: string, content: string, intelligence: Co
   return extractExportedSymbols(content).map((sym) => ({ ...sym, file }));
 }
 
-async function collectExportedSymbols(files: string[], intelligence: CodeIntelligence): Promise<ExportedSymbol[]> {
+/** The exported symbols of the target files, or the first target that cannot be read. */
+async function collectExportedSymbols(files: string[], intelligence: CodeIntelligence): Promise<{ exported: ExportedSymbol[]; unreadable?: string }> {
   const exported: ExportedSymbol[] = [];
   for (const file of files) {
     const content = await readTextFile(file);
-    if (content !== null) exported.push(...await exportedSymbolsOf(file, content, intelligence));
+    if (content === null) return { exported, unreadable: file };
+    exported.push(...await exportedSymbolsOf(file, content, intelligence));
   }
-  return exported;
+  return { exported };
 }
 
 export async function runImpact(
@@ -100,10 +102,14 @@ export async function runImpact(
   const deadline = Date.now() + MAX_SCAN_MS;
   const expired = pastDeadline ?? (() => Date.now() > deadline);
   const intelligence = CodeIntelligence.forPath(projectRoot);
-  const exportedNames = await collectExportedSymbols(
+  const targets = await collectExportedSymbols(
     targetFiles.map((rawFile) => resolveInsideRoot(rawFile, projectRoot)),
     intelligence,
   );
+  if (targets.unreadable !== undefined) {
+    return analyzeRefusal(`Cannot read file: ${relative(projectRoot, targets.unreadable)}`, 'Pass files that exist inside the project and can be read.');
+  }
+  const exportedNames = targets.exported;
 
   if (exportedNames.length === 0) {
     return { affected_files: [], exported_names: [], message: 'No exported symbols found in target files' };
@@ -167,14 +173,16 @@ function packageOfSpecifier(specifier: string): string | null {
   return parts[0] || null;
 }
 
-async function buildDepGraph(files: string[], projectRoot: string): Promise<{ graph: DepGraph; packages: Set<string> }> {
+/** The import graph of the files that could be read; a file that could not is in `unread`, not in the graph. */
+async function buildDepGraph(files: string[], projectRoot: string): Promise<{ graph: DepGraph; packages: Set<string>; unread: string[] }> {
   const graph: DepGraph = {};
   const packages = new Set<string>();
+  const unread: string[] = [];
   for (const file of files) {
     const key = relative(projectRoot, file);
     const content = await readTextFile(file);
     if (content === null) {
-      graph[key] = [];
+      unread.push(file);
       continue;
     }
 
@@ -193,7 +201,7 @@ async function buildDepGraph(files: string[], projectRoot: string): Promise<{ gr
     graph[key] = [...new Set(imports)];
   }
 
-  return { graph, packages };
+  return { graph, packages, unread };
 }
 
 function detectCycles(graph: DepGraph): string[][] {
@@ -235,11 +243,15 @@ function detectCycles(graph: DepGraph): string[][] {
 
 export async function runDependencies(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
   const submode = input.submode ?? 'analyze';
-  const targetFiles = await collectInputFiles(input.files, projectRoot, { expandDirectories: true, walkOptions });
-  const { graph, packages } = await buildDepGraph(targetFiles, projectRoot);
+  const unreadable: string[] = [];
+  const targetFiles = await collectInputFiles(input.files, projectRoot, { expandDirectories: true, walkOptions, unreadable });
+  const { graph, packages, unread } = await buildDepGraph(targetFiles, projectRoot);
+  unreadable.push(...unread);
+  // Files left out of the graph are named, so the answer does not read as the whole of what was asked.
+  const unreadableNote = unreadable.length > 0 ? { unreadable_files: unreadable.map((file) => relative(projectRoot, file)) } : {};
 
   if (submode === 'analyze') {
-    return { graph, file_count: targetFiles.length };
+    return { graph, file_count: Object.keys(graph).length, ...unreadableNote };
   }
 
   if (submode === 'circular') {
@@ -248,12 +260,13 @@ export async function runDependencies(input: AnalyzeInput, projectRoot: string, 
       cycles,
       cycle_count: cycles.length,
       has_cycles: cycles.length > 0,
+      ...unreadableNote,
     };
   }
 
   if (submode === 'upgrade') {
     // The external packages the scanned files import. No version is checked here; mode `upgrade` does that.
-    return { packages: Array.from(packages).sort(), count: packages.size };
+    return { packages: Array.from(packages).sort(), count: packages.size, ...unreadableNote };
   }
 
   return analyzeRefusal(`Unknown dependencies submode: ${submode}`, "Pass submode 'analyze', 'circular' or 'upgrade'.");
@@ -511,22 +524,27 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
   // The dotenv convention names its files `.env` and `.env.<suffix>`; every such file at the root is audited.
   const envNames = listProjectEnvFiles(projectRoot);
   const found: Array<{ name: string; keys: string[]; variables: Array<{ key: string; blank: boolean }> }> = [];
+  // Env files present but not readable: named on every answer, so a comparison without them does not read as complete.
+  const unreadableNames: string[] = [];
 
   for (const name of envNames) {
-    const p = join(projectRoot, name);
-    try {
-      const content = (await assertCapturedToolReadAccess(p), await Bun.file(p).text());
-      const variables = [...parseEnvVariables(content)]
-        .map(([key, blank]) => ({ key, blank }))
-        .sort((a, b) => a.key.localeCompare(b.key));
-      found.push({ name, keys: variables.map(({ key }) => key), variables });
-    } catch {
+    const content = await readTextFile(join(projectRoot, name));
+    if (content === null) {
+      unreadableNames.push(name);
       continue;
     }
+    const variables = [...parseEnvVariables(content)]
+      .map(([key, blank]) => ({ key, blank }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+    found.push({ name, keys: variables.map(({ key }) => key), variables });
   }
+  const unreadableNote = unreadableNames.length > 0 ? { unreadable_files: unreadableNames } : {};
 
   if (found.length === 0) {
-    return { files: [], missing: [], extra: [], message: 'No .env files found' };
+    return {
+      files: [], missing: [], extra: [], ...unreadableNote,
+      message: envNames.length === 0 ? 'No .env files found' : `${envNames.length} .env file${envNames.length === 1 ? ' was' : 's were'} found and none could be read`,
+    };
   }
 
   // Which file, if any, is the template listing every expected variable is read by `engine.tools.env-template`.
@@ -556,6 +574,7 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
       extra: [],
       uncertain: selected.uncertain,
       ...(selected.provenance ? { provenance: selected.provenance } : {}),
+      ...unreadableNote,
       message: selected.provenance ? 'Without a decision model, this found no single conventionally named env template; no comparison was made'
         : !selected.uncertain ? 'No env file reads as a template of the expected variables; nothing to compare against' : 'The env template reading is unsettled; no comparison was made',
     };
@@ -587,7 +606,7 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
     }
   }
 
-  return { files, reference: reference.name, missing, extra, ...(selected.provenance ? { provenance: selected.provenance, reference_source: 'filename-convention' } : {}) };
+  return { files, reference: reference.name, missing, extra, ...unreadableNote, ...(selected.provenance ? { provenance: selected.provenance, reference_source: 'filename-convention' } : {}) };
 }
 
 /** One project file that imports a requested source: the lines importing it and the file's opening lines. */

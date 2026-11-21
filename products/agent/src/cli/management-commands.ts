@@ -2,17 +2,10 @@ import { createCliSecretsCommand } from '@goodvibes/engine/terminal-shell/cli-se
 import { createCliWorkspaceCommands } from '@goodvibes/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes/engine/terminal-shell/cli-subscription-view';
 import { withProviderServices, withSessionServices, type OneShotProviderServices, type OneShotSessionServices } from './one-shot-services.ts';
-import '@goodvibes/engine/platform/platform/sessions';
-import 'node:fs';
-import 'node:path';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { credentialWriteScopeWasRelocated, resolveCredentialDeleteScope, resolveCredentialWriteScope } from '../config/credential-scope.ts';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
 
-import '@goodvibes/engine/platform/platform/config';
-import '@/runtime/index.ts';
 import { mintAgentDevicePairing } from '../agent/device-pairing.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';

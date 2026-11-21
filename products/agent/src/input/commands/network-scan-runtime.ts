@@ -1,9 +1,11 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import {
   discoveredProvidersFilePath,
-  loadLanScanConsent,
+  lanScanGranted,
+  readLanScanConsent,
   saveLanScanConsent,
   startLanScanNow,
   NETWORK_SCAN_DISABLE_COMMAND,
@@ -12,9 +14,20 @@ import {
 import type { CommandContext } from '../command-registry.ts';
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
 import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from './confirmation.ts';
+import type { LanScanDecision } from '../../runtime/lan-scan-consent.ts';
 
-function statusText(storePath: string, decision: ReturnType<typeof loadLanScanConsent>): string {
-  if (!decision || decision.decision === 'declined') {
+function statusText(storePath: string, consent: ReturnType<typeof readLanScanConsent>): string {
+  if (consent.kind === 'unreadable') {
+    return [
+      'Local network scanning: off (the recorded decision could not be read)',
+      `  Decision file      ${consent.path}`,
+      `  Why                ${consent.reason}`,
+      '  What it would do   Check other devices on your local network (your subnet only, nothing beyond it) for model servers.',
+      `  Record a decision  ${NETWORK_SCAN_ENABLE_COMMAND} or ${NETWORK_SCAN_DISABLE_COMMAND}`,
+    ].join('\n');
+  }
+  if (consent.kind === 'absent' || consent.state.decision === 'declined') {
     return [
       'Local network scanning: off',
       '  At each start      Model servers on this computer (such as Ollama or LM Studio) are found and registered; providers whose API key is in the environment are registered.',
@@ -25,12 +38,25 @@ function statusText(storePath: string, decision: ReturnType<typeof loadLanScanCo
   }
   return [
     'Local network scanning: on',
-    `  Turned on           ${decision.decidedAt}`,
+    `  Turned on           ${consent.state.decidedAt}`,
     '  What it does        Checks other devices on your local network (your subnet only, nothing beyond it) for model servers such as Ollama or LM Studio, each time the agent starts.',
     `  What it stores      Found servers are saved to ${storePath}.`,
     '  See discovered      /provider',
     `  Turn it off         ${NETWORK_SCAN_DISABLE_COMMAND}`,
   ].join('\n');
+}
+
+/**
+ * Record the owner's decision, or refuse with nothing changed: the reply never
+ * says scanning is on or off unless that decision is on disk.
+ */
+function recordDecision(shellPaths: ReturnType<typeof requireShellPaths>, decision: LanScanDecision): void {
+  try {
+    saveLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT, decision);
+  } catch (err) {
+    const recorded = lanScanGranted(readLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT)) ? 'on' : 'off';
+    throw commandRefusal(`Not changed: the scanning decision could not be saved (${summarizeError(err)}); scanning stays ${recorded}.`);
+  }
 }
 
 function storeOf(ctx: CommandContext): { readonly shellPaths: ReturnType<typeof requireShellPaths>; readonly storePath: string } {
@@ -61,7 +87,7 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
         operator: { terminalOnly: 'the consent is kept by this Agent' },
         async run(_values, ctx) {
           const { shellPaths, storePath } = storeOf(ctx);
-          return statusText(storePath, loadLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT));
+          return statusText(storePath, readLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT));
         },
       }),
       {
@@ -73,7 +99,7 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
         example: {},
         async run(_values, ctx) {
           const { shellPaths, storePath } = storeOf(ctx);
-          saveLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT, 'granted');
+          recordDecision(shellPaths, 'granted');
           const scanning = startLanScanNow();
           return `Local network scanning is now on. ${scanning ? 'Scanning now, and at each start,' : 'From the next start,'} the agent checks other devices on your ` +
             `local network (your subnet only) for model servers such as Ollama or LM Studio, and saves what it finds to ${storePath}. ` +
@@ -88,7 +114,7 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
         example: {},
         async run(_values, ctx) {
           const { shellPaths } = storeOf(ctx);
-          saveLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT, 'declined');
+          recordDecision(shellPaths, 'declined');
           return `Local network scanning is now off. Nothing on your network will be probed. Turn it back on anytime with ${NETWORK_SCAN_ENABLE_COMMAND}.`;
         },
       },

@@ -76,7 +76,7 @@ export interface AgentOrchestratorRunContext {
   /** Pause between provider retries; a test seam, defaults to a real timer. Must reject when the signal aborts. */
   readonly waitForRetry?: ((delayMs: number, signal: AbortSignal | undefined) => Promise<void>) | undefined;
   readonly processManager?: ProcessManager | undefined;
-  readonly messageBus: Pick<AgentMessageBus, 'getMessages'> & Partial<Pick<AgentMessageBus, 'markDelivered' | 'markTaken'>>;
+  readonly messageBus: Pick<AgentMessageBus, 'getMessages'> & Partial<Pick<AgentMessageBus, 'markDelivered' | 'markTaken' | 'releaseTaken'>>;
   readonly knowledgeService?: Pick<KnowledgeService, 'preparePromptPacket'> | undefined;
   readonly memoryRegistry?: Pick<import('../state/index.js').MemoryRegistry, 'getAll' | 'semanticCandidates' | 'vectorStats'> | undefined;
   /**

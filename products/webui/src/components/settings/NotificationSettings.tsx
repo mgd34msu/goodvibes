@@ -124,6 +124,9 @@ export function NotificationSettings() {
     mutationFn: sendTestPush,
     onSuccess: () => toast({ title: 'Test push sent', description: 'Watch for a notification on this device.', tone: 'success' }),
     onError: (error) => toast({ title: 'Test push failed', description: pushErrorMessage(error), tone: 'danger' }),
+    // A test the push service answered as gone removed this device on the daemon: re-read
+    // the registration so the switch turns off and the removal note says why.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['push'] }),
   });
 
   const state = registration.data;

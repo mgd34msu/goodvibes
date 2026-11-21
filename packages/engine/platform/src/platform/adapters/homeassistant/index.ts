@@ -3,10 +3,8 @@ import type { SurfaceAdapterContext } from '../types.js';
 import { answerSurfaceControl } from '../surface-message.js';
 import type { UpsertRouteBindingInput } from '../../channels/route-manager.js';
 import { constantTimeEquals, declaredMention, parseJsonRecord, readString, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
-import {
-  HOME_ASSISTANT_SURFACE,
-  resolveHomeAssistantWebhookSecret,
-} from '../../channels/builtin/homeassistant.js';
+import { HOME_ASSISTANT_SURFACE } from '../../channels/builtin/homeassistant.js';
+import { resolveSurfaceSecret } from '../../channels/builtin/surface-secrets.js';
 import type { ChannelConversationKind } from '../../channels/index.js';
 
 export async function handleHomeAssistantSurfaceWebhook(
@@ -14,7 +12,7 @@ export async function handleHomeAssistantSurfaceWebhook(
   context: SurfaceAdapterContext,
 ): Promise<Response> {
   const enabled = Boolean(context.configManager.get('surfaces.homeassistant.enabled'));
-  const secret = await resolveHomeAssistantWebhookSecret(context);
+  const secret = await resolveSurfaceSecret(context, 'homeassistant', 'signingSecret');
   // Closed until both are set: without a secret anyone who can reach the daemon could post as Home Assistant.
   if (!enabled || !secret) {
     return Response.json({

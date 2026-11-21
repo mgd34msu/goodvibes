@@ -132,7 +132,7 @@ export function describeUserError(err: unknown, reading?: UserErrorReading): Use
     case 'auth':
       if (reading.operationProvenance === 'classic') return {
         kind: 'auth', message: 'Authentication failed: the provider rejected the credentials or sign-in session.',
-        action: 'Run /login to re-authenticate or check your API key.',
+        action: 'Run /accounts repair to see what is wrong with the provider\'s account and fix it.',
       };
       // A subscription-session death is not an API-key problem, and telling a
       // subscriber to "check your API key" reads as "your subscription isn't
@@ -141,13 +141,13 @@ export function describeUserError(err: unknown, reading?: UserErrorReading): Use
         return {
           kind: 'auth',
           message: 'Authentication failed: your provider subscription session has ended.',
-          action: 'Run /login to sign in to the provider again.',
+          action: 'Run /provider sign-in to sign in again (then /provider finish if it asks for a code).',
         };
       }
       return {
         kind: 'auth',
         message: 'Authentication failed: the provider rejected your API key.',
-        action: 'Run /login to re-authenticate or check your API key.',
+        action: 'Run /accounts repair to see what is wrong with the provider\'s account and fix it.',
       };
     case 'rate-limit':
       return {

@@ -61,15 +61,18 @@ export function openSettingsChoice(
     changed(); ctx.renderRequest(); return false;
   };
   let fallbackIndex: number | null = null;
-  const existingReferenceNames = async (source: 'env' | 'secret'): Promise<readonly string[]> => {
+  // The names that exist, and why they could not be read when the secret store would not list them.
+  const existingReferenceNames = async (source: 'env' | 'secret'): Promise<{ readonly names: readonly string[]; readonly error?: string }> => {
     if (source === 'env') {
-      return Object.keys(process.env).filter(name => process.env[name] && /(?:_API_KEY|_TOKEN|_KEY|_SECRET)$/.test(name)).sort();
+      return { names: Object.keys(process.env).filter(name => process.env[name] && /(?:_API_KEY|_TOKEN|_KEY|_SECRET)$/.test(name)).sort() };
     }
+    const secrets = ctx.platform.secretsManager;
+    if (!secrets) return { names: [], error: 'this session has no secret store' };
     try {
-      const records = await ctx.platform.secretsManager?.listDetailed() ?? [];
-      return [...new Set(records.filter(record => record.source !== 'env').map(record => record.key))].sort();
-    } catch {
-      return [];
+      const records = await secrets.listDetailed();
+      return { names: [...new Set(records.filter(record => record.source !== 'env').map(record => record.key))].sort() };
+    } catch (error) {
+      return { names: [], error: summarizeError(error) };
     }
   };
   const fallbackChain = (): readonly JudgmentFallbackSettings[] => config.get('judgment.fallbacks');
@@ -173,12 +176,15 @@ export function openSettingsChoice(
           // The names that exist, read once when the picker opens: set environment
           // variables named like a credential, or the keys in the secret store. A
           // name that resolves to nothing is saved only by choosing "use anyway".
-          void existingReferenceNames(source).then((names) => {
+          void existingReferenceNames(source).then(({ names, error }) => {
             const known = new Set(names);
-            open('Credential reference name — never the key value',
+            open(error === undefined ? 'Credential reference name — never the key value' : `Credential reference name (the stored names could not be read: ${error})`,
               names.map(name => ({ id: name, label: name, detail: source === 'env' ? 'Set in this environment' : 'Stored in the secret store', primaryAction: 'select' as const })), {
                 allowSearch: true,
-                customItem: query => !validName(query) || known.has(query) ? null : {
+                customItem: query => !validName(query) || known.has(query) ? null : error !== undefined ? {
+                  id: query, label: `Use ${query} (not checked)`,
+                  detail: 'The secret store could not be listed, so this name was not checked.',
+                } : {
                   id: query, label: `Use anyway: ${query}`,
                   detail: source === 'env' ? 'No environment variable of this name is set; decisions fail until it is.' : 'No stored secret of this name exists; decisions fail until it is stored.',
                 },

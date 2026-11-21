@@ -16,7 +16,7 @@ import type { ContentPart } from '@goodvibes/engine/platform/platform/providers'
 import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
-import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture, type ComposerCaptureDeps } from '@goodvibes/engine/terminal-shell/submission-router';
+import { applyComposerCapture, createShellCommandTracker, readComposerMarker, shouldSendAfterCapture, type ComposerCaptureDeps } from '@goodvibes/engine/terminal-shell/submission-router';
 import { SHELL_USAGE_HINT, type ShellPassthrough, type ShellRunResult } from '../input/shell-passthrough.ts';
 
 /** How a message is sent: given back to the composer when refused, with the held `!` output in front. */
@@ -26,7 +26,7 @@ export interface OwnerTurnHow {
 }
 
 export interface OwnerSubmissionPorts {
-  /** Runs `!` commands; their output is held for the next message. */
+  /** Runs `!` commands; their output is held for the next message, which waits for a running one to finish. */
   readonly shellPassthrough: Pick<ShellPassthrough, 'run'>;
   readonly workingDir: string;
   readonly sessionMemoryStore: ComposerCaptureDeps['sessionMemoryStore'];
@@ -62,7 +62,15 @@ export interface OwnerSubmission {
 }
 
 export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmission {
-  const running = new Set<Promise<void>>();
+  // A message sent while a `!` command runs waits for it, so its output goes with that message.
+  const shellCommands = createShellCommandTracker({
+    notify: (message) => ports.notify(message, 'info'),
+    render: ports.render,
+    sendFailed: (error) => {
+      ports.notify(`Your message was not sent: ${summarizeError(error)}`, 'error');
+      ports.render();
+    },
+  });
 
   const runShellCommand = (command: string): void => {
     if (!command) {
@@ -75,14 +83,12 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
     const run = ports.shellPassthrough
       .run(command, ports.workingDir)
       .then((result) => ports.showShellOutput(result))
-      .catch((error: unknown) => ports.notify(`[Shell] Failed to run: ${summarizeError(error)}`, 'error'))
-      .finally(() => {
-        running.delete(run);
-        ports.onShellCommandsRunning(running.size);
-        ports.render();
-      });
-    running.add(run);
-    ports.onShellCommandsRunning(running.size);
+      .catch((error: unknown) => ports.notify(`[Shell] Failed to run: ${summarizeError(error)}`, 'error'));
+    void shellCommands.track(command, run).then(() => {
+      ports.onShellCommandsRunning(shellCommands.running());
+      ports.render();
+    });
+    ports.onShellCommandsRunning(shellCommands.running());
   };
 
   const submitComposerText = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
@@ -117,16 +123,17 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
     const expandedReferences = options.source?.unsupportedSources.some((part) => part.kind === 'file' || part.kind === 'context') === true;
     const resendable = (unsent: string): string => !expandedReferences ? unsent
       : marker.kind === 'memory-pin' ? draft.replace(/^\s*!#\s*/, '') : draft;
-    void ports.sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, {
+    // The held `!` output goes with this message, once every running command has finished.
+    shellCommands.afterShellCommands(() => ports.sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, {
       notSent: (unsent) => ports.restoreDraft(resendable(unsent)),
       attachShellOutput: true,
-    });
+    }));
   };
 
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     ports.prepare();
     if (ports.refuseUnsendable(text, options.source, content)) return;
-    void ports.sendTurn(text, options, undefined, { attachShellOutput: true });
+    shellCommands.afterShellCommands(() => ports.sendTurn(text, options, undefined, { attachShellOutput: true }));
   };
 
   return {
@@ -134,8 +141,6 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
     submitTurn,
     // Speech is sent as said; only typed composer text has a grammar.
     submitSpeech: (text) => submitTurn(text, undefined, { source: captureNativeConversationInput(text) }),
-    shellCommandsSettled: async () => {
-      while (running.size > 0) await Promise.allSettled([...running]);
-    },
+    shellCommandsSettled: shellCommands.settled,
   };
 }

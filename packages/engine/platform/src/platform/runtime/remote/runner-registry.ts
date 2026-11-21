@@ -199,10 +199,16 @@ function findTaskForContract(contract: RemoteRunnerContract, store?: RuntimeStor
   return undefined;
 }
 
+/**
+ * The artifact's status for the store's task. A task the store no longer holds
+ * (evicted after it ended, or a contract imported from a file) is `unknown`,
+ * never `running`: nothing says the work is still going.
+ */
 function mapTaskStatus(
   task?: RuntimeTask,
-): 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' {
-  switch (task?.status) {
+): RemoteExecutionArtifact['task']['status'] {
+  if (!task) return 'unknown';
+  switch (task.status) {
     case 'queued':
       return 'pending';
     case 'running':
@@ -215,7 +221,7 @@ function mapTaskStatus(
     case 'cancelled':
       return 'cancelled';
     default:
-      return 'running';
+      return 'unknown';
   }
 }
 

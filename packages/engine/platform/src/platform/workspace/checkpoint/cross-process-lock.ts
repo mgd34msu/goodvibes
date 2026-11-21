@@ -15,7 +15,7 @@
  * while a creation is in flight) keep working. The holder removes it on
  * release; a file left by a holder that died is replaced by the next one.
  */
-import { closeSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { logger } from '../../utils/logger.js';
@@ -159,6 +159,30 @@ export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly
     throw error;
   }
   return ownedRelease(lockPath, held, assertCurrent);
+}
+
+/**
+ * For a lock named after one holder that nobody takes again once that holder
+ * is gone (a service instance's own lock, named by its instance id): `held`
+ * while the holder has it; otherwise its files are removed and the answer is
+ * `removed`, or `absent` when it left none. Never waits. Removing is safe only
+ * for such a name: no later holder can come to lock a second file under it.
+ */
+export function clearAbandonedCrossProcessLock(lockPath: string): 'held' | 'removed' | 'absent' {
+  const kernel = kernelLockPath(lockPath);
+  if (!existsSync(kernel) && !existsSync(lockPath)) return 'absent';
+  const held = holdProcessLock(kernel);
+  if (!held) return 'held';
+  try {
+    for (const path of [lockPath, kernel]) {
+      try { unlinkSync(path); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  } finally {
+    held.release();
+  }
+  return 'removed';
 }
 
 /**

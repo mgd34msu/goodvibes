@@ -206,12 +206,12 @@ try {
 ```
 
 The full set of canonical codes, available as `EngineErrorCodes.*`, is twenty
-five values grouped by the failure family they name.
+seven values grouped by the failure family they name. A credential that is
+missing, expired or revoked is answered `AUTH_REQUIRED`: get a new one and retry.
 
 | Code | What it signals |
 | --- | --- |
 | `AUTH_REQUIRED` | The call needs authentication that was not presented |
-| `TOKEN_EXPIRED` | The presented token is no longer valid; refresh and retry |
 | `PERMISSION_DENIED` | The authenticated principal lacks the required scope or permission |
 | `PAYMENT_REQUIRED` | The account's billing state blocks the call |
 | `RATE_LIMITED` | Too many requests; honor `retryAfterMs` before retrying |
@@ -221,6 +221,9 @@ five values grouped by the failure family they name.
 | `NOT_FOUND` | The addressed resource does not exist |
 | `CONFLICT` | The mutation conflicts with current resource state |
 | `SESSION_CLOSED` | The target session has already been closed |
+| `TARGET_CHANGED` | What a preview or confirmation showed is no longer what the call would act on; nothing was done |
+| `CREDENTIAL_NOT_FOR_TARGET` | A credential was about to go to a daemon it was not issued for; nothing was sent |
+| `CREDENTIAL_DESTINATION_UNBOUND` | A write would move where a configured credential is sent without stating that credential; nothing was saved |
 | `NOT_INVOKABLE` | The gateway method exists but cannot be invoked over this path |
 | `METHOD_NOT_FOUND` | No gateway method with that id exists |
 | `VALIDATION_FAILED` | The input failed schema or contract validation |
@@ -238,7 +241,7 @@ five values grouped by the failure family they name.
 
 ### Kind → representative code
 
-The platform infers a representative canonical code for each `kind` (via `inferKind` and `inferCodeFromCategory`). The mapping is representative, not exhaustive. One `kind` may surface several codes (for example, `auth` covers `AUTH_REQUIRED`, `TOKEN_EXPIRED`, `PERMISSION_DENIED`, and `PAYMENT_REQUIRED`).
+The platform infers a representative canonical code for each `kind` (via `inferKind` and `inferCodeFromCategory`). The mapping is representative, not exhaustive. One `kind` may surface several codes (for example, `auth` covers `AUTH_REQUIRED`, `PERMISSION_DENIED`, and `PAYMENT_REQUIRED`).
 
 | `kind` | Representative `code` |
 |--------|-----------------------|

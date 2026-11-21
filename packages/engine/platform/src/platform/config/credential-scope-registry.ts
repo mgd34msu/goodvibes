@@ -126,6 +126,7 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
   { key: 'MATRIX_ACCESS_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon holds the Matrix session and sends as that account.' },
   { key: 'MATTERMOST_BOT_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon runs the Mattermost bot connection.' },
   { key: 'MSTEAMS_APP_PASSWORD', match: 'exact', scope: 'daemon-needed', why: 'The daemon authenticates to Microsoft Teams with it.' },
+  { key: 'MSTEAMS_WEBHOOK_SECRET', match: 'exact', scope: 'daemon-needed', why: 'The daemon verifies calls from a Microsoft Teams relay with it.' },
   { key: 'WHATSAPP_ACCESS_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon sends WhatsApp messages with it.' },
   { key: 'WHATSAPP_VERIFY_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon answers Meta\'s webhook verification challenge with it.' },
   { key: 'SIGNAL_BRIDGE_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon authenticates to the Signal bridge with it.' },

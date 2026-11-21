@@ -543,7 +543,7 @@ export async function handleCompatCommand(runtime: CliCommandRuntime): Promise<C
   const knowledgeRouteReady = inspected.agentKnowledge.ready;
   const hostCompatible = inspected.reachable && inspected.compatible;
   const next = !inspected.reachable
-    ? 'start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port.'
+    ? 'start the GoodVibes daemon (goodvibes-daemon) or check daemon.connectedHost.url (for the daemon on this machine, controlPlane.host and controlPlane.port).'
     : !inspected.operatorToken.present
       ? 'pair this Agent with the host (goodvibes-agent setup pair --apply).'
       : hostCompatible

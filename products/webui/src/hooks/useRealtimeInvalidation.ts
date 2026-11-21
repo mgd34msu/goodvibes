@@ -31,7 +31,7 @@ const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
  * one app-wide stream and refetch every active query.
  */
 const APP_DOMAINS: readonly RuntimeEventDomain[] = [
-  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session', 'planner',
+  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session', 'planner', 'config',
 ];
 
 /**
@@ -54,11 +54,15 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   knowledge: [['knowledge']],
   'control-plane': [queryKeys.control],
   // Fleet node lifecycle deltas revalidate the snapshot and archive, at most once per
-  // FLEET_REFETCH_WINDOW_MS; the snapshot stays the one source of truth, so no
+  // REFETCH_WINDOW_MS; the snapshot stays the one source of truth, so no
   // client-side tree is built from the deltas.
   fleet: [queryKeys.fleet, queryKeys.fleetArchived],
   // OPS_POWER_STATE_CHANGED and OPS_MEMORY_PRESSURE ride `ops`.
   ops: [queryKeys.power, queryKeys.opsMemory],
+  // A setting changed from any surface (another tab or device, the daemon's CLI):
+  // the one settings cache and the restart-pending report are re-read, at most once
+  // per window, so a config.setMany burst costs one config.get.
+  config: [queryKeys.config, queryKeys.featureRestartStatus],
   [SESSION_UPDATE_WIRE_EVENT]: [queryKeys.sessions],
   [HOSTED_SESSION_UPDATE_WIRE_EVENT]: [queryKeys.hostedSessionsAll],
 };
@@ -67,11 +71,13 @@ const FALLBACK_REFRESH_MS = 15_000;
 
 /**
  * A running contract with many agents sends fleet frames several times a
- * second. The first frame refetches at once; frames inside the next window
- * fold into one more refetch at its end, so the fleet is read at most once
- * per window instead of once per frame.
+ * second, and one multi-key settings write sends a config frame per key. For
+ * these frames the first refetches at once; frames inside the next window fold
+ * into one more refetch at its end, so each is read at most once per window
+ * instead of once per frame.
  */
-const FLEET_REFETCH_WINDOW_MS = 250;
+const REFETCH_WINDOW_MS = 250;
+const WINDOWED_FRAMES: ReadonlySet<string> = new Set(['fleet', 'config']);
 
 export function useRealtimeInvalidation(enabled: boolean): string | null {
   const queryClient = useQueryClient();
@@ -80,22 +86,23 @@ export function useRealtimeInvalidation(enabled: boolean): string | null {
   useEffect(() => {
     if (!enabled) return undefined;
     let disposed = false;
-    let fleetWindow: ReturnType<typeof setTimeout> | null = null;
-    let fleetPending = false;
-    const refetchFleet = () => {
-      for (const key of DOMAIN_INVALIDATIONS.fleet ?? []) void queryClient.invalidateQueries({ queryKey: key });
+    // Per windowed frame name: the open window's timer, and whether a frame arrived inside it.
+    const windows = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: boolean }>();
+    const refetchFrame = (frame: string) => {
+      for (const key of DOMAIN_INVALIDATIONS[frame] ?? []) void queryClient.invalidateQueries({ queryKey: key });
     };
-    const onFleetFrame = () => {
-      if (fleetWindow !== null) { fleetPending = true; return; }
-      refetchFleet();
+    const onWindowedFrame = (frame: string) => {
+      const open = windows.get(frame);
+      if (open) { open.pending = true; return; }
+      refetchFrame(frame);
       const close = () => {
         if (disposed) return;
-        if (!fleetPending) { fleetWindow = null; return; }
-        fleetPending = false;
-        refetchFleet();
-        fleetWindow = setTimeout(close, FLEET_REFETCH_WINDOW_MS);
+        const current = windows.get(frame);
+        if (!current?.pending) { windows.delete(frame); return; }
+        refetchFrame(frame);
+        windows.set(frame, { timer: setTimeout(close, REFETCH_WINDOW_MS), pending: false });
       };
-      fleetWindow = setTimeout(close, FLEET_REFETCH_WINDOW_MS);
+      windows.set(frame, { timer: setTimeout(close, REFETCH_WINDOW_MS), pending: false });
     };
     const invalidate = (key: readonly unknown[], frame: string) => {
       const lifetime = getClientLifetime();
@@ -120,7 +127,7 @@ export function useRealtimeInvalidation(enabled: boolean): string | null {
       domains: APP_DOMAINS,
       events: Object.keys(DOMAIN_INVALIDATIONS),
       onEvent: (name) => {
-        if (name === 'fleet') { onFleetFrame(); return; }
+        if (WINDOWED_FRAMES.has(name)) { onWindowedFrame(name); return; }
         for (const key of DOMAIN_INVALIDATIONS[name] ?? []) invalidate(key, name);
       },
       onReady: (resumed) => {
@@ -129,7 +136,8 @@ export function useRealtimeInvalidation(enabled: boolean): string | null {
     });
     return () => {
       disposed = true;
-      if (fleetWindow !== null) clearTimeout(fleetWindow);
+      for (const open of windows.values()) clearTimeout(open.timer);
+      windows.clear();
       unsubscribe();
     };
   }, [enabled, queryClient]);

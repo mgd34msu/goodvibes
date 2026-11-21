@@ -85,7 +85,7 @@ export function homeAuditCheck(audit: HomeAudit): LiveVerificationCheck {
 
 
 function resolveDaemonBaseUrl(homeDir: string, explicit?: string): string {
-  return resolveVerificationHostUrl(homeDir, explicit, ['GOODVIBES_DAEMON_URL'], readJsonFile);
+  return resolveVerificationHostUrl(homeDir, explicit, ['GOODVIBES_DAEMON_URL']);
 }
 
 export async function buildLiveVerificationReport(options: LiveVerificationOptions): Promise<LiveVerificationReport> {

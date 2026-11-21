@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
@@ -119,9 +120,9 @@ export function buildSetupTransferBundle(ctx: CommandContext, snapshot: SetupRev
   const readPart = (path: string): Record<string, unknown> | undefined => (existsSync(path)
     ? maskLiteralSecrets(JSON.parse(readFileSync(path, 'utf-8')), redacted, path.slice(path.lastIndexOf('/') + 1)) as Record<string, unknown>
     : undefined);
-  const services = readPart(shellPaths.resolveUserPath('tui', 'services.json'));
-  const plugins = readPart(shellPaths.resolveProjectPath('tui', 'ecosystem', 'plugins.json'));
-  const skills = readPart(shellPaths.resolveProjectPath('tui', 'ecosystem', 'skills.json'));
+  const services = readPart(shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'services.json'));
+  const plugins = readPart(shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem', 'plugins.json'));
+  const skills = readPart(shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem', 'skills.json'));
 
   return {
     schemaVersion: 'v1',

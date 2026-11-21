@@ -33,6 +33,9 @@ import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 /** How far a remembered approval decision reaches. */
 export type RememberTier = 'session' | 'exact' | 'command-class' | 'path' | 'tool';
 
+/** Every remember tier, for reading one off a message. */
+export const REMEMBER_TIER_VALUES: readonly RememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
+
 /** One offerable remember tier, rendered by whatever surface shows the ask. */
 export interface RememberTierOption {
   readonly tier: RememberTier;

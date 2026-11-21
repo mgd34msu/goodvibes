@@ -5,7 +5,7 @@ import type { CommandContext } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { readRefusal } from '@goodvibes/engine/errors';
 import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
-import { setActiveThemeMode, setActiveThemeName, type ThemeMode } from '../../renderer/theme.ts';
+import { takeAppliedThemeMessage } from '../../renderer/theme-mode-config.ts';
 import {
   buildGoodVibesSecretKey,
   defaultSecretBackedScope,
@@ -85,24 +85,10 @@ export async function setSettingValue(key: string, value: string, ctx: CommandCo
       }
       const after = ctx.platform.configManager.get(key as ConfigKey);
       ctx.print(`Set ${key}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
-      // Forced theme modes apply immediately (matches the settings-modal
-      // path); 'auto' re-probes on the next launch (stated honestly).
-      if (key === 'display.theme') {
-        const applied = setActiveThemeName(after);
-        ctx.requestFullRepaint?.();
-        ctx.print(`Theme applied: ${applied}.`);
-      }
-      if (key === 'display.themeMode') {
-        if (after === 'dark' || after === 'light') {
-          setActiveThemeMode(after as ThemeMode);
-          ctx.requestFullRepaint?.();
-          ctx.print(
-            'Theme applied. Note: transcript, modal, and header/footer/thinking chrome all flip; only the background colour follows your terminal.',
-          );
-        } else {
-          ctx.print('Theme mode "auto" probes the terminal background on the next launch.');
-        }
-      }
+      // A theme change was applied by the start-up theme subscription
+      // (renderer/terminal-bg-probe.ts); this only reports what it did.
+      const themeMessage = takeAppliedThemeMessage(key);
+      if (themeMessage !== undefined) ctx.print(`${themeMessage}.`);
     } catch (e) {
       if (readRefusal(e)) throw e;
       throw commandRefusal(`Could not set ${key}; nothing was changed: ${e instanceof Error ? e.message : String(e)}`);

@@ -14,6 +14,7 @@ import { DetailPane, DetailSection, Facts } from '../../components/data-view/Dat
 import { Button } from '../../components/ui/Button';
 import { Row, RowList } from '../../components/ui/Row';
 import { StatusDot } from '../../components/ui/StatusDot';
+import { costAmountLabel } from '../../lib/cost-source';
 import { AttemptComparison } from '../fleet/AttemptComparison';
 
 function candidateState(state: string): { word: string; tone: 'ok' | 'warn' | 'bad' | 'live' | 'idle' } {
@@ -56,9 +57,7 @@ export function AttemptGroupDetail({ group, onClose }: { group: FleetAttemptGrou
           ))}
           {group.candidates.map((candidate) => {
             const state = candidateState(candidate.state);
-            const cost = candidate.usage.costState !== 'unpriced' && candidate.usage.costUsd != null
-              ? `${candidate.usage.costState === 'estimated' ? '~' : ''}$${candidate.usage.costUsd.toFixed(2)}`
-              : undefined;
+            const cost = costAmountLabel(candidate.usage.costUsd, candidate.usage.costState, { whenUnpriced: 'omit' });
             return (
               <Row
                 key={candidate.itemId}

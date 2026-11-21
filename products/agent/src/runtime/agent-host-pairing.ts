@@ -1,10 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
-import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { readConnectedHostBootstrapToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from './native-paired-principal.ts';
 import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing, removeAgentHostPairing, type RemoveAgentHostPairingResult } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 
@@ -78,7 +78,7 @@ function authCheckFailed(error: unknown, host: string, aborted: boolean): AgentH
       return { status: 'host-timeout', host, message: `The host at ${host} did not answer within ${PAIRING_AUTH_DEADLINE_MS / 1000} s. Check that the daemon there is running and reachable from this machine, then preview again. Nothing was created.` };
     case 'host_unreachable':
     case 'route_unavailable':
-      return { status: 'host-unreachable', host, message: `No GoodVibes daemon answered at ${host}. Start the daemon there or correct controlPlane.host and controlPlane.port, then preview again. Nothing was created.` };
+      return { status: 'host-unreachable', host, message: `No GoodVibes daemon answered at ${host}. Start the daemon there or correct daemon.connectedHost.url, then preview again. Nothing was created.` };
     case 'auth_rejected':
     case 'forbidden':
       return { status: 'credential-rejected', host, message: `The host at ${host} did not accept the current credential (HTTP ${status ?? 401}). Provision the host's operator token for this Agent, then preview again. Nothing was created.` };
@@ -95,7 +95,7 @@ function authCheckFailed(error: unknown, host: string, aborted: boolean): AgentH
  * only deletes the local marker. A credential the host minted for it was an
  * offer nobody received, so it never authenticates and lapses unused.
  */
-function clearPreview(home: string, host: string, attemptId: string): AgentHostPairingPreview {
+function clearPreview(home: string, host: string, attemptId: string, notRepeated?: string): AgentHostPairingPreview {
   const confirmation = `CLEAR ${randomBytes(6).toString('hex')}`;
   let consumed = false;
   return {
@@ -103,7 +103,7 @@ function clearPreview(home: string, host: string, attemptId: string): AgentHostP
       ...unknown(host),
       confirmation,
       confirmationPrompt: 'forget this unresolved attempt',
-      message: `${unknown(host).message} Or confirm below to forget the attempt and pair from scratch; a credential the host made for it was never received, so it cannot sign in and lapses within 15 minutes.`,
+      message: `${unknown(host).message}${notRepeated ? ` It was not repeated now: ${notRepeated}` : ''} Or confirm below to forget the attempt and pair from scratch; a credential the host made for it was never received, so it cannot sign in and lapses within 15 minutes.`,
     },
     async confirm(answer) {
       if (consumed || answer !== confirmation) return cancelled();
@@ -150,9 +150,9 @@ function forgetPreview(home: string, host: string, tokenId: string): AgentHostPa
  */
 export async function unpairAgentHost(options: Pick<AgentDaemonVerbCallerOptions, 'configManager' | 'homeDirectory'>): Promise<AgentHostPairingResult> {
   const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-  const configured = resolveConnectedHostBaseUrl(options.configManager);
+  const configured = resolveConnectedHostAddress(options.configManager).baseUrl;
   const host = canonicalizePairingHost(configured);
-  if (!host) return { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin, so there is no credential to forget. Set controlPlane.host and controlPlane.port to name the host.` };
+  if (!host) return { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin, so there is no credential to forget. Set daemon.connectedHost.url to name the host.` };
   const state = readAgentHostPairing(home, host);
   if (state.status === 'unavailable') return { status: 'pairing-store-unreadable', host, message: `${state.reason} Nothing was forgotten.` };
   if (state.status === 'missing') return { status: 'blocked', host, message: 'No device credential is stored for this host; nothing to forget.' };
@@ -228,13 +228,19 @@ export async function previewAgentHostPairing(
     name = name.trim();
     if (!resolveConnectedHostDialEnabled(options.configManager)) return { result: { status: 'blocked', message: 'Connected-host dialing is disabled (daemon.connectedHost.enabled is false). Turn it on in settings, then preview again. No pairing request was made.' } };
     const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-    const configured = resolveConnectedHostBaseUrl(options.configManager);
+    const address = resolveConnectedHostAddress(options.configManager);
+    if (address.refusal) return { result: { status: 'no-host-configured', message: `${address.refusal} Then preview again. No pairing request was made.` } };
+    const configured = address.baseUrl;
     host = canonicalizePairingHost(configured);
-    if (!host) return { result: { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin. Set controlPlane.host and controlPlane.port to the GoodVibes daemon, then preview again.` } };
+    if (!host) return { result: { status: 'no-host-configured', message: `The configured host address (${configured}) is not a usable http(s) origin. Set daemon.connectedHost.url to the GoodVibes daemon, then preview again.` } };
     const pairingHost = host;
     const state = readAgentHostPairing(home, pairingHost);
     if (state.status === 'unavailable') return { result: storeUnreadable(home, state) };
     const selection = { configManager: options.configManager, homeDirectory: options.homeDirectory };
+    const selectedHostNow = (): string | null => {
+      const now = resolveConnectedHostAddress(options.configManager);
+      return now.refusal ? null : canonicalizePairingHost(now.baseUrl);
+    };
     const selected = resolveConnectedHost(selection);
     const fetchOption = options.fetchImpl ? { fetchImpl: options.fetchImpl } : {};
     const verifyAs = (token: string, callSignal: AbortSignal | undefined) => {
@@ -257,8 +263,8 @@ export async function previewAgentHostPairing(
       if (!isNativePairedPrincipal(pairedAuth) || pairedAuth.principalId !== `pairing:${minted.tokenId}`) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored, but this host did not verify its expected native principal. Inspect the host; do not remint.' };
       const finalHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
       if (finalHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
-        || canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager)) !== pairingHost
-        || (envOverride() && readConnectedHostOperatorToken(home).token !== sourceToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
+        || selectedHostNow() !== pairingHost
+        || (envOverride() && readConnectedHostBootstrapToken(home, pairingHost).token !== sourceToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
       if (envOverride()) return { status: 'paired-shadowed', host: pairingHost, message: 'Pairing credential stored for this host. An environment token still takes precedence. Review that override before rerunning setup status; no environment variable was changed.' };
       const effective = resolveConnectedHost(selection);
       if (canonicalizePairingHost(effective.baseUrl) !== pairingHost || effective.token !== minted.token) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current configuration or authority is unverified; rerun setup status before native work.' };
@@ -268,9 +274,12 @@ export async function previewAgentHostPairing(
       // The owner confirmed this attempt when it was first sent; it is repeated
       // under its own id, which the host answers with the credential it already
       // made (or a first one), never a second. The marker hides the host-bound
-      // credential, so the shared token is read without a host.
-      const bootstrap = readConnectedHostOperatorToken(home).token;
-      if (!bootstrap) return clearPreview(home, pairingHost, state.attemptId);
+      // credential, so the request goes with the bootstrap credential for this
+      // host: an environment token, or this machine's daemon token only when the
+      // host is this machine.
+      const bootstrapCredential = readConnectedHostBootstrapToken(home, pairingHost);
+      const bootstrap = bootstrapCredential.token;
+      if (!bootstrap) return clearPreview(home, pairingHost, state.attemptId, bootstrapCredential.error);
       const outcome = await sendAgentMigration({ home, host: pairingHost, token: bootstrap, name: state.name, attemptId: state.attemptId, repeat: true, fetchImpl: options.fetchImpl, signal });
       if (outcome.status === 'paired') return { result: await verifyStored(outcome, bootstrap, signal) };
       if (outcome.result.status === 'unknown') return clearPreview(home, pairingHost, state.attemptId);
@@ -320,16 +329,27 @@ export async function previewAgentHostPairing(
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, pairingHost), state)) return changed();
         if (!isHostPairingBootstrapPrincipal(live)) return changed();
         const attemptId = randomUUID();
-        const begin = await beginAgentHostPairing(home, pairingHost, { attemptId, name, startedAt: Date.now() });
+        // Checked under the store lock just before the marker is published: a
+        // cancel or a change of host or credential while the lock is awaited
+        // creates no attempt.
+        const begin = await beginAgentHostPairing(home, pairingHost, { attemptId, name, startedAt: Date.now() }, {},
+          () => !actionSignal?.aborted && current() && resolveConnectedHostDialEnabled(options.configManager) && selectedHostNow() === pairingHost);
+        if (begin.status === 'cancelled') return actionSignal?.aborted ? cancelled() : changed();
         if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : storeUnreadable(home, begin);
-        // Once the durable marker exists, every interruption is conservatively
-        // unknown until an exact successful response is safely stored.
+        // While the durable marker stands, a failure is conservatively unknown
+        // until an exact successful response is safely stored or the marker is released.
         attempted = true;
-        // The marker hides the host-bound credential, so the shared token is read without a host.
-        const bootstrap = readConnectedHostOperatorToken(home);
+        // The marker now hides the host-bound credential, so the credential the
+        // request goes with is read as a bootstrap for this host.
+        const bootstrap = readConnectedHostBootstrapToken(home, pairingHost);
         const nowHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
         if (actionSignal?.aborted || nowHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
-          || canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager)) !== pairingHost || bootstrap.token !== selectedToken) return unknown(pairingHost);
+          || selectedHostNow() !== pairingHost || bootstrap.token !== selectedToken) {
+          // Nothing was sent, so nothing can have been minted: release the marker so pairing can be previewed again.
+          const released = await clearAgentHostPairingAttempt(home, pairingHost, attemptId);
+          if (released.status !== 'cleared') return unknown(pairingHost);
+          return actionSignal?.aborted ? cancelled() : changed();
+        }
         const outcome = await sendAgentMigration({ home, host: pairingHost, token: selectedToken, name, attemptId, repeat: false, fetchImpl: options.fetchImpl, signal: actionSignal });
         if (outcome.status !== 'paired') return outcome.result;
         return await verifyStored(outcome, selectedToken, actionSignal);

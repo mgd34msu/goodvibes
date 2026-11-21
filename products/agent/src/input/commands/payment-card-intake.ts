@@ -72,7 +72,6 @@ import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 import { commandRefusal } from './confirmation.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, routeDaemonOwnedConfigWrite } from '../../config/daemon-config-routing.ts';
 import type { ConfigKey } from '../../config/index.ts';
-import '@goodvibes/engine/platform/platform/payments';
 import { PAYMENTS_ADDRESS_FIELD_SUFFIXES, paymentsAddressConfigKey, type PaymentsAddressKind } from '../payments-config.ts';
 
 /**

@@ -22,7 +22,7 @@ import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate';
 
 export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'display.themeMode': {
-    auto: 'Probe the terminal background colour (OSC 11) once at startup and pick light or dark. Falls back to dark on unreadable/unsupported terminals. Only evaluated at startup: selecting auto takes effect next launch.',
+    auto: 'Probe the terminal background colour (OSC 11) once at startup and pick light or dark. Falls back to dark on unreadable/unsupported terminals. Selecting auto applies now when the terminal reported its background at startup, otherwise at the next launch.',
     dark: 'Force the dark theme regardless of terminal background. Applies immediately.',
     light: 'Force the light theme regardless of terminal background. Applies immediately.',
   },

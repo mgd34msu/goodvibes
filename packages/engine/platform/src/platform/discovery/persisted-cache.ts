@@ -1,9 +1,10 @@
 import type { DiscoveredServer, ServerType } from './scanner.js';
 
-const SERVER_TYPES: ReadonlySet<string> = new Set<ServerType>([
-  'ollama', 'lm-studio', 'vllm', 'llamacpp', 'localai', 'tgi', 'jan',
-  'gpt4all', 'koboldcpp', 'aphrodite', 'unknown',
-]);
+/** Every server type a scan can save; the Record keeps it in step with the ServerType union. */
+const SERVER_TYPES: ReadonlySet<string> = new Set(Object.keys({
+  ollama: true, 'lm-studio': true, vllm: true, llamacpp: true, localai: true, tgi: true, jan: true,
+  gpt4all: true, koboldcpp: true, aphrodite: true, unknown: true,
+} satisfies Record<ServerType, true>));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

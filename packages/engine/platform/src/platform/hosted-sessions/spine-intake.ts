@@ -85,8 +85,12 @@ export interface HostedSessionSpine {
    * Optional so a stand-in spine in a test need not implement it; a spine
    * without it leaves the record collected-but-unfinished, which is still
    * honest, what must never happen is marking it consumed.
+   *
+   * Resolves with the input as marked, or null when it was no longer waiting
+   * to be delivered (cancelled, answered or failed meanwhile) and nothing was
+   * written.
    */
-  failInput?(sessionId: string, inputId: string, error: string): Promise<unknown>;
+  failInput?(sessionId: string, inputId: string, error: string): Promise<{ readonly state: string } | null>;
   /**
    * Be told when sessions, messages or inputs change, so inputs are collected
    * as they arrive. Returns the unsubscribe. Optional: without it the intake
@@ -94,6 +98,13 @@ export interface HostedSessionSpine {
    */
   subscribe?(listener: () => void): () => void;
 }
+
+/** What marking an undeliverable input failed did, for the owner's alert. */
+type FailMark =
+  | { readonly kind: 'marked' }
+  | { readonly kind: 'not-waiting'; readonly state: string | null }
+  | { readonly kind: 'unmarked' }
+  | { readonly kind: 'mark-failed' };
 
 /** What the intake needs from the engine that owns the sessions. */
 export interface HostedSessionSpineIntakeOptions {
@@ -739,26 +750,41 @@ export class HostedSessionSpineIntake {
    * itself failed (a restart may then deliver it again).
    */
   private async failAndAlert(spine: HostedSessionSpine, pending: PendingDelivery, attempts: number, detail: string, assertCurrent?: () => void): Promise<void> {
-    let marked = true;
-    try {
-      await spine.failInput?.(pending.sessionId, pending.inputId, detail);
-    } catch (error) {
-      marked = false;
-      logger.error('[hosted-sessions] an undeliverable input could not be marked failed', {
-        sessionId: pending.sessionId, inputId: pending.inputId, error: summarizeError(error),
-      });
+    let mark: FailMark;
+    if (!spine.failInput) {
+      mark = { kind: 'unmarked' };
+    } else {
+      try {
+        const marked = await spine.failInput(pending.sessionId, pending.inputId, detail);
+        mark = marked?.state === 'failed' ? { kind: 'marked' } : { kind: 'not-waiting', state: marked?.state ?? this.currentInputState(spine, pending) };
+      } catch (error) {
+        mark = { kind: 'mark-failed' };
+        logger.error('[hosted-sessions] an undeliverable input could not be marked failed', {
+          sessionId: pending.sessionId, inputId: pending.inputId, error: summarizeError(error),
+        });
+      }
     }
     assertCurrent?.();
-    this.alertOwner(pending, attempts, detail, marked);
+    this.alertOwner(pending, attempts, detail, mark);
+  }
+
+  /** The input's state as the spine holds it now, or null when it no longer lists it. */
+  private currentInputState(spine: HostedSessionSpine, pending: PendingDelivery): string | null {
+    try {
+      return spine.getInputsSince(pending.sessionId, {}).find((input) => input.id === pending.inputId)?.state ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Say it on a channel that still works. Never throws into the tick. */
-  private alertOwner(pending: PendingDelivery, attempts: number, detail: string, marked: boolean): void {
+  private alertOwner(pending: PendingDelivery, attempts: number, detail: string, mark: FailMark): void {
+    const outcome = mark.kind === 'marked' ? `and has been marked failed: ${detail}`
+      : mark.kind === 'not-waiting' ? `and was not marked failed, because it was no longer waiting to be delivered${mark.state ? ` (it is now ${mark.state})` : ''}: ${detail}`
+        : mark.kind === 'unmarked' ? `and was left as collected, since this engine cannot mark it failed: ${detail}`
+          : `and could not be marked failed either, so it may be tried again after a restart: ${detail}`;
     try {
-      this.options.alertOwner?.(
-        `A message for hosted session ${pending.sessionId} could not be delivered after ${attempts} attempts `
-        + (marked ? `and has been marked failed: ${detail}` : `and could not be marked failed either, so it may be tried again after a restart: ${detail}`),
-      );
+      this.options.alertOwner?.(`A message for hosted session ${pending.sessionId} could not be delivered after ${attempts} attempts ${outcome}`);
     } catch (error) {
       logger.error('[hosted-sessions] the owner could not be told about an undelivered message', {
         sessionId: pending.sessionId,

@@ -3,8 +3,8 @@
  *
  * These are the knobs over the daemon's `push-subscriptions.json`: the contact
  * a push service can reach the operator on, how many registered devices per
- * operator is worth mentioning, when a push service has proved an endpoint
- * dead, and how often housekeeping runs.
+ * operator is worth mentioning, and when a push service has proved an
+ * endpoint dead.
  *
  * The load-bearing thing to know about this domain, and the reason
  * `warnAbovePerPrincipal` is a warning and not a cap: a device is removed only
@@ -27,7 +27,6 @@ export interface PushConfig {
   subscriptions: {
     warnAbovePerPrincipal: number;
     failureThreshold: number;
-    sweepIntervalMinutes: number;
   };
 }
 
@@ -38,7 +37,6 @@ export const pushConfigDefaults: { push: PushConfig } = {
     subscriptions: {
       warnAbovePerPrincipal: 50,
       failureThreshold: 5,
-      sweepIntervalMinutes: 60,
     },
   },
 };
@@ -47,6 +45,7 @@ export const pushConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'push.vapidSubject',
     label: 'Contact address push services can reach you at',
+    appliesWhen: 'restart',
     type: 'string',
     validate: (v) => typeof v === 'string' && (v.trim().length === 0 || isValidVapidSubject(v.trim())),
     validationHint: `empty, or ${VAPID_SUBJECT_HINT}`,
@@ -65,12 +64,5 @@ export const pushConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     ...intRange(1, 100),
     description: 'How many deliveries in a row a push service must refuse before the daemon treats that endpoint as dead and removes it. A 404 or 410 removes it immediately, that is the push service saying the subscription is gone, so this bound is for the murkier case of an endpoint that only ever errors or times out. Any single success resets the count to zero. Raise it if you have a flaky network and would rather keep retrying; lower it to clear out dead endpoints faster.',
-  },
-  {
-    key: 'push.subscriptions.sweepIntervalMinutes',
-    label: 'How often push devices are checked (minutes)',
-    type: 'number',
-    ...intRange(1, 1440),
-    description: 'How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss. A change to the interval takes effect after the daemon restarts.',
   },
 ];

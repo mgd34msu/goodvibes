@@ -5,7 +5,6 @@ import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes/engine/te
 export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes/engine/terminal-shell/npm-pack-report';
 import { resolveWorkspaceBinary, workspaceBinaryCandidates } from './workspace-binary.ts';
 import { execSync } from 'node:child_process';
-import 'node:fs';
 import { join } from 'node:path';
 
 export type PackageCliBinVerification = PackageBinVerification<'goodvibes'>;

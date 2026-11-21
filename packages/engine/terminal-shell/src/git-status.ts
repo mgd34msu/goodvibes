@@ -89,13 +89,19 @@ function gitStateStamp(workingDirectory: string): string {
  *
  * Results are cached for 2 seconds (TTL). The next call after expiry triggers
  * a fresh fetch and returns the cached value immediately (stale-while-revalidate).
- * Never throws, returns FALLBACK on any error.
+ * One read runs at a time: getStatus and the poll join the read in flight,
+ * while refresh waits for it and then reads again, so what refresh returns was
+ * read after it was called. Never throws, returns FALLBACK on any error.
  */
 export class GitStatusProvider {
   private cache: GitHeaderInfo = { ...FALLBACK };
   private lastFetch = 0;
   private readonly ttlMs = 2000;
-  private fetching = false;
+  /** The read in flight, if any. */
+  private reading: Promise<void> | null = null;
+  /** The read refresh queued behind `followUpOf`, shared by every refresh that waits on that same read. */
+  private followUp: Promise<void> | null = null;
+  private followUpOf: Promise<void> | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private polledStamp: string | null = null;
   private polledFocus: boolean | null = null;
@@ -115,15 +121,29 @@ export class GitStatusProvider {
           this.lastFetch = Date.now();
         }
       });
-    } else if (!this.fetching) {
+    } else if (this.reading === null) {
       this._fetch().catch(err => { logger.debug('GitStatusProvider: background refresh failed', { error: summarizeError(err) }); });
     }
     return this.cache;
   }
 
-  /** Force a fresh fetch and update the cache. Returns updated info. */
+  /**
+   * A reading taken after this call: when a read is already in flight (it may
+   * have sampled the repository before a command that just ran), wait for it
+   * and read once more. Refreshes that wait on the same read share that one
+   * follow-up read.
+   */
   async refresh(): Promise<GitHeaderInfo> {
-    await this._fetch();
+    const current = this.reading;
+    if (current === null) {
+      await this._fetch();
+      return this.cache;
+    }
+    if (this.followUpOf !== current || this.followUp === null) {
+      this.followUpOf = current;
+      this.followUp = current.then(() => this._fetch());
+    }
+    await this.followUp;
     return this.cache;
   }
 
@@ -142,7 +162,7 @@ export class GitStatusProvider {
     this.polledStamp = gitStateStamp(this.workingDirectory);
     this.polledFocus = isFocused?.() ?? null;
     this.pollTimer = setInterval(() => {
-      if (this.fetching) return;
+      if (this.reading !== null) return;
       const stamp = gitStateStamp(this.workingDirectory);
       const focused = isFocused?.() ?? null;
       const regainedFocus = focused === true && this.polledFocus === false;
@@ -166,13 +186,21 @@ export class GitStatusProvider {
     }
   }
 
-  private async _fetch(): Promise<void> {
-    if (this.fetching) return;
-    this.fetching = true;
+  /** Start a read, or join the one in flight. */
+  private _fetch(): Promise<void> {
+    if (this.reading !== null) return this.reading;
+    const reading = this._read().finally(() => {
+      if (this.reading === reading) this.reading = null;
+    });
+    this.reading = reading;
+    return reading;
+  }
+
+  private async _read(): Promise<void> {
     try {
       // A background read: it never takes .git/index.lock (an owner's or the
       // agent's own git command would fail on it), and a stalled git is ended
-      // so `fetching` clears and the next tick reads again.
+      // so the read settles and the next tick reads again.
       const git = new GitService(this.workingDirectory, undefined, { noOptionalLocks: true, timeoutMs: GIT_READ_TIMEOUT_MS });
       const [statusResult, branchResult] = await Promise.all([
         git.status(),
@@ -198,8 +226,6 @@ export class GitStatusProvider {
       // Never throw. A failure after an earlier success (the repo was removed, git broke) must not leave the old branch and dirty marker standing as current; and the failure is throttled like a success.
       this.cache = { ...FALLBACK };
       this.lastFetch = Date.now();
-    } finally {
-      this.fetching = false;
     }
   }
 }

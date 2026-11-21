@@ -39,10 +39,12 @@ POST /api/goodvibes-agent/knowledge/ingest/connector
 POST /api/goodvibes-agent/knowledge/reindex
 ```
 
-If the GoodVibes API is on a different host or port, use a one-off override when launching the TUI:
+By default the Agent dials the daemon on this machine, at the address its bind settings give (`controlPlane.hostMode`, `controlPlane.host`, `controlPlane.port`, with `https` when `controlPlane.tls.mode` is on). A daemon on another machine is named by its origin in `daemon.connectedHost.url`, scheme included, for example `https://10.0.0.7:3421`. When `controlPlane.host` names another machine and `daemon.connectedHost.url` is empty, the Agent refuses to dial it rather than guess the scheme, because a guess of `http` would send its credentials unencrypted over the network.
+
+For a one-off address when launching the TUI (it sets `daemon.connectedHost.url` for that run; `http://` and `https://` are both accepted, and a URL without a port means port 3421):
 
 ```sh
-goodvibes-agent --runtime-url http://127.0.0.1:3421
+goodvibes-agent --runtime-url https://10.0.0.7:3421
 ```
 
 For a persistent shell/session override, set:

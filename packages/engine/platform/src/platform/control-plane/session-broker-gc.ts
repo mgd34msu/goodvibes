@@ -1,13 +1,16 @@
-import type { SharedSessionInputRecord } from './session-intents.js';
-import type { SharedSessionMessage, SharedSessionRecord } from './session-types.js';
+import type { SharedSessionRecord } from './session-types.js';
 import { withSessionCloseReason } from './session-broker-sessions.js';
 import { logger } from '../utils/logger.js';
-import { forgetVerificationJournal } from '../core/verification/store.js';
 
 export interface SharedSessionGcStore {
   readonly sessions: Map<string, SharedSessionRecord>;
-  readonly messages: Map<string, SharedSessionMessage[]>;
-  readonly inputs: Map<string, SharedSessionInputRecord[]>;
+}
+
+/** What one sweep did: whether any record changed, and the closed sessions whose records it deleted. */
+export interface SharedSessionSweep {
+  readonly changed: boolean;
+  /** Deleted records; the broker lets go of everything else it holds for each (history, fence, journal, routes). */
+  readonly deleted: readonly SharedSessionRecord[];
 }
 
 export interface SharedSessionGcOptions {
@@ -52,9 +55,10 @@ export interface SharedSessionGcOptions {
   readonly isExternallyLive?: ((session: SharedSessionRecord) => boolean) | undefined;
 }
 
-export function sweepSharedSessions(store: SharedSessionGcStore, options: SharedSessionGcOptions): boolean {
+export function sweepSharedSessions(store: SharedSessionGcStore, options: SharedSessionGcOptions): SharedSessionSweep {
   const now = Date.now();
   let anyChanged = false;
+  const deleted: SharedSessionRecord[] = [];
   for (const [sessionId, session] of store.sessions.entries()) {
     if (session.status === 'closed') {
       // History by default. Only an explicit FINITE retention window authorizes
@@ -63,9 +67,7 @@ export function sweepSharedSessions(store: SharedSessionGcStore, options: Shared
       const closedAt = session.closedAt ?? session.updatedAt;
       if (Number.isFinite(options.deletionRetentionMs) && now - closedAt >= options.deletionRetentionMs) {
         store.sessions.delete(sessionId);
-        store.messages.delete(sessionId);
-        store.inputs.delete(sessionId);
-        forgetVerificationJournal(session.project, sessionId);
+        deleted.push(session);
         anyChanged = true;
       }
       continue;
@@ -87,7 +89,7 @@ export function sweepSharedSessions(store: SharedSessionGcStore, options: Shared
     options.publishUpdate('session-closed', { ...closed, reason });
     anyChanged = true;
   }
-  return anyChanged;
+  return { changed: anyChanged, deleted };
 }
 
 /** One session the boot sweep closed, for the caller to disclose. */

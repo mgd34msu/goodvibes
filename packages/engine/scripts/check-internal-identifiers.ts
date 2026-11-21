@@ -73,8 +73,8 @@ export function findNulSources(repoRoot = resolve(INTERNAL_ID_ROOT, '../..')): s
   let listed: string;
   try {
     listed = execFileSync('git', ['-C', repoRoot, 'ls-files', '-z', '--', '*.ts', '*.tsx', '*.js', '*.mjs', '*.cjs'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  } catch {
-    return [];
+  } catch (error) {
+    return [`git ls-files could not list the tracked sources: ${error instanceof Error ? error.message : String(error)}`];
   }
   return listed.split('\u0000').filter((rel) => {
     if (!rel) return false;

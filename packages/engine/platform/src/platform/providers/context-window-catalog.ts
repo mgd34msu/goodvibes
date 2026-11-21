@@ -3,6 +3,7 @@
  * and declared aliases. Other providers' figures remain labelled estimates;
  * user caps and learned endpoint observations are applied afterward.
  */
+import { isPrivateNetworkHost } from '@goodvibes/engine/transport-http';
 import { knownFallbackContextWindow } from './context-window-fallback.js';
 import { ModelIdentityResolver } from '../routing/model-identity.js';
 import type { CatalogModel } from './model-catalog.js';
@@ -113,30 +114,25 @@ export function resolveCatalogContextWindow(
   return { tokens: knownFallbackContextWindow(providerId, modelId), provenance: 'fallback', origin: { kind: 'family_default' } };
 }
 
+/** Home and office network names counted as local here; the transport's rule (where plain http is allowed) does not take them. */
+const LOCAL_NAME_SUFFIXES = ['.lan', '.internal', '.home.arpa'] as const;
+
 /**
  * True when a base URL points at this machine or a private network: such an
- * endpoint is a local server whose own figure is kept.
+ * endpoint is a local server whose own figure is kept. The private-network
+ * rule is the transport's (`isPrivateNetworkHost`), plus the home network
+ * name suffixes above.
  */
 export function isLocalBaseUrl(baseURL: string): boolean {
   let host: string;
   try {
-    host = new URL(baseURL).hostname.toLowerCase();
+    host = new URL(baseURL).hostname;
   } catch {
     return false;
   }
-  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0' || host === '::1' || host === '::') return true;
-  if (host.endsWith('.local') || host.endsWith('.lan') || host.endsWith('.internal') || host.endsWith('.home.arpa')) return true;
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
-    return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
-  }
-  if (host.includes(':')) {
-    return host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80') || host.startsWith('::ffff:127.');
-  }
-  return false;
+  if (isPrivateNetworkHost(host)) return true;
+  const lower = host.toLowerCase();
+  return LOCAL_NAME_SUFFIXES.some((suffix) => lower.endsWith(suffix));
 }
 
 /**

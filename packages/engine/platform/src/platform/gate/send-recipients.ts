@@ -2,15 +2,17 @@
  * Sends whose recipients code reads from the call itself, for the calls no
  * tool declaration covers: a shell command that mails or posts a message, a
  * `fetch` request to a messaging service, and an MCP server or plugin tool
- * whose arguments name a person to send to. Pure: no I/O, no model.
+ * whose arguments name a person to send to. No model; the only I/O is reading
+ * a shell script a command runs.
  *
  * Each rule names a program, a service endpoint or an argument name, and
  * where its recipients sit:
  *
  *  - shell mail programs (`mail`, `mailx`, `s-nail`, `sendmail`, `msmtp`,
  *    `ssmtp`, `mutt`, `neomutt`, `swaks`) and the Twilio CLI, from their
- *    arguments, read through the same wrappers, `sh -c` strings and `$(...)`
- *    the deletion rules read (unrecoverable-commands.ts);
+ *    arguments, read by the gate's one command walk (command-walk.ts): through
+ *    `sudo`, `setsid` and the other wrappers, `sh -c` strings, `$(...)` and
+ *    the shell scripts a command runs;
  *  - an HTTP request (`fetch`, `curl`, `wget`, HTTPie) to a messaging
  *    service's send endpoint: for a webhook the URL is the recipient (as
  *    `agent_channel_send` compares one); for a service that takes the
@@ -22,7 +24,8 @@
  *    addresses or phone numbers. A tool that only saves a draft sends nothing.
  *
  * A send these rules recognise whose recipients cannot be read (`sendmail -t`,
- * a body read from a file, a body that is not JSON or a form) is reported as
+ * a body read from a file, a body that is not JSON or a form), and a command
+ * nested too deeply or a script too large to read, is reported as
  * unreadable, and the caller treats it as a recipient nobody allowed. What no
  * rule names (a URL or address held in a shell variable or a file, a script
  * that sends from inside a program, a page the browser types into) is not
@@ -30,10 +33,11 @@
  *
  * Cost per call: nothing for a tool that runs no command, is not `fetch` and
  * declares its effects; one parse of each command string for a call that runs
- * commands; a walk of the arguments for an undeclared tool.
+ * commands, and one stat and read per shell script a command runs; a walk of
+ * the arguments for an undeclared tool.
  */
 import type { ToolDefinition } from '../types/tools.js';
-import { firstProgramAnswer } from './unrecoverable-commands.js';
+import { walkCommands } from './command-walk.js';
 
 /**
  * What a call sends to: the recipients read from it (empty when it sends to
@@ -442,18 +446,22 @@ function programRecipients(name: string, args: readonly string[]): SendRecipient
   return found !== undefined && found.length === 0 ? null : found;
 }
 
-/** What the shell commands send to, read through wrappers, `sh -c` and `$(...)` as the deletion rules read them. */
-export function commandRecipients(commands: readonly string[]): SendRecipients {
+/**
+ * What the shell commands send to, read by the gate's one command walk;
+ * `directory` is where a relative script path is read from.
+ */
+export function commandRecipients(commands: readonly string[], directory: string | undefined): SendRecipients {
   if (commands.length === 0) return [];
   const out: string[] = [];
   let unreadable = false;
-  // The walker stops at the first answer; this visitor collects and never answers, so every program is read.
-  firstProgramAnswer<true>(commands, (name, args) => {
-    const found = programRecipients(name, args);
+  const cannotRead = (): undefined => { unreadable = true; return undefined; };
+  // The walk stops at the first answer; this visitor collects and never answers, so every program is read.
+  walkCommands<true>(commands, (run) => {
+    const found = programRecipients(run.name, run.args);
     if (found === undefined) unreadable = true;
     else if (found !== null) out.push(...found);
     return undefined;
-  }, () => undefined);
+  }, { directory, tooDeep: cannotRead, onScriptTooLarge: cannotRead });
   return unreadable ? undefined : out;
 }
 
@@ -490,11 +498,12 @@ function argumentRecipients(toolName: string, args: Record<string, unknown>): st
  * reading), a `fetch` request to a messaging service, or the arguments of an
  * MCP server or plugin tool call that is not a read. `[]` when it sends to no
  * recipient these rules recognise; `undefined` when it is such a send and its
- * recipients cannot be read.
+ * recipients cannot be read. `directory` is the call's working directory,
+ * where a shell script a command runs is read from.
  */
 export function undeclaredSendRecipients(toolName: string, args: Record<string, unknown>,
-  definition: Pick<ToolDefinition, 'sideEffects'> | undefined, commands: readonly string[], reads: boolean): SendRecipients {
-  const parts: SendRecipients[] = [commandRecipients(commands)];
+  definition: Pick<ToolDefinition, 'sideEffects'> | undefined, commands: readonly string[], reads: boolean, directory: string | undefined): SendRecipients {
+  const parts: SendRecipients[] = [commandRecipients(commands, directory)];
   if (toolName === 'fetch') parts.push(fetchRecipients(args));
   else if (!reads && toolName === 'mcp' && args['mode'] === 'call' && args['input'] && typeof args['input'] === 'object' && !Array.isArray(args['input'])) {
     const qualified = typeof args['qualifiedName'] === 'string' ? args['qualifiedName'] : '';

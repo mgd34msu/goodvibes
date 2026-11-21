@@ -16,7 +16,7 @@ import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes/engine/pl
 import { createSessionSpineRestProbe } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from '../runtime/session-spine-rest-transport.ts';
 import { createMemorySpineRestTransport } from '../runtime/memory-spine-rest-transport.ts';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import type { CliCommandRuntime } from './management.ts';
 
 /** The label a command prints for the host's store. */
@@ -78,12 +78,12 @@ export async function withMemoryCommandStore<T>(
     const access = new MemorySpineClient({ local: createLocalMemoryAccess(unreachableLocalStore()), transport });
     return await fn({ access, label: WIRE_STORE_LABEL });
   }
-  const baseUrl = resolveConnectedHostBaseUrl(runtime.configManager);
-  const remote = !hostIsThisMachine(baseUrl);
+  const { baseUrl, refusal } = resolveConnectedHostAddress(runtime.configManager);
+  const remote = refusal !== null || !hostIsThisMachine(baseUrl);
   if (remote && writes) {
-    throw new MemoryHostUnavailableError(
-      `The connected host ${baseUrl} did not answer; nothing was stored. Start the GoodVibes daemon there or check controlPlane.host, then rerun the command.`,
-    );
+    throw new MemoryHostUnavailableError(refusal
+      ? `${refusal} Nothing was stored.`
+      : `The connected host ${baseUrl} did not answer; nothing was stored. Start the GoodVibes daemon there or check daemon.connectedHost.url, then rerun the command.`);
   }
   return await withMemory(runtime, async ({ registry, path }) => fn({
     access: createLocalMemoryAccess(registry),

@@ -22,6 +22,7 @@ import {
   providerEnvBacked,
 } from './surfaces.js';
 import { clearSurfaceSecret, storeSurfaceSecret } from './surface-secrets.js';
+import { getBuiltinSetupSchema } from './setup-schema.js';
 import { displaySettingValue } from '../../config/config-key-facts.js';
 
 // What each action does to credentials is CHANNEL_ACCOUNT_ACTION_EFFECTS in account-action-effects.ts,
@@ -563,14 +564,10 @@ async function runProviderLogoutAction(
     };
   }
   if (context.deps.providerRuntime) context.deps.providerRuntime.stop(surface);
-  const secrets = context.deps.secretsManager;
-  if (surface === 'slack') {
-    await clearSurfaceSecret(context.deps, 'slack', 'primary');
-    await clearSurfaceSecret(context.deps, 'slack', 'appToken');
-    await clearSurfaceSecret(context.deps, 'slack', 'signingSecret');
-    await secrets.delete('SLACK_WEBHOOK_URL');
-  } else {
-    await clearSurfaceSecret(context.deps, surface, 'primary');
+  // Every credential the setup schema declares for the surface, each removed
+  // where setup stores it (its secret-store key and, when it has one, its setting).
+  for (const target of getBuiltinSetupSchema(surface).secretTargets) {
+    await clearSurfaceSecret(context.deps, surface, target.id);
   }
   const refreshed = await context.buildAccount(surface);
   return {

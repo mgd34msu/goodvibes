@@ -318,7 +318,9 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
   for (const [endpointLabel, endpointBinding] of [['controlPlane', controlPlane], ['web', web], ['httpListener', httpListener]] as const) {
     if (!shows(endpointLabel)) continue;
     if (!endpointBinding.recognized) {
-      readinessIssues.push(`${endpointLabel}.hostMode '${endpointBinding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind this endpoint until it is corrected.`);
+      readinessIssues.push(endpointLabel === 'controlPlane'
+        ? `controlPlane.hostMode '${endpointBinding.hostMode}' is not a recognized mode (local|network|custom); the daemon does not start until it is corrected.`
+        : `${endpointLabel}.hostMode '${endpointBinding.hostMode}' is not a recognized mode (local|network|custom); it is read as local, so this endpoint serves this computer only until it is corrected.`);
     }
   }
   // The daemon's control plane serves this machine whenever the daemon runs;
@@ -462,7 +464,7 @@ export async function buildListenerTestResult(runtime: CliCommandRuntime): Promi
     };
   }).filter((surface) => surface.enabled === true);
   const issues: string[] = [];
-  if (!binding.recognized) issues.push(`httpListener.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind until it is corrected.`);
+  if (!binding.recognized) issues.push(`httpListener.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); it is read as local, so the listener serves this computer only until it is corrected.`);
   if (enabled !== true) issues.push('HTTP listener is disabled.');
   // The service rules read what the service manager reports; `goodvibes service check` and doctor apply them.
   if (isNetworkFacing(enabled, binding) && !auth.userStorePresent) issues.push('Network-facing listener has no local auth user store.');

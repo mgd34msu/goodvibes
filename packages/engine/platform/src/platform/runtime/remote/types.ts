@@ -89,7 +89,8 @@ export interface RemoteExecutionArtifact {
   readonly runnerContract: RemoteRunnerContract;
   readonly task: {
     readonly task: string;
-    readonly status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    /** `unknown` when the task is no longer held where the artifact was built, so whether it ended cannot be said. */
+    readonly status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
     readonly startedAt: number;
     readonly completedAt?: number | undefined;
     readonly summary: string;

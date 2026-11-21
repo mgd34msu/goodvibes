@@ -23,7 +23,6 @@ import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input'
 import { join } from 'node:path';
 import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
-import '@goodvibes/engine/platform/platform/core';
 import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes/engine/platform/platform/routing';
@@ -68,7 +67,6 @@ import type { ShellViews } from '../views/builtin-views.ts';
 import { announceResumeState } from './resume-notice.ts';
 import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
-import './daemon-attach-notices.ts';
 import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platform/tools';
 import {
   autostartInstalledDaemon,
@@ -419,7 +417,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     memorySpine: services.memorySpine,
     sessionInboundInputs: sessionInboundInputs as unknown as Parameters<typeof createSpineAdoptionSync>[0]['sessionInboundInputs'],
     sessionUnionCache: sessionUnionCache as unknown as Parameters<typeof createSpineAdoptionSync>[0]['sessionUnionCache'],
-    legacyStorePath: services.shellPaths.resolveProjectPath('tui', 'control-plane', 'sessions.json'),
+    legacyStorePath: services.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'control-plane', 'sessions.json'),
     workingDirectory: services.workingDirectory,
     retryHooks: transportRetryHooks(runtimeBus, { sessionId: userSessionId, traceId: `${userSessionId}:daemon-http`, source: 'bootstrap' }, 'http'),
     // Both ride adoption. A message submitted into a session this surface hosts
@@ -671,14 +669,14 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     restoreRuntimeModel: restoreSavedModel,
     systemMessageRouter,
     shellPaths: services.shellPaths,
-    surfaceRoot: 'tui',
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   });
   const mcpDiscovery = scheduleBackgroundMcpDiscovery({
     mcpRegistry: services.mcpRegistry,
     systemMessageRouter,
     requestRender,
     shellPaths: services.shellPaths,
-    surfaceRoot: 'tui',
+    surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   });
   wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
   // Routines belong to the daemon, so each runs once with or without a terminal

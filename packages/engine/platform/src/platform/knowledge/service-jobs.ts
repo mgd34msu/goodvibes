@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import type { BrowserKnowledgeIngestResult } from './browser-history/index.js';
 import type { KnowledgeSemanticService } from './semantic/index.js';
+import type { KnowledgeRefreshResult } from './ingest-inputs.js';
 
 export interface KnowledgeServiceJobRunnerContext {
   readonly lint: () => Promise<readonly KnowledgeIssueRecord[]>;
@@ -15,7 +16,7 @@ export interface KnowledgeServiceJobRunnerContext {
     kind: 'stale' | 'bookmark',
     sourceIds?: readonly string[],
     limit?: number | undefined,
-  ) => Promise<number>;
+  ) => Promise<KnowledgeRefreshResult>;
   readonly syncBrowserHistory: (input: { readonly limit?: number | undefined }) => Promise<BrowserKnowledgeIngestResult>;
   readonly materializeProjection: (input: {
     readonly kind: 'overview' | 'bundle';
@@ -64,9 +65,15 @@ export async function runKnowledgeServiceJobByKind(
         ...(result.semanticEnrichment ? { semanticEnrichment: result.semanticEnrichment } : {}) };
     }
     case 'refresh-stale':
-      return { refreshed: await context.refreshSources('stale', input.sourceIds, input.limit) };
-    case 'refresh-bookmarks':
-      return { refreshed: await context.refreshSources('bookmark', input.sourceIds, input.limit) };
+    case 'refresh-bookmarks': {
+      const result = await context.refreshSources(kind === 'refresh-stale' ? 'stale' : 'bookmark', input.sourceIds, input.limit);
+      // Some sources failing is a labelled partial result; every source it tried
+      // failing is a failed run, not "nothing was due".
+      if (result.attempted > 0 && result.refreshed === 0 && result.failed.length > 0) {
+        throw new KnowledgeJobFailedError(`Source refresh refreshed nothing: ${result.failed.length} of ${result.attempted} source(s) failed${firstError(result.failed.map((entry) => entry.reason))}.`);
+      }
+      return { refreshed: result.refreshed, attempted: result.attempted, failed: result.failed.length, failures: result.failed };
+    }
     case 'sync-browser-history': {
       const result = await context.syncBrowserHistory({ limit: input.limit });
       // Partial failures stay `completed` with counts in the result; a run in

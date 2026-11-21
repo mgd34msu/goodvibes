@@ -35,7 +35,7 @@ import type { PermissionCategory, ToolArgumentPath, ToolDecision, ToolDefinition
 import type { GatePresetName } from './presets.js';
 import { effectPermittedForProvenance, isGuestSurfaceId, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
-import { fileOperationDestroys, unrecoverableDeletionIn } from './unrecoverable-commands.js';
+import { fileOperationDestroys, unrecoverableDeletionIn, type Destruction } from './unrecoverable-commands.js';
 
 /**
  * The closed list of what only the owner decides. Jev never approves one, in
@@ -417,9 +417,13 @@ export function callRecipients(args: Record<string, unknown>, definition?: Pick<
   return values?.map((value) => value.trim()).filter((value) => value.length > 0);
 }
 
-/** The owner-only kind a call is, from its tool, mode, arguments and the facts its caller read; undefined when it is none. */
+/**
+ * The owner-only kind a call is, from its tool, mode, arguments and the facts
+ * its caller read; undefined when it is none. `directory` is the call's working
+ * directory, where a shell script a command runs is read from.
+ */
 export function recognizeOwnerOnly(toolName: string, args: Record<string, unknown>,
-  definition?: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
+  definition: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts, directory: string | undefined): OwnerOnlyKind | undefined {
   const acts = definition?.ownerActs;
   // A value that cannot be read is taken as an owner act: the declaration fails closed.
   if (acts !== undefined && namesOneOf(args, acts.field, acts.values)) return 'owner-act';
@@ -428,15 +432,20 @@ export function recognizeOwnerOnly(toolName: string, args: Record<string, unknow
   const decisions = definition?.ownerDecisions;
   if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.contractChanges)) return 'change-contract';
   if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.irreversible)) return 'irreversible-operator';
-  if (unrecoverableDeletion(toolName, args, definition) !== undefined) return 'unrecoverable-delete';
+  if (unrecoverableDeletion(toolName, args, definition, directory) !== undefined) return 'unrecoverable-delete';
   if (facts.newRecipient === true) return 'new-recipient';
   return undefined;
 }
 
-/** What a call destroys that nothing keeps a copy of, in words (gate/unrecoverable-commands.ts); undefined when nothing. */
+/**
+ * What a call destroys that nothing keeps a copy of (gate/unrecoverable-commands.ts);
+ * undefined when nothing. `directory` is where a relative script path is read from.
+ */
 export function unrecoverableDeletion(toolName: string, args: Record<string, unknown>,
-  definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): string | undefined {
+  definition: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined, directory: string | undefined): Destruction | undefined {
   const commands = callCommands(toolName, args, definition);
-  return (commands.length > 0 ? unrecoverableDeletionIn(commands) : undefined)
-    ?? (toolName === 'exec' ? fileOperationDestroys(args) : undefined);
+  const fromCommands = commands.length > 0 ? unrecoverableDeletionIn(commands, directory) : undefined;
+  if (fromCommands !== undefined) return fromCommands;
+  const fileOperation = toolName === 'exec' ? fileOperationDestroys(args) : undefined;
+  return fileOperation === undefined ? undefined : { reason: fileOperation, unread: false };
 }

@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
+import { resolveAndValidatePath, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
@@ -10,7 +10,7 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import { AgentPersonaRegistry } from './persona-registry.js';
 import { AgentRoutineRegistry } from './routine-registry.js';
 import { AgentSkillRegistry } from './skill-registry.js';
-import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './learning-consolidation-core.js';
+import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, LearningRecordNotFoundError, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './learning-consolidation-core.js';
 import type { LearningCandidate } from './learning-curator.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { captureCatalogData } from './catalog-data.js';
@@ -704,7 +704,13 @@ async function applyRollback(
   }
   // Check every record before restoring any, so a missing one cannot leave a half-restored set.
   const restorable = receipt.beforeDuplicates.flatMap((snapshot) => { const id = stringField(snapshot, 'id'); return id ? [{ id, snapshot }] : []; });
-  const gone = await Promise.all(restorable.map(async ({ id }) => { try { await getRecord(shellPaths, memory, receipt.domain, id); return false; } catch { return true; } }));
+  // Only a record that does not exist counts as gone; one that could not be read refuses the rollback with its reason.
+  const gone = await Promise.all(restorable.map(async ({ id }) => {
+    try { await getRecord(shellPaths, memory, receipt.domain, id); return false; } catch (error) {
+      if (error instanceof LearningRecordNotFoundError) return true;
+      throw new Error(`Rollback refused: ${id} could not be read (${summarizeError(error)}); nothing was restored. Try again.`);
+    }
+  }));
   const missing = restorable.filter((_entry, index) => gone[index]).map(({ id }) => id);
   if (missing.length > 0) throw new Error(`Rollback refused: ${missing.join(', ')} no longer exist (deleted since). Nothing was restored; use mode:"recreate" with the delete receipt if one exists.`);
   const restored: { readonly id: string; readonly reviewState: string }[] = [];

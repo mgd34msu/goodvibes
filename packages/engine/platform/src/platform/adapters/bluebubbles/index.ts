@@ -1,5 +1,5 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
@@ -10,14 +10,9 @@ function conversationKindForChatGuid(chatGuid?: string, isGroup?: boolean): impo
 }
 
 export async function handleBlueBubblesSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.bluebubbles.password' },
-    { kind: 'registry', service: 'bluebubbles', field: 'password' },
-    { kind: 'env', name: 'BLUEBUBBLES_PASSWORD' },
-  );
+  const credential = await resolveInboundCredential(context, 'bluebubbles');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('bluebubbles', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('bluebubbles', credential.setting);
   const url = new URL(req.url);
   // Header FIRST, query parameter second.
   //

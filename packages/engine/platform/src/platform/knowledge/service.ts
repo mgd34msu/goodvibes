@@ -3,6 +3,7 @@ import type { ArtifactCleanupResult } from './artifact-reference-ensemble.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
+import type { KnowledgeRefreshResult } from './ingest-inputs.js';
 import { randomUUID } from 'node:crypto';
 import { snapshotNodeInput } from './activation/projection.js';
 import { knowledgeRecordVersion } from './store-record-representation.js';
@@ -271,10 +272,10 @@ export class KnowledgeService {
       store: this.store,
       memoryRegistry: this.options.memoryRegistry,
       syncReviewedMemory: this.syncReviewedMemory.bind(this),
-      refreshSource: async (sourceId: string): Promise<number> => {
+      refreshSource: async (sourceId: string): Promise<KnowledgeRefreshResult> => {
         if (options.admitRefresh) this.requireAdmission('knowledge source refresh');
         const source = this.store.getSource(sourceId);
-        if (!source) return 0;
+        if (!source) return { attempted: 0, refreshed: 0, failed: [] };
         return refreshKnowledgeSources(this.getIngestContext(),
           pickKnowledgeRefreshCandidates({ store: { listSources: () => [source] } }, 'stale', [sourceId], 1));
       },

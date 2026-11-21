@@ -63,19 +63,50 @@ export function sanitizeStatuslineOutput(raw: string): string | null {
   return cleaned.length > MAX_OUTPUT_CHARS ? cleaned.slice(0, MAX_OUTPUT_CHARS) : cleaned;
 }
 
-/** Default runner: `/bin/sh -c <command>` via Bun.spawn with a hard timeout. */
+/**
+ * Default runner: `/bin/sh -c <command>` in its own process group (POSIX), so
+ * at the limit the whole group is killed, the forked children of a compound
+ * command included, and the reader is cancelled, so a child that escaped the
+ * group cannot hold the pipe open and keep the run from settling.
+ */
 const defaultRunner: StatuslineCommandRunner = async (command, cwd, timeoutMs) => {
+  const groupKill = process.platform !== 'win32';
   const proc = Bun.spawn(['/bin/sh', '-c', command], {
     stdout: 'pipe',
     stderr: 'ignore',
     cwd,
-    timeout: timeoutMs,
-    killSignal: 'SIGKILL',
+    detached: groupKill,
   });
-  const out = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
-  // A timed-out process is killed by Bun; treat any non-zero exit (including the
-  // kill) as failure so stale output is cleared rather than shown.
+  const reader = proc.stdout.getReader();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    let killed = false;
+    if (groupKill) {
+      try { process.kill(-proc.pid, 'SIGKILL'); killed = true; } catch { /* the group is already gone */ }
+    }
+    if (!killed) {
+      try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+    }
+    void reader.cancel().catch(() => {});
+  }, timeoutMs);
+  timer.unref?.();
+  const decoder = new TextDecoder();
+  let out = '';
+  let exitCode: number;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+    exitCode = await proc.exited;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (timedOut) throw new Error(`statusline command did not finish within ${timeoutMs}ms`);
+  // Any non-zero exit is a failure, so stale output is cleared rather than shown.
   if (exitCode !== 0) throw new Error(`statusline command exited with code ${exitCode}`);
   return out;
 };

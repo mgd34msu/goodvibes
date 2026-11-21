@@ -115,6 +115,24 @@ export class RelayCodeStore {
     return view === null || view.isRevoked(routeKey(id));
   }
 
+  /**
+   * Drop the codes the authority record holds as revoked (revoked with the
+   * device they were issued to), so they stop counting toward the cap; the
+   * mint's own write saves the pruned file. Only from a readable record: an
+   * unreadable one prunes nothing (it refuses every code, which is not a
+   * revocation).
+   */
+  private pruneRevokedOnRecord(codes: Map<string, StoredRelayCode>): void {
+    const view = this.authority?.view();
+    if (!view) return;
+    for (const [id, entry] of [...codes]) {
+      if (!view.isRevoked(routeKey(id))) continue;
+      codes.delete(id);
+      this.byHash.delete(entry.hash);
+      this.seen.delete(id);
+    }
+  }
+
   private load(): Map<string, StoredRelayCode> {
     if (this.codes) return this.codes;
     const codes = new Map<string, StoredRelayCode>();
@@ -160,6 +178,7 @@ export class RelayCodeStore {
    */
   mint(name: string | undefined, deviceTokenId?: string): MintedRelayCode {
     const codes = this.load();
+    this.pruneRevokedOnRecord(codes);
     if (codes.size >= MAX_RELAY_CODES) {
       throw Object.assign(new Error(`This daemon already holds ${MAX_RELAY_CODES} relay codes. Revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again.`), {
         code: 'RELAY_CODE_LIMIT', status: 409,

@@ -2,9 +2,6 @@ import {
   createApprovalCommand,
   createVoiceExperienceCommand,
 } from '@goodvibes/engine/terminal-shell/experience-commands';
-import '@goodvibes/engine/terminal-shell/voice-settings-review';
-import 'node:fs';
-import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';

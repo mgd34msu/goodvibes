@@ -43,6 +43,7 @@ import { PermissionModeSheet } from '../../components/confirm/PermissionModeShee
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useSessionLifecycle } from '../../hooks/useSessionLifecycle';
 import { PriceSourceNote } from '../../components/pricing/PriceSourceNote';
+import { costAmountLabel } from '../../lib/cost-source';
 import { DetailPane, DetailSection, Facts } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
@@ -165,7 +166,7 @@ function useKnownCost(sessionId: string) {
   if (row?.costUsd == null) return null;
   return (
     <span className="work-cost" title={`${row.pricedRecordCount} priced and ${row.unpricedRecordCount} unpriced record(s) in the last 24 hours`}>
-      ${row.costUsd.toFixed(row.costUsd < 0.01 ? 4 : 2)}{row.costState === 'estimated' ? ' (estimated)' : ''}
+      {costAmountLabel(row.costUsd, row.costState)}
       <PriceSourceNote costSource={row.costSource} pricingAsOf={row.pricingAsOf} />
     </span>
   );

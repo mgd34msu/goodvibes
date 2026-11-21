@@ -8,17 +8,16 @@
  * path, no parser and no writer of its own. A failed call is described by
  * `describeOperatorRpcError`, which names the transport, never a value.
  */
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { registerAboutMeCommand } from '@goodvibes/engine/terminal-shell/about-me-command';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 
-/** Which surface is recording a line; named in the provenance suffix. */
-const TUI_SURFACE = 'tui';
-
 export function registerProfileRuntimeCommands(registry: CommandRegistry): void {
   registerAboutMeCommand<CommandContext>(registry, {
-    surface: TUI_SURFACE,
+    // The surface recording a line, named in the provenance suffix.
+    surface: GOODVIBES_TUI_SURFACE_ROOT,
     async call(ctx, method, input) {
       const rpc = getOperatorRpc(ctx);
       if (!rpc.available) throw commandRefusal(rpc.reason);

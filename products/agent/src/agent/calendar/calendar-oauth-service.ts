@@ -7,8 +7,6 @@
  */
 
 export {
-  CALENDAR_OAUTH_CLIENT_ID_KEYS,
-  CALENDAR_OAUTH_CLIENT_SECRET_KEYS,
   CalendarCreateUnconfirmedError,
   CalendarOAuthService,
   daemonScopedSecrets,

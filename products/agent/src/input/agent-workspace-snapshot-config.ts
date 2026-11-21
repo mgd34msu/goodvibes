@@ -7,7 +7,7 @@
 import type { CommandContext } from './command-registry.ts';
 import { getAgentWorkspaceConfigReader } from './agent-workspace-config-reader.ts';
 
-function readConfigValue(context: CommandContext, key: string, failures: Map<string, string> | undefined): unknown {
+export function readConfigValue(context: CommandContext, key: string, failures: Map<string, string> | undefined): unknown {
   let reader: ReturnType<typeof getAgentWorkspaceConfigReader>;
   try {
     reader = getAgentWorkspaceConfigReader(context);

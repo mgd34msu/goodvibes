@@ -6,10 +6,19 @@ import { ProcessLockBusyError, withProcessLock } from '../packages/engine/platfo
 import { DAEMON_SERVICE_NAME } from '../packages/engine/platform/src/platform/daemon/daemon-service-default.ts';
 
 export const PACKAGE = 'goodvibes';
-export const SERVICE = `${DAEMON_SERVICE_NAME}.service`;
 export const COMMANDS = ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon', 'goodvibes-uninstall'] as const;
 export interface Layout { prefix: string; binDir: string; dataDir: string; home: string }
-export interface Installation extends Layout {
+/**
+ * A layout with the systemd unit name the daemon wrote (its `service.serviceName`, without `.service`).
+ * Absent before the daemon has written a unit (a first install's preflight) and in receipts written
+ * before the name was recorded, which always named the default.
+ */
+export interface ServiceLayout extends Layout { serviceName?: string }
+/** The daemon's systemd unit as systemctl names it. */
+export const serviceUnit = (layout: ServiceLayout): string => `${layout.serviceName ?? DAEMON_SERVICE_NAME}.service`;
+/** One setting an update is about to write: its value before the run and the value the run writes. */
+export interface PendingSetting { readonly key: string; readonly previous: unknown; readonly written: unknown }
+export interface Installation extends ServiceLayout {
   /** v1 contains digests; v2 retains exact generated wrapper/unit text. */
   schema: 1 | 2;
   package: typeof PACKAGE;
@@ -28,6 +37,12 @@ export interface Installation extends Layout {
    * before that change, and {@link recoverPendingService} restores it.
    */
   pendingService?: { readonly service: boolean };
+  /**
+   * Written before an update's first daemon setting write and dropped by the receipt that records the
+   * result. Present after an update was stopped part way: {@link recoverPendingSettings} puts back each
+   * setting that still holds what the stopped run wrote.
+   */
+  pendingSettings?: readonly PendingSetting[];
 }
 export type Run = (command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; capture?: boolean }) => string;
 /**
@@ -35,7 +50,7 @@ export type Run = (command: string, args: string[], options?: { cwd?: string; en
  * message. Never carries argv or the environment: config commands may carry credentials.
  */
 export class CommandError extends Error {
-  constructor(readonly command: string, readonly status: number | null, readonly spawnCode: string | undefined, stderr = '') {
+  constructor(readonly command: string, readonly status: number | null, readonly spawnCode: string | undefined, stderr = '', readonly stdout = '') {
     super(`${command} ${spawnCode ? `could not be started (${spawnCode})` : `failed${status === null ? '' : ` (${status})`}`}${stderr ? `: ${stderr}` : ''}`);
     this.name = 'CommandError';
   }
@@ -45,7 +60,7 @@ export const run: Run = (command, args, options = {}) => {
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit' });
   if (result.error || result.status !== 0) {
     const spawnCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
-    throw new CommandError(command, result.status, spawnCode, options.capture && result.stderr ? result.stderr.trim() : '');
+    throw new CommandError(command, result.status, spawnCode, options.capture && result.stderr ? result.stderr.trim() : '', options.capture && result.stdout ? result.stdout.trim() : '');
   }
   return result.stdout?.trim() ?? '';
 };
@@ -103,7 +118,54 @@ export function validateLayout(layout: Layout): void {
   plainPath(unit);
   if ([prefix, binDir, dataDir].some(path => contained(path, unit))) throw new Error('Installation paths must not contain the systemd unit directory.');
 }
-export const unitPath = (layout: Layout): string => join(layout.home, '.config/systemd/user', SERVICE);
+export const unitPath = (layout: ServiceLayout): string => join(layout.home, '.config/systemd/user', serviceUnit(layout));
+const SERVICE_NAME = /^[A-Za-z0-9_.@-]+$/;
+/** One setting as the installed daemon reports it (`goodvibes-daemon config get <key> --json`). */
+export function readDaemonSetting(execute: Run, daemon: string, dataDir: string, key: string): unknown {
+  const output = execute(daemon, ['config', 'get', key, '--json'], { cwd: dataDir, capture: true });
+  let parsed: { ok?: unknown; data?: { value?: unknown } };
+  try { parsed = JSON.parse(output) as typeof parsed; } catch { parsed = {}; }
+  if (parsed.ok !== true || parsed.data === undefined) throw new Error(`${daemon} config get ${key} --json did not report the setting; nothing was changed.`);
+  return parsed.data.value;
+}
+/** The daemon's service as it reports it (`goodvibes-daemon service-status --json`): its unit name and definition path. */
+export function readDaemonService(execute: Run, daemon: string, dataDir: string): { serviceName: string; path: string } {
+  let output: string;
+  // Exit 3 and 4 (not running, not installed) still print the document.
+  try { output = execute(daemon, ['service-status', '--json'], { cwd: dataDir, capture: true }); }
+  catch (error) {
+    if (!(error instanceof CommandError) || (error.status !== 3 && error.status !== 4) || !error.stdout) throw error;
+    output = error.stdout;
+  }
+  let parsed: { serviceName?: unknown; path?: unknown; platform?: unknown };
+  try { parsed = (JSON.parse(output) as { data?: typeof parsed }).data ?? {}; } catch { parsed = {}; }
+  if (parsed.platform !== 'systemd' || typeof parsed.serviceName !== 'string' || !SERVICE_NAME.test(parsed.serviceName) || typeof parsed.path !== 'string') {
+    throw new Error(`${daemon} service-status --json did not report a systemd user service.`);
+  }
+  return { serviceName: parsed.serviceName, path: parsed.path };
+}
+/**
+ * An update stopped after it began writing daemon settings (the receipt says `pendingSettings`): each recorded
+ * setting that still holds what that run wrote is set back to its previous value with this installation's
+ * daemon; one changed since (by the owner or a newer run) is left as it is. Run after
+ * {@link recoverInterruptedUpdate}, so the daemon used is the release the receipt names. Returns whether there
+ * was anything to recover.
+ */
+export function recoverPendingSettings(receipt: Installation, execute: Run): boolean {
+  if (!receipt.pendingSettings) return false;
+  const daemon = join(receipt.prefix, 'commands/goodvibes-daemon');
+  const restored: string[] = [];
+  for (const { key, previous, written } of receipt.pendingSettings) {
+    if (JSON.stringify(readDaemonSetting(execute, daemon, receipt.dataDir, key)) !== JSON.stringify(written)) continue;
+    if (previous === undefined || previous === null) execute(daemon, ['config', 'unset', key], { cwd: receipt.dataDir, capture: true });
+    else execute(daemon, ['config', 'set', key, typeof previous === 'string' ? previous : JSON.stringify(previous)], { cwd: receipt.dataDir, capture: true });
+    restored.push(key);
+  }
+  delete receipt.pendingSettings;
+  atomicWrite(receiptPath(receipt), JSON.stringify(receipt, null, 2) + '\n');
+  if (restored.length > 0) console.warn(`An earlier update was stopped after it changed daemon settings; put back ${restored.join(', ')}.`);
+  return true;
+}
 export const receiptPath = (layout: Layout): string => join(layout.prefix, 'installation.json');
 export function atomicWrite(path: string, contents: string, mode = 0o600): void {
   plainPath(path); mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -120,7 +182,9 @@ export function readInstallation(prefix: string): Installation | undefined {
   if ((value.schema !== 1 && value.schema !== 2) || value.package !== PACKAGE || value.prefix !== prefix || !/^[0-9a-f-]{36}$/.test(value.id)
     || !/^[0-9a-f]{40}-[0-9a-f-]{36}$/.test(value.release) || !/^[0-9a-f]{40}$/.test(value.sourceCommit)
     || typeof value.service !== 'boolean' || typeof value.unit !== 'string' || !value.wrappers
-    || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) throw new Error('Invalid GoodVibes installation receipt.');
+    || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535
+    || (value.serviceName !== undefined && (typeof value.serviceName !== 'string' || !SERVICE_NAME.test(value.serviceName)))
+    || (value.pendingSettings !== undefined && (!Array.isArray(value.pendingSettings) || value.pendingSettings.some(entry => typeof entry?.key !== 'string')))) throw new Error('Invalid GoodVibes installation receipt.');
   validateLayout(value);
   for (const name of COMMANDS) if (typeof value.wrappers[name] !== 'string') throw new Error('Invalid command ownership receipt.');
   return value;
@@ -233,9 +297,9 @@ export function recoverPendingService(receipt: Installation, purpose: 'update' |
   if (purpose === 'uninstall') {
     if (present(unit)) Object.assign(receipt, { service: true, unit: readFileSync(unit, 'utf8') });
   } else if (receipt.service) {
-    if (receipt.unit) { atomicWrite(unit, receipt.unit, 0o644); quietly(['--user', 'daemon-reload']); quietly(['--user', 'enable', SERVICE]); }
+    if (receipt.unit) { atomicWrite(unit, receipt.unit, 0o644); quietly(['--user', 'daemon-reload']); quietly(['--user', 'enable', serviceUnit(receipt)]); }
   } else if (present(unit)) {
-    quietly(['--user', 'disable', SERVICE]);
+    quietly(['--user', 'disable', serviceUnit(receipt)]);
     rmSync(unit, { force: true });
     quietly(['--user', 'daemon-reload']);
   }
@@ -311,18 +375,18 @@ export async function withLock<T>(directory: string, work: () => Promise<T>): Pr
   }
 }
 export function assertServiceLocation(receipt: Installation, execute: Run): void {
-  const fragment = execute('systemctl', ['--user', 'show', SERVICE, '--property=FragmentPath', '--value'], { capture: true });
-  if (fragment && fragment !== unitPath(receipt)) throw new Error(`Systemd loaded a different ${SERVICE}; refusing to manage it.`);
+  const fragment = execute('systemctl', ['--user', 'show', serviceUnit(receipt), '--property=FragmentPath', '--value'], { capture: true });
+  if (fragment && fragment !== unitPath(receipt)) throw new Error(`Systemd loaded a different ${serviceUnit(receipt)}; refusing to manage it.`);
 }
 export function stopService(receipt: Installation, execute: Run): void {
   assertServiceLocation(receipt, execute);
-  execute('systemctl', ['--user', 'stop', SERVICE]);
-  const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+  execute('systemctl', ['--user', 'stop', serviceUnit(receipt)]);
+  const state = execute('systemctl', ['--user', 'show', serviceUnit(receipt), '--property=ActiveState', '--value'], { capture: true });
   if (state !== 'inactive' && state !== 'failed') throw new Error('The daemon has not stopped; keeping the installation intact.');
 }
 function serviceAlreadyRemoved(receipt: Installation, execute: Run): boolean {
   if (present(unitPath(receipt))) return false;
-  const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
+  const state = execute('systemctl', ['--user', 'show', serviceUnit(receipt), '--property=ActiveState', '--value'], { capture: true });
   return state === 'inactive' || state === 'failed';
 }
 export async function uninstall(prefix: string, purge: boolean, execute: Run = run): Promise<void> {
@@ -340,7 +404,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
         // A re-run after a failure that came after the unit was removed: nothing is left to stop or disable.
         if (!serviceAlreadyRemoved(receipt, execute)) {
           stopService(receipt, execute);
-          execute('systemctl', ['--user', 'disable', SERVICE]);
+          execute('systemctl', ['--user', 'disable', serviceUnit(receipt)]);
         }
         rmSync(unitPath(receipt), { force: true });
         execute('systemctl', ['--user', 'daemon-reload']);

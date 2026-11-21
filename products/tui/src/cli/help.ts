@@ -1,9 +1,8 @@
 import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
 import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
-import 'node:fs';
 import { join } from 'node:path';
-import 'node:url';
+import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import { VERSION } from '../version.ts';
 
 export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes/tui', VERSION);
@@ -12,44 +11,57 @@ export function renderGoodVibesVersion(binary = 'goodvibes'): string {
   return `${binary} ${getPackageVersion()}`;
 }
 
+/** Commands served before the shared parser runs, so they are not in its catalog. */
+const PRE_PARSER_COMMANDS: readonly { readonly name: string; readonly aliases: readonly string[]; readonly subcommands: readonly string[] }[] = [
+  { name: 'acp', aliases: [], subcommands: [] },
+  { name: 'host', aliases: [], subcommands: ['pair', 'unpair'] },
+];
+
+/** A command offered to a person: its words from the catalog, its line from the help table. */
+export interface TuiCommandEntry {
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly subcommands: readonly string[];
+  readonly line: string;
+}
+
+/**
+ * Every command `goodvibes` offers, in catalog order with the pre-parser
+ * commands before `completion`. `serve` is left out: the catalog keeps it only
+ * so the entry point can refuse it by name.
+ */
+export function listTuiCommands(): readonly TuiCommandEntry[] {
+  const catalog = GOODVIBES_CLI_CATALOG.commands.filter((spec) => spec.name !== 'serve');
+  const at = catalog.findIndex((spec) => spec.name === 'completion');
+  const ordered = [...catalog.slice(0, at), ...PRE_PARSER_COMMANDS, ...catalog.slice(at)];
+  return ordered.map((spec) => {
+    const help = COMMAND_HELP[normalizeHelpTopic(spec.name)];
+    return { name: spec.name, aliases: spec.aliases, subcommands: spec.subcommands, line: help?.line ?? help?.summary ?? spec.name };
+  });
+}
+
+/** The help's command list: one line per help page, its command words joined (`remote|bridge`). */
+function renderCommandList(): string[] {
+  const pages = new Map<string, { names: string[]; line: string }>();
+  for (const entry of listTuiCommands()) {
+    const topic = normalizeHelpTopic(entry.name);
+    const page = pages.get(topic);
+    if (page) page.names.push(entry.name);
+    else pages.set(topic, { names: [entry.name], line: entry.line });
+  }
+  return [...pages.values()].map(({ names, line }) => {
+    const words = names.join('|');
+    return words.length < 27 ? `  ${words.padEnd(27)}${line}` : `  ${words}\n${' '.repeat(29)}${line}`;
+  });
+}
+
 export function renderGoodVibesHelp(binary = 'goodvibes'): string {
   return [
     `Usage: ${binary} [OPTIONS] [PROMPT]`,
     `       ${binary} [OPTIONS] <COMMAND> [ARGS]`,
     '',
     'Commands:',
-    '  tui [path]                 Start the interactive TUI (default)',
-    '  run|exec [prompt]          Run non-interactively with text/json/stream-json output',
-    '  web                        Show browser surface bind URL and enablement',
-    '  service                    Inspect/manage daemon service lifecycle',
-    '  status                     Print config, provider, service, and onboarding posture',
-    '  doctor                     Print status plus setup warnings',
-    '  doctor explain <target>    Explain why a tool/command would be allowed/asked/denied',
-    '  doctor routing             Print which model/provider serves which role',
-    '  doctor hooks               List registered hooks, their source, and validation status',
-    '  onboarding [status]        Open onboarding in the TUI, or print onboarding status',
-    '  models [provider]          List/use/pin selectable models and recent model history',
-    '  providers                  List/inspect/use provider config/auth posture',
-    '  auth                       Inspect and manage local users, sessions, and bootstrap auth',
-    '  subscription               Start/finish/logout provider subscription sessions',
-    '  secrets                    List, set, link, delete, and test GoodVibes secret refs',
-    '  sessions                   List, show, export, or resume saved sessions',
-    '  tasks                      List/show in-process tasks or submit a non-interactive task',
-    '  acp                        Run as an Agent Client Protocol agent over stdio (for editors)',
-    '  host pair|unpair          Review explicit TUI host pairing (--bootstrap-shared; --apply), or forget it',
-    '  pair|qrcode                Mint a named device token on the connected host; print its link and QR code',
-    '  surfaces                   Inspect/check/enable/disable browser/listener/external surfaces',
-    '  listener test              Test HTTP listener/webhook readiness',
-    '  control-plane status       Inspect daemon auth, local admin, tokens, and ports',
-    '  support-bundle export|inspect|import',
-    '                             Move a support snapshot (config + diagnostics + posture)',
-    '  remote|bridge              Inspect remote runner/node posture',
-    '  hooks validate             Validate hooks.json against the hook loader schema',
-    '  plugin init|validate|trust Scaffold, validate, or set what a plugin may do',
-    '  plugin bundles ...         Browse/install/uninstall/list SHA-256-pinned capability bundles',
-    '  completion <shell>         Generate shell completion script',
-    '  help [command]             Print this help or command-specific help',
-    '  version                    Print version',
+    ...renderCommandList(),
     '',
     'Options:',
     '  -m, --model <registryKey>       Override model. provider:model infers --provider',
@@ -89,8 +101,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     `  ${binary}`,
     `  ${binary} --no-alt-screen`,
     `  ${binary} --cd ~/work/project --model openai:gpt-5.2`,
-    `  ${binary} onboarding`,
-    `  ${binary} onboarding status`,
+    `  ${binary} setup`,
+    `  ${binary} setup status`,
     `  ${binary} status`,
     `  ${binary} models current`,
     `  ${binary} models use openai:gpt-5.2`,
@@ -113,6 +125,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   tui: {
     usage: ['tui [path]', '[prompt]'],
     summary: 'Start the interactive terminal UI. A prompt starts the TUI with that prompt seeded.',
+    line: 'Start the interactive TUI (default)',
     examples: ['', 'tui ~/work/project', '"review this repo"'],
   },
   run: {
@@ -124,27 +137,32 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
     summary:
       'Run one prompt non-interactively and print the result; the prompt goes straight to the local model. The --intake-* modes work on a prompt captured through native daemon admission: status is read-only and recovery reuses the saved input. Use -- before literal prompt tokens.',
+    line: 'Run non-interactively with text/json/stream-json output',
     examples: ['run "summarize the current project"', 'run --output json "list risks"', 'exec --output stream-json "fix lint"'],
   },
   open: {
     usage: ['open <goodvibes://open/<view>[?target=<id>[:<kind>]]>'],
     summary: 'Start the app and open the view a goodvibes:// link names (selecting its target in a process view). A link that does not parse exits with the usage error.',
+    line: 'Start the app on the view a goodvibes://open link names',
     examples: ['open goodvibes://open/security', 'open "goodvibes://open/agents?target=contract-123:contract"'],
   },
   setup: {
     usage: ['setup', 'setup status'],
     summary: 'Open /setup: models, sign-in, keys, access, chat apps and features, one topic at a time; or say whether first run has been done for this user.',
+    line: 'Open /setup in the TUI, or say whether first run has been done',
     examples: ['setup', 'setup status'],
   },
   status: {
     usage: ['status', 'status --json'],
     summary: 'Print config, provider, auth, service, surface, and onboarding posture.',
+    line: 'Print config, provider, service, and onboarding posture',
     examples: ['status', 'status --json'],
   },
   doctor: {
     usage: ['doctor', 'doctor --json', 'doctor --strict', 'doctor explain <tool|command>', 'doctor routing', 'doctor hooks'],
     summary:
       'Print status plus setup warnings, or explain a platform decision: explain (why a tool/command would be allowed/asked/denied: the gate the app runs, under the mode in force, with the decision model, remembered and never-run rules and the tool\'s path containment; it says when the decision model was not consulted), routing (which model/provider serves which role), hooks (registered hooks, their source, and validation status). Exits 0 when the install is usable (advisory findings render as notes); non-zero only for a must-fix finding. --strict also fails on advisory findings, for CI.',
+    line: 'Print status plus setup warnings; explain, routing and hooks explain a decision',
     examples: [
       'doctor',
       'doctor --strict',
@@ -154,9 +172,13 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'doctor hooks --json',
     ],
   },
-  providers: COMMON_COMMAND_HELP['providers'],
+  providers: { ...COMMON_COMMAND_HELP['providers'], line: 'List/inspect/use provider config/auth posture' },
   // The terminal app also lists the synthetic models' fallback chains.
-  models: { ...COMMON_COMMAND_HELP['models'], usage: [...COMMON_COMMAND_HELP['models'].usage, 'models chain [filter]'] },
+  models: {
+    ...COMMON_COMMAND_HELP['models'],
+    usage: [...COMMON_COMMAND_HELP['models'].usage, 'models chain [filter]'],
+    line: 'List/use/pin selectable models, recent model history and fallback chains',
+  },
   auth: {
     usage: [
       'auth status',
@@ -169,11 +191,13 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'auth revoke-sessions <username>',
       'auth clear-bootstrap',
     ],
-    summary: 'Inspect and manage local admin users, bootstrap auth, and local sessions. Changes are written to the user store; a running host picks them up when it restarts, and its in-memory sessions are not reachable from this command.',
+    summary: 'Inspect and manage local admin users, bootstrap auth, and local sessions. User changes reach a running daemon at its next sign-in or session check; sessions, revoke-session and revoke-sessions act on the running daemon on this machine.',
+    line: 'Inspect and manage local users, sessions, and bootstrap auth',
     examples: ['auth', 'auth add-user admin --password-stdin', 'auth rotate-password admin --password-stdin', 'auth clear-bootstrap'],
   },
   host: {
     usage: ['host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]', 'host unpair [--url <exact-origin>]'],
+    line: 'Review explicit TUI host pairing (--bootstrap-shared; --apply), or forget it',
     summary: 'Review pairing of this TUI with its host. --apply creates the credential and needs fresh confirmation in an owner terminal; scripted approval (--yes) is not supported. When the host no longer accepts the stored credential, pair --apply offers to forget it. unpair forgets the stored credential (it stays valid on the host until revoked there).',
     examples: ['host pair', 'host pair --bootstrap-shared', 'host pair --apply', 'host unpair'],
   },
@@ -188,17 +212,20 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'subscription logout <provider>',
     ],
     summary: 'Manage OAuth/subscription-backed provider sessions such as OpenAI subscription access.',
+    line: 'Start/finish/refresh/logout provider subscription sessions',
     examples: ['subscription providers', 'subscription login openai start --open', 'subscription inspect openai'],
   },
-  secrets: COMMON_COMMAND_HELP['secrets'],
+  secrets: { ...COMMON_COMMAND_HELP['secrets'], line: 'List, set, link, delete, and test GoodVibes secret refs' },
   sessions: {
     usage: ['sessions list', 'sessions show <id|name>', 'sessions export <id|name> [path]', 'sessions resume <id|name>'],
     summary: 'List, inspect, export, or resume saved TUI sessions.',
+    line: 'List, show, export, or resume saved sessions',
     examples: ['sessions list', 'sessions show latest-session', 'sessions export abc123 session.json'],
   },
   tasks: {
     usage: ['tasks list', 'tasks show <taskId>', 'tasks submit <prompt>'],
     summary: 'Inspect runtime tasks or submit a non-interactive task.',
+    line: 'List/show in-process tasks or submit a non-interactive task',
     examples: ['tasks list', 'tasks submit "check provider readiness"'],
   },
   surfaces: {
@@ -210,42 +237,49 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'surfaces disable <web|listener|control-plane|surfaceId>',
     ],
     summary: 'Inspect and configure browser, control-plane, HTTP listener, and external integration surfaces.',
+    line: 'Inspect/check/enable/disable browser/listener/external surfaces',
     examples: ['surfaces check', 'surfaces enable web', 'surfaces enable slack'],
   },
   listener: {
     usage: ['listener test'],
     summary: 'Check HTTP listener/webhook readiness, network posture, service posture, auth, and enabled surface requirements.',
+    line: 'Test HTTP listener/webhook readiness',
     examples: ['listener test', 'listener test --json'],
   },
   'control-plane': {
     usage: ['control-plane status'],
     summary: 'Inspect daemon control-plane bind posture, reachability, local auth, bootstrap credentials, and operator tokens.',
+    line: 'Inspect daemon auth, local admin, tokens, and ports',
     examples: ['control-plane status', 'control-plane status --json'],
   },
   'support-bundle': {
     usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--include-security] [--yes]'],
     summary:
       'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values: it refuses a bundle from another product or format version, imports only values that differ from your settings, holds back permission, sandbox, listener, service and storage settings unless --include-security is given, applies all or nothing, and without --yes lists each change as current -> new and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+    line: 'Move a support snapshot (config + diagnostics + posture)',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
   },
   acp: {
     usage: ['acp'],
     summary:
       'Run GoodVibes as an Agent Client Protocol agent on stdin/stdout so an ACP editor (Zed and others) can drive it. Stdout carries only protocol frames; messages go to stderr. Ends when the editor closes stdin. Prompt input is text only and session restore (loadSession) is not supported. For an MCP client use `goodvibes-daemon mcp serve`.',
+    line: 'Run as an Agent Client Protocol agent over stdio (for editors)',
     examples: ['acp'],
   },
-  pair: COMMON_COMMAND_HELP['pair'],
+  pair: { ...COMMON_COMMAND_HELP['pair'], line: 'Mint a named device token on the connected host; print its link and QR code' },
   web: {
     usage: ['web [--open]'],
     summary: 'Show the configured browser surface URL, bind address, and enablement state.',
+    line: 'Show browser surface bind URL and enablement',
     examples: ['web', 'web --open', 'web --hostname 0.0.0.0 --port 3423'],
   },
   service: {
     usage: ['service status', 'service check', 'service install|start|stop|restart|uninstall'],
     summary: 'Inspect and manage the daemon service lifecycle, autostart, restart policy, PID, logs, and endpoint readiness.',
+    line: 'Inspect/manage daemon service lifecycle',
     examples: ['service status', 'service check --json', 'service install'],
   },
-  completion: COMMON_COMMAND_HELP['completion'],
+  completion: { ...COMMON_COMMAND_HELP['completion'], line: 'Generate shell completion script' },
   serve: {
     usage: ['serve'],
     summary:
@@ -255,13 +289,27 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   remote: {
     usage: ['remote', 'bridge'],
     summary: 'Inspect remote runner/node posture and bridge readiness.',
+    line: 'Inspect remote runner/node posture',
     examples: ['remote', 'bridge'],
   },
   hooks: {
     usage: ['hooks validate'],
     summary:
       'Validate the configured hooks.json against the hook loader schema; per-hook pass/fail with plain reasons, nonzero exit if any hook is invalid.',
+    line: 'Validate hooks.json against the hook loader schema',
     examples: ['hooks validate', 'hooks validate --json'],
+  },
+  help: {
+    usage: ['help [command]'],
+    summary: 'Print the command list and options, or one command\'s help.',
+    line: 'Print this help or command-specific help',
+    examples: ['help', 'help run'],
+  },
+  version: {
+    usage: ['version'],
+    summary: 'Print the version.',
+    line: 'Print version',
+    examples: ['version'],
   },
   plugin: {
     usage: [
@@ -277,6 +325,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     ],
     summary:
       'Scaffold a minimal valid plugin (manifest.json + entry file), validate a plugin directory against the plugin loader checks, browse/install/uninstall/list SHA-256-pinned capability bundles from a governed marketplace index (--ref picks a git ref when the bundle source is a git remote; without --yes, install prints the activation plan and changes nothing), or set and inspect a plugin\'s trust tier (what it may register), which every GoodVibes app on this machine applies the next time it starts the plugin. Bundle installs are never unpinned; a missing or mismatched --sha256 is refused, not overridable. Marking a plugin trusted when its signature does not verify needs --yes.',
+    line: 'Scaffold, validate or trust a plugin, or manage SHA-256-pinned capability bundles',
     examples: [
       'plugin init my-plugin',
       'plugin validate .goodvibes/plugins/my-plugin',
@@ -288,29 +337,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
 };
 
+/** Every catalog spelling names its command's page; `bridge` shares the `remote` page. */
 const HELP_ALIASES: Record<string, string> = {
-  app: 'tui',
-  exec: 'run',
-  provider: 'providers',
-  model: 'models',
-  subscriptions: 'subscription',
-  secret: 'secrets',
-  session: 'sessions',
-  task: 'tasks',
-  surface: 'surfaces',
-  webhook: 'listener',
-  controlplane: 'control-plane',
-  cp: 'control-plane',
-  bundle: 'support-bundle',
-  bundles: 'support-bundle',
-  qrcode: 'pair',
-  qr: 'pair',
-  daemon: 'serve',
-  server: 'serve',
-  services: 'service',
+  ...Object.fromEntries(GOODVIBES_CLI_CATALOG.commands.flatMap((spec) => spec.aliases.map((alias) => [alias, spec.name]))),
   bridge: 'remote',
-  hook: 'hooks',
-  plugins: 'plugin',
 };
 
 const normalizeHelpTopic = (topic: string) => normalizeTopic(topic, HELP_ALIASES);

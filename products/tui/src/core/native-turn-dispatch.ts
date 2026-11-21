@@ -6,23 +6,19 @@
 export interface NativeTurnDispatchSteps {
   /** Anything awaited before the turn starts (memory refresh). */
   readonly prepare: () => Promise<void>;
-  /** False once a newer dispatch has taken over. */
-  readonly current: () => boolean;
-  /** Runs once the dispatch is still current and about to start the turn. */
+  /** Runs once the preparation is done and the turn is about to start. */
   readonly begin: () => void;
   readonly start: () => Promise<void>;
-  /** Reports a failure to the owner; only called while this dispatch is current. */
+  /** Reports a failure to the owner; the caller decides what a newer prompt supersedes. */
   readonly failed: (error: unknown) => void | Promise<void>;
 }
 
 export async function runNativeTurnDispatch(steps: NativeTurnDispatchSteps): Promise<void> {
   try {
     await steps.prepare();
-    if (!steps.current()) return;
     steps.begin();
     await steps.start();
   } catch (error) {
-    if (!steps.current()) return;
     await steps.failed(error);
   }
 }

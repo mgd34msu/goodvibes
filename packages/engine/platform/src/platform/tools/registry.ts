@@ -429,6 +429,28 @@ const toolActivityByName = new Map<string, ToolActivity>();
 
 const toolDescriptionByName = new Map<string, string>();
 
+/** How many registries of this process hold each tool name; the words go when the last one lets the name go. */
+const registryHoldersByName = new Map<string, number>();
+
+/** Records the words of the latest registration of a tool name: a word it does not declare is not kept from an earlier one. */
+function recordToolWords(name: string, definition: { readonly activity?: ToolActivity | undefined; readonly description?: unknown }): void {
+  if (definition.activity) toolActivityByName.set(name, definition.activity);
+  else toolActivityByName.delete(name);
+  if (typeof definition.description === 'string' && definition.description.trim() !== '') toolDescriptionByName.set(name, definition.description);
+  else toolDescriptionByName.delete(name);
+}
+
+function releaseToolName(name: string): void {
+  const holders = (registryHoldersByName.get(name) ?? 1) - 1;
+  if (holders > 0) {
+    registryHoldersByName.set(name, holders);
+    return;
+  }
+  registryHoldersByName.delete(name);
+  toolActivityByName.delete(name);
+  toolDescriptionByName.delete(name);
+}
+
 /** A registered tool's own description, by its name: what an ask about a tool with no display words is worded from. */
 export function toolDescriptionOf(name: string): string | undefined {
   return toolDescriptionByName.get(name);
@@ -564,9 +586,9 @@ export class ToolRegistry {
     const assertCurrent = projector ? projectionFunction<() => void>(projectionProperty(projector, 'assertCurrent')) : undefined;
     const captureNativeReferences = projector ? projectionFunction<NonNullable<ToolInputProjector['captureNativeReferences']>>(projectionProperty(projector, 'captureNativeReferences')) : undefined;
     const signal = projector ? projectionSignal(projectionProperty(projector, 'signal')) : undefined;
+    if (!this.tools.has(name)) registryHoldersByName.set(name, (registryHoldersByName.get(name) ?? 0) + 1);
     this.tools.set(name, tool);
-    if (definition.activity) toolActivityByName.set(name, definition.activity);
-    if (typeof definition.description === 'string' && definition.description.trim() !== '') toolDescriptionByName.set(name, definition.description);
+    recordToolWords(name, definition);
     this.registrations.set(name, Object.freeze({ tool, projector, project, captureNativeReferences, assertCurrent, signal,
       revision: `tool-input-projection:${++this.registrationRevision}` }));
   }
@@ -1601,6 +1623,7 @@ export class ToolRegistry {
     this.tools.delete(name);
     this.registrations.delete(name);
     this.registrationRevision++;
+    releaseToolName(name);
     return true;
   }
 

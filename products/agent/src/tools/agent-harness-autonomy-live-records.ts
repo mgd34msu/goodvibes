@@ -3,6 +3,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { redactSensitiveData } from '@goodvibes/engine/platform/platform/utils';
+import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
@@ -33,9 +34,15 @@ export interface AutonomyLiveNativeFact {
   readonly cancellable: boolean;
 }
 
+/** An approval's fact keeps the lifecycle's own status type, so a new open status reaches every reader. */
+export interface AutonomyLiveApprovalFact {
+  readonly status: SharedApprovalStatus;
+  readonly cancellable: boolean;
+}
+
 export interface AutonomyLiveNativeFacts {
   readonly tasks: readonly AutonomyLiveNativeFact[];
-  readonly approvals: readonly AutonomyLiveNativeFact[];
+  readonly approvals: readonly AutonomyLiveApprovalFact[];
   readonly automationRuns: readonly AutonomyLiveNativeFact[];
   readonly watcherReceipts: readonly AutonomyLiveNativeFact[];
   readonly schedules: readonly AutonomyLiveNativeFact[];
@@ -86,7 +93,7 @@ export function autonomyLiveNativeFacts(context: CommandContext): AutonomyLiveNa
   const { tasks, approvals, automation, artifacts, researchRuns } = readLiveSources(context);
   return {
     tasks: (tasks?.tasks ?? []).map(task => ({ status: task.status, cancellable: task.cancellable && ['queued', 'running', 'blocked'].includes(task.status) })),
-    approvals: (approvals?.approvals ?? []).map(approval => ({ status: approval.status, cancellable: approval.status === 'pending' || approval.status === 'claimed' })),
+    approvals: (approvals?.approvals ?? []).map(approval => ({ status: approval.status, cancellable: isOpenApprovalStatus(approval.status) })),
     automationRuns: nonWatcherRuns(automation).map(run => ({ status: run.status, cancellable: run.status === 'queued' || run.status === 'running' })),
     watcherReceipts: watcherReceiptArtifacts(artifacts).map(artifact => ({ status: receiptStatus(artifact), cancellable: false })),
     schedules: (automation?.jobs ?? []).map(job => ({ status: job.status, cancellable: job.enabled && job.status === 'enabled' })),
@@ -508,7 +515,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
     })
     .slice(0, LIVE_RECORD_LIMIT)
     .map((approval) => {
-      const active = approval.status === 'pending' || approval.status === 'claimed';
+      const active = isOpenApprovalStatus(approval.status);
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
       // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
       const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /questions answer, or the web UI`;

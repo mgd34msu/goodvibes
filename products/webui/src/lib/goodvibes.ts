@@ -610,6 +610,11 @@ export interface PaymentAdvanceApproval {
   readonly amount: string;
   readonly expiresAt: string;
 }
+/**
+ * What approving again does after an answer that was lost or unreadable: the daemon
+ * returns the unexpired approval whose merchant, item and amount match, never a second one.
+ */
+export const SAME_ADVANCE_APPROVAL_AGAIN = 'Approving the same merchant, item and amount again returns that approval, not a second one';
 /** Approve one purchase in advance: the merchant's domain, the item, and the most it may cost. */
 async function approvePurchaseInAdvance(input: { merchantDomain: string; item: string; amount: string }, signal?: AbortSignal): Promise<PaymentAdvanceApproval> {
   const route = ownerPaymentRoute('payments.checkout.approve');
@@ -617,7 +622,10 @@ async function approvePurchaseInAdvance(input: { merchantDomain: string; item: s
   const field = (key: string): string => { const value = raw[key]; return typeof value === 'string' ? value : ''; };
   const result = { merchantDomain: field('merchantDomain'), item: field('item'), amount: field('amount'), expiresAt: field('expiresAt') };
   if (raw.approved !== true || !result.merchantDomain || !result.item || !result.amount || !result.expiresAt) {
-    throw new Error('The daemon did not confirm the approval. Nothing is known to be approved; try again.');
+    throw Object.assign(
+      new Error(`The daemon received the request but its answer did not confirm the approval, so it may have been approved. ${SAME_ADVANCE_APPROVAL_AGAIN}.`),
+      { code: 'OUTCOME_UNKNOWN' },
+    );
   }
   return result;
 }
@@ -877,22 +885,8 @@ export type EmailSendResult = OperatorMethodOutput<'email.send'>;
 export type EmailDraftCreateInput = OperatorMethodInput<'email.draft.create'>;
 export type EmailDraftCreateResult = OperatorMethodOutput<'email.draft.create'>;
 /** `email.draft.update`: replace the saved draft named by `uid` in the Drafts generation `uidValidity`. */
-export interface EmailDraftUpdateInput {
-  readonly uid: number;
-  readonly uidValidity: number;
-  readonly to: string;
-  readonly subject: string;
-  readonly body: string;
-  readonly inReplyTo?: string;
-  readonly references?: string;
-}
-export interface EmailDraftUpdateResult {
-  readonly draftId: string;
-  readonly uid?: number;
-  readonly uidValidity?: number;
-  readonly mailbox: string;
-  readonly replaced: number;
-}
+export type EmailDraftUpdateInput = OperatorMethodInput<'email.draft.update'>;
+export type EmailDraftUpdateResult = OperatorMethodOutput<'email.draft.update'>;
 
 // ─── Sessions and companion chat ─────────────────────────────────────────────
 
@@ -1213,10 +1207,19 @@ export const client = {
       status: async (): Promise<FeatureRestartStatus> =>
         readFeatureRestartStatus(await requestJson('/api/control-plane/methods/flags.status/invoke', { method: 'POST', body: { body: {} } })),
     },
-    // Restarts the daemon's managed service so saved startup settings apply; the
-    // daemon refuses with its reason when service management is off.
+    // Restarts the daemon's managed service so saved startup settings apply.
+    // Service management being off is a thrown error. A restart the service
+    // manager could not carry out comes back as a status whose actionError names
+    // why (a failed systemctl or launchctl call, no unit installed for a daemon run
+    // by hand, a manually run service asked to restart itself): that is thrown
+    // too, so a refusal never reads as a restart. The answer is the daemon's own
+    // sentence about what happens next, when it gives one.
     services: {
-      restart: () => invokeOperator('services.restart', {}),
+      restart: async (): Promise<{ readonly accepted: string | null }> => {
+        const status = asRecord(await invokeOperator('services.restart', {}));
+        if (typeof status.actionError === 'string' && status.actionError.trim()) throw new Error(status.actionError);
+        return { accepted: typeof status.accepted === 'string' && status.accepted.trim() ? status.accepted : null };
+      },
     },
     // payments.cards.*, the ONLY path card material takes off this surface.
     //
@@ -1390,9 +1393,8 @@ export const client = {
         create: (input: EmailDraftCreateInput) =>
           invokeOperator('email.draft.create', input),
         // Replaces the saved draft (uid + uidValidity from email.drafts.list): the folder keeps one copy. ws-only.
-        // Typed here until the generated contract carries the method; sent through the generic invoke route.
-        update: (input: EmailDraftUpdateInput) =>
-          invokeGatewayMethod('email.draft.update' as never, input as never) as Promise<EmailDraftUpdateResult>,
+        update: (input: EmailDraftUpdateInput): Promise<EmailDraftUpdateResult> =>
+          invokeGatewayMethod('email.draft.update', input),
       },
     },
     // Occasions and plans (occasions.*, docs/occasions.md).

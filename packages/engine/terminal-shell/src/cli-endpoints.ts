@@ -3,11 +3,17 @@
  * for the three network endpoints a front-end's daemon exposes: the control
  * plane, the plain HTTP listener, and the web UI.
  */
-import { resolveWebPort } from '@goodvibes/engine/platform/platform/daemon/host-resolver';
-import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { resolveHostBinding, resolveWebPort } from '@goodvibes/engine/platform/platform/daemon/host-resolver';
+import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 
 export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';
 export type RuntimeHostMode = 'local' | 'network' | 'custom';
+export type RuntimeEndpointSettingKey = `${RuntimeEndpointId}.${'hostMode' | 'host' | 'port'}`;
+
+/** Any reader of the endpoint settings: a config manager or a narrower view of one. */
+export interface RuntimeEndpointConfigReader {
+  get(key: RuntimeEndpointSettingKey): unknown;
+}
 
 export const RUNTIME_ENDPOINT_DEFAULT_PORTS: Record<RuntimeEndpointId, number> = {
   controlPlane: 3421,
@@ -38,34 +44,29 @@ export const RUNTIME_ENDPOINT_CONFIG_KEYS: Record<RuntimeEndpointId, {
 };
 
 export interface RuntimeEndpointBinding {
+  /** The applied mode when recognized; the stored text as written when not. */
   readonly hostMode: string;
   readonly configuredHost: string;
   readonly host: string;
   readonly port: number;
   /**
-   * False when the stored hostMode is not one of the platform's recognized modes
-   * ('local' | 'network' | 'custom'). The platform's resolveHostBinding is a switch
-   * with NO default case: an unrecognized mode yields an undefined binding and
-   * the daemon throws in its constructor before ever binding. Displays must
-   * therefore never present the host/port below as a definite binding when
-   * this is false, the fallback values exist only so display code has
-   * something structured to show alongside the warning.
+   * False when the stored hostMode is not one of 'local' | 'network' | 'custom'
+   * (after trimming and lowercasing). The platform's bind rule then applies
+   * the local posture, so host and port are 127.0.0.1 and the endpoint's port.
    */
   readonly recognized: boolean;
 }
 
 /**
- * THE one display seam for endpoint bindings: every surface that renders a
- * binding as text goes through this, so no surface can present the resolver's
- * loopback fallback as a definite bind for a hostMode the platform cannot handle
- * (its bind resolver has no default case, the daemon throws before binding).
- * The recognized case renders the familiar `<mode> <host>:<port>`.
+ * The one text form of an endpoint binding: `<mode> <host>:<port>`, or, for an
+ * unrecognized stored mode, that mode named with the local binding the
+ * platform applies in its place.
  */
 export function formatRuntimeEndpointBinding(binding: RuntimeEndpointBinding): string {
   if (binding.recognized) {
     return `${binding.hostMode} ${binding.host}:${binding.port}`;
   }
-  return `'${binding.hostMode}', not a recognized host mode (expected local|network|custom); the daemon cannot bind this endpoint until it is corrected`;
+  return `'${binding.hostMode}', not a recognized host mode (expected local|network|custom); read as local, this computer only (${binding.host}:${binding.port})`;
 }
 
 export function hostModeForHostname(hostname: string): RuntimeHostMode {
@@ -76,37 +77,21 @@ export function hostModeForHostname(hostname: string): RuntimeHostMode {
 }
 
 export function resolveRuntimeEndpointBinding(
-  config: Pick<ConfigManager, 'get'>,
+  config: RuntimeEndpointConfigReader,
   endpoint: RuntimeEndpointId,
 ): RuntimeEndpointBinding {
   const keys = RUNTIME_ENDPOINT_CONFIG_KEYS[endpoint];
   const hostMode = String(config.get(keys.hostMode) ?? 'local');
   const configuredHost = String(config.get(keys.host) ?? '127.0.0.1');
-  // Port coercion is anchored PER ENDPOINT to what the platform actually does with
-  // the stored value, so a display never disagrees with the machinery:
-  //   - controlPlane / httpListener bind via resolveHostBinding, which is fed
-  //     `Number(raw ?? default)` and applies `customPort || DEFAULT`, a
-  //     stored 0 or non-numeric value collapses to the endpoint default.
-  //   - web goes through the platform's own resolveWebPort, which every surface
-  //     that announces, links a channel account, or serves over tailscale
-  //     also anchors to, so the display never disagrees with the machinery.
-  const rawPort = Number(config.get(keys.port) ?? RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]);
-  const port = endpoint === 'web'
-    ? resolveWebPort(config.get(keys.port))
-    : (rawPort || RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]);
-  if (hostMode === 'network') {
-    return { hostMode, configuredHost, host: '0.0.0.0', port, recognized: true };
-  }
-  if (hostMode === 'custom') {
-    return { hostMode, configuredHost, host: configuredHost || '127.0.0.1', port, recognized: true };
-  }
-  if (hostMode === 'local') {
-    return { hostMode, configuredHost, host: '127.0.0.1', port, recognized: true };
-  }
-  // Unrecognized hostMode ('LAN', 'Network', '', a trimmed variant, …): the
-  // platform bind path has NO default case for this, resolveHostBinding returns
-  // undefined and the daemon throws before binding. There IS no real binding
-  // to display; recognized:false tells callers to warn instead of asserting
-  // the loopback fallback below as fact.
-  return { hostMode, configuredHost, host: '127.0.0.1', port, recognized: false };
+  const rawPort = config.get(keys.port);
+  // The platform's bind rule decides host, port and mode; the web port goes
+  // through the platform's own web port rule, which every web surface uses.
+  const binding = resolveHostBinding(hostMode, configuredHost, Number(rawPort ?? RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]), endpoint);
+  return {
+    hostMode: binding.recognized ? binding.effectiveMode : hostMode,
+    configuredHost,
+    host: binding.host,
+    port: endpoint === 'web' ? resolveWebPort(rawPort) : binding.port,
+    recognized: binding.recognized,
+  };
 }

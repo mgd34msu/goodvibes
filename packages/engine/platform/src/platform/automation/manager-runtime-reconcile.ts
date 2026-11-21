@@ -7,6 +7,7 @@ import { buildRunTelemetryFromAgent, canSettleStoredRun, getTerminalAgentState }
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import {
+  automationRunDeliveryWanted,
   failureNoticeCoversRunDelivery,
   settleAutomationRunFailure,
   type AutomationFailureFollowUpContext,
@@ -31,8 +32,12 @@ export interface AutomationRunSettleContext {
   /** Delivers failure notices, emits run-failed and applies the job's retry or cooldown policy. */
   readonly followUp: AutomationFailureFollowUpContext;
   readonly emitJobAutoDisabled: (job: AutomationJob, reason: string) => void;
+  /** The manager's delivery wiring, to tell whether a settled run has an answer to deliver (automationRunDeliveryWanted). */
+  readonly delivery: Parameters<typeof automationRunDeliveryWanted>[0];
   /** Starts the run's delivery; true when one was started (the run then owes it until it lands). */
   readonly maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => boolean;
+  /** Hears that a run left the running count, so work waiting for a run slot can start. */
+  readonly runEnded: () => void;
   readonly applyFailureToJob: (job: AutomationJob, timestamp: number, countRun?: boolean) => AutomationJob;
   readonly removeJobRecord: (jobId: string, reason: string) => void;
 }
@@ -50,6 +55,8 @@ interface AutomationReconcileContext extends AutomationRunSettleContext {
   readonly saveJobs: () => Promise<void>;
   readonly saveRuns: () => Promise<void>;
   readonly pruneRunHistory: () => void;
+  /** Hears the save-then-follow-up of the runs one pass settled, as a promise that never rejects. */
+  readonly track: (work: Promise<void>) => void;
 }
 
 /** How a run ended, with what each ending carries. */
@@ -66,15 +73,24 @@ function reportAsyncFailure(label: string, error: unknown, metadata: Record<stri
 }
 
 /**
- * A run whose agent vanished before reporting a terminal state was lost to a
- * restart, not failed by its work, so another attempt could succeed. Known
- * from structure; nothing to read.
+ * A run cut off before it reported an end (the daemon restarted under it, or
+ * its agent vanished unreported) may already have acted: sent mail, posted,
+ * written files. Running it again on its own could repeat that, so it is not
+ * retried; the failure notice says so and the owner can run it again by hand.
+ * Known from structure; nothing to read.
  */
-const AGENT_STATE_LOST = {
-  failureClass: 'retryable',
+const RUN_CUT_OFF = {
+  failureClass: 'terminal',
   basis: 'explicit',
-  detail: 'the agent state was lost before the run completed',
+  detail: 'the run was cut off before it reported its end and may already have acted',
 } as const;
+
+/** What a run cut off by a restart says, in its record and its failure notice. */
+const CUT_OFF_BY_RESTART = 'Interrupted by a restart before it finished. It may already have done part of its work, so it was not retried; run it again by hand if it still needs to run.';
+/** What a check-in cut off by a restart says: its note may already have been sent. */
+const CHECKIN_CUT_OFF_BY_RESTART = 'Check-in interrupted by a restart before it finished. Its note may already have been sent, so it was not retried; run checkin.run if a check-in is still wanted.';
+/** What a run whose agent stopped without reporting says. */
+const AGENT_LOST = 'Its agent stopped without reporting how the run ended. It may already have done part of its work, so it was not retried; run it again by hand if it still needs to run.';
 
 /** A run past its deadline was stopped by the manager; the job's policy decides whether to try again. */
 const RUN_TIMED_OUT = {
@@ -107,22 +123,36 @@ function formatTimeout(ms: number): string {
 }
 
 /**
+ * A settled run, and what it still has to do once its end is saved: start its
+ * delivery and its failure follow-up (notice, retry or cooldown). The caller
+ * saves first and then calls `followUp`, so an answer or notice never goes out
+ * for a run whose end is not on disk.
+ */
+export interface AutomationRunEnding {
+  readonly run: AutomationRun;
+  readonly followUp: () => void;
+}
+
+const NOTHING_TO_FOLLOW_UP = (): void => {};
+
+/**
  * The one way a running run ends, whoever noticed: the reconcile pass, an
  * operator cancelling the run, a remote runner reporting back, the run's
  * timeout or its job being removed. A completed run resets the job's failure
  * count and is delivered. A cancelled run is recorded and delivered as
  * cancelled; it is not a failure, so it is neither counted nor retried. Only
  * a failed run goes through the failure notice and the job's failure policy.
- * Persistence is the caller's: it saves once for everything it settled.
+ * Persistence is the caller's: it saves once for everything it settled, then
+ * calls each returned `followUp`.
  */
 export function settleAutomationRun(
   context: AutomationRunSettleContext,
   run: AutomationRun,
   settlement: AutomationRunSettlement,
   source: string,
-): AutomationRun {
+): AutomationRunEnding {
   const stored = context.runs.get(run.id) ?? run;
-  if (stored.status !== 'running' || !canSettleStoredRun(stored, settlement.status)) return stored;
+  if (stored.status !== 'running' || !canSettleStoredRun(stored, settlement.status)) return { run: stored, followUp: NOTHING_TO_FOLLOW_UP };
   const { endedAt } = settlement;
   const updatedRun: AutomationRun = {
     ...stored,
@@ -139,9 +169,10 @@ export function settleAutomationRun(
   };
   context.runs.set(updatedRun.id, updatedRun);
   context.syncRunToRuntime(updatedRun, source);
+  context.runEnded();
 
   const job = context.jobs.get(updatedRun.jobId);
-  if (!job) return updatedRun;
+  if (!job) return { run: updatedRun, followUp: NOTHING_TO_FOLLOW_UP };
   const wasEnabled = job.enabled;
   const updatedJob: AutomationJob = settlement.status === 'completed'
     ? { ...job, successCount: job.successCount + 1, failureCount: 0, updatedAt: endedAt }
@@ -173,17 +204,12 @@ export function settleAutomationRun(
   // A failed run is announced by its failure notice when that goes to the
   // job's own targets; sending the run message too would say it twice.
   // Save, then deliver: the run's end carries `delivery: owed` in the caller's
-  // save, and the write that records the delivery clears it, so a daemon that
-  // stops in between delivers it after its restart (deliverOwedAutomationRuns).
-  let owed = false;
-  if (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) {
-    const owing: AutomationRun = { ...updatedRun, delivery: { state: 'owed', effect: automationRunEffect(updatedRun.id) } };
-    context.runs.set(owing.id, owing);
-    owed = context.maybeDeliverRun(updatedJob, owing);
-    const latest = context.runs.get(owing.id);
-    // Nothing was started (no target, no inbox): nothing is owed.
-    if (!owed && latest?.delivery) context.runs.set(owing.id, { ...latest, delivery: undefined });
-  }
+  // save, the delivery starts only after that save, and the write that records
+  // the delivery clears it, so a daemon that stops in between delivers it after
+  // its restart (deliverOwedRuns).
+  const owed = (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob))
+    && automationRunDeliveryWanted(context.delivery, updatedJob, updatedRun);
+  if (owed) context.runs.set(updatedRun.id, { ...updatedRun, delivery: { state: 'owed', effect: automationRunEffect(updatedRun.id) } });
   // A one-shot job is done only when a run of it succeeded. A failed or
   // cancelled one stays (disabled once its occurrence fired) so the owner or
   // an agent can retry the run or start it by hand; that run's success removes
@@ -192,13 +218,37 @@ export function settleAutomationRun(
   if (updatedJob.deleteAfterRun && settlement.status === 'completed' && !owed) {
     context.removeJobRecord(updatedJob.id, 'one-shot-complete');
   }
-  if (settlement.status === 'failed') {
-    settleAutomationRunFailure(failedRunFollowUp(context), updatedJob, updatedRun, settlement.error, settlement.failure);
-    if (!updatedJob.enabled && wasEnabled) {
-      context.emitJobAutoDisabled(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');
-    }
+  if (settlement.status === 'failed' && !updatedJob.enabled && wasEnabled) {
+    context.emitJobAutoDisabled(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');
   }
-  return context.runs.get(updatedRun.id) ?? updatedRun;
+  const followUp = (): void => {
+    if (owed) {
+      const owing = context.runs.get(updatedRun.id);
+      if (owing?.delivery?.state === 'owed') context.maybeDeliverRun(updatedJob, owing);
+    }
+    if (settlement.status === 'failed') {
+      settleAutomationRunFailure(failedRunFollowUp(context), updatedJob, updatedRun, settlement.error, settlement.failure);
+    }
+  };
+  return { run: context.runs.get(updatedRun.id) ?? updatedRun, followUp };
+}
+
+/**
+ * Saves what the caller settled, then starts every follow-up, whether or not
+ * the save landed (a failed save is logged; the answer is still owed to its
+ * person). Never rejects.
+ */
+export async function saveThenFollowUp(
+  save: () => Promise<unknown>,
+  followUps: readonly (() => void)[],
+  label: string,
+): Promise<void> {
+  try {
+    await save();
+  } catch (error) {
+    reportAsyncFailure(label, error);
+  }
+  for (const followUp of followUps) followUp();
 }
 
 /** The identity of a run's delivery, the same for every attempt (the delivery manager's `announces`). */
@@ -214,7 +264,10 @@ function runTimeoutMs(context: AutomationReconcileContext, run: AutomationRun): 
 }
 
 export function reconcileAutomationActiveRuns(context: AutomationReconcileContext): void {
-  let settled = false;
+  const followUps: Array<() => void> = [];
+  const settle = (run: AutomationRun, settlement: AutomationRunSettlement, source: string): void => {
+    followUps.push(settleAutomationRun(context, run, settlement, source).followUp);
+  };
   const now = Date.now();
   for (const run of [...context.runs.values()]) {
     if (run.status !== 'running') continue;
@@ -226,8 +279,7 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
         catch (error) { reportAsyncFailure('timed-out agent cancellation', error, { jobId: run.jobId, runId: run.id, agentId: run.agentId }); }
       }
       const error = `Timed out after ${formatTimeout(timeoutMs)}`;
-      settleAutomationRun(context, run, { status: 'failed', endedAt: now, error, failure: { known: RUN_TIMED_OUT } }, 'automation.timeout');
-      settled = true;
+      settle(run, { status: 'failed', endedAt: now, error, failure: { known: RUN_TIMED_OUT } }, 'automation.timeout');
       continue;
     }
     if (!run.agentId) {
@@ -235,8 +287,7 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
       // back from disk can never finish. Any other run without an agent is
       // settled by a remote peer's report or, failing that, by its deadline.
       if (restored && run.labels.includes('checkin')) {
-        settleAutomationRun(context, run, { status: 'failed', endedAt: now, error: 'Check-in interrupted by a restart', failure: { known: AGENT_STATE_LOST } }, 'automation.reconcile');
-        settled = true;
+        settle(run, { status: 'failed', endedAt: now, error: CHECKIN_CUT_OFF_BY_RESTART, failure: { known: RUN_CUT_OFF } }, 'automation.reconcile');
       }
       continue;
     }
@@ -248,27 +299,24 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
       // window before it is settled the same way.
       const lostAfterMs = Math.max(300_000, Number(context.configManager.get('automation.catchUpWindowMinutes') ?? 30) * 60_000);
       if (!restored && now - (run.startedAt ?? run.queuedAt) < lostAfterMs) continue;
-      settleAutomationRun(context, run, { status: 'failed', endedAt: now, error: 'Agent state lost before completion', failure: { known: AGENT_STATE_LOST } }, 'automation.reconcile');
-      settled = true;
+      settle(run, { status: 'failed', endedAt: now, error: restored ? CUT_OFF_BY_RESTART : AGENT_LOST, failure: { known: RUN_CUT_OFF } }, 'automation.reconcile');
       continue;
     }
     const terminalStatus = getTerminalAgentState(agent);
     if (!terminalStatus) continue;
     const endedAt = agent.completedAt ?? now;
     const telemetry = buildRunTelemetryFromAgent(agent, run);
-    settleAutomationRun(context, run, terminalStatus === 'completed'
+    settle(run, terminalStatus === 'completed'
       ? { status: 'completed', endedAt, result: agent.fullOutput ?? agent.progress ?? null, telemetry }
       : terminalStatus === 'failed'
         ? { status: 'failed', endedAt, error: agent.error ?? 'Agent failed', failure: { error: agent.error ?? '' }, telemetry }
         : { status: 'cancelled', endedAt, reason: agent.error ?? 'Agent cancelled', telemetry }, 'automation.reconcile');
-    settled = true;
   }
-  if (!settled) return;
-  void context.saveJobs().catch((error: unknown) => {
-    reportAsyncFailure('job persistence', error);
-  });
+  if (followUps.length === 0) return;
   context.pruneRunHistory();
-  void context.saveRuns().catch((error: unknown) => {
-    reportAsyncFailure('run persistence', error);
-  });
+  // One save for every run this pass settled, then their deliveries and failure follow-ups.
+  context.track(saveThenFollowUp(() => Promise.all([
+    context.saveJobs().catch((error: unknown) => { reportAsyncFailure('job persistence', error); }),
+    context.saveRuns(),
+  ]), followUps, 'run persistence'));
 }

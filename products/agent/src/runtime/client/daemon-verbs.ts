@@ -49,7 +49,7 @@ import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPreconditio
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { ConnectedHostVerbError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export interface AgentDaemonVerbCallerOptions {
@@ -124,7 +124,9 @@ function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConne
     const refusal = options.hostRefusal?.();
     if (refusal) return unavailable(refusal);
     const homeDirectory = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-    const baseUrl = resolveConnectedHostBaseUrl(configManager);
+    const address = resolveConnectedHostAddress(configManager);
+    if (address.refusal) return unavailable(address.refusal);
+    const { baseUrl } = address;
     if (!observation) {
       observation = new OwnedSelectionObservation();
       connectionObservations.set(options, observation);
@@ -171,14 +173,18 @@ export function isDefiniteHostRefusal(error: unknown): boolean {
 }
 
 /**
- * Render a thrown verb error honestly: a 404 means this host has not wired a
- * handler for the verb (a live host that simply does not implement it yet),
- * never "no result" or a fabricated empty state.
+ * Render a thrown verb error honestly. A 404 whose code names an unknown
+ * method or route (METHOD_NOT_FOUND, NOT_FOUND, or no code) means this host has
+ * not wired a handler for the verb; any other 404 is the host saying a record
+ * does not exist, and its own words (with its next step) are shown.
  */
 export function describeConnectedHostVerbError(error: unknown): string {
   if (error instanceof ConnectedHostVerbError) {
-    if (error.status === 404) {
+    if (error.status === 404 && (error.code === undefined || error.code === 'METHOD_NOT_FOUND' || error.code === 'NOT_FOUND')) {
       return 'the connected host returned 404, this verb is not wired up on that host yet.';
+    }
+    if (error.status === 404) {
+      return `the connected host has no such record (${error.code}): ${error.message}`;
     }
     if (error.status === 401 || error.status === 403) {
       return `the connected host rejected the request (${error.status}): ${error.message}`;
@@ -196,7 +202,21 @@ export function describeConnectedHostVerbError(error: unknown): string {
  * and a caller that captured an absent token at boot would keep refusing for
  * the life of the process.
  */
-export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOptions): DaemonVerbCaller {
+/** Per-call options of the Agent's verb caller. */
+export interface AgentDaemonVerbInvokeOptions {
+  /**
+   * Sent as the `Idempotency-Key` header: the host answers a repeat of the same
+   * request under the same key with its first answer instead of acting again.
+   */
+  readonly idempotencyKey?: string | undefined;
+}
+
+/** The engine's verb caller, whose `invoke` also takes {@link AgentDaemonVerbInvokeOptions}. */
+export interface AgentDaemonVerbCaller extends DaemonVerbCaller {
+  invoke<T = unknown>(methodId: string, input?: unknown, options?: AgentDaemonVerbInvokeOptions): Promise<T>;
+}
+
+export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOptions): AgentDaemonVerbCaller {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const probe = (): DaemonReachability => {
@@ -260,7 +280,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
       return await captureRemoteSettingsPrecondition({ baseUrl: resolved.baseUrl, token: resolved.token, source: 'installed connected host' },
         request, { fetchImpl, assertCurrent });
     },
-    invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
+    invoke: async <T,>(methodId: string, input?: unknown, invokeOptions?: AgentDaemonVerbInvokeOptions): Promise<T> => {
       const resolved = resolveConnection(options);
       if ('reason' in resolved) throw new Error(`cannot invoke '${methodId}': ${resolved.reason}`);
       const timeoutMs = options.invokeTimeoutMs ?? DEFAULT_INVOKE_TIMEOUT_MS;
@@ -272,7 +292,11 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
           `${resolved.baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`,
           {
             method: 'POST',
-            headers: { Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json' },
+            // The caller names the Agent, so the approvals it raises and the credentials it writes are attributed to it.
+            headers: {
+              Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json', 'x-goodvibes-client': 'agent',
+              ...(invokeOptions?.idempotencyKey ? { 'Idempotency-Key': invokeOptions.idempotencyKey } : {}),
+            },
             // The envelope the route requires: `body` must be PRESENT even when
             // empty, or the route refuses with a 400 naming the shape it wanted.
             body: JSON.stringify({ body: input ?? {} }),
@@ -297,8 +321,12 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
         throw error;
       }
       if (!response.ok) {
-        const body = payload && typeof payload === 'object' ? payload as { error?: unknown; code?: unknown } : undefined;
-        const described = body && 'error' in body ? String(body.error) : `HTTP ${response.status}`;
+        const body = payload && typeof payload === 'object' ? payload as { error?: unknown; code?: unknown; next?: unknown; hint?: unknown } : undefined;
+        const firstNext = Array.isArray(body?.next) && typeof body.next[0] === 'string' ? body.next[0]
+          : typeof body?.hint === 'string' ? body.hint : undefined;
+        const described = body && 'error' in body
+          ? `${String(body.error)}${firstNext ? `; ${firstNext}` : ''}`
+          : `HTTP ${response.status}`;
         const code = typeof body?.code === 'string' && body.code.length > 0 ? body.code : undefined;
         throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status, code);
       }

@@ -171,7 +171,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
         const name = values.name ?? '';
         if (values.what === 'device') return await h.pairDevice(ctx, name);
         if (values.what === 'host') {
-          return h.pairHost ? await h.pairHost(ctx, { name, bootstrapShared: values.shared === 'yes', apply: values.apply === 'yes' }) : missing('Pairing this terminal with its daemon', 'the Agent pairs with its connected host through goodvibes-agent host pair');
+          return h.pairHost ? await h.pairHost(ctx, { name, bootstrapShared: values.shared === 'yes', apply: values.apply === 'yes' }) : missing('Pairing this terminal with its daemon', 'pair with the connected host through /setup pair');
         }
         if (values.what === 'relay') return h.pairRelay ? await h.pairRelay(ctx, name) : missing('Pairing through the relay', TERMINAL_ONLY);
         if (!values.channel) throw commandRefusal('Name the channel to pair.', '/devices pair channel <channel>');
@@ -224,7 +224,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
       id: 'host-status', label: 'See how this terminal reaches its daemon', word: 'host-status',
       sentence: 'Shows whether this terminal holds a device pairing for its daemon, or uses this machine\'s operator token.',
       operator: { terminalOnly: TERMINAL_ONLY },
-      async run(_values, ctx) { return h.hostStatus ? await h.hostStatus(ctx) : missing('This terminal\'s host pairing', 'the Agent shows its connected host under goodvibes-agent host status'); },
+      async run(_values, ctx) { return h.hostStatus ? await h.hostStatus(ctx) : missing('This terminal\'s host pairing', '/setup pair shows how this program reaches its connected host'); },
     }),
     {
       id: 'unpair-host', label: 'Forget this terminal\'s daemon pairing', word: 'unpair-host',
@@ -233,7 +233,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
       ownerOnly: { reason: 'it cuts this terminal off from its daemon', instead: '/devices host-status shows how this terminal reaches its daemon' },
       operator: { terminalOnly: TERMINAL_ONLY },
       example: {},
-      async run(_values, ctx) { return h.unpairHost ? await h.unpairHost(ctx) : missing('Forgetting the host pairing', 'the Agent forgets its connected host with goodvibes-agent host unpair'); },
+      async run(_values, ctx) { return h.unpairHost ? await h.unpairHost(ctx) : missing('Forgetting the host pairing', 'forget the connected host\'s credential with /setup unpair'); },
     },
     readAction<Ctx>({
       id: 'relay-status', label: 'See whether the relay is reachable', word: 'relay-status',

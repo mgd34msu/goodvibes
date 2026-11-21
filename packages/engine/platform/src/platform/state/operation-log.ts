@@ -113,7 +113,10 @@ class FileOperationLog<P> implements OperationLog<P> {
 
   async accept(line: Omit<OperationLine<P>, 'state' | 'at'>): Promise<Durable<OperationLine<P>>> {
     const existing = this.#ops.get(line.op);
-    // The same operation accepted again (a retried request with its key): the first record answers.
+    // The same operation accepted again: the first record answers. Only an
+    // operation still open, or settled and not yet compacted away, is known
+    // here; a client-keyed retry of settled work is answered by
+    // control-plane/idempotent-replay.ts, not by this log.
     if (existing) return durableAfter(existing, this.#log.flush());
     const accepted = compactLine<P>({ ...line, state: 'accepted', at: Date.now() });
     this.#append(accepted);

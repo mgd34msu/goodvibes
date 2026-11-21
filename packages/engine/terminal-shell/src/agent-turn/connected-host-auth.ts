@@ -62,6 +62,55 @@ export function readConnectedHostPairing(homeDirectory: string, hostUrl: string)
 }
 const tokenFileReads = new Map<string, { readonly stamp: string; readonly token: string | null; readonly error?: string }>();
 
+/** An environment token, which outranks every stored credential; null when none is set. */
+function environmentCredential(): ConnectedHostOperatorToken | null {
+  const connectedHostEnvToken = process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim();
+  if (connectedHostEnvToken) return { path: 'env:GOODVIBES_CONNECTED_HOST_TOKEN', source: 'environment', present: true, token: connectedHostEnvToken };
+  const legacyEnvToken = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
+  if (legacyEnvToken) return { path: 'env:GOODVIBES_DAEMON_TOKEN', source: 'environment', present: true, token: legacyEnvToken };
+  return null;
+}
+
+/**
+ * This machine's daemon token file. It is presented only to this machine's
+ * daemon: for a `hostUrl` that is another machine it comes back with no token
+ * and the reason, and the file is not read.
+ */
+function operatorFileCredential(homeDirectory: string, hostUrl: string | undefined): ConnectedHostOperatorToken {
+  const path = connectedHostOperatorTokenPath(homeDirectory);
+  if (hostUrl !== undefined && !isThisMachineHost(parseDaemonOrigin(hostUrl)?.host ?? '')) {
+    return { path, source: 'operator-file', present: false, token: null,
+      error: `This machine's daemon token is never sent to ${parseDaemonOrigin(hostUrl)?.baseUrl ?? hostUrl}, which is not this machine. Run goodvibes-agent setup pair to pair with that host, or set GOODVIBES_CONNECTED_HOST_TOKEN to its token.` };
+  }
+  const stamp = fileStamp(path);
+  if (stamp === 'absent' && !existsSync(path)) return { path, source: 'operator-file', present: false, token: null };
+  const prior = tokenFileReads.get(path);
+  if (prior?.stamp === stamp) return { path, source: 'operator-file', present: true, token: prior.token, ...(prior.error ? { error: prior.error } : {}) };
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    const token = isRecord(parsed) && typeof parsed.token === 'string' && parsed.token.trim().length > 0
+      ? parsed.token
+      : null;
+    tokenFileReads.set(path, { stamp, token });
+    return { path, source: 'operator-file', present: true, token };
+  } catch {
+    // Parser diagnostics can quote the secret-bearing source text.
+    tokenFileReads.delete(path);
+    return { path, source: 'operator-file', present: true, token: null, error: 'Connected-host token record could not be read.' };
+  }
+}
+
+/**
+ * The credential a pairing request to `hostUrl` is sent with: the same
+ * precedence as {@link readConnectedHostOperatorToken} without the pairing
+ * store (whose marker or device credential is what the request settles), so an
+ * environment token, else this machine's daemon token only when `hostUrl` is
+ * this machine. Null token, with the reason, for another machine.
+ */
+export function readConnectedHostBootstrapToken(homeDirectory: string, hostUrl: string): ConnectedHostOperatorToken {
+  return environmentCredential() ?? operatorFileCredential(homeDirectory, hostUrl);
+}
+
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl: string | undefined,
   observation: OwnedSelectionObservation, sourceOwner?: object): SelectedConnectedHostOperatorToken;
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: string): ConnectedHostOperatorToken;
@@ -73,52 +122,15 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
       resolve(homeDirectory), value, pairing ?? null,
     ], sourceOwner) }
     : value;
-  const connectedHostEnvToken = process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim();
-  if (connectedHostEnvToken) {
-    return selected({
-      path: 'env:GOODVIBES_CONNECTED_HOST_TOKEN',
-      source: 'environment',
-      present: true,
-      token: connectedHostEnvToken,
-    });
-  }
-  const legacyEnvToken = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
-  if (legacyEnvToken) {
-    return selected({
-      path: 'env:GOODVIBES_DAEMON_TOKEN',
-      source: 'environment',
-      present: true,
-      token: legacyEnvToken,
-    });
-  }
+  const environment = environmentCredential();
+  if (environment) return selected(environment);
   if (hostUrl !== undefined) {
     const pairing = readPairing(homeDirectory, hostUrl);
     if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
     if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The reply to this Agent\'s pairing request was lost. Run goodvibes-agent setup pair to repeat the same request; the host answers it with the credential it made, or makes it now.' }, pairing);
     if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: describeUnreadableAgentHostPairing(pairing) }, pairing);
   }
-  const path = connectedHostOperatorTokenPath(homeDirectory);
-  // The operator file is the token of the daemon on THIS machine: never presented to a host elsewhere.
-  if (hostUrl !== undefined && !isThisMachineHost(parseDaemonOrigin(hostUrl)?.host ?? '')) {
-    return selected({ path, source: 'operator-file', present: false, token: null,
-      error: `This machine's daemon token is never sent to ${parseDaemonOrigin(hostUrl)?.baseUrl ?? hostUrl}, which is not this machine. Run goodvibes-agent setup pair to pair with that host, or set GOODVIBES_CONNECTED_HOST_TOKEN to its token.` });
-  }
-  const stamp = fileStamp(path);
-  if (stamp === 'absent' && !existsSync(path)) return selected({ path, source: 'operator-file', present: false, token: null });
-  const prior = tokenFileReads.get(path);
-  if (prior?.stamp === stamp) return selected({ path, source: 'operator-file', present: true, token: prior.token, ...(prior.error ? { error: prior.error } : {}) });
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    const token = isRecord(parsed) && typeof parsed.token === 'string' && parsed.token.trim().length > 0
-      ? parsed.token
-      : null;
-    tokenFileReads.set(path, { stamp, token });
-    return selected({ path, source: 'operator-file', present: true, token });
-  } catch {
-    // Parser diagnostics can quote the secret-bearing source text.
-    tokenFileReads.delete(path);
-    return selected({ path, source: 'operator-file', present: true, token: null, error: 'Connected-host token record could not be read.' });
-  }
+  return selected(operatorFileCredential(homeDirectory, hostUrl));
 }
 
 export function connectedHostTokenRequiredMessage(path: string): string {

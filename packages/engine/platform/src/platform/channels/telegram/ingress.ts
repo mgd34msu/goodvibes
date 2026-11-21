@@ -31,7 +31,7 @@ import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import type { SurfaceAdapterContext } from '../../adapters/types.js';
 import { processTelegramUpdate, telegramUpdateReceiveScope } from '../../adapters/telegram/index.js';
-import { isSecretRefInput, normalizeSecretRef, resolveSecretInput } from '../../config/secret-refs.js';
+import { isSecretRefInput, normalizeSecretRef } from '../../config/secret-refs.js';
 import { looksLikeSecretRef } from '../../config/secret-ref-refusal.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -39,6 +39,7 @@ import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } fro
 import { isAdmissionRefusal, WORK_ADMISSION_RECHECK_MS } from '../../daemon/work-admission.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { channelCredentials } from '../credential-holder.js';
+import { resolveSurfaceSecret } from '../builtin/surface-secrets.js';
 import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError, type TelegramReceiveScope } from './receive-progress.js';
 import { bindEarlierTelegramCursor, TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
@@ -1505,33 +1506,18 @@ export class TelegramIngressSupervisor {
   }
 
   /**
-   * Resolve the bot token through the secret-reference path, so config can hold
-   * `goodvibes://secrets/...` rather than a literal token in a settings file.
+   * The bot token, read like every other reader of it (status, the probe,
+   * delivery): the service registry, then `surfaces.telegram.botToken` (a
+   * `goodvibes://secrets/...` reference is resolved), then TELEGRAM_BOT_TOKEN.
+   * A setting that holds a reference which does not resolve is answered as no
+   * token, never with the environment's bot.
    */
   private async resolveBotToken(): Promise<string> {
-    const fromRegistry = await this.deps.serviceRegistry.resolveSecret('telegram', 'primary');
-    if (fromRegistry) return fromRegistry;
-    const fromConfig = await this.resolveConfigSecret(
-      this.deps.configManager.get('surfaces.telegram.botToken'),
-    );
-    return fromConfig || process.env.TELEGRAM_BOT_TOKEN || '';
+    return await resolveSurfaceSecret(this.deps, 'telegram', 'primary') ?? '';
   }
 
   private async resolveWebhookSecret(): Promise<string> {
-    const fromRegistry = await this.deps.serviceRegistry.resolveSecret('telegram', 'signingSecret');
-    if (fromRegistry) return fromRegistry;
-    const fromConfig = await this.resolveConfigSecret(
-      this.deps.configManager.get('surfaces.telegram.webhookSecret'),
-    );
-    return fromConfig || process.env.TELEGRAM_WEBHOOK_SECRET || '';
-  }
-
-  private async resolveConfigSecret(value: unknown): Promise<string> {
-    const resolved = await resolveSecretInput(value, {
-      resolveLocalSecret: (key) => this.deps.secretsManager.get(key),
-      homeDirectory: this.deps.secretsManager.getGlobalHome?.() ?? undefined,
-    }, 'dispatch');
-    return resolved ?? '';
+    return await resolveSurfaceSecret(this.deps, 'telegram', 'signingSecret') ?? '';
   }
 
   /**

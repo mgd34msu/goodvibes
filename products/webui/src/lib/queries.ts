@@ -9,6 +9,9 @@ export const queryKeys = {
   // the session-view permission-mode reader all read and invalidate this key, so a
   // write from any screen is seen by every reader.
   config: ['config'] as const,
+  // flags.status: restart-gated features whose saved setting the running daemon has
+  // not applied yet. Re-read on a save of one of those settings and on a config frame.
+  featureRestartStatus: ['flags', 'status'] as const,
   // Revision is local, contains no credentials, and changes on token/relay identity
   // replacement and expiry. The prefix lets contract events refresh every view.
   contracts: ['contracts'] as const,
@@ -187,6 +190,9 @@ export const queryKeys = {
   // Keyed per target so each line's "where did you get that" is its own cache entry,
   // provenance is reachable per line, never as one bulk dump (§8.3).
   ownerProfileProvenance: (targetId: string) => ['owner-profile', 'provenance', targetId] as const,
+  // One profile field read on its own (the account menu's owner name). Under the
+  // owner-profile prefix so every profile edit's prefix invalidation refreshes it.
+  ownerProfileField: (path: string) => ['owner-profile', 'field', path] as const,
   // occasions.* (docs/occasions.md), the dates panel. No wire event exists for this
   // domain yet, so DatesView refetches manually/on mutation success, same standing
   // gap fleet.*/checkpoints.*/memory.*/ci.*/checkin.* document above.

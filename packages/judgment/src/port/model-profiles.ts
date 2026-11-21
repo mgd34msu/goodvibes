@@ -1,5 +1,7 @@
 /** Wire adapters describe a protocol, independently of where a model runs. */
-export type JudgmentAdapterKind = 'system-one' | 'cloudflare-workers-ai' | 'laya';
+export const JUDGMENT_ADAPTER_KINDS = Object.freeze(['system-one', 'cloudflare-workers-ai', 'laya'] as const);
+
+export type JudgmentAdapterKind = typeof JUDGMENT_ADAPTER_KINDS[number];
 
 export interface DecisionModelProfile {
   readonly id: string;

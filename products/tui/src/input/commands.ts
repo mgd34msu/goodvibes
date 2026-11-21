@@ -1,5 +1,5 @@
 import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
-import { CommandRegistry } from './command-registry.ts';
+import { CommandRegistry, type CommandContext } from './command-registry.ts';
 import type { SlashCommand } from './command-registry.ts';
 import { evalCommand } from './commands/eval.ts';
 import { sessionCommand, resumeCommand, saveCommand } from './commands/session.ts';
@@ -31,7 +31,7 @@ import { registerPlatformServicesRuntimeCommands } from './commands/platform-ser
 import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
-import { registerHooksRuntimeCommands } from './commands/hooks-runtime.ts';
+import { registerHooksCommand } from '@goodvibes/engine/terminal-shell/hooks-command';
 import { registerEditorRuntimeCommands } from './commands/editor-runtime.ts';
 import { registerControlRoomRuntimeCommands } from './commands/control-room-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
@@ -115,7 +115,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Marketplace', register: registerMarketplaceRuntimeCommands },
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
   { category: 'Remote', register: registerRemoteRuntimeCommands },
-  { category: 'Hooks', register: registerHooksRuntimeCommands },
+  { category: 'Hooks', register: (registry) => registerHooksCommand<CommandContext>(registry) },
   { category: 'Editor', register: registerEditorRuntimeCommands },
   { category: 'Control Room', register: registerControlRoomRuntimeCommands },
   { category: 'MCP', register: registerMcpRuntimeCommands },

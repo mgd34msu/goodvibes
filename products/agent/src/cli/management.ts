@@ -7,28 +7,18 @@ export { openBrowser } from '@goodvibes/engine/terminal-shell/cli-environment';
 import { hasCommandFlag, isPresentConfigValue } from '@goodvibes/engine/terminal-shell/cli-arguments';
 export { hasCommandFlag, isPresentConfigValue } from '@goodvibes/engine/terminal-shell/cli-arguments';
 import { probeTcp as probe } from '@goodvibes/engine/terminal-shell/service-io';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { runSetupPairingCommand, runSetupUnpairCommand } from './setup-pair-command.ts';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import 'node:child_process';
-import 'node:os';
 import type { ConfigManager } from '../config/index.ts';
-import '../config/index.ts';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import '../config/secrets.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
-import '@goodvibes/engine/platform/platform/providers';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@/runtime/index.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';
-import './provider-classification.ts';
 import { handleBundleCommand } from './bundle-command.ts';
 import { handleImportCommand } from './import-command.ts';
 import { handleSessions, handleTasks, renderPairing, renderSubscriptions, runSecrets, taskSubmitRefusal } from './management-commands.ts';
@@ -78,8 +68,8 @@ export function getNestedValue(source: unknown, key: string): unknown {
 }
 
 /**
- * Where THIS process dials. Shares the wildcard→loopback mapping with every
- * other dial site (config/connected-host-dial.ts).
+ * Where THIS process connects to probe a listener on this machine: the
+ * wildcard→loopback mapping of connected-host-dial.ts.
  */
 const connectHostForBindHost = dialHostForConfiguredHost;
 
@@ -104,7 +94,7 @@ export function readAuthPaths(runtime: CliCommandRuntime) {
   });
   const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
   const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
-  const operatorToken = readConnectedHostOperatorToken(runtime.homeDirectory, resolveConnectedHostBaseUrl(runtime.configManager));
+  const operatorToken = readConnectedHostOperatorToken(runtime.homeDirectory, resolveConnectedHostAddress(runtime.configManager).baseUrl);
   return {
     userStorePath,
     userStorePresent: existsSync(userStorePath),

@@ -1,7 +1,7 @@
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import { readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { join } from 'node:path';
 import { getOrCreateCompanionToken } from '@goodvibes/engine/platform/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
@@ -223,7 +223,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   }
 
   const shellPaths = requireShellPaths(context);
-  const pairing = readAgentHostPairing(shellPaths.homeDirectory, resolveConnectedHostBaseUrl(context.platform.configManager));
+  const pairing = readAgentHostPairing(shellPaths.homeDirectory, resolveConnectedHostAddress(context.platform.configManager).baseUrl);
   if (pairing.status !== 'missing') return {
     status: 'blocked', done: false, mode: 'provision_connected_host_token', setupItemId: 'connected-host-auth',
     mutation: { performed: false },

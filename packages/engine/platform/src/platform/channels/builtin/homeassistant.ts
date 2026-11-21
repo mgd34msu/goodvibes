@@ -1,5 +1,3 @@
-import { resolveSecretInput } from '../../config/secret-refs.js';
-import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { HomeAssistantIntegration, type HomeAssistantStateRecord } from '../../integrations/homeassistant.js';
 import type {
@@ -9,6 +7,7 @@ import type {
 } from '../types.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
+import { requireSurfaceSecret } from './surface-secrets.js';
 
 export const HOME_ASSISTANT_SURFACE = 'homeassistant' as const satisfies ChannelSurface;
 export const HOME_ASSISTANT_WEBHOOK_PATH = '/webhook/homeassistant';
@@ -91,22 +90,10 @@ interface ConfigReader {
   get(key: string): unknown;
 }
 
-const HOME_ASSISTANT_TOKEN_ENV = [
-  'HOMEASSISTANT_ACCESS_TOKEN',
-  'HOME_ASSISTANT_ACCESS_TOKEN',
-  'HA_ACCESS_TOKEN',
-] as const;
-
 const HOME_ASSISTANT_URL_ENV = [
   'HOMEASSISTANT_URL',
   'HOME_ASSISTANT_URL',
   'HA_URL',
-] as const;
-
-const HOME_ASSISTANT_WEBHOOK_SECRET_ENV = [
-  'HOMEASSISTANT_WEBHOOK_SECRET',
-  'HOME_ASSISTANT_WEBHOOK_SECRET',
-  'HA_GOODVIBES_WEBHOOK_SECRET',
 ] as const;
 
 interface HomeAssistantActionContext {
@@ -374,7 +361,7 @@ export async function createHomeAssistantClient(deps: BuiltinChannelRuntimeDeps)
   if (!baseUrl) {
     throw new Error('Home Assistant instance URL is not configured.');
   }
-  const accessToken = await resolveHomeAssistantAccessToken(deps);
+  const accessToken = await requireSurfaceSecret(deps, 'homeassistant', 'primary');
   return new HomeAssistantIntegration({
     baseUrl,
     accessToken: accessToken ?? undefined,
@@ -392,39 +379,10 @@ export function resolveHomeAssistantBaseUrl(
   ) ?? null;
 }
 
-export async function resolveHomeAssistantAccessToken(deps: {
-  readonly configManager: ConfigReader;
-  readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
-  readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveSecret'> | undefined;
-}): Promise<string | null> {
-  const registered = await deps.serviceRegistry?.resolveSecret('homeassistant', 'primary');
-  if (registered) return registered;
-  const configured = deps.configManager.get('surfaces.homeassistant.accessToken');
-  if (configured !== undefined && configured !== null && (typeof configured !== 'string' || configured.trim().length > 0)) {
-    // A configured reference that does not resolve must not quietly switch to
-    // whichever account the environment happens to name.
-    const resolved = await resolveConfiguredSecret(deps, configured);
-    if (!resolved) throw new Error('Could not resolve the Home Assistant access token referenced by surfaces.homeassistant.accessToken');
-    return resolved;
-  }
-  return firstNonEmpty(...HOME_ASSISTANT_TOKEN_ENV.map((key) => process.env[key])) ?? null;
-}
-
 /** The event type outbound messages are published as; an empty setting means the default. */
 export function resolveHomeAssistantEventType(configManager: ConfigReader): string {
   return firstNonEmpty(String(configManager.get('surfaces.homeassistant.eventType') ?? ''))
     ?? HOME_ASSISTANT_DEFAULT_EVENT_TYPE;
-}
-
-export async function resolveHomeAssistantWebhookSecret(deps: {
-  readonly configManager: ConfigReader;
-  readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
-  readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveSecret'> | undefined;
-}): Promise<string | null> {
-  return await deps.serviceRegistry?.resolveSecret('homeassistant', 'signingSecret')
-    || await resolveConfiguredSecret(deps, deps.configManager.get('surfaces.homeassistant.webhookSecret'))
-    || firstNonEmpty(...HOME_ASSISTANT_WEBHOOK_SECRET_ENV.map((key) => process.env[key]))
-    || null;
 }
 
 async function checkHomeAssistantStatus(deps: BuiltinChannelRuntimeDeps): Promise<Record<string, unknown>> {
@@ -432,7 +390,7 @@ async function checkHomeAssistantStatus(deps: BuiltinChannelRuntimeDeps): Promis
   if (!baseUrl) return { ok: false, configured: false, error: 'Home Assistant instance URL is not configured.' };
   let token: string | null;
   try {
-    token = await resolveHomeAssistantAccessToken(deps);
+    token = await requireSurfaceSecret(deps, 'homeassistant', 'primary');
   } catch (error) {
     return { ok: false, configured: true, baseUrl, error: error instanceof Error ? error.message : String(error) };
   }
@@ -534,18 +492,6 @@ async function publishGoodVibesEvent(deps: BuiltinChannelRuntimeDeps, input?: Re
     metadata: readRecord(input?.metadata) ?? {},
   });
   return { ok: true, eventType, result };
-}
-
-async function resolveConfiguredSecret(
-  deps: {
-    readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
-  },
-  value: unknown,
-): Promise<string | null> {
-  return resolveSecretInput(value, {
-    resolveLocalSecret: deps.secretsManager ? (key) => deps.secretsManager!.get(key) : undefined,
-    homeDirectory: deps.secretsManager?.getGlobalHome?.() ?? undefined,
-  }, 'dispatch');
 }
 
 function action(

@@ -32,7 +32,7 @@ export const PAIRING_OFFERS_FRAGMENT_KEY = 'offers';
 
 /** The set-up steps a pairing hand-off can offer, mirrors the platform's PairingHandoffOfferKind. */
 export type PairingOfferKind = 'notifications' | 'relay' | 'passkey';
-const PAIRING_OFFER_KINDS: readonly PairingOfferKind[] = ['notifications', 'relay', 'passkey'];
+export const PAIRING_OFFER_KINDS: readonly PairingOfferKind[] = ['notifications', 'relay', 'passkey'];
 
 function isPairingOfferKind(value: string): value is PairingOfferKind {
   return (PAIRING_OFFER_KINDS as readonly string[]).includes(value);

@@ -1,5 +1,6 @@
 import type { ConfigKey, ConfigManager } from '../config/index.ts';
 import { ConfigError } from '@goodvibes/engine/platform/platform/types/errors';
+import { DEFAULT_CONTROL_PLANE_PORT, parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './endpoints.ts';
@@ -18,10 +19,10 @@ function parseConfigOverrideValue(value: string): unknown {
   }
 }
 
-function parseRuntimeUrl(rawValue: string, source: string): { readonly host: string; readonly port: number } {
+function parseRuntimeUrl(rawValue: string, source: string): string {
   const trimmed = rawValue.trim();
   if (trimmed.length === 0) {
-    throw new ConfigError(`${source} requires a non-empty http://host:port value.`);
+    throw new ConfigError(`${source} requires a non-empty http(s)://host:port value.`);
   }
 
   const value = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
@@ -29,25 +30,29 @@ function parseRuntimeUrl(rawValue: string, source: string): { readonly host: str
   try {
     url = new URL(value);
   } catch {
-    throw new ConfigError(`${source} must be a valid http://host:port URL.`);
+    throw new ConfigError(`${source} must be a valid http(s)://host:port URL.`);
   }
 
-  if (url.protocol !== 'http:') {
-    throw new ConfigError(`${source} must use http:// because Agent connects to the local GoodVibes API.`);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new ConfigError(`${source} must use http:// or https://.`);
   }
   if (!url.hostname) {
     throw new ConfigError(`${source} must include a hostname.`);
   }
-  if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
-    throw new ConfigError(`${source} must point at the connected GoodVibes API root, not a path, query, or hash.`);
+  if ((url.pathname && url.pathname !== '/') || url.search || url.hash || url.username || url.password) {
+    throw new ConfigError(`${source} must point at the connected GoodVibes API root, not a path, query, hash or user name.`);
   }
 
-  const port = url.port ? Number.parseInt(url.port, 10) : 3421;
+  // Without a port, the daemon's default port: a bare host names a GoodVibes daemon, not a web server.
+  // The URL parser drops a port equal to the scheme's default, so a written port is read from the text.
+  const writtenPort = /^[a-z][a-z\d+.-]*:\/\/(?:\[[^\]]*\]|[^/:?#]*):(\d+)/i.exec(value)?.[1];
+  const port = writtenPort ? Number.parseInt(writtenPort, 10) : DEFAULT_CONTROL_PLANE_PORT;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new ConfigError(`${source} port must be from 1 to 65535.`);
   }
-
-  return { host: url.hostname, port };
+  const origin = parseDaemonOrigin(`${url.protocol}//${url.host.replace(/:\d+$/, '')}:${port}`);
+  if (!origin) throw new ConfigError(`${source} must be a valid http(s)://host:port URL.`);
+  return origin.baseUrl;
 }
 
 export function applyRuntimeConfigValue(configManager: ConfigManager, key: ConfigKey, value: unknown): void {
@@ -82,10 +87,8 @@ export function applyRuntimeUrlOverride(
   source = '--runtime-url',
 ): readonly string[] {
   try {
-    const parsed = parseRuntimeUrl(rawValue, source);
-    applyRuntimeConfigValue(configManager, 'controlPlane.hostMode', hostModeForHostname(parsed.host));
-    applyRuntimeConfigValue(configManager, 'controlPlane.host', parsed.host);
-    applyRuntimeConfigValue(configManager, 'controlPlane.port', parsed.port);
+    // The stated origin, scheme included, is the connected host for this run (connected-host-dial.ts reads it first).
+    applyRuntimeConfigValue(configManager, 'daemon.connectedHost.url', parseRuntimeUrl(rawValue, source));
     return [];
   } catch (error) {
     return [error instanceof Error ? error.message : `Invalid ${source}`];

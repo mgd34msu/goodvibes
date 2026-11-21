@@ -247,7 +247,7 @@ function inferCategoryFromCause(cause: unknown, seen = new Set<object>(), depth 
  *   if (err instanceof GoodVibesError) {
  *     if (isErrorCode(err, EngineErrorCodes.RATE_LIMITED)) {
  *       await delay(err.retryAfterMs ?? 1000);
- *     } else if (isErrorCode(err, EngineErrorCodes.TOKEN_EXPIRED)) {
+ *     } else if (isErrorCode(err, EngineErrorCodes.AUTH_REQUIRED)) {
  *       await refreshToken();
  *     }
  *   }

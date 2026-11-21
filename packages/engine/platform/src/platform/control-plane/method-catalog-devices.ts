@@ -227,7 +227,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
     id: 'devices.grants.revoke',
     repeat: 'safe',
     title: 'Revoke a Device Capability Grant',
-    description: 'Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.',
+    description: 'Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked: a grant already revoked answers revoked 0, so a repeat after a lost reply succeeds. Naming nothing (no grantId, nodeId or capabilityId) is 400 INVALID_ARGUMENT, and a grantId the record never held is 404 GRANT_NOT_FOUND (read devices.grants.list for the ids); nothing is revoked either way.',
     category: 'runtime',
     effects: ['config.write'],
     http: { method: 'POST', path: '/api/devices/grants/revoke' },

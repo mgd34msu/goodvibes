@@ -4,7 +4,7 @@ import { GitHubIntegration, type GitHubReplyTarget } from '../../integrations/gi
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import type { AgentRecord } from '../../tools/agent/index.js';
 import type { TrySpawnAgentFn } from '../types.js';
-import { parseJsonRecord, readRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
+import { parseJsonRecord, readRecord, readString, readTextBodyWithinLimit, surfaceCredentialAbsent } from '../helpers.js';
 import { inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { done, failedOutcome, observe, refusal } from '@goodvibes/engine/errors';
 import { effectKey, newOperationId, outcomeOfFailure, type OperationId } from '../../state/operation.js';
@@ -56,10 +56,7 @@ export async function handleGitHubAutomationWebhook(
   const githubWebhookSecret =
     context.githubWebhookSecret
     ?? await context.serviceRegistry.resolveSecret('github', 'signingSecret');
-  if (!githubWebhookSecret) {
-    logger.warn('handleGitHubAutomationWebhook: GITHUB_WEBHOOK_SECRET not configured, rejecting');
-    return Response.json({ error: 'Webhook not configured' }, { status: 503 });
-  }
+  if (!githubWebhookSecret) return surfaceCredentialAbsent('github', 'GITHUB_WEBHOOK_SECRET');
 
   const signature = req.headers.get('x-hub-signature-256') ?? '';
   if (!signature) {

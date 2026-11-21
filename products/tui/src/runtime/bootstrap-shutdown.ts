@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
+import { createSessionShutdown, drainShutdownRegistry, type SessionShutdown } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 /** Ordered teardown owned by bootstrap; the shell owns the exit deadline. */
 import { shutdownRuntime } from '@/runtime/index.ts';
 
@@ -27,23 +27,8 @@ export interface BootstrapShutdownDeps {
   readonly persistenceOptions: Parameters<typeof shutdownRuntime>[9];
 }
 
-/**
- * Thrown by the shutdown handler when the session WAS saved durably and only
- * releasing other owned resources failed. The shell keeps this apart from a
- * failed save: recovery state is for a session that was not saved.
- */
-export class ShutdownReleaseError extends AggregateError {
-  constructor(errors: readonly unknown[], message: string) {
-    super(errors, message);
-    this.name = 'ShutdownReleaseError';
-  }
-}
-
 /** The handler returned as bootstrapRuntime's public ctx.shutdown, plus whether its save has landed. */
-export type BootstrapShutdown = ((sessionData: Parameters<typeof shutdownRuntime>[1]) => Promise<void>) & {
-  /** True once the session is durably saved, even while releases are still running. */
-  readonly sessionSaved: () => boolean;
-};
+export type BootstrapShutdown = SessionShutdown<Parameters<typeof shutdownRuntime>[1]>;
 
 /**
  * The same handler returned as bootstrapRuntime's public ctx.shutdown.
@@ -56,8 +41,7 @@ export type BootstrapShutdown = ((sessionData: Parameters<typeof shutdownRuntime
 export function createBootstrapShutdown(deps: BootstrapShutdownDeps): BootstrapShutdown {
   // Publish ownership before callbacks run. Direct callers and the shell share
   // one completion; callbacks must not await this shutdown (even indirectly).
-  let durablySaved = false;
-  const shutdown = createOrderedShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt) => {
+  return createSessionShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt, markSaved) => {
     let title = '';
     await attempt(() => {
       title = deps.conversationTitle();
@@ -77,7 +61,7 @@ export function createBootstrapShutdown(deps: BootstrapShutdownDeps): BootstrapS
         deps.persistenceOptions,
         // The save is durable before the session hooks are waited for; a slow
         // hook that meets the exit deadline must not read as a failed save.
-        () => { durablySaved = true; },
+        markSaved,
       );
     });
     // Take each registry before invoking its callbacks. Failed owners cannot
@@ -98,10 +82,5 @@ export function createBootstrapShutdown(deps: BootstrapShutdownDeps): BootstrapS
     await attempt(deps.settleExternalServices);
     await attempt(deps.stopExternalServices);
     await attempt(deps.closeRuntimeGraph);
-  }, 'TUI shutdown failed to release one or more owned resources', (errors, message) => {
-    // A failed save stays the plain failure the shell treats as "not saved".
-    if (!durablySaved) return errors.length === 1 ? errors[0] : new AggregateError(errors, message);
-    return new ShutdownReleaseError(errors, 'TUI shutdown saved the session but failed to release one or more owned resources');
-  });
-  return Object.assign(shutdown, { sessionSaved: () => durablySaved });
+  }, 'TUI shutdown failed to release one or more owned resources', 'TUI shutdown saved the session but failed to release one or more owned resources');
 }

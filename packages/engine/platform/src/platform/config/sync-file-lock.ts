@@ -14,20 +14,24 @@
  * read and a file write, so the wait is brief. Never hold it across a network
  * call.
  *
- * When the lock cannot be taken (another process holds it past the wait, or the
- * directory cannot hold the lock file) `withSyncFileLock` still runs the
- * operation, unlocked, with a warning: the caller's change is the user's intent,
- * and dropping it would be worse than the lost-update window this lock narrows.
- * A write that can simply happen next time (a notice, a receipt) uses
- * `trySyncFileLock` instead, which skips the operation.
+ * When the lock cannot be taken, `withSyncFileLock` decides by its `onBusy`
+ * policy. `write-unlocked` (the default) still runs the operation, unlocked,
+ * with a warning: the caller's change is the user's intent, and dropping it
+ * would be worse than the lost-update window this lock narrows. `refuse` throws
+ * ProcessLockBusyError when another process holds the lock past the wait, and
+ * writes unlocked with a warning only when the directory cannot hold a lock
+ * file at all. A write that can simply happen next time (a notice, a receipt)
+ * uses `trySyncFileLock` instead, which skips the operation. Every form shares
+ * one record of the locks this process holds, so a nested call on the same
+ * file joins the outer hold instead of being refused by it.
  */
 import { resolve } from 'node:path';
-import { withProcessLockSync } from '../utils/process-lock.js';
+import { ProcessLockUnavailableError, withProcessLockSync } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** How long a writer waits for another process's read-and-write before saving without the lock. */
-const WAIT_MS = 500;
+/** How long a writer waits for another process's read-and-write to the same file. */
+const WAIT_MS = 1_000;
 
 /** Lock paths this process holds right now, so a nested call joins instead of being refused by its own hold. */
 const heldHere = new Set<string>();
@@ -61,10 +65,15 @@ export function trySyncFileLock<T>(target: string, operation: () => T): SyncFile
   }
 }
 
-/** Run `operation` with the lock for `target` held, releasing it however the operation ends. */
-export function withSyncFileLock<T>(target: string, operation: () => T): T {
+/**
+ * Run `operation` with the lock for `target` held, releasing it however the
+ * operation ends. When the lock cannot be taken, `onBusy` decides: see the
+ * file header.
+ */
+export function withSyncFileLock<T>(target: string, operation: () => T, options: { readonly onBusy?: 'refuse' | 'write-unlocked' } = {}): T {
   const attempt = trySyncFileLock(target, operation);
   if (attempt.ran) return attempt.value;
+  if (options.onBusy === 'refuse' && !(attempt.error instanceof ProcessLockUnavailableError)) throw attempt.error;
   logger.warn('Shared file lock could not be taken; saving without it', { lock: syncFileLockPath(target), error: summarizeError(attempt.error) });
   return operation();
 }

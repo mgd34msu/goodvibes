@@ -122,6 +122,7 @@ function validateDistributedRuntimePairRequest(record: unknown): void {
   validateOptionalStringArray(record['capabilities']);
   validateOptionalStringArray(record['commands']);
   validateOptionalString(record['challengeHash']);
+  validateOptionalString(record['verifiedTokenId']);
   validateOptionalNumber(record['createdAt']);
   validateOptionalNumber(record['updatedAt']);
   validateOptionalNumber(record['approvedAt']);
@@ -429,10 +430,12 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
         leaseExpiresAt: undefined,
         metadata: { ...item.metadata, leaseRequeues: requeues },
       };
-      state.work.set(workId, settled);
+      // The bridges it owes are written with it, so a restart before they
+      // deliver still tells its session, approval and automation run.
+      state.work.set(workId, withOwedDistributedBridges(settled));
       state.workAdmissions.get(workId)?.detach();
       state.workAdmissions.delete(workId);
-      expired.push(settled);
+      expired.push(state.work.get(workId)!);
     } else {
       state.work.set(workId, {
         ...item,
@@ -481,7 +484,19 @@ function settleExpiredWork(state: DistributedRuntimeManagerState, work: Distribu
   const peer = state.peers.get(work.peerId);
   publishDistributedRuntimeEvent(state, 'remote-work-settled', { peer: peer ? sanitizePeer(peer) : null, work });
   resolveDistributedRuntimeWaiters(state, work);
-  if (peer) void bridgeSettledAndRemember(state, sanitizePeer(peer), work);
+  // Work whose peer is gone still owes its session, approval and automation run the expiry.
+  void bridgeSettledAndRemember(state, sanitizePeer(peer ?? standInBridgePeer(work.peerId, work.peerKind, work.createdAt)), work)
+    .catch((error: unknown) => {
+      logger.warn('Distributed runtime expiry could not be delivered to its bridges', { workId: work.id, error: summarizeError(error) });
+    });
+}
+
+/** The record the bridges are told about when the work's peer is gone; it is never stored as a peer. */
+export function standInBridgePeer(peerId: string, kind: DistributedPeerKind, pairedAt: number): StoredPeerRecord {
+  return {
+    id: peerId, kind, label: peerId, requestedId: peerId,
+    capabilities: [], commands: [], permissions: undefined, status: 'idle', pairedAt, tokens: [], metadata: {},
+  };
 }
 
 const BRIDGE_PENDING = 'bridgePending';
@@ -492,11 +507,30 @@ function readBridgePending(work: DistributedPendingWork): DistributedBridgeName[
   return Array.isArray(value) ? BRIDGE_NAMES.filter((name) => value.includes(name)) : [];
 }
 
+/** The bridges settled work must reach: its session, approval and automation run, as it names them. */
+export function owedDistributedBridges(work: DistributedPendingWork): DistributedBridgeName[] {
+  return BRIDGE_NAMES.filter((name) => (name === 'session' ? work.sessionId : name === 'approval' ? work.approvalId : work.automationRunId) !== undefined);
+}
+
 /**
- * Tell the bridges that work settled. A bridge that could not deliver is recorded on the stored
- * work (`metadata.bridgePending`) so the next start delivers it again, instead of the session,
- * approval or automation run staying unaware of a result the work record already holds.
- * A retry (`only`) also keeps a bridge that is still not attached.
+ * Settled work as it is stored before its bridges run: `metadata.bridgePending`
+ * names every bridge it owes, so the obligation is on disk with the result and
+ * a restart in the middle delivers it again. Delivery clears the names.
+ */
+export function withOwedDistributedBridges(work: DistributedPendingWork): DistributedPendingWork {
+  const owed = owedDistributedBridges(work);
+  return owed.length === 0 ? work : { ...work, metadata: { ...work.metadata, [BRIDGE_PENDING]: owed } };
+}
+
+/** Work whose bridges are running now; a retry pass leaves it to that run. */
+const bridging = new WeakMap<DistributedRuntimeManagerState, Set<string>>();
+
+/**
+ * Tell the bridges that work settled. The stored work names the bridges it still owes
+ * (`metadata.bridgePending`, written with the settled record before this runs); a bridge that
+ * delivered is cleared from it and one that could not stays, so the next start delivers it again
+ * instead of the session, approval or automation run staying unaware of a result the work record
+ * already holds. A retry (`only`) also keeps a bridge that is still not attached.
  */
 export async function bridgeSettledAndRemember(
   state: DistributedRuntimeManagerState,
@@ -504,7 +538,15 @@ export async function bridgeSettledAndRemember(
   work: DistributedPendingWork,
   only?: ReadonlyArray<DistributedBridgeName>,
 ): Promise<void> {
-  const report = await bridgeSettledDistributedWork(state, peer, work, only);
+  const running = bridging.get(state) ?? new Set<string>();
+  bridging.set(state, running);
+  running.add(work.id);
+  let report: Awaited<ReturnType<typeof bridgeSettledDistributedWork>>;
+  try {
+    report = await bridgeSettledDistributedWork(state, peer, work, only);
+  } finally {
+    running.delete(work.id);
+  }
   const stored = state.work.get(work.id);
   if (!stored) return;
   const pending = BRIDGE_NAMES.filter((name) => report.failed.includes(name) || report.absent.includes(name));
@@ -529,12 +571,9 @@ export async function retryPendingDistributedBridges(state: DistributedRuntimeMa
     for (const work of [...state.work.values()]) {
       if (work.status === 'queued' || work.status === 'claimed') continue;
       const pending = readBridgePending(work);
-      if (pending.length === 0) continue;
+      if (pending.length === 0 || bridging.get(state)?.has(work.id)) continue;
       const peer = state.peers.get(work.peerId);
-      const bridgePeer = sanitizePeer(peer ?? {
-        id: work.peerId, kind: work.peerKind, label: work.peerId, requestedId: work.peerId,
-        capabilities: [], commands: [], permissions: undefined, status: 'idle', pairedAt: work.createdAt, tokens: [], metadata: {},
-      });
+      const bridgePeer = sanitizePeer(peer ?? standInBridgePeer(work.peerId, work.peerKind, work.createdAt));
       await bridgeSettledAndRemember(state, bridgePeer, work, pending);
     }
   } finally {

@@ -1,5 +1,5 @@
 /**
- * The process monitor (F2, or Enter on the process indicator): background
+ * The process monitor (Enter on the process indicator): background
  * shell processes drawn with the modal surface kit. Running processes first,
  * then the finished ones the process manager still keeps (with their output),
  * newest first. One kit row per process (status marker, command, the manager's

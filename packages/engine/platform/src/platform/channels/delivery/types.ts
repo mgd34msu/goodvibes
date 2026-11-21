@@ -100,6 +100,15 @@ export interface ChannelDeliveryStrategy {
    * takes files, otherwise as a named download link. Absent: attachments are dropped.
    */
   readonly supportsAttachments?: boolean | undefined;
+  /**
+   * Whether sending `request` again after a failure whose outcome is unknown
+   * (a timeout or reset after the request left, a 5xx) cannot post it twice:
+   * the far side drops a repeat by an identity this strategy sends (an
+   * Idempotency-Key, a Discord nonce, a Matrix transaction id). Absent or
+   * false: the router turns such a failure into a final one, so the message
+   * is reported as possibly delivered instead of being sent again.
+   */
+  repeatSafe?(request: ChannelDeliveryRequest): boolean;
   canHandle(request: ChannelDeliveryRequest): boolean;
   deliver(request: ChannelDeliveryRequest): Promise<ChannelDeliveryResult>;
 }

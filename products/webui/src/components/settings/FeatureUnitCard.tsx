@@ -220,8 +220,8 @@ function PendingRestartNotice({ featureId, featureName, pending }: {
     if (!ok) return;
     setRestarting(true);
     try {
-      await platformClient.operator.services.restart();
-      toast({ title: 'Daemon restarting', description: 'This page reconnects when it is back.', tone: 'success' });
+      const { accepted } = await platformClient.operator.services.restart();
+      toast({ title: 'Daemon restarting', description: accepted ?? 'This page reconnects when it is back.', tone: 'success' });
     } catch (problem) {
       toast({ title: 'The daemon did not restart', description: formatError(problem), tone: 'danger' });
     } finally {

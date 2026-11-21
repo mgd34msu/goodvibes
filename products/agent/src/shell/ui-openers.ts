@@ -36,12 +36,7 @@ import { buildLocalFitRecommendations, buildSignInRow, LOCAL_REC_PROVIDER } from
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
-import {
-  applyThemeModeSettingChange,
-  applyThemeNameSettingChange,
-  THEME_MODE_CONFIG_KEY,
-  THEME_NAME_CONFIG_KEY,
-} from '../renderer/theme-mode-config.ts';
+import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -335,16 +330,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           render();
         },
         onSettingApplied: (change) => {
-          // Forced dark/light applies immediately (mode flip + full
-          // repaint via clearScreen's resetDiff); auto only re-probes at startup,
-          // so it takes effect next launch (stated honestly).
-          if (String(change.key) === THEME_MODE_CONFIG_KEY) {
-            return applyThemeModeSettingChange(change.value, () => commandContext.clearScreen?.());
-          }
-          // Theme changes apply immediately: rebuild palettes + full repaint.
-          if (String(change.key) === THEME_NAME_CONFIG_KEY) {
-            return applyThemeNameSettingChange(change.value, () => commandContext.clearScreen?.());
-          }
+          // A theme change was applied by the start-up theme subscription
+          // (startup-theme-probe.ts); this only reports what it did.
+          const themeMessage = takeAppliedThemeMessage(String(change.key));
+          if (themeMessage !== undefined) return { message: themeMessage };
           // The owner keep-awake toggle no longer needs a bespoke live-apply
           // here: services.ts wires wireRuntimePower's subscribeConfig option
           // (the platform's own PowerManager config subscription), so setDynamic's

@@ -43,6 +43,9 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('secret-set-provider', 'secrets set-secret'),
       settingAction({ id: 'setup-secret-policy', label: 'Secret storage policy', detail: 'Choose how strongly Agent prefers secure secret storage.', key: 'storage.secretPolicy' }),
       settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
+      settingAction({ id: 'setup-connected-host-url', label: 'Address of the daemon to connect to', detail: 'The GoodVibes daemon on another computer this Agent connects to, as https://host:port or http://host:port. Empty means the daemon on this computer.', key: 'daemon.connectedHost.url' }),
+      settingAction({ id: 'setup-connected-host-enabled', label: 'Let this Agent reach its connected daemon', detail: 'Whether this Agent may dial the daemon it is connected to at all.', key: 'daemon.connectedHost.enabled' }),
+      actRow('setup-pair-host', 'setup pair'),
       { id: 'import-goodvibes-tui-settings', label: 'Import GoodVibes settings', detail: 'Brings over the display, provider, sign-in, behaviour, permission, speech, channel, tool and schedule settings you made in the terminal app; shows what would change and asks first.', kind: 'settings-import', safety: 'safe' },
     ],
   },
@@ -579,6 +582,7 @@ export const AGENT_SETUP_TOPIC_ROWS = {
   'model': ['use-local-model', 'setup-provider-model', 'setup-reasoning-effort'],
   'sign-in': ['subscription-login-start', 'subscription-login-finish', 'subscription-logout', 'subscription-inspect'],
   'store-key': ['secret-set-provider', 'setup-secret-policy'],
+  'connect-daemon': ['setup-connected-host-url', 'setup-connected-host-enabled', 'setup-pair-host'],
   'history': ['setup-save-history'],
   'import-settings': ['import-goodvibes-tui-settings'],
 } as const satisfies Readonly<Partial<Record<import('@goodvibes/engine/terminal-shell/setup-command').SetupTopicId, readonly string[]>>>;

@@ -7,7 +7,7 @@ import { STARTUP_COMMAND } from './local-setup.ts';
 
 /** The topics the terminal app opens as one form of its own (the former wizard pages). */
 const FORM_TOPICS: readonly OnboardingWizardTopic[] = [
-  'model', 'sign-in', 'store-key', 'local-only', 'browser', 'other-devices', 'webhooks', 'chat-apps', 'cloudflare',
+  'model', 'sign-in', 'store-key', 'local-only', 'browser', 'other-devices', 'connect-daemon', 'webhooks', 'chat-apps', 'cloudflare',
   'who-signs-in', 'how-it-works', 'safety', 'memory', 'telemetry', 'automation', 'devices-voice', 'provider-behaviour', 'advanced',
 ];
 

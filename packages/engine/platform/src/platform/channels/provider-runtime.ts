@@ -355,7 +355,7 @@ export class ChannelProviderRuntimeManager {
       this.markError('slack', 'Slack app-level token is required for Socket Mode.');
       return this.result('slack', false, 'Slack app-level token is required for Socket Mode.');
     }
-    const webhookUrl = await this.deps.serviceRegistry.resolveSecret('slack', 'webhookUrl') ?? process.env.SLACK_WEBHOOK_URL;
+    const webhookUrl = await resolveSurfaceSecret(this.deps, 'slack', 'webhookUrl') ?? undefined;
     if (generation !== this.slackGeneration) return this.result('slack', false, 'Slack Socket Mode start was cancelled by stop().');
     const slack = new SlackIntegration(webhookUrl, botToken ?? undefined);
     const client: SlackSocketModeClient = new SlackSocketModeClient({

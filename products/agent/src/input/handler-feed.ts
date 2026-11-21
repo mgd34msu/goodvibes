@@ -33,7 +33,6 @@ import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
 import type { WrappedPromptInfo } from './handler-prompt-buffer.ts';
-import '../renderer/conversation-layout.ts';
 import { handleWorkTreeToken } from './handler-work-tree-route.ts';
 
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';

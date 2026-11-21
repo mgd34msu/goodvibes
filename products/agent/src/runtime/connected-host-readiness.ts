@@ -27,7 +27,7 @@ function failureDetail(error: unknown, baseUrl: string, deadlineMs: number): str
         ? `The host at ${baseUrl} did not answer within ${deadlineMs / 1000} s. Check that the daemon there is running and reachable from this machine, then rerun setup status.`
         : `The host at ${baseUrl} timed out (HTTP ${status}). Rerun setup status.`;
     case 'host_unreachable':
-      return `Nothing answered at ${baseUrl}. Start the GoodVibes daemon there or correct controlPlane.host and controlPlane.port, then rerun setup status.`;
+      return `Nothing answered at ${baseUrl}. Start the GoodVibes daemon there or correct daemon.connectedHost.url, then rerun setup status.`;
     case 'auth_rejected':
       return `The host at ${baseUrl} rejected the current credential (HTTP ${status ?? 401}). Pair again with setup pair, then rerun setup status.`;
     case 'forbidden':
@@ -35,7 +35,7 @@ function failureDetail(error: unknown, baseUrl: string, deadlineMs: number): str
     case 'incompatible':
       return `The GoodVibes host at ${baseUrl} does not serve the auth check (HTTP 404); it is older than this Agent. Update GoodVibes on the host, then rerun setup status.`;
     case 'route_unavailable':
-      return `Nothing at ${baseUrl} answered as a GoodVibes daemon (HTTP 404). Check controlPlane.host and controlPlane.port, then rerun setup status.`;
+      return `Nothing at ${baseUrl} answered as a GoodVibes daemon (HTTP 404). Check daemon.connectedHost.url, then rerun setup status.`;
     case 'response_invalid':
       return `The host at ${baseUrl} answered the auth check in a shape this Agent cannot read. Run the same GoodVibes version on the host and here, then rerun setup status.`;
     case 'cancelled':
@@ -57,8 +57,11 @@ export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerO
   if (selected.unavailable?.code === 'dial_disabled') {
     return { status: 'disabled', detail: 'Connected-host dialing is disabled (daemon.connectedHost.enabled is false); no auth check was made.' };
   }
+  if (selected.unavailable?.code === 'address_unstated') {
+    return { status: 'unavailable', detail: `${selected.unavailable.reason} No auth check was made.` };
+  }
   if (!canonicalizePairingHost(selected.baseUrl)) {
-    return { status: 'unavailable', detail: 'The configured host address is not a usable http(s) origin; no auth check was made. Correct controlPlane.host and controlPlane.port.' };
+    return { status: 'unavailable', detail: 'The configured host address is not a usable http(s) origin; no auth check was made. Set daemon.connectedHost.url to the host\'s origin.' };
   }
   if (selected.token === null) {
     return { status: 'missing-credential', detail: `No effective connected-host credential: ${selected.unavailable?.reason ?? `nothing found in ${selected.credential}`}. Pair with setup pair, then rerun setup status.` };

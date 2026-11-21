@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { logger } from '../utils/logger.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { SurfaceAdapterContext, SurfaceIngressDecision } from './types.js';
 import { readTextBodyWithinLimit, DEFAULT_MAX_REQUEST_BODY_BYTES } from '../utils/request-body.js';
@@ -6,6 +7,17 @@ import { WORK_AUTHORIZED_METADATA_KEY } from '../agents/conversation-continuatio
 import { SHARED_SESSION_DELEGATED_INPUT_METADATA_KEY } from '../control-plane/session-intents.js';
 
 export const DEFAULT_WEBHOOK_MAX_BYTES = DEFAULT_MAX_REQUEST_BODY_BYTES;
+
+/**
+ * The answer to an inbound webhook whose surface has no credential to check
+ * callers against: 503, naming the setting to set, so the refusal a vendor
+ * console shows carries the next step. The setting's name is not a secret; its
+ * value is never read here.
+ */
+export function surfaceCredentialAbsent(surface: string, setting: string): Response {
+  logger.warn('Refusing inbound surface traffic: no credential is configured to verify it', { surface, setting });
+  return Response.json({ error: `Webhook not configured: set ${setting}` }, { status: 503 });
+}
 
 export function constantTimeEquals(expected: string, provided: string): boolean {
   if (!expected || !provided || expected.length !== provided.length) return false;

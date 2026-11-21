@@ -18,7 +18,7 @@ export interface SetupPairingTerminal {
  */
 export async function runSetupUnpairCommand(runtime: CliCommandRuntime): Promise<number> {
   if (runtime.cli.commandArgs.length > 1) {
-    console.error('Usage: goodvibes-agent setup unpair. It forgets the device credential stored for the selected host (controlPlane.host and controlPlane.port).');
+    console.error('Usage: goodvibes-agent setup unpair. It forgets the device credential stored for the selected host (daemon.connectedHost.url, or the daemon on this machine).');
     return 2;
   }
   const result = await unpairAgentHost({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });

@@ -1,3 +1,5 @@
+import { resolveHostBinding, resolveWebPort } from '@goodvibes/engine/platform/platform/daemon/host-resolver';
+
 export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';
 export type RuntimeHostMode = 'local' | 'network' | 'custom';
 export type RuntimeEndpointSettingKey = `${RuntimeEndpointId}.${'hostMode' | 'host' | 'port'}`;
@@ -57,12 +59,14 @@ export function resolveRuntimeEndpointBinding(
   const keys = RUNTIME_ENDPOINT_CONFIG_KEYS[endpoint];
   const hostMode = String(config.get(keys.hostMode) ?? 'local');
   const configuredHost = String(config.get(keys.host) ?? '127.0.0.1');
-  const port = Number(config.get(keys.port) || RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]);
-  if (hostMode === 'network') {
-    return { hostMode, configuredHost, host: '0.0.0.0', port };
-  }
-  if (hostMode === 'custom') {
-    return { hostMode, configuredHost, host: configuredHost || '127.0.0.1', port };
-  }
-  return { hostMode, configuredHost, host: '127.0.0.1', port };
+  const rawPort = config.get(keys.port);
+  // The platform's bind rule decides host, port and mode; an unrecognized mode
+  // is read as local, and is shown as stored.
+  const binding = resolveHostBinding(hostMode, configuredHost, Number(rawPort ?? RUNTIME_ENDPOINT_DEFAULT_PORTS[endpoint]), endpoint);
+  return {
+    hostMode: binding.recognized ? binding.effectiveMode : hostMode,
+    configuredHost,
+    host: binding.host,
+    port: endpoint === 'web' ? resolveWebPort(rawPort) : binding.port,
+  };
 }

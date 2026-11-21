@@ -34,6 +34,7 @@ import { IS_WORKSPACE_DISTRIBUTION } from './workspace-update-policy.ts';
 import { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import { installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, PeriodicUpdateLoop, type SuiteUpdateResult, type PeriodicCheckOutcome } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { channelDeliveriesInFlight } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
 import { applyUpdate, checkForUpdate, type ApplyUpdateOptions, type CheckForUpdateResult } from '../input/commands/update-runtime.ts';
 import { restartOntoUpdatedBinary } from '../cli/launch-auto-update.ts';
@@ -43,17 +44,12 @@ import { recordSelfUpdate } from './self-update-receipt.ts';
 import type { ConfigManager } from '../config/index.ts';
 import { VERSION } from '../version.ts';
 
-/** Minutes between periodic checks when settings say nothing. */
-export const DEFAULT_PERIODIC_INTERVAL_MINUTES = 60;
-/** Seconds after start before the first periodic check when settings say nothing. */
-export const DEFAULT_PERIODIC_FIRST_CHECK_SECONDS = 30;
-
 /** The activity signals the idle gate reads, injected so tests drive them. */
 export interface AgentUpdateIdleProbes {
   /** Sessions with pending input, an agent mid-turn. */
   readonly countBusySessions: () => number;
   /** Approvals awaiting a human answer count as pending confirmations. */
-  readonly listApprovals: () => readonly { readonly status: string }[];
+  readonly listApprovals: () => readonly { readonly status: SharedApprovalStatus }[];
   /** Channel deliveries that have left the conversation but not reached the person. */
   readonly channelDeliveriesInFlight?: (() => number) | undefined;
   /**
@@ -77,8 +73,7 @@ export function agentIsIdleForUpdate(probes: AgentUpdateIdleProbes): boolean {
   if (probes.countBusySessions() > 0) return false;
   const inFlight = (probes.channelDeliveriesInFlight ?? channelDeliveriesInFlight)();
   if (inFlight > 0) return false;
-  // 'claimed' is still open: someone picked the approval up but has not answered.
-  return !probes.listApprovals().some((approval) => approval.status === 'pending' || approval.status === 'claimed');
+  return !probes.listApprovals().some((approval) => isOpenApprovalStatus(approval.status));
 }
 
 /**
@@ -107,9 +102,9 @@ export function periodicUpdateEnabled(
 ): boolean {
   // A stated `auto` is a decision and always wins. An unstated one is only a
   // default, and a default must not override an explicit off switch.
-  if (options.autoWasStated === true) return settings.auto ?? true;
-  if (settings.auto === false) return false;
-  return settings.autoUpdateAtLaunch ?? true;
+  if (options.autoWasStated === true) return settings.auto;
+  if (!settings.auto) return false;
+  return settings.autoUpdateAtLaunch;
 }
 
 export interface AgentPeriodicUpdaterOptions {
@@ -152,11 +147,9 @@ export class AgentPeriodicUpdater {
   private announcedTag: string | null = null;
 
   constructor(private readonly options: AgentPeriodicUpdaterOptions) {
-    const intervalMinutes = options.settings.intervalMinutes ?? DEFAULT_PERIODIC_INTERVAL_MINUTES;
-    const firstCheckSeconds = options.settings.firstCheckSeconds ?? DEFAULT_PERIODIC_FIRST_CHECK_SECONDS;
     this.loop = new PeriodicUpdateLoop({
-      checkIntervalMs: intervalMinutes * 60 * 1000,
-      firstCheckDelayMs: firstCheckSeconds * 1000,
+      checkIntervalMs: options.settings.intervalMinutes * 60 * 1000,
+      firstCheckDelayMs: options.settings.firstCheckSeconds * 1000,
       runCheck: () => this.runCheck(),
       onError: (error) => {
         if (suiteUpdateRequiresRecovery(error)) {
@@ -286,7 +279,7 @@ export function resumeArgv(argv: readonly string[], sessionId: string | undefine
 }
 
 export interface StartPeriodicSelfUpdateParams {
-  readonly configManager: Pick<ConfigManager, 'getRaw' | 'sourceOf'> & Partial<Pick<ConfigManager, 'get' | 'getConfigPath' | 'getProjectConfigPath' | 'getDaemonTierPath'>>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'sourceOf'> & Partial<Pick<ConfigManager, 'getConfigPath' | 'getProjectConfigPath' | 'getDaemonTierPath'>>;
   readonly services: {
     /**
      * The sessions THIS process is running, and how many are mid-turn. Read

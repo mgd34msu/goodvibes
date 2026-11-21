@@ -4,7 +4,8 @@
  * Every key read here is a platform schema row (schema-domain-update.ts),
  * including `autoUpdateAtLaunch` and `launchCheckTimeoutMs`: the loader
  * validates them, and settings search, the settings screen and `settings set`
- * all reach them. This reader applies the Agent's clamps and defaults.
+ * all reach them. The config manager applies their ranges and defaults; this
+ * reader only gathers them.
  *
  * `update.auto` and `update.autoUpdateAtLaunch` are daemon settings: one value
  * for the machine's installation, in the daemon's settings file, read by the
@@ -13,17 +14,11 @@
  * Agent's own: its user-level file loads first and a working-directory
  * `.goodvibes/agent/settings.json` deep-merges on top.
  *
- * The reader hand-validates each field and returns a PARTIAL object holding
- * only the keys the user actually set to a well-typed value, a missing or
- * malformed block degrades to "use the built-in defaults", never a crash. The
- * defaults themselves live in the consumer (src/cli/launch-auto-update.ts):
- * the feature defaults ON for binary installs, per the recorded owner
+ * The feature defaults ON for binary installs, per the recorded owner
  * directive that clients update on start, and `update.autoUpdateAtLaunch:
  * false` is the explicit, persisted off switch.
  */
 import type { ConfigKey, ConfigManager } from './index.ts';
-
-type RawRecord = Record<string, unknown>;
 
 export interface UpdateSettings {
   /**
@@ -36,11 +31,11 @@ export interface UpdateSettings {
    * install with this set to false still replaced itself about thirty seconds
    * in, under `auto`'s separate default.
    */
-  readonly autoUpdateAtLaunch?: boolean;
-  /** How long the launch-time version check may take before it is skipped. Defaults to 2500; clamped to [250, 30000]. */
-  readonly launchCheckTimeoutMs?: number;
+  readonly autoUpdateAtLaunch: boolean;
+  /** How long the launch-time version check may take before it is skipped. `update.launchCheckTimeoutMs`, default 2500, 250 to 30000. */
+  readonly launchCheckTimeoutMs: number;
   /** How long the launch-time download, verification and swap may take before it is deferred (`update.applyTimeoutMs`, default 45000, 5000 to 300000). */
-  readonly applyTimeoutMs?: number;
+  readonly applyTimeoutMs: number;
   /**
    * Keep checking for a newer release WHILE the agent runs, and install it at
    * an idle moment. Mirrors the daemon's `update.auto`. Default: follows
@@ -52,54 +47,23 @@ export interface UpdateSettings {
    * `{ autoUpdateAtLaunch: false, auto: true }` still means "do not update at
    * launch, but do update at an idle moment while running".
    */
-  readonly auto?: boolean;
-  /** Minutes between periodic checks. Mirrors the daemon's `update.intervalMinutes`. Defaults to 60; clamped to [5, 1440]. */
-  readonly intervalMinutes?: number;
-  /** Seconds after start before the FIRST periodic check. Mirrors the daemon's `update.firstCheckSeconds`. Defaults to 30; clamped to [0, 3600]. */
-  readonly firstCheckSeconds?: number;
+  readonly auto: boolean;
+  /** Minutes between periodic checks. Mirrors the daemon's `update.intervalMinutes`. Default 60, 5 to 1440. */
+  readonly intervalMinutes: number;
+  /** Seconds after start before the FIRST periodic check. Mirrors the daemon's `update.firstCheckSeconds`. Default 30, 0 to 3600. */
+  readonly firstCheckSeconds: number;
 }
 
-const LAUNCH_CHECK_MIN_TIMEOUT_MS = 250;
-const LAUNCH_CHECK_MAX_TIMEOUT_MS = 30_000;
-const APPLY_MIN_TIMEOUT_MS = 5_000;
-const APPLY_MAX_TIMEOUT_MS = 300_000;
-const MIN_INTERVAL_MINUTES = 5;
-const MAX_INTERVAL_MINUTES = 24 * 60;
-const MAX_FIRST_CHECK_SECONDS = 60 * 60;
-
-/** A number field is honored only when finite and non-negative; then clamped. */
-function readClamped(value: unknown, min: number, max: number): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
-  return Math.min(max, Math.max(min, Math.floor(value)));
-}
-
-/** Read `update.*` from settings.json, validating and clamping the timeout. */
-export function readUpdateSettings(configManager: Pick<ConfigManager, 'getRaw'>): UpdateSettings {
-  const raw = configManager.getRaw() as unknown as RawRecord;
-  const block = raw['update'];
-  if (!block || typeof block !== 'object' || Array.isArray(block)) return {};
-  const src = block as RawRecord;
-  const out: {
-    autoUpdateAtLaunch?: boolean;
-    launchCheckTimeoutMs?: number;
-    applyTimeoutMs?: number;
-    auto?: boolean;
-    intervalMinutes?: number;
-    firstCheckSeconds?: number;
-  } = {};
-  if (typeof src['autoUpdateAtLaunch'] === 'boolean') out.autoUpdateAtLaunch = src['autoUpdateAtLaunch'];
-  const timeout = src['launchCheckTimeoutMs'];
-  if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) {
-    out.launchCheckTimeoutMs = Math.min(LAUNCH_CHECK_MAX_TIMEOUT_MS, Math.max(LAUNCH_CHECK_MIN_TIMEOUT_MS, Math.floor(timeout)));
-  }
-  const applyTimeout = readClamped(src['applyTimeoutMs'], APPLY_MIN_TIMEOUT_MS, APPLY_MAX_TIMEOUT_MS);
-  if (applyTimeout !== undefined) out.applyTimeoutMs = applyTimeout;
-  if (typeof src['auto'] === 'boolean') out.auto = src['auto'];
-  const interval = readClamped(src['intervalMinutes'], MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES);
-  if (interval !== undefined) out.intervalMinutes = interval;
-  const firstCheck = readClamped(src['firstCheckSeconds'], 0, MAX_FIRST_CHECK_SECONDS);
-  if (firstCheck !== undefined) out.firstCheckSeconds = firstCheck;
-  return out;
+/** The `update.*` values in effect, as the config manager validated and defaulted them. */
+export function readUpdateSettings(configManager: Pick<ConfigManager, 'get'>): UpdateSettings {
+  return {
+    autoUpdateAtLaunch: configManager.get('update.autoUpdateAtLaunch'),
+    launchCheckTimeoutMs: configManager.get('update.launchCheckTimeoutMs'),
+    applyTimeoutMs: configManager.get('update.applyTimeoutMs'),
+    auto: configManager.get('update.auto'),
+    intervalMinutes: configManager.get('update.intervalMinutes'),
+    firstCheckSeconds: configManager.get('update.firstCheckSeconds'),
+  };
 }
 
 /**

@@ -1022,22 +1022,19 @@ export async function waitForResponseDelegates(conversation: ConversationManager
   if (!delegates.length) return false;
   const ids = new Set(delegates.map(agent => agent.id));
   const waiting = () => manager.list().filter(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running') && canWait(agent.id));
-  let previous = '';
   for (let pending = waiting(); pending.length > 0; pending = waiting()) {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
-    // Joining an agent that has not started returns at once; when nothing moved
-    // since the last wake, the list is looked at once a second instead.
-    const state = pending.map(agent => `${agent.id}:${agent.status}`).join(',');
-    const join = state === previous ? undefined : manager.join;
-    previous = state;
+    // A running agent wakes the wait when its execution ends; a pending one has
+    // no execution to join yet, so `wake` (its start) wakes the wait instead.
+    const running = pending.filter(agent => agent.status === 'running');
+    const join = manager.join;
     await new Promise<void>((resolve, reject) => {
       let stop: (() => void) | undefined;
-      const done = () => { stop?.(); options.signal?.removeEventListener('abort', aborted); clearTimeout(fallback); resolve(); };
-      const aborted = () => { stop?.(); clearTimeout(fallback); reject(options.signal?.reason); };
+      const done = () => { stop?.(); options.signal?.removeEventListener('abort', aborted); resolve(); };
+      const aborted = () => { stop?.(); reject(options.signal?.reason); };
       stop = wake?.(done);
       options.signal?.addEventListener('abort', aborted, { once: true });
-      const fallback = join ? undefined : setTimeout(done, 1_000);
-      if (join) void Promise.race(pending.map(agent => join.call(manager, agent.id))).then(done, done);
+      if (join && running.length > 0) void Promise.race(running.map(agent => join.call(manager, agent.id))).then(done, done);
     });
   }
   options.signal?.throwIfAborted(); options.assertCurrent?.();

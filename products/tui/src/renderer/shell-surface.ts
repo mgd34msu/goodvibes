@@ -1,16 +1,13 @@
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes/engine/terminal-shell/shell-footer';
 import type { Line } from '@goodvibes/engine/platform/platform/types';
-import '@goodvibes/engine/platform/platform/providers';
 import { UIFactory } from './ui-factory.ts';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
 import { permissionModeTone } from '../core/permission-mode.ts';
 import { SLEEP_DISABLED_CHIP } from '../core/power-status.ts';
-import './composer.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
 import { type ThrobberState } from './throbber.ts';
 import { type BackToBottomState } from './back-to-bottom.ts';
-import './voice-capture-chip.ts';
 import { tagFooterLine } from './footer-targets.ts';
 import { wrapText } from '../utils/terminal-width.ts';
 

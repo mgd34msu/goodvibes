@@ -41,7 +41,7 @@ const MAX_KEPT_BODY_BYTES = 256 * 1024;
 export const IDEMPOTENCY_KEY_REPLAY: ContractReplayKey = Object.freeze({
   in: 'header',
   name: 'Idempotency-Key',
-  behavior: `Send a key (${OPERATION_KEY_RULE}) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as \`idempotencyKey\` beside \`body\`.`,
+  behavior: `Send a key (${OPERATION_KEY_RULE}) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as \`idempotencyKey\` beside \`body\`.`,
 });
 
 /** One request's answer, as the transport sends it. */
@@ -70,6 +70,11 @@ interface KeptEntry {
 function refusal(status: number, code: string, error: string, extra: Record<string, unknown> = {}): ReplayableAnswer {
   return { status, body: { error, code, status, ...extra } };
 }
+
+/** What every repeat of a request whose first run threw (in a running daemon) is answered. */
+const FAILED_PARTWAY = refusal(500, 'IDEMPOTENCY_OUTCOME_UNKNOWN',
+  'The first request under this Idempotency-Key failed partway, so whether it acted is unknown. Nothing was done again; check the state before sending a new request.',
+  { recoverable: false });
 
 /** JSON with object keys sorted, so the same request in another key order is the same request. */
 function canonical(value: unknown): string {
@@ -130,8 +135,18 @@ export class IdempotentReplayStore {
     try {
       this.sweep();
       this.write(file, { fingerprint, state: 'running', at: this.now() });
-      // A throw before an answer leaves the key as an unknown outcome, which is the truth.
-      const answer = await execute();
+      let answer: ReplayableAnswer;
+      try {
+        answer = await execute();
+      } catch (error) {
+        // A throw before an answer is an unknown outcome while the daemon is up: the key says so to every repeat.
+        try {
+          this.write(file, { fingerprint, state: 'done', at: this.now(), ...FAILED_PARTWAY });
+        } catch (writeError) {
+          logger.warn('[idempotent-replay] the outcome of a request that failed partway could not be kept', { error: summarizeError(writeError) });
+        }
+        throw error;
+      }
       if (answer.status >= 400 && answer.status < 500) {
         // A refusal changed nothing: the key is free for the corrected request.
         this.remove(file);

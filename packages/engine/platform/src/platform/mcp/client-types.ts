@@ -109,15 +109,16 @@ export type McpElicitationResolver = (input: {
 }) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> | undefined }>;
 
 /**
- * Where a client's connection is in its life. `restart-wait` means the server
- * will be started again on a timer (by the client itself, or by the registry's
- * automatic reconnect); `gave-up` means nothing will start it again until a
- * reconnect is asked for (configuration reload).
+ * Where a client's connection is in its life. A client itself ends in
+ * `gave-up` when its server stops without being asked; `restart-wait` is the
+ * registry's reading of a server its lifecycle will reconnect on a timer, and
+ * `gave-up` there means nothing will start it again until a reconnect is asked
+ * for (configuration reload).
  */
 export type McpClientPhase = 'idle' | 'starting' | 'negotiating' | 'ready' | 'restart-wait' | 'gave-up' | 'closed';
 
 export interface McpClientOptions {
-  /** Live owner check immediately before every initial or restarted process spawn. */
+  /** Live owner check immediately before every process spawn. */
   beforeProcessStart?: (() => void) | undefined;
   /** Bound for every request on this connection; 0 (the default) leaves tool calls to the registry's deadline. */
   timeout?: number | undefined;
@@ -128,14 +129,11 @@ export interface McpClientOptions {
    * Defaults to `timeout` when that is set, otherwise 30 s; 0 disables it.
    */
   initializeTimeoutMs?: number | undefined;
-  /** Base delay before a crashed stdio server is restarted; attempt N waits N times this. Defaults to 2 s. */
-  restartDelayMs?: number | undefined;
   /**
-   * How many times this client restarts a crashed stdio server itself. Defaults to 3;
-   * 0 leaves reconnecting to the owner of the connection (the MCP registry's lifecycle).
+   * Called when the server stopped without being asked, with the reason. The
+   * client does not start it again: reconnecting is the owner's job (the MCP
+   * registry's lifecycle).
    */
-  restartAttempts?: number | undefined;
-  /** Called when the server stopped without being asked and this client will not restart it, with the reason. */
   onUnexpectedExit?: ((reason: string) => void) | undefined;
   processSpec?: McpProcessSpec | undefined;
   onNotification?: ((notification: McpClientNotification) => void) | undefined;

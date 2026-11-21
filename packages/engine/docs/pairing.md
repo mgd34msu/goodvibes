@@ -197,8 +197,10 @@ independently declinable:
 - **`passkey`.** Registers a WebAuthn credential for relay step-up. Available when the daemon
   runs the step-up service (the daemon always does).
 
-`pairing.handoff.create` returns the offers actually available on this daemon; a surface
-presents only those. After the device scans and completes its side of each accepted offer, it
+`pairing.handoff.create` returns the offers actually available on this daemon that the new
+pairing can complete; a surface presents only those. Completing needs what registering a
+step-up passkey needs (full authority), so a pairing minted narrower than that (from a caller
+holding a narrowed list) is offered nothing and gets its token alone. After the device scans and completes its side of each accepted offer, it
 calls `pairing.handoff.complete` with its per-offer decisions in one pass. Each offer resolves
 to an honest per-offer result (`completed` / `declined` / `unavailable` / `failed`); an omitted
 or explicitly declined offer is reported as `declined`, never silently half-applied.

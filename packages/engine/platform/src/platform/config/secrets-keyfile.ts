@@ -1,9 +1,10 @@
 /** Random keyfile ownership and AES-256-GCM secret-store envelopes. */
 
-import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { chmodSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { dirname } from 'path';
 import { logger } from '../utils/logger.js';
+import { syncDirectory } from '../utils/atomic-json-store.js';
 
 /** Versioned AES-GCM envelope; authentication comes from the tag and keyfile. */
 export interface EncryptedStoreEnvelope {
@@ -67,23 +68,37 @@ function readKeyfile(keyFilePath: string): Buffer {
   return Buffer.from(raw, 'hex');
 }
 
+/** Create `path` exclusively with `content`, synced to disk before it is closed. */
+function writeSyncedExclusive(path: string, content: string): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(fd, content, 'utf-8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function writeKeyfileExclusive(keyFilePath: string, key: Buffer): boolean {
-  mkdirSync(dirname(keyFilePath), { recursive: true, mode: 0o700 });
-  chmodSync(dirname(keyFilePath), 0o700);
+  const directory = dirname(keyFilePath);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
   const content = `${key.toString('hex')}\n`;
-  // The key is written to a private temp file first and then linked into place,
-  // so the keyfile never exists half-written: a racing process either sees no
-  // file or the complete key. A link never replaces an existing keyfile.
+  // The key is written to a private temp file and synced, then linked into
+  // place and the directory synced, so the keyfile never exists half-written
+  // (a racing process sees no file or the complete key) and a crash after
+  // this returns cannot lose it while the store it encrypts survives. A link
+  // never replaces an existing keyfile.
   const temp = `${keyFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
-    writeFileSync(temp, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+    writeSyncedExclusive(temp, content);
     try {
       linkSync(temp, keyFilePath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
       // A filesystem without hard links: fall back to exclusive creation.
       try {
-        writeFileSync(keyFilePath, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+        writeSyncedExclusive(keyFilePath, content);
       } catch (fallbackErr) {
         if ((fallbackErr as NodeJS.ErrnoException).code === 'EEXIST') return false;
         throw fallbackErr;
@@ -93,6 +108,7 @@ function writeKeyfileExclusive(keyFilePath: string, key: Buffer): boolean {
     try { unlinkSync(temp); } catch { /* the temp file may never have been created */ }
   }
   chmodSync(keyFilePath, 0o600);
+  syncDirectory(directory);
   return true;
 }
 

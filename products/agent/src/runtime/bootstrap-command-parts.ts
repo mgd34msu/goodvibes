@@ -57,7 +57,6 @@ import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifact
 import type { ChannelDeliveryRouter } from '@goodvibes/engine/platform/platform/channels';
 import type { AgentExecutionLedger } from './execution-ledger.ts';
 import type { ApprovalsView } from './client/approvals-view.ts';
-import '@goodvibes/engine/platform/platform/utils';
 import type { ConsolidationReceiptSource } from '../agent/memory-consolidation-proposals.ts';
 import { listPendingConsolidationProposals } from '../agent/memory-consolidation-proposals.ts';
 import { activeTokens } from '../renderer/theme.ts';

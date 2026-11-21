@@ -1,4 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
+import { approvalLifecycle, isOpenApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -180,9 +181,17 @@ function nativeFactsForRecords(records: readonly AutonomyQueueLiveRecord[]) {
   return records.map(record => ({ status: record.status, cancellable: controlAvailable(record, 'cancel') }));
 }
 
+/** Approval rows carry the record's status as text; only a status the approval lifecycle declares becomes a fact. */
+function approvalFactsForRecords(records: readonly AutonomyQueueLiveRecord[]): AutonomyLiveNativeFacts['approvals'] {
+  return records.flatMap((record) => {
+    const { status } = record;
+    return approvalLifecycle.isState(status) ? [{ status, cancellable: controlAvailable(record, 'cancel') }] : [];
+  });
+}
+
 function nativeFactsForBundle(records: AutonomyLiveRecordBundle): AutonomyLiveNativeFacts {
   return {
-    tasks: nativeFactsForRecords(records.tasks), approvals: nativeFactsForRecords(records.approvals),
+    tasks: nativeFactsForRecords(records.tasks), approvals: approvalFactsForRecords(records.approvals),
     automationRuns: nativeFactsForRecords(records.automationRuns), watcherReceipts: nativeFactsForRecords(records.watcherReceipts),
     schedules: nativeFactsForRecords(records.schedules), researchRuns: nativeFactsForRecords(records.researchRuns),
   };
@@ -259,7 +268,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
     : facts.tasks.some((record) => record.status === 'running' || record.status === 'queued')
       ? 'active'
       : methodStatus(taskMethods);
-  const approvalStatus: AutonomyQueueStatus = facts.approvals.some((record) => record.status === 'pending' || record.status === 'claimed')
+  const approvalStatus: AutonomyQueueStatus = facts.approvals.some((record) => isOpenApprovalStatus(record.status))
     ? 'attention'
     : methodStatus(approvalMethods);
   const automationStatus: AutonomyQueueStatus = automationStates.some((record) => record.status === 'failed' || record.status === 'blocked')
@@ -379,12 +388,12 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       visible: true,
       cancellable: facts.approvals.some(record => record.cancellable),
       records: approvalRecords.length + approvalOmitted,
-      needsOwner: facts.approvals.filter((record) => record.status === 'pending' || record.status === 'claimed').length,
+      needsOwner: facts.approvals.filter((record) => isOpenApprovalStatus(record.status)).length,
       methodsAvailable: approvalMethods.length,
       current: approvalRecords.length > 0
         ? `${shownOf(approvalRecords.length, approvalOmitted)} recent approval record(s); pending or claimed approvals require explicit user-visible decisions.`
         : `${approvalMethods.length} approval daemon method(s) are present; approval decisions remain explicit and reviewable.`,
-      next: approvalRecords.some((record) => record.status === 'pending' || record.status === 'claimed')
+      next: facts.approvals.some((record) => isOpenApprovalStatus(record.status))
         ? 'Review pending approval records, risk, and args; approve, deny, or cancel exactly one id only when the user asks.'
         : 'Review the matrix, then approve, deny, or cancel one exact approval id only when the user asks.',
       inspectRoute: 'workspace action:"action" actionId:"approval-review"',

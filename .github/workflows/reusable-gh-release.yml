@@ -212,8 +212,10 @@ jobs:
           # recomputed inside this group from what is published now and given to the highest stable
           # vN.N.N suite release, the rule align-dist-tags.ts applies to npm: a patch for an older line
           # or a prerelease never takes it, and whichever run comes last leaves it on the highest.
-          highest="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1000 \
-            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
+          # A failed read stops the job; only grep finding no stable tag is tolerated.
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1000 \
+            --json tagName --jq '.[].tagName')"
+          highest="$(printf '%s\n' "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
           if [ -z "$highest" ]; then
             echo "No published stable release; the latest mark is left as it is."
             exit 0

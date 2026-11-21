@@ -38,6 +38,14 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
+/**
+ * The terminal app's surface root: its stores live under `~/.goodvibes/tui/`
+ * and `<project>/.goodvibes/tui/`. The Agent shares the stores the two
+ * terminal products read in common (settings, subscriptions, connected-daemon
+ * credentials) under the same root.
+ */
+export const GOODVIBES_TUI_SURFACE_ROOT = 'tui';
+
 /** The two roots every surface derives its storage from. */
 export interface GoodVibesHomeOwnership {
   /** The tree root: the directory `.goodvibes/` sits under. */

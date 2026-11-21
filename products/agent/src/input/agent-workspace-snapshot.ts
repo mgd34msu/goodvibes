@@ -13,7 +13,7 @@ import { buildPromptContextReceiptTimeline, buildVibeSummary } from './agent-wor
 import { summarizeMemoryItem, summarizeRoutineItem } from './agent-workspace-local-library-snapshot.ts';
 import { buildReviewPacketDefaults, buildReviewPacketTimeline, buildReviewPacketWizard, readDocumentDrafts } from './agent-workspace-review-packet-snapshot.ts';
 import { buildSetupSmokeHistory, buildWorkspaceSetupWizard, setupCompletionMarkerExists } from './agent-workspace-setup-snapshot.ts';
-import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-workspace-snapshot-config.ts';
+import { readConfigBoolean, readConfigValue } from './agent-workspace-snapshot-config.ts';
 import {
   buildAgentWorkspaceArtifactListSnapshot,
   buildAgentWorkspaceCompanionAccessSnapshot,
@@ -34,7 +34,7 @@ import {
   type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot, AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
-import { connectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 
 const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
   personas: 'personas',
@@ -295,9 +295,7 @@ export function buildAgentWorkspacePersonalOpsPart(context: CommandContext): Pic
  * each build from one reading.
  */
 function readAgentWorkspaceSetupInputs(context: CommandContext, readFailures: AgentWorkspaceReadFailures) {
-  const host = readConfigString(context, 'controlPlane.host', '127.0.0.1', readFailures);
-  const port = readConfigNumber(context, 'controlPlane.port', 3421, readFailures);
-  const runtimeBaseUrl = connectedHostBaseUrl(host, port);
+  const runtimeBaseUrl = resolveConnectedHostAddress({ get: (key) => readConfigValue(context, key, readFailures) }).baseUrl;
   const homeDirectory = context.workspace?.shellPaths?.homeDirectory;
   // The profile functions resolve the base home themselves, from inside a profile session too.
   const { runtimeProfiles, runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(homeDirectory ?? '');

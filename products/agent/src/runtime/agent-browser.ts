@@ -26,18 +26,17 @@ import {
 } from '@goodvibes/engine/platform/platform/browser';
 import type { UntrustedContentPort } from '@goodvibes/engine/platform/platform/browser';
 import { browserGatewayOverEngine } from '@goodvibes/engine/platform/platform/control-plane';
+import { BINARY_INSTALL_COMMAND } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 import type { BrowserToolBackend } from '@goodvibes/engine/terminal-shell/agent-turn/browser-tool';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
 
 /**
- * What the agent tells someone whose browser host script is missing.
- *
- * The platform ships no installer, so it cannot phrase this; the sentence is the
- * same one the agent printed before the host client moved.
+ * What the agent tells someone whose browser host script is missing: the host
+ * script ships with the released install, so the fix is the installer.
  */
 const MISSING_HOST_SCRIPT_FIX =
-  'Reinstall the agent so its files are complete: bun add -g @goodvibes/agent';
+  `Re-run the installer so its files are complete: ${BINARY_INSTALL_COMMAND}`;
 
 /** Where saved browser profiles live, under the agent's own storage root. */
 export function agentBrowserProfileRoot(homeDirectory: string): string {
@@ -101,9 +100,20 @@ export interface AgentBrowserEngineOptions {
   readonly untrusted?: UntrustedContentPort;
 }
 
-/** The agent's browser: a platform engine with this product's four answers bound in. */
+/**
+ * Every engine this process built (the `browser` tool and the Google setup
+ * browser), so app shutdown can close the browsers this agent started. Attached
+ * browsers are untouched by this: the session manager's shutdown only ends what
+ * it launched. An engine injected by a caller is not registered: its owner closes it.
+ */
+const liveEngines = new Set<BrowserEngine>();
+
+/**
+ * The agent's browser: a platform engine with this product's four answers bound
+ * in. Every engine built here is registered for app shutdown.
+ */
 export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): BrowserEngine {
-  return new BrowserEngine(
+  const engine = new BrowserEngine(
     createAgentBrowserSessionManager({
       profileRoot: options.profileRoot,
       homeDirectory: options.homeDirectory,
@@ -114,14 +124,9 @@ export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): Br
       ...(options.destinationConfig ? { destinationConfig: options.destinationConfig } : {}),
     },
   );
+  liveEngines.add(engine);
+  return engine;
 }
-
-/**
- * Engines built for this process's `browser` tool and `browser` command, so
- * app shutdown can close the browsers this agent started. Attached browsers are
- * untouched by this: the session manager's shutdown only ends what it launched.
- */
-const liveEngines = new Set<BrowserEngine>();
 
 export async function shutdownAgentBrowserSessions(): Promise<void> {
   for (const live of [...liveEngines]) {
@@ -144,9 +149,7 @@ export function agentBrowserToolBackend(options: AgentBrowserEngineOptions & { r
   let backend: BrowserToolBackend | null = null;
   return () => {
     if (!backend) {
-      let engine = options.engine;
-      if (!engine) { engine = createAgentBrowserEngine(options); liveEngines.add(engine); }
-      const built = engine;
+      const built = options.engine ?? createAgentBrowserEngine(options);
       backend = browserGatewayOverEngine(async () => built, () => built.shutdown());
     }
     return backend;

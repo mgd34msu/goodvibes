@@ -417,7 +417,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       summary: 'First run has not been finished for this user.',
       cause: 'No global user onboarding check marker was found: no model was ready at a start, and first run was left before a model was chosen.',
       impact: 'Important service, network, provider, auth, or permission choices may still be implicit defaults.',
-      action: 'Run /setup in the TUI or goodvibes onboarding status to review setup state.',
+      action: 'Run /setup in the TUI, or goodvibes setup status.',
     });
   }
 
@@ -723,7 +723,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
 export function renderOnboardingCliStatus(options: CliStatusOptions): string {
   const marker = effectiveMarker(options.onboardingMarker);
   return [
-    'GoodVibes onboarding status',
+    'GoodVibes setup status',
     `  checked: ${marker?.exists ? 'yes' : 'no'}`,
     `  scope: ${marker?.scope ?? 'none'}`,
     `  source: ${marker?.payload?.source ?? 'n/a'}`,

@@ -1,4 +1,3 @@
-import '@goodvibes/engine/terminal-shell/skill-discovery';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';

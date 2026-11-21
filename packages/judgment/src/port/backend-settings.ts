@@ -1,4 +1,4 @@
-import type { JudgmentAdapterKind } from './backends.ts';
+import { JUDGMENT_ADAPTER_KINDS, type JudgmentAdapterKind } from './model-profiles.ts';
 
 /** Public deployment capabilities and model aliases; never credential values. */
 export interface JudgmentBackendSettings {
@@ -21,7 +21,7 @@ export function captureJudgmentBackendSettings(value: unknown): JudgmentBackendS
     captured[key] = descriptor.value;
   }
   const { adapter, maxInputBytes, maxQuestions, responseModels } = captured;
-  if (adapter !== undefined && adapter !== 'system-one' && adapter !== 'cloudflare-workers-ai' && adapter !== 'laya'
+  if (adapter !== undefined && !(JUDGMENT_ADAPTER_KINDS as readonly unknown[]).includes(adapter)
     || [maxInputBytes, maxQuestions].some(number => number !== undefined && (typeof number !== 'number' || !Number.isSafeInteger(number) || number < 1))) {
     throw new Error('Invalid judgment backend capabilities');
   }

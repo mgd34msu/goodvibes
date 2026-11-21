@@ -11,7 +11,7 @@ import { AgentMessageBus } from '../agents/message-bus.js';
 import { computeSchedulerCapacity, scheduleCapacityWaitKey, type AutomationCapacityWait, type SchedulerCapacityReport } from './scheduler-capacity.js';
 import { AutomationJobStore } from './store/jobs.js';
 import { AutomationRunStore } from './store/runs.js';
-import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
+import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationCheckinJobOwnedError, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, CHECKIN_JOB_OWNER, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
 import { AutomationDeliveryManager } from './delivery-manager.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -72,7 +72,7 @@ import {
   syncAutomationRunToRuntime,
   syncAutomationRuntimeSnapshot,
 } from './manager-runtime-sync.js';
-import { reconcileAutomationActiveRuns, settleAutomationRun, type AutomationRunSettleContext, type AutomationRunSettlement } from './manager-runtime-reconcile.js';
+import { reconcileAutomationActiveRuns, saveThenFollowUp, settleAutomationRun, type AutomationRunEnding, type AutomationRunSettleContext, type AutomationRunSettlement } from './manager-runtime-reconcile.js';
 import { recordAutomationMissedRun } from './manager-runtime-missed.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
@@ -123,6 +123,19 @@ interface AutomationManagerConfig {
    * due stays due and runs once after the restart. Absent: always admitted.
    */
   readonly workAdmitted?: (() => boolean) | undefined;
+}
+
+/**
+ * What an update would do to the check-in job that only the check-in settings
+ * may do (see CHECKIN_JOB_OWNER), worded for the refusal; undefined when nothing.
+ */
+function checkinJobOwnedChange(job: AutomationJob, patch: UpdateAutomationJobInput): string | undefined {
+  if (job.kind !== 'checkin') return patch.kind === 'checkin' ? 'made from another job' : undefined;
+  if (patch.kind !== undefined && patch.kind !== 'checkin') return 'turned into another kind of job';
+  if (patch.enabled !== undefined && patch.enabled !== job.enabled) return patch.enabled ? 'enabled' : 'disabled';
+  const schedule = patch.schedule;
+  if (schedule && (schedule.kind !== job.schedule.kind || (schedule.kind === 'cron' && job.schedule.kind === 'cron' && schedule.expression !== job.schedule.expression))) return 'rescheduled';
+  return undefined;
 }
 
 export interface AutomationHeartbeatResult {
@@ -176,7 +189,7 @@ export class AutomationManager {
   /** The mutationLifetime the in-flight startPromise was begun under. */
   private startLifetime: object | null = null;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
-  // Jobs already logged as having no reachable failure-notice target (reported once per job).
+  // Jobs already logged as having a failure notice that reached no one (reported once per job).
   private readonly warnedDeliveryGapJobs = new Set<string>();
   /** The group's copy of the jobs (cluster/group-work.ts), once attached; it acts only while this machine is in a group. */
   private group: GroupJobFamily | null = null;
@@ -270,7 +283,7 @@ export class AutomationManager {
       emitJobAutoDisabled: (job: AutomationJob, reason: string) => this.emitJobAutoDisabled(job, reason),
       cancelTask: this.cancelTask,
       applyFailureToJob: (job: AutomationJob, timestamp: number, countRun = true) => this.applyFailureToJob(job, timestamp, countRun),
-      settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string) => settleAutomationRun(this.runSettleContext(), run, settlement, source),
+      settleRun: (run: AutomationRun, settlement: AutomationRunSettlement, source: string): AutomationRunEnding => settleAutomationRun(this.runSettleContext(), run, settlement, source),
       jobs: this.jobs,
       runs: this.runs,
       checkinEvaluator: this.checkinEvaluator,
@@ -389,7 +402,7 @@ export class AutomationManager {
       clearTimeout(timer);
       this.retryTimers.delete(key);
     }
-    let cancelled = false;
+    const followUps: Array<() => void> = [];
     for (const run of [...this.runs.values()]) {
       if (run.jobId !== jobId || run.status !== 'running') continue;
       // The run is detached from the removed job either way; when its agent
@@ -400,8 +413,7 @@ export class AutomationManager {
         detail = `${reason}; its agent could not be stopped`;
         logger.warn('AutomationManager: the agent of a removed job\'s run could not be stopped', { jobId, runId: run.id, agentId: run.agentId, error: summarizeError(error) });
       }
-      settleAutomationRun(this.runSettleContext(), run, { status: 'cancelled', endedAt: Date.now(), reason: detail }, 'automation.job-removed');
-      cancelled = true;
+      followUps.push(settleAutomationRun(this.runSettleContext(), run, { status: 'cancelled', endedAt: Date.now(), reason: detail }, 'automation.job-removed').followUp);
     }
     const removed = this.jobs.get(jobId);
     this.jobs.delete(jobId);
@@ -413,11 +425,8 @@ export class AutomationManager {
         logger.warn('AutomationManager: a job removal could not be written to the group\'s record', { jobId, error: summarizeError(error) });
       });
     }
-    if (cancelled) {
-      void this.saveRuns().catch((error: unknown) => {
-        logger.warn('AutomationManager: run persistence failed', { reason: 'job-removed', jobId, error: summarizeError(error) });
-      });
-    }
+    // The cancelled runs are saved before their cancellation is delivered.
+    if (followUps.length > 0) this.trackDelivery(saveThenFollowUp(() => this.saveRuns(), followUps, 'run persistence (job removed)'));
     return groupRemoval;
   }
 
@@ -727,6 +736,7 @@ export class AutomationManager {
     current();
     const selected = this.jobs.get(jobId);
     if (!selected) return false;
+    if (selected.kind === 'checkin' && options.owner !== CHECKIN_JOB_OWNER) throw new AutomationCheckinJobOwnedError('removed');
     await this.commitJob(selected, null, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
     // Removed from the group's record too before the owner is told it is gone, as a create or update is.
     await this.removeJobRecord(jobId, 'job-removed');
@@ -738,6 +748,10 @@ export class AutomationManager {
     this.requireEnabled('set automation job enabled state');
     await this.start();
     current();
+    const selected = this.jobs.get(jobId);
+    if (selected?.kind === 'checkin' && selected.enabled !== enabled && options.owner !== CHECKIN_JOB_OWNER) {
+      throw new AutomationCheckinJobOwnedError(enabled ? 'enabled' : 'disabled');
+    }
     const updated = await toggleAutomationJobEnabled(this.jobMutationContext(), jobId, enabled, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
     if (!enabled) this.cancelTimer(jobId);
     return updated;
@@ -750,6 +764,10 @@ export class AutomationManager {
     current();
     const selected = this.jobs.get(jobId);
     if (patch.expectedMutationRevision !== undefined && (!selected || automationJobRevision(selected) !== patch.expectedMutationRevision)) throw new AutomationJobMutationStaleError();
+    if (selected && options.owner !== CHECKIN_JOB_OWNER) {
+      const ownedChange = checkinJobOwnedChange(selected, patch);
+      if (ownedChange) throw new AutomationCheckinJobOwnedError(ownedChange);
+    }
     return await updateAutomationJobRecord(this.jobMutationContext(), jobId, patch, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
   }
 
@@ -784,21 +802,32 @@ export class AutomationManager {
     const processed: AutomationRun[] = [];
     const failed: Array<{ jobId: string; error: string }> = [];
     for (const wake of queued) {
-      // At the limit, or while the daemon takes no new work: the wakes stay queued for a later heartbeat.
-      if (this.activeRunCount() >= this.maxConcurrentRuns() || !this.workAdmitted()) break;
+      // While the daemon takes no new work the wakes stay queued for a later heartbeat.
+      if (!this.workAdmitted()) break;
       const job = this.jobs.get(wake.jobId);
       // One run of a job at a time, as for timers: the wake stays queued and is
       // processed by a later heartbeat once the running run has finished.
       if (job?.enabled && this.hasRunningRun(job.id)) continue;
+      // The run slot is taken before the group claim and held across it, so no
+      // other start takes it meanwhile. At the limit the wakes stay queued.
+      const release = this.tryReserveRun();
+      if (!release) break;
       this.heartbeatWakes.delete(wake.jobId);
-      if (!job?.enabled) continue;
+      if (!job?.enabled) {
+        release();
+        continue;
+      }
       try {
         const claimed = wake.trigger === 'scheduled' ? await this.claimOccurrence(job) : job;
-        if (!claimed) continue;
-        const run = await this.executeJob(claimed, wake.trigger, wake.dueRun, wake.attempt);
+        if (!claimed) {
+          release();
+          continue;
+        }
+        const run = await this.executeJob(claimed, wake.trigger, wake.dueRun, wake.attempt, undefined, release);
         processed.push(run);
         this.advanceScheduledHeartbeatJob(job.id);
       } catch (error) {
+        release();
         failed.push({
           jobId: wake.jobId,
           error: summarizeError(error),
@@ -836,14 +865,19 @@ export class AutomationManager {
     if (!run) return null;
     if (run.status !== 'running') return run;
 
-    const updatedRun = this.cancelRunNow(run, reason);
-    await this.saveRuns();
-    await this.saveJobs();
-    return updatedRun;
+    const ending = this.cancelRunNow(run, reason);
+    // Saved, then delivered: the cancellation is on disk before anyone is told of it.
+    try {
+      await this.saveRuns();
+      await this.saveJobs();
+    } finally {
+      ending.followUp();
+    }
+    return this.runs.get(ending.run.id) ?? ending.run;
   }
 
-  /** Stop a running run's agent and settle the run as cancelled. */
-  private cancelRunNow(run: AutomationRun, reason: string): AutomationRun {
+  /** Stop a running run's agent and settle the run as cancelled; the caller saves, then starts its follow-up. */
+  private cancelRunNow(run: AutomationRun, reason: string): AutomationRunEnding {
     // A run still starting (a check-in evaluating) is stopped through its fence: it delivers and saves nothing more.
     this.runFences.get(run.id)?.retire(reason);
     if (run.agentId) {
@@ -870,14 +904,19 @@ export class AutomationManager {
 
     const endedAt = Date.now();
     const telemetry = input.telemetry ? normalizeExternalTelemetry(input.telemetry, run, input.metadata) : undefined;
-    const updatedRun = settleAutomationRun(this.runSettleContext(), run, input.status === 'completed'
+    const ending = settleAutomationRun(this.runSettleContext(), run, input.status === 'completed'
       ? { status: 'completed', endedAt, result: input.result, telemetry }
       : input.status === 'failed'
         ? { status: 'failed', endedAt, error: input.error ?? 'Remote work failed', failure: { error: input.error ?? '' }, telemetry }
         : { status: 'cancelled', endedAt, reason: input.error ?? 'Remote work cancelled', telemetry }, 'automation.external');
-    await this.saveRuns();
-    await this.saveJobs();
-    return updatedRun;
+    // Saved, then delivered: the result is on disk before its answer goes out.
+    try {
+      await this.saveRuns();
+      await this.saveJobs();
+    } finally {
+      ending.followUp();
+    }
+    return this.runs.get(ending.run.id) ?? ending.run;
   }
 
   private async load(): Promise<void> {
@@ -910,9 +949,10 @@ export class AutomationManager {
       capacityWaits: this.capacityWaits,
       running: () => this.running,
       saveJobs: () => this.saveJobs(),
-      activeRunCount: () => this.activeRunCount(),
-      maxConcurrentRuns: () => this.maxConcurrentRuns(),
-      executeJob: (scheduledJob, trigger, dueRun, attempt) => this.executeJob(scheduledJob, trigger, dueRun, attempt),
+      tryReserveRun: () => this.tryReserveRun(),
+      executeJob: (scheduledJob, trigger, dueRun, attempt, reserved) => this.executeJob(scheduledJob, trigger, dueRun, attempt, undefined, reserved),
+      syncJobToRuntime: (changed, source) => this.syncJobToRuntime(changed, source),
+      emitJobUpdated: (changed, fields) => this.emitJobUpdated(changed, fields),
       recordMissedRun: (missedJob, plannedRunAt) => this.recordMissedRun(missedJob, plannedRunAt),
       hasRunningRun: (jobId) => this.hasRunningRun(jobId),
       runsHere: (scheduledJob) => this.runsHere(scheduledJob),
@@ -942,6 +982,8 @@ export class AutomationManager {
     for (const job of this.jobs.values()) {
       this.scheduleJob(job);
     }
+    // A raised concurrency limit frees slots no run ending announced.
+    this.drainCapacityWaits();
   }
 
   private cancelTimer(jobId: string): void {
@@ -958,6 +1000,8 @@ export class AutomationManager {
       {
         jobs: this.jobs,
         saveJobs: () => this.saveJobs(),
+        syncJobToRuntime: (changed, source) => this.syncJobToRuntime(changed, source),
+        emitJobUpdated: (changed, fields) => this.emitJobUpdated(changed, fields),
       },
       this.timers,
       jobId,
@@ -966,6 +1010,61 @@ export class AutomationManager {
   }
 
   private readonly startingRuns = new Set<symbol>();
+  /** Whether a pass over the work waiting for a run slot is already queued. */
+  private capacityDrainQueued = false;
+
+  /**
+   * Takes a run slot in the same step as it checks one is free, so nothing can
+   * take it between the check and the start. Returns its release (safe to call
+   * more than once), or null at the concurrency limit. Releasing a slot, like a
+   * run ending, starts the work waiting for one.
+   */
+  private tryReserveRun(): (() => void) | null {
+    if (this.activeRunCount() >= this.maxConcurrentRuns()) return null;
+    const reservation = Symbol('automation run slot');
+    this.startingRuns.add(reservation);
+    return () => {
+      if (this.startingRuns.delete(reservation)) this.runSlotFreed();
+    };
+  }
+
+  /** A run left the running count: start the work waiting for a slot, once the current step has finished. */
+  private runSlotFreed(): void {
+    if (this.capacityWaits.size === 0 || this.capacityDrainQueued) return;
+    this.capacityDrainQueued = true;
+    queueMicrotask(() => {
+      this.capacityDrainQueued = false;
+      this.drainCapacityWaits();
+    });
+  }
+
+  /**
+   * Starts the scheduled occurrences and retries waiting for a run slot, oldest
+   * first, while a slot can be taken; each is handed the slot taken for it.
+   * A wait whose job was disabled, edited to another time or removed gives its
+   * slot back and is dropped.
+   */
+  private drainCapacityWaits(): void {
+    if (!this.running) return;
+    const waiting = [...this.capacityWaits.entries()].sort(([, a], [, b]) => a.since - b.since);
+    for (const [key, wait] of waiting) {
+      if (this.capacityWaits.get(key) !== wait) continue;
+      if (!this.capacityWaitCurrent(key, wait)) {
+        this.capacityWaits.delete(key);
+        continue;
+      }
+      const release = this.tryReserveRun();
+      if (!release) return;
+      wait.resume(release);
+    }
+  }
+
+  /** Whether a wait still stands for work that is due: see AutomationCapacityWait. */
+  private capacityWaitCurrent(key: string, wait: AutomationCapacityWait): boolean {
+    const job = this.jobs.get(wait.jobId);
+    if (wait.kind === 'retry') return job !== undefined;
+    return key === scheduleCapacityWaitKey(wait.jobId) && job?.enabled === true && job.nextRunAt === wait.nextRunAt;
+  }
 
   private async executeJob(
     job: AutomationJob,
@@ -973,13 +1072,13 @@ export class AutomationManager {
     dueRun: boolean,
     attempt = 1,
     operation?: ExternalOperationSource,
+    reserved?: () => void,
   ): Promise<AutomationRun> {
-    if (this.activeRunCount() >= this.maxConcurrentRuns()) {
+    // A caller that took its run slot already (a scheduled occurrence held it across its group claim) hands it over.
+    const release = reserved ?? this.tryReserveRun();
+    if (!release) {
       throw new Error(`Automation concurrency limit reached (${this.maxConcurrentRuns()})`);
     }
-    const reservation = Symbol(job.id);
-    this.startingRuns.add(reservation);
-    const release = () => { this.startingRuns.delete(reservation); };
     // The run's fence: its own generation, under the manager's scope and, for a job the group shares, the role.
     const issuer = new FenceIssuer(`automation job ${job.id}`);
     const shared = this.group !== null && this.sharedWithGroup(job) && this.group.shared();
@@ -1022,6 +1121,7 @@ export class AutomationManager {
       saveJobs: () => this.saveJobs(),
       saveRuns: () => this.saveRuns(),
       pruneRunHistory: () => this.pruneRunHistory(),
+      track: (work) => this.trackDelivery(work),
     });
   }
 
@@ -1036,7 +1136,9 @@ export class AutomationManager {
       emitRunCompleted: (job, run, outcome, failure) => this.emitRunCompleted(job, run, outcome, failure),
       followUp: this.failureFollowUpContext(),
       emitJobAutoDisabled: (job, reason) => this.emitJobAutoDisabled(job, reason),
+      delivery: { deliveryManager: this.deliveryManager, unattendedRuns: this.unattendedRuns },
       maybeDeliverRun: (job, run) => this.maybeDeliverRun(job, run),
+      runEnded: () => this.runSlotFreed(),
       applyFailureToJob: (job, timestamp, countRun) => this.applyFailureToJob(job, timestamp, countRun),
       removeJobRecord: (jobId, reason) => this.removeJobRecord(jobId, reason),
     };
@@ -1076,18 +1178,13 @@ export class AutomationManager {
   /**
    * Run slots in use and the work waiting for one: pending heartbeat wakes,
    * and scheduled occurrences and retries put off at the concurrency limit.
-   * A wait whose job was disabled, edited to another time or removed, or whose
-   * retry was cleared, is dropped here.
+   * A wait whose job was disabled, edited to another time or removed is dropped here.
    */
   getSchedulerCapacity(): SchedulerCapacityReport {
     const waitingSince: number[] = [];
     for (const wake of this.heartbeatWakes.values()) waitingSince.push(wake.queuedAt);
     for (const [key, wait] of this.capacityWaits) {
-      const job = this.jobs.get(wait.jobId);
-      const current = wait.kind === 'retry'
-        ? this.retryTimers.has(wait.retryKey)
-        : key === scheduleCapacityWaitKey(wait.jobId) && job?.enabled === true && job.nextRunAt === wait.nextRunAt;
-      if (current) waitingSince.push(wait.since);
+      if (this.capacityWaitCurrent(key, wait)) waitingSince.push(wait.since);
       else this.capacityWaits.delete(key);
     }
     return computeSchedulerCapacity(this.maxConcurrentRuns(), this.activeRunCount(), waitingSince);
@@ -1126,9 +1223,8 @@ export class AutomationManager {
       admitted: this.workAdmitted,
       capacityWaits: this.capacityWaits,
       deliveryManager: this.deliveryManager,
-      activeRunCount: () => this.activeRunCount(),
-      maxConcurrentRuns: () => this.maxConcurrentRuns(),
-      executeJob: (scheduledJob, trigger, dueRun, attempt) => this.executeJob(scheduledJob, trigger, dueRun, attempt),
+      tryReserveRun: () => this.tryReserveRun(),
+      executeJob: (scheduledJob, trigger, dueRun, attempt, reserved) => this.executeJob(scheduledJob, trigger, dueRun, attempt, undefined, reserved),
       saveJobs: () => this.saveJobs(),
       scheduleJob: (scheduledJob) => this.scheduleJob(scheduledJob),
       deliverFailureNotice: (failureJob, failureRun) => this.maybeDeliverFailureNotice(failureJob, failureRun),
@@ -1152,16 +1248,23 @@ export class AutomationManager {
   }
 
   private maybeDeliverFailureNotice(job: AutomationJob, run: AutomationRun): void {
-    this.trackDelivery(maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun) => {
-      // No target: the notice goes to the owner inbox, so a failed or missed unattended run is never silent.
-      if (this.unattendedRuns) {
-        this.trackDelivery(this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun)).then(() => {}));
+    this.trackDelivery(maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun, reason) => {
+      // The notice reached no one: it goes to the owner inbox, so a failed or missed unattended run is never silent.
+      if (!this.unattendedRuns) {
+        this.warnUndeliveredNotice(gapJob, gapRun, reason ?? 'the job names no delivery target and there is no owner inbox in this process');
         return;
       }
-      if (this.warnedDeliveryGapJobs.has(gapJob.id)) return;
-      this.warnedDeliveryGapJobs.add(gapJob.id);
-      logger.warn('AutomationManager: failure notice has no delivery target', { jobId: gapJob.id, jobName: gapJob.name, runId: gapRun.id, status: gapRun.status });
+      this.trackDelivery(this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun), reason).then((receipt) => {
+        if (receipt.to === 'nowhere') this.warnUndeliveredNotice(gapJob, gapRun, receipt.reason);
+      }));
     }));
+  }
+
+  /** A failure notice that reached neither a target nor the owner inbox: logged once per job. */
+  private warnUndeliveredNotice(job: AutomationJob, run: AutomationRun, reason: string): void {
+    if (this.warnedDeliveryGapJobs.has(job.id)) return;
+    this.warnedDeliveryGapJobs.add(job.id);
+    logger.warn('AutomationManager: a failure notice reached no one', { jobId: job.id, jobName: job.name, runId: run.id, status: run.status, reason });
   }
 
   private syncRuntimeSnapshot(): void {

@@ -1,18 +1,31 @@
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireHookApi } from './runtime-services.ts';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import type { HookApi } from '@goodvibes/engine/platform/platform/hooks';
+import type { TerminalCommandRegistry } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
+import { requireContextValue } from './command-service-access.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { CommandActionContext } from './command-actions/types.js';
+import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
 /**
- * `/hooks`, described once (command-actions/): see the hook points and the
- * managed hooks file, make, switch on or off and remove managed hooks and
- * chains, try which hooks an event would run, and move hooks between machines.
+ * `/hooks`, described once (command-actions/) for both terminal apps, since
+ * both load the hooks file: see the hook points and the managed hooks file,
+ * make, switch on or off and remove managed hooks and chains, try which hooks
+ * an event would run, and move hooks between machines.
  */
+
+/** What `/hooks` reads from a product's command context. */
+export interface HooksCommandContext extends CommandActionContext {
+  readonly clients?: { readonly hookApi?: HookApi | undefined } | undefined;
+  /** The full-screen hooks view, where the product has one. */
+  readonly openHooksView?: (() => void) | undefined;
+}
+
+const requireHookApi = (ctx: HooksCommandContext): HookApi => requireContextValue(ctx.clients?.hookApi, 'clients.hookApi');
 
 const TERMINAL_ONLY = 'Managed hooks are kept in this machine\'s hooks file.';
 
-const MANAGED_HOOKS = defineList<CommandContext>({
+const MANAGED_HOOKS = defineList<HooksCommandContext>({
   name: 'hooks.managed',
   async read(ctx) {
     const workbench = requireHookApi(ctx).workbench;
@@ -33,8 +46,8 @@ const HOOK_TYPES = [
   { value: 'ts', label: 'Run a TypeScript file' },
 ];
 
-export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
+export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>): void {
+  registry.register(defineCommand<Ctx>({
     name: 'hooks',
     title: 'Hooks',
     summary: 'Run your own steps when things happen: before a tool runs, after a turn, and more',
@@ -46,7 +59,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
       { label: 'Try and move hooks', actions: ['simulate', 'reload', 'export', 'inspect', 'import'] },
     ],
     actions: [
-      readAction<CommandContext>({
+      readAction<Ctx>({
         id: 'contracts', label: 'See the hook points and your hooks', word: 'contracts',
         inputs: [textInput({ id: 'filter', label: 'Only those about', help: 'Words to narrow the list', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'all of them' } })],
         sentence: 'Shows each hook point {filter}, what a hook there may do, and the managed hooks file.', example: { filter: 'tool' },
@@ -67,7 +80,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           return lines.join('\n');
         },
       }),
-      doAction<CommandContext>({
+      doAction<Ctx>({
         id: 'open', label: 'Open the hooks screen', word: 'open', touches: 'reads',
         sentence: 'Opens the full-screen view of hook points and managed hooks.', operator: { terminalOnly: 'It is a terminal screen.' },
         async run(_values, ctx) {
@@ -137,7 +150,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           return `Removed managed hook entry ${values.hook}.`;
         },
       },
-      readAction<CommandContext>({
+      readAction<Ctx>({
         id: 'simulate', label: 'See which hooks an event would run', word: 'simulate',
         inputs: [textInput({ id: 'event', label: 'Event', help: 'An event path, such as Pre:tool:exec', why: 'an event path', typed: { position: 1 } })],
         sentence: 'Shows the hooks and chains that {event} would run; nothing runs.', example: { event: 'Pre:tool:exec' },
@@ -152,7 +165,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           ].join('\n');
         },
       }),
-      doAction<CommandContext>({
+      doAction<Ctx>({
         id: 'reload', label: 'Read the hooks file again', word: 'reload',
         sentence: 'The managed hooks file is read again, so edits made by hand take effect now.', operator: { terminalOnly: TERMINAL_ONLY },
         async run(_values, ctx) {
@@ -161,7 +174,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           return `Read the managed hooks again from ${workbench.getFilePath()}`;
         },
       }),
-      doAction<CommandContext>({
+      doAction<Ctx>({
         id: 'export', label: 'Save the hooks to a file', word: 'export',
         inputs: [{ ...FILE, help: 'Where to write the bundle', typed: { position: 1 }, required: { default: '', defaultMeans: 'the hooks file itself' } }],
         sentence: 'Every managed hook and chain is written to {path} as a bundle.', operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'hooks-bundle.json' },
@@ -170,7 +183,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
           return `Saved the managed hooks to ${await workbench.export(values.path || workbench.getFilePath())}`;
         },
       }),
-      readAction<CommandContext>({
+      readAction<Ctx>({
         id: 'inspect', label: 'Look inside a hooks bundle', word: 'inspect', inputs: [FILE],
         sentence: 'Shows how many hooks and chains {path} holds and their hook points; nothing is installed.', example: { path: 'hooks-bundle.json' },
         async run(values, ctx) {

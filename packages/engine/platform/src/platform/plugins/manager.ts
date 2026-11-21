@@ -146,7 +146,14 @@ function copyIdentity(discovered: DiscoveredPlugin): { readonly dir: string; rea
   return { dir: resolve(discovered.pluginDir), digest: pluginContentDigest(discovered) };
 }
 
-const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
+function emptyState(): PluginState {
+  return { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
+}
+
+/** The lock serialising read-change-write of one plugin state file across processes. */
+function stateLockPath(stateFile: string): string {
+  return `${stateFile}.writer.sqlite`;
+}
 
 export interface PluginManagerOptions {
   readonly pathOptions: PluginPathOptions;
@@ -218,7 +225,14 @@ export interface PluginShutdownStatus {
  */
 export class PluginManager {
   private plugins = new Map<string, LoadedPlugin>();
-  private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
+  /**
+   * The state file as last read or written. Every window of a product shares
+   * the file, so it is read again whenever its identity changes, and every
+   * change is a locked read-change-write of the file itself.
+   */
+  private state: PluginState = emptyState();
+  /** Identity of the state file when it was last read or written. */
+  private stateFileIdentity: string | undefined;
   /** Lifecycle operations run one at a time, in the order they were asked for. */
   private operationTail: Promise<unknown> = Promise.resolve();
   private deps: PluginLoaderDeps | undefined;
@@ -267,7 +281,8 @@ export class PluginManager {
       if (deps.inFlight) this.inFlight = deps.inFlight;
       // Each start reads the plugin's current tier, including one another app set since.
       this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName, copy) => this.tierOf(pluginName, copy) };
-      this.loadState();
+      this.refreshState();
+      this.loadTrust();
       await this.loadEnabledPlugins();
     });
   }
@@ -304,11 +319,11 @@ export class PluginManager {
   }
 
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined {
-    return this.state.quarantine[name];
+    return this.currentState().quarantine[name];
   }
 
   private isQuarantined(name: string): boolean {
-    return isQuarantineActive(this.state.quarantine[name]);
+    return isQuarantineActive(this.currentState().quarantine[name]);
   }
 
   /**
@@ -359,7 +374,7 @@ export class PluginManager {
    */
   trustSigned(
     name: string,
-    publicKey: string | undefined = this.state.publisherKeys[name],
+    publicKey: string | undefined = this.currentState().publisherKeys[name],
   ): PluginTrustChangeResult & {
     fingerprint?: string | undefined;
     /** Set only when the manifest's signature did not verify; any other failure (closed manager, unknown plugin, unsaved record) leaves it unset. */
@@ -408,18 +423,14 @@ export class PluginManager {
     } catch {
       return { ok: false, error: 'The file is not a readable public key (PEM); ask the publisher for their Ed25519 public key file.' };
     }
-    const prior = this.state.publisherKeys[name];
-    const failure = this.commitState(
-      () => { this.state.publisherKeys[name] = publicKeyPem; },
-      () => { if (prior !== undefined) this.state.publisherKeys[name] = prior; else delete this.state.publisherKeys[name]; },
-    );
+    const failure = this.updateState((state) => { state.publisherKeys[name] = publicKeyPem; });
     return failure ? { ok: false, error: `The publisher key for '${name}' was not saved, ${failure}` } : { ok: true };
   }
 
   /**
    * verify, Inspect a plugin's manifest signature without changing its tier.
    */
-  verify(name: string, publicKey: string | undefined = this.state.publisherKeys[name]): { ok: boolean } & SignatureValidationResult {
+  verify(name: string, publicKey: string | undefined = this.currentState().publisherKeys[name]): { ok: boolean } & SignatureValidationResult {
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
       return { ok: false, valid: false, reason: this.notFoundError(name) };
@@ -491,7 +502,7 @@ export class PluginManager {
     }
 
     const record: QuarantineRecord = { pluginName: name, quarantinedAt: Date.now(), reason, lifted: false };
-    const failure = this.commitState(() => { this.state.quarantine[name] = record; }, this.undoQuarantine(name));
+    const failure = this.updateState((state) => { state.quarantine[name] = record; });
     if (failure) return { ok: false, error: `Quarantine of '${name}' was not saved, ${failure}` };
     logger.warn(`[plugins] ${name}: quarantined, ${reason}`);
 
@@ -522,10 +533,11 @@ export class PluginManager {
     if (!this.isQuarantined(name)) {
       return { ok: false, error: `Plugin '${name}' is not quarantined` };
     }
-    const current = this.state.quarantine[name];
-    if (!current) return { ok: false, error: `Plugin '${name}' is not quarantined` };
-    const lifted: QuarantineRecord = { ...current, lifted: true, liftedAt: Date.now() };
-    const failure = this.commitState(() => { this.state.quarantine[name] = lifted; }, this.undoQuarantine(name));
+    const liftedAt = Date.now();
+    const failure = this.updateState((state) => {
+      const current = state.quarantine[name];
+      if (current) state.quarantine[name] = { ...current, lifted: true, liftedAt };
+    });
     if (failure) return { ok: false, error: `Lifting the quarantine of '${name}' was not saved, ${failure}` };
     logger.info(`[plugins] ${name}: quarantine lifted`);
     this.notifySubscribers();
@@ -535,13 +547,16 @@ export class PluginManager {
   /** Enable a plugin by name. Loads it immediately if deps are available. */
   enable(name: string): Promise<{ ok: boolean; error?: string }> {
     return this.ownOperation(async () => {
-      // A flag with no recorded directory is one the repository copy was refused
-      // under; enabling again is how the owner chooses a copy.
-      if (this.isEnabled(name) && (this.plugins.has(name) || this.state.enabledDirs[name] !== undefined)) {
-        return { ok: false, error: `Plugin '${name}' is already enabled` };
+      // Only a running plugin is refused. One that is enabled but not running
+      // (its start failed, its quarantine was lifted, or the copy it was enabled
+      // from moved) is started here, and a flag with no recorded directory is
+      // bound to the copy the owner enables now.
+      if (this.plugins.has(name)) {
+        return { ok: false, error: `Plugin '${name}' is already enabled and running` };
       }
 
-      const discovered = this.findDiscoveredPlugin(name);
+      // The copy it is already bound to when that copy is still present; else the first one found.
+      const discovered = this.copyOf(name) ?? this.findDiscoveredPlugin(name);
       if (!discovered) {
         return { ok: false, error: this.notFoundError(name) };
       }
@@ -550,10 +565,14 @@ export class PluginManager {
         return { ok: false, error: `Plugin '${name}' is quarantined and will not load; lift the quarantine first` };
       }
 
-      const failure = this.commitState(() => {
-        this.state.enabled[name] = true;
-        this.state.enabledDirs[name] = resolve(discovered.pluginDir);
-      }, this.undoEnabled(name));
+      let priorEnabled: boolean | undefined;
+      let priorDir: string | undefined;
+      const failure = this.updateState((state) => {
+        priorEnabled = state.enabled[name];
+        priorDir = state.enabledDirs[name];
+        state.enabled[name] = true;
+        state.enabledDirs[name] = resolve(discovered.pluginDir);
+      });
       if (failure) return { ok: false, error: `Plugin '${name}' was not enabled, the change could not be saved: ${failure}` };
 
       if (this.deps) {
@@ -565,11 +584,20 @@ export class PluginManager {
           // The admitted operator preference was already saved. Shutdown can
           // refuse registrations during init; retain that intent for restart.
           if (this.closed) return { ok: false, error: 'Plugin manager closed during enable; enabled preference retained' };
-          // Revert enable on load failure
-          delete this.state.enabled[name];
-          delete this.state.enabledDirs[name];
-          this.saveState();
-          return { ok: false, error: `Plugin '${name}' did not start and was left disabled: ${failure ?? 'see the log for the reason'}` };
+          const reason = failure ?? 'see the log for the reason';
+          // Put back what the state file held before this call: a plugin that
+          // was enabled stays enabled, a first enable is left disabled.
+          const unsaved = this.updateState((state) => {
+            if (priorEnabled === undefined) delete state.enabled[name]; else state.enabled[name] = priorEnabled;
+            if (priorDir === undefined) delete state.enabledDirs[name]; else state.enabledDirs[name] = priorDir;
+          });
+          this.notifySubscribers();
+          if (unsaved !== undefined) {
+            return { ok: false, error: `Plugin '${name}' did not start: ${reason}. It is still enabled in the saved state and will be tried at the next start, because the change could not be saved: ${unsaved}` };
+          }
+          return priorEnabled === true
+            ? { ok: false, error: `Plugin '${name}' did not start and stays enabled: ${reason}` }
+            : { ok: false, error: `Plugin '${name}' did not start and was left disabled: ${reason}` };
         }
       }
 
@@ -598,9 +626,10 @@ export class PluginManager {
         this.plugins.delete(name);
       }
 
-      delete this.state.enabled[name];
-      delete this.state.enabledDirs[name];
-      const failure = this.saveState();
+      const failure = this.updateState((state) => {
+        delete state.enabled[name];
+        delete state.enabledDirs[name];
+      });
       this.notifySubscribers();
       if (cleanupError !== undefined) throw cleanupError;
       // The plugin is stopped now, but a state file that was not written
@@ -621,7 +650,8 @@ export class PluginManager {
   reload(options: { readonly quiesceTimeoutMs?: number | undefined } = {}): Promise<PluginReloadSummary> {
     return this.ownOperation(async () => {
       const quiesceTimeoutMs = options.quiesceTimeoutMs ?? DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS;
-      const names = Object.keys(this.state.enabled).filter((n) => this.state.enabled[n]);
+      const enabled = this.currentState().enabled;
+      const names = Object.keys(enabled).filter((n) => enabled[n]);
       const loadedNames = names.filter((name) => this.plugins.has(name));
       let reloaded = 0;
       let failed = 0;
@@ -700,12 +730,12 @@ export class PluginManager {
 
   /** Returns whether a plugin is marked as enabled in persisted state. */
   isEnabled(name: string): boolean {
-    return this.state.enabled[name] === true;
+    return this.currentState().enabled[name] === true;
   }
 
   /** Returns plugin-specific config for a given plugin name. */
   getPluginConfig(name: string): Record<string, unknown> {
-    return this.state.config[name] ?? {};
+    return this.currentState().config[name] ?? {};
   }
 
   /**
@@ -953,11 +983,12 @@ export class PluginManager {
     const chosen: DiscoveredPlugin[] = [];
     const seen = new Set<string>();
     const refused = new Set<string>();
-    let adopted = false;
+    const adopted = new Map<string, string>();
+    const state = this.currentState();
     for (const candidate of all) {
       const name = candidate.manifest.name;
-      if (seen.has(name) || !this.isEnabled(name)) continue;
-      const bound = this.state.enabledDirs[name];
+      if (seen.has(name) || state.enabled[name] !== true) continue;
+      const bound = state.enabledDirs[name];
       if (bound === undefined) {
         // An enable recorded before directories were kept never said which copy
         // the owner meant. A copy inside the repository was not chosen by them,
@@ -967,8 +998,7 @@ export class PluginManager {
           refused.add(name);
           continue;
         }
-        this.state.enabledDirs[name] = resolve(candidate.pluginDir);
-        adopted = true;
+        adopted.set(name, resolve(candidate.pluginDir));
         seen.add(name);
         chosen.push(candidate);
         continue;
@@ -977,12 +1007,20 @@ export class PluginManager {
       seen.add(name);
       chosen.push(candidate);
     }
-    for (const name of Object.keys(this.state.enabled)) {
-      if (this.state.enabled[name] && !seen.has(name) && !refused.has(name) && all.some((p) => p.manifest.name === name)) {
-        logger.warn(`[plugins] ${name}: not loaded, it was enabled from '${this.state.enabledDirs[name]}' and that copy is no longer present; enable it again to use the copy found now`);
+    for (const name of Object.keys(state.enabled)) {
+      if (state.enabled[name] && !seen.has(name) && !refused.has(name) && all.some((p) => p.manifest.name === name)) {
+        logger.warn(`[plugins] ${name}: not loaded, it was enabled from '${state.enabledDirs[name]}' and that copy is no longer present; enable it again to use the copy found now`);
       }
     }
-    if (adopted) this.saveState();
+    if (adopted.size > 0) {
+      const bind = (target: PluginState): void => {
+        for (const [name, dir] of adopted) {
+          if (target.enabled[name] === true && target.enabledDirs[name] === undefined) target.enabledDirs[name] = dir;
+        }
+      };
+      // A binding that could not be saved still applies to this start; the next start binds again.
+      if (this.updateState(bind) !== undefined) bind(this.state);
+    }
     return chosen;
   }
 
@@ -994,30 +1032,68 @@ export class PluginManager {
     return dir === resolve(repositoryRoot) || dir.startsWith(`${resolve(repositoryRoot)}${sep}`);
   }
 
-  private loadState(): void {
+  /** Reads the state file; a missing or unreadable-as-JSON file (which is set aside) reads as empty. */
+  private readStateFile(): PluginState {
+    const parsed = readJsonFileOrQuarantine<Partial<PluginState>>(this.stateFilePath, {
+      label: 'plugins/state',
+      recovery: 'Every plugin returns to its default enabled state, trust decisions must be made again, and any recorded quarantine is cleared.',
+      validate: (raw) => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+          throw new Error('plugin state file is not a JSON object');
+        }
+        return raw as Partial<PluginState>;
+      },
+    });
+    if (!parsed) return emptyState();
+    return {
+      enabled: parsed.enabled ?? {},
+      enabledDirs: parsed.enabledDirs ?? {},
+      config: parsed.config ?? {},
+      trust: parsed.trust ?? {},
+      quarantine: readQuarantineRecords(parsed.quarantine),
+      publisherKeys: parsed.publisherKeys ?? {},
+    };
+  }
+
+  /** Reads the state file again when another process changed it since it was last read (one stat). */
+  private refreshState(): void {
+    const identity = fileIdentity(this.stateFilePath);
+    if (identity === this.stateFileIdentity) return;
+    this.stateFileIdentity = identity;
     try {
-      const parsed = readJsonFileOrQuarantine<Partial<PluginState>>(this.stateFilePath, {
-        label: 'plugins/state',
-        recovery: 'Every plugin returns to its default enabled state, trust decisions must be made again, and any recorded quarantine is cleared.',
-        validate: (raw) => {
-          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-            throw new Error('plugin state file is not a JSON object');
-          }
-          return raw as Partial<PluginState>;
-        },
-      });
-      if (parsed) {
-        this.state.enabled = parsed.enabled ?? {};
-        this.state.enabledDirs = parsed.enabledDirs ?? {};
-        this.state.config = parsed.config ?? {};
-        this.state.trust = parsed.trust ?? {};
-        this.state.quarantine = readQuarantineRecords(parsed.quarantine);
-        this.state.publisherKeys = parsed.publisherKeys ?? {};
-      }
+      this.state = this.readStateFile();
     } catch (err) {
       logger.warn(`[plugins] Could not load state: ${summarizeError(err)}`);
     }
-    this.loadTrust();
+  }
+
+  /** The plugin state as the file holds it now. */
+  private currentState(): PluginState {
+    this.refreshState();
+    return this.state;
+  }
+
+  /**
+   * Changes the state file: under its lock, reads it as it stands, applies
+   * `change`, writes it atomically and adopts what was written. A change made
+   * by another process in between is kept. Returns the reason when the change
+   * could not be saved; nothing is changed then.
+   */
+  private updateState(change: (state: PluginState) => void): string | undefined {
+    try {
+      withProcessLockSync(stateLockPath(this.stateFilePath), () => {
+        const next = this.readStateFile();
+        change(next);
+        writeJsonFileAtomic(this.stateFilePath, next, { trailingNewline: false });
+        this.state = next;
+        this.stateFileIdentity = fileIdentity(this.stateFilePath);
+      });
+      return undefined;
+    } catch (err) {
+      const reason = summarizeError(err);
+      logger.warn(`[plugins] Could not save state: ${reason}`);
+      return reason;
+    }
   }
 
   /**
@@ -1026,7 +1102,7 @@ export class PluginManager {
    * shared file once (the newer decision wins) and dropped from this app's file.
    */
   private loadTrust(): void {
-    const own = this.state.trust;
+    const own = this.currentState().trust;
     const path = this.trustFilePath;
     if (!path) {
       if (Object.keys(own).length > 0) this.trustStore.importRecords(own);
@@ -1055,8 +1131,12 @@ export class PluginManager {
       this.trustFileIdentity = undefined;
       this.refreshSharedTrust();
     }
-    this.state.trust = {};
-    this.saveState();
+    // The records read above now live in the shared file (or a newer one does there) and leave this app's file.
+    this.updateState((state) => {
+      for (const name of Object.keys(own)) {
+        if (state.trust[name]?.updatedAt === own[name]?.updatedAt) delete state.trust[name];
+      }
+    });
   }
 
   /** The trust tiers as they stand now: the shared file is read again only when it changed (one stat). */
@@ -1091,7 +1171,7 @@ export class PluginManager {
   /** Saves one trust decision where tiers live; returns the reason when it could not be saved. */
   private saveTrustRecord(name: string, record: PluginTrustRecord): string | undefined {
     const path = this.trustFilePath;
-    if (!path) return this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    if (!path) return this.updateState((state) => { state.trust[name] = record; });
     try {
       // The file is shared by every app: read, merge and write under its lock,
       // so two apps saving different plugins at once both keep their record.
@@ -1105,45 +1185,6 @@ export class PluginManager {
       return summarizeError(err);
     }
     return undefined;
-  }
-
-  /** Writes the state file; returns the reason when it could not be written. */
-  private saveState(): string | undefined {
-    try {
-      writeJsonFileAtomic(this.stateFilePath, this.state, { trailingNewline: false });
-      return undefined;
-    } catch (err) {
-      const reason = summarizeError(err);
-      logger.warn(`[plugins] Could not save state: ${reason}`);
-      return reason;
-    }
-  }
-
-  /** Applies a state change and saves it; on a failed save the change is undone and the reason returned. */
-  private commitState(apply: () => void, undo: () => void): string | undefined {
-    apply();
-    const failure = this.saveState();
-    if (failure !== undefined) undo();
-    return failure;
-  }
-
-  private undoTrust(name: string): () => void {
-    const prior = this.state.trust[name];
-    return () => { if (prior) this.state.trust[name] = prior; else delete this.state.trust[name]; };
-  }
-
-  private undoQuarantine(name: string): () => void {
-    const prior = this.state.quarantine[name];
-    return () => { if (prior) this.state.quarantine[name] = prior; else delete this.state.quarantine[name]; };
-  }
-
-  private undoEnabled(name: string): () => void {
-    const priorEnabled = this.state.enabled[name];
-    const priorDir = this.state.enabledDirs[name];
-    return () => {
-      if (priorEnabled === undefined) delete this.state.enabled[name]; else this.state.enabled[name] = priorEnabled;
-      if (priorDir === undefined) delete this.state.enabledDirs[name]; else this.state.enabledDirs[name] = priorDir;
-    };
   }
 
   private discoverPlugins() {
@@ -1160,7 +1201,7 @@ export class PluginManager {
    * (a repository's own); the first one found only when it was never enabled.
    */
   private copyOf(name: string): DiscoveredPlugin | undefined {
-    const bound = this.state.enabledDirs[name];
+    const bound = this.currentState().enabledDirs[name];
     if (bound === undefined) return this.findDiscoveredPlugin(name);
     return discoverAllPlugins(this.pathOptions).find((plugin) => plugin.manifest.name === name && resolve(plugin.pluginDir) === bound);
   }

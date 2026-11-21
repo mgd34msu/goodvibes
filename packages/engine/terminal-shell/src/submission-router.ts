@@ -136,3 +136,59 @@ export function routeSubmissionIntent(input: SubmissionRouterInput, commands: Re
     }
     return { kind: 'prompt', label: 'prompt', hasAttachments };
 }
+/**
+ * The `!` commands running in one terminal, and the rule for a message sent
+ * while one runs: its output is attached only once the command has exited, so
+ * the message waits for every running command to finish, then goes with their
+ * output. Messages sent during a wait go in the order they were sent. Stopping
+ * the commands (Esc) ends the wait and the message goes with the partial output.
+ */
+export interface ShellCommandTracker {
+    /**
+     * Records a started command; `run` settles when it has finished and its
+     * output is held. The returned promise resolves once it is no longer counted.
+     */
+    readonly track: (command: string, run: Promise<unknown>) => Promise<void>;
+    /** How many commands are running. */
+    readonly running: () => number;
+    /** Resolves once every command started so far, and any started meanwhile, has finished. */
+    readonly settled: () => Promise<void>;
+    /** Runs `send` now when nothing runs and no message is waiting; otherwise after the commands finish, in order. */
+    readonly afterShellCommands: (send: () => unknown) => void;
+}
+export function createShellCommandTracker(ports: {
+    readonly notify: (message: string) => void;
+    readonly render: () => void;
+    /** A send that threw after waiting: shown, since nobody awaits it. */
+    readonly sendFailed: (error: unknown) => void;
+}): ShellCommandTracker {
+    const running = new Map<Promise<void>, string>();
+    let waiting: Promise<void> | null = null;
+    const settled = async (): Promise<void> => {
+        while (running.size > 0)
+            await Promise.allSettled([...running.keys()]);
+    };
+    return {
+        track(command, run) {
+            const tracked: Promise<void> = run.then(() => undefined, () => undefined).finally(() => { running.delete(tracked); });
+            running.set(tracked, command);
+            return tracked;
+        },
+        running: () => running.size,
+        settled,
+        afterShellCommands(send) {
+            if (running.size === 0 && waiting === null) {
+                send();
+                return;
+            }
+            if (running.size > 0) {
+                const names = [...new Set(running.values())].map((command) => `\`!${command}\``).join(', ');
+                ports.notify(`Waiting for ${names} to finish so ${running.size === 1 ? 'its' : 'their'} output goes with your message; Esc stops ${running.size === 1 ? 'it' : 'them'}.`);
+                ports.render();
+            }
+            const next = (waiting ?? Promise.resolve()).then(settled).then(async () => { await send(); }).catch(ports.sendFailed);
+            waiting = next;
+            void next.finally(() => { if (waiting === next) waiting = null; });
+        },
+    };
+}

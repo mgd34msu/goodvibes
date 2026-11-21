@@ -1,5 +1,4 @@
 import { taskDetailLines } from '@goodvibes/engine/terminal-shell/task-presentation';
-import '@goodvibes/engine/terminal-shell/task-presentation';
 /**
  * `/tasks`, the Agent's read-only view of runtime tasks.
  *
@@ -16,7 +15,6 @@ import '@goodvibes/engine/terminal-shell/task-presentation';
  */
 import type { CommandContext } from '../command-registry.ts';
 
-import '@goodvibes/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 

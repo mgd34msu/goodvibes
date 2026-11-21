@@ -8,7 +8,6 @@ import {
 import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import '@goodvibes/engine/platform/platform/utils';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { setSettingValue } from './setting-write.ts';

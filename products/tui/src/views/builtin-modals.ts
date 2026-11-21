@@ -1,3 +1,4 @@
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createNativeWorkLedgerModalSurface } from './modals/native-work-ledger-modal.ts';
 import type { ModalSurfaceRegistry } from './modal-surface-registry.ts';
 import type { ResolvedBuiltinViewDeps } from './view-deps.ts';
@@ -89,8 +90,8 @@ export function registerBuiltinModals(
     ecosystemPaths: {
       cwd: ui.environment.shellPaths.workingDirectory,
       homeDir: ui.environment.shellPaths.homeDirectory,
-      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath('tui', 'ecosystem'),
-      userCatalogRoot: ui.environment.shellPaths.resolveUserPath('tui', 'ecosystem'),
+      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
+      userCatalogRoot: ui.environment.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
     },
   }));
   manager.registerModalRedirect('marketplace', 'marketplace-modal');
@@ -113,8 +114,8 @@ export function registerBuiltinModals(
     ecosystemPaths: {
       cwd: ui.environment.shellPaths.workingDirectory,
       homeDir: ui.environment.shellPaths.homeDirectory,
-      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath('tui', 'ecosystem'),
-      userCatalogRoot: ui.environment.shellPaths.resolveUserPath('tui', 'ecosystem'),
+      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
+      userCatalogRoot: ui.environment.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
     },
   }));
   manager.registerModalRedirect('skills', 'skills-modal');

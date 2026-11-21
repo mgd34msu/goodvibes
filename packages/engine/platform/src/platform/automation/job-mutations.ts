@@ -91,6 +91,25 @@ export interface AutomationJobMutationOptions {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
   readonly withPublication?: MutationPublication | undefined;
+  /** CHECKIN_JOB_OWNER when the check-in settings are changing their own job; nothing else passes it. */
+  readonly owner?: typeof CHECKIN_JOB_OWNER | undefined;
+}
+
+/**
+ * The check-in settings own the `kind: 'checkin'` job: only CheckinService,
+ * keeping the job in step with checkin.*, removes, enables, disables,
+ * reschedules or re-kinds it, and it marks those calls with this.
+ */
+export const CHECKIN_JOB_OWNER: unique symbol = Symbol('check-in settings');
+
+/** A change to the check-in job made other than through the check-in settings. */
+export class AutomationCheckinJobOwnedError extends Error {
+  readonly code = 'INVALID_ARGUMENT';
+  readonly status = 400;
+  constructor(change: string) {
+    super(`The check-in job is kept by the check-in settings, so it cannot be ${change} here. Use checkin.config.set: enabled false stops check-ins, enabled true starts them, and cadence changes when they run. Nothing was changed.`);
+    this.name = 'AutomationCheckinJobOwnedError';
+  }
 }
 
 export class AutomationJobMutationStaleError extends Error {

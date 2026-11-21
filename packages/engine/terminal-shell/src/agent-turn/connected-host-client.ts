@@ -30,7 +30,7 @@ import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from
 import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes/engine/operator-client';
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
-import { connectedHostBaseUrl } from './connected-host-dial.js';
+import { resolveConnectedHostAddress, type ConnectedHostAddressKey } from './connected-host-dial.js';
 import {
   connectedHostOperatorTokenPath,
   readConnectedHostOperatorToken,
@@ -94,8 +94,11 @@ export interface HostRefusal {
 
 /** Why a credential is not usable, carried on a connection whose token is null. */
 export interface ConnectedHostUnavailable {
-  /** `host_too_old`: the attached daemon's build is below what this Agent build needs (its build verdict). */
-  readonly code: 'dial_disabled' | 'no_credential' | 'credential_unreadable' | 'source_not_accepted' | 'host_too_old';
+  /**
+   * `host_too_old`: the attached daemon's build is below what this Agent build needs (its build verdict).
+   * `address_unstated`: the host is another machine and no origin with its scheme was stated (connected-host-dial.ts).
+   */
+  readonly code: 'dial_disabled' | 'address_unstated' | 'no_credential' | 'credential_unreadable' | 'source_not_accepted' | 'host_too_old';
   readonly reason: string;
   readonly next: readonly string[];
 }
@@ -335,7 +338,8 @@ function dialSettingValue(value: unknown): boolean | string | number | undefined
 export function resolveConnectedHost(selection: ConnectedHostSelection): ConnectedHostConnection {
   if (selection.inProcess) return selection.inProcess.connection();
   const { configManager } = selection;
-  const baseUrl = connectedHostBaseUrl(configManager.get('controlPlane.host'), configManager.get('controlPlane.port'));
+  const address = resolveConnectedHostAddress({ get: (key: ConnectedHostAddressKey) => configManager.get(key) });
+  const { baseUrl } = address;
   if (!resolveConnectedHostDialEnabled({ get: key => dialSettingValue(configManager.get(key)) })) {
     return {
       baseUrl, token: null, credential: 'daemon.connectedHost.enabled',
@@ -343,6 +347,16 @@ export function resolveConnectedHost(selection: ConnectedHostSelection): Connect
         code: 'dial_disabled',
         reason: 'this Agent is set not to dial a connected host (daemon.connectedHost.enabled is false)',
         next: ['set daemon.connectedHost.enabled to true in settings, then retry'],
+      },
+    };
+  }
+  if (address.refusal) {
+    return {
+      baseUrl, token: null, credential: 'daemon.connectedHost.url',
+      unavailable: {
+        code: 'address_unstated',
+        reason: address.refusal,
+        next: ['set daemon.connectedHost.url to the host\'s https:// or http:// origin in settings, then retry'],
       },
     };
   }
@@ -540,6 +554,16 @@ async function classifyFailure(error: unknown, facts: CallFacts): Promise<HostFa
           next: ['use a credential the host grants this scope to, then retry'],
         });
       case 'not_found': {
+        // The host names a missing record with its own code (SESSION_NOT_FOUND and the like);
+        // only an unknown route or method (METHOD_NOT_FOUND, or a bare 404) says anything about the host's version.
+        const bodyCode = error instanceof GoodVibesError ? error.code : undefined;
+        if (bodyCode !== undefined && bodyCode !== 'METHOD_NOT_FOUND' && bodyCode !== 'NOT_FOUND') {
+          return failure('connected_host_error', 'no', {
+            code: 'not_found', status, reason, retryable: false,
+            state: `the connected host has no such record (${bodyCode})`,
+            next: [error instanceof GoodVibesError && error.next?.[0] ? error.next[0] : 'check the id with the matching list, then retry'],
+          });
+        }
         // A 404 alone cannot tell a host older than this Agent from no GoodVibes host at all.
         const answers = (await fetchConnectedHostStatus({ baseUrl: connection.baseUrl, token: connection.token, fetch: facts.fetchImpl },
           { signal: facts.callerSignal })).ok;
@@ -552,7 +576,7 @@ async function classifyFailure(error: unknown, facts: CallFacts): Promise<HostFa
           : failure('connected_host_route_unavailable', 'no', {
             code: 'route_unavailable', status, reason, retryable: false,
             state: `nothing at ${connection.baseUrl} served ${route} or /status`,
-            next: ['check that controlPlane.host and controlPlane.port point at the GoodVibes daemon, then retry'],
+            next: ['check that daemon.connectedHost.url (or, for the daemon on this machine, controlPlane.host and controlPlane.port) points at the GoodVibes daemon, then retry'],
           });
       }
       case 'timeout':
@@ -611,7 +635,7 @@ async function classifyFailure(error: unknown, facts: CallFacts): Promise<HostFa
       state: `the connected host at ${connection.baseUrl} could not be reached`,
       reason: hostMessage(error) + (code && !hostMessage(error).includes(code) ? ` (${code})` : ''),
       next: [refused || isRead
-        ? 'start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port, then retry'
+        ? 'start the GoodVibes daemon (goodvibes-daemon), or check daemon.connectedHost.url (for the daemon on this machine, controlPlane.host and controlPlane.port), then retry'
         : checkFirst],
     });
   }
@@ -694,6 +718,12 @@ export function createConnectedHost(
       return refuse('connected_host_incompatible', {
         code: 'host_too_old', reason: resolved.unavailable.reason, next: resolved.unavailable.next, retryable: false,
         state: `the GoodVibes host at ${resolved.baseUrl} is older than this Agent build needs`,
+      });
+    }
+    if (resolved.token === null && resolved.unavailable?.code === 'address_unstated') {
+      return refuse('connected_host_unavailable', {
+        code: 'address_unstated', reason: resolved.unavailable.reason, next: resolved.unavailable.next, retryable: false,
+        state: 'nothing was sent',
       });
     }
     if (resolved.token === null) {

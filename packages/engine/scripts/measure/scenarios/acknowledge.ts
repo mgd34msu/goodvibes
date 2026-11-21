@@ -193,7 +193,7 @@ const channelReplyFinal: Scenario = {
 const automationRunSettle: Scenario = {
   name: 'automation-run-settle',
   drives: 'A scheduled run whose agent completed is settled by the automation manager (listJobs -> reconcile -> settleAutomationRun) and its result delivered to the job\'s one ntfy target on a loopback server (AutomationDeliveryManager.deliverJobRun); counted until the run records its delivery id. The run is started by runNow before each measured run.',
-  entries: [`${P}/automation/manager-runtime-reconcile.ts:117 settleAutomationRun`, `${P}/automation/manager-runtime-delivery.ts maybeDeliverAutomationRun`, `${P}/automation/delivery-manager.ts AutomationDeliveryManager.deliverJobRun`],
+  entries: [`${P}/automation/manager-runtime-reconcile.ts:148 settleAutomationRun`, `${P}/automation/manager-runtime-delivery.ts maybeDeliverAutomationRun`, `${P}/automation/delivery-manager.ts AutomationDeliveryManager.deliverJobRun`],
   async setup(env): Promise<Instance> {
     const judgment = decisions(env, 'daemon');
     const ntfy = await recorder();

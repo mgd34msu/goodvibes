@@ -20,10 +20,13 @@
  *  4. Without a reading, nothing is marked as unable to be undone unless code
  *     recognised it, and the details say it was not checked.
  *
- * Pure: one parse of each command string the call carries, no I/O.
+ * Cost: one parse of each command string the call carries; for the undo
+ * fact, one stat and read per shell script a command runs (the same reading
+ * of commands the gate makes, gate/command-walk.ts).
  */
 import { basename } from 'node:path';
-import { firstProgramAnswer, unrecoverableDeletionIn, fileOperationDestroys } from '../gate/unrecoverable-commands.js';
+import { unrecoverableDeletionIn, fileOperationDestroys } from '../gate/unrecoverable-commands.js';
+import { walkCommands } from '../gate/command-walk.js';
 import { splitShellCommand, extractCommandArgs } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import type { GateRiskFamily } from '../gate/batteries/risk-family.js';
@@ -130,17 +133,24 @@ function programEffect(name: string, args: readonly string[]): CommandEffect | u
 export function commandEffect(command: string): CommandEffect | undefined {
   const split = splitShellCommand(command);
   if (split.opaque || split.segments.length !== 1) return undefined;
-  return firstProgramAnswer([command], programEffect, () => undefined);
+  // The sentence is about the command line itself: a script it runs is not read for it.
+  return walkCommands<CommandEffect>([command], (run) => programEffect(run.name, run.args), {
+    directory: undefined, tooDeep: () => undefined, onScriptTooLarge: () => undefined, readScripts: false,
+  });
 }
 
-/** Why code alone says a call cannot be undone, or undefined. Never an unread or uncertain guess. */
-export function codeUndoFact(toolName: string, args: Record<string, unknown>, ownerOnly?: OwnerOnlyKind | undefined): string | undefined {
+/**
+ * Why code alone says a call cannot be undone, or undefined. Never an unread or
+ * uncertain guess. `directory` is where a relative script path is read from.
+ */
+export function codeUndoFact(toolName: string, args: Record<string, unknown>, ownerOnly: OwnerOnlyKind | undefined,
+  directory: string | undefined): string | undefined {
   // A tool that declares the operator act irreversible is the tool's own fact.
   if (ownerOnly === 'irreversible-operator') return 'the tool declares this cannot be undone';
   const commands = extractCommandArgs(args);
-  const destroys = commands.length > 0 ? unrecoverableDeletionIn(commands) : undefined;
-  // A command nested too deeply to read is not known to destroy anything; the gate asks, but nothing is claimed.
-  if (destroys !== undefined && !/nested too deeply to read$/.test(destroys)) return destroys;
+  const destroys = commands.length > 0 ? unrecoverableDeletionIn(commands, directory) : undefined;
+  // What code could not read is not known to destroy anything; the gate asks, but nothing is claimed.
+  if (destroys !== undefined && !destroys.unread) return destroys.reason;
   return toolName === 'exec' ? fileOperationDestroys(args) : undefined;
 }
 
@@ -155,11 +165,11 @@ export type UndoFact =
  * every surface marks it red; nothing else is.
  */
 export function undoFactOf(toolName: string, args: Record<string, unknown>, reading: GateReadingRecord | undefined,
-  ownerOnly?: OwnerOnlyKind | undefined): UndoFact {
+  ownerOnly: OwnerOnlyKind | undefined, directory: string | undefined): UndoFact {
   const commands = extractCommandArgs(args);
   const effectPaths = commands.length === 1 ? commandEffect(commands[0]!)?.paths : undefined;
   const paths = effectPaths ?? extractPathArgs(args);
-  if (codeUndoFact(toolName, args, ownerOnly) !== undefined) return { cannotUndo: true, by: 'code', paths };
+  if (codeUndoFact(toolName, args, ownerOnly, directory) !== undefined) return { cannotUndo: true, by: 'code', paths };
   if (readingAnswer(reading, 'irreversible') === 'yes') return { cannotUndo: true, by: 'reading', paths };
   return { cannotUndo: false, checked: reading !== undefined };
 }

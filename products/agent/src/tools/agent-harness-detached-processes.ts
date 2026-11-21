@@ -129,15 +129,38 @@ function parseRecord(value: unknown): DetachedProcessRecord | null {
   return { processId, pid, command, cwd, startedAt, logPath, boot, leaderStart };
 }
 
+/**
+ * The detached-process record file exists but cannot be read, or does not
+ * hold a record list. Nothing is listed from it and nothing overwrites it: the
+ * processes it names may still be running, and their logs are kept.
+ */
+export class DetachedRecordsUnreadableError extends Error {
+  constructor(readonly path: string, readonly reason: string) {
+    super(`The detached-process records at ${path} could not be read (${reason}).`);
+    this.name = 'DetachedRecordsUnreadableError';
+  }
+}
+
+/** The records in the file; none when there is no file. Throws DetachedRecordsUnreadableError for any other failure. */
 function readRecords(path: string): DetachedProcessRecord[] {
   let raw: string;
-  try { raw = readFileSync(path, 'utf-8'); } catch { return []; }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const rows = parsed && typeof parsed === 'object' && Array.isArray((parsed as { processes?: unknown }).processes)
-      ? (parsed as { processes: unknown[] }).processes : [];
-    return rows.flatMap(row => { const record = parseRecord(row); return record ? [record] : []; });
-  } catch { return []; }
+  try { raw = readFileSync(path, 'utf-8'); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new DetachedRecordsUnreadableError(path, error instanceof Error ? error.message : String(error));
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch (error) {
+    throw new DetachedRecordsUnreadableError(path, `not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { processes?: unknown }).processes)) {
+    throw new DetachedRecordsUnreadableError(path, 'it holds no list of processes');
+  }
+  return (parsed as { processes: unknown[] }).processes.flatMap(row => { const record = parseRecord(row); return record ? [record] : []; });
+}
+
+function unreadableReason(error: unknown): string {
+  if (error instanceof DetachedRecordsUnreadableError) return error.reason;
+  throw error;
 }
 
 let linuxBootId: string | null | undefined;
@@ -218,17 +241,26 @@ function stillOurs(record: DetachedProcessRecord, starts: ReadonlyMap<number, st
   return groupAlive(record.pid);
 }
 
+/** The detached processes from earlier sessions, and why none could be read when the record file is unreadable. */
+export interface DetachedProcessListing {
+  readonly records: readonly DetachedProcessRecord[];
+  /** Set when the record file exists but could not be read: the processes it names are not listed. */
+  readonly unreadable?: string;
+}
+
 /**
  * Records that still name their running process. The rest are dropped from
  * the file, unless the start times could not be observed at all, in which
- * case nothing is listed or dropped (nothing can be shown to be ours).
+ * case nothing is listed or dropped (nothing can be shown to be ours). An
+ * unreadable record file lists nothing and is left as it is, with the reason.
  */
-export function listDetachedProcesses(shellPaths: DetachedPaths): readonly DetachedProcessRecord[] {
+export function listDetachedProcesses(shellPaths: DetachedPaths): DetachedProcessListing {
   const path = storePath(shellPaths);
-  const records = readRecords(path);
-  if (records.length === 0) return [];
+  let records: DetachedProcessRecord[];
+  try { records = readRecords(path); } catch (error) { return { records: [], unreadable: unreadableReason(error) }; }
+  if (records.length === 0) return { records: [] };
   const starts = leaderStarts(records.map(record => record.pid));
-  if (!starts) return [];
+  if (!starts) return { records: [] };
   const alive = records.filter(record => stillOurs(record, starts));
   if (alive.length !== records.length) {
     const goneRecords = records.filter(record => !alive.includes(record));
@@ -241,33 +273,41 @@ export function listDetachedProcesses(shellPaths: DetachedPaths): readonly Detac
     } catch { /* A record of a finished process is harmless; the next read drops it with its log. */ }
   }
   for (const record of alive) trimLog(shellPaths, record.logPath);
-  return alive;
+  return { records: alive };
 }
 
 export function findDetachedProcess(shellPaths: DetachedPaths, processId: string): DetachedProcessRecord | undefined {
-  return listDetachedProcesses(shellPaths).find(record => record.processId === processId);
+  return listDetachedProcesses(shellPaths).records.find(record => record.processId === processId);
 }
+
+/** Whether a detached start was recorded for later sessions, and why not when it was not. */
+export type DetachedRecordOutcome = { readonly recorded: true } | { readonly recorded: false; readonly reason: string };
 
 /**
  * Records a detached start with its identity, read from the running process.
- * `false` when the identity could not be read (the process already ended, or
- * this system reports no start times): later sessions will not list it.
+ * Not recorded when the identity could not be read (the process already ended,
+ * or this system reports no start times), or when the record file exists but
+ * cannot be read: it is then neither overwritten nor are earlier logs swept.
+ * Later sessions will not list an unrecorded start.
  */
-export function recordDetachedProcess(shellPaths: DetachedPaths, start: DetachedProcessStart): boolean {
+export function recordDetachedProcess(shellPaths: DetachedPaths, start: DetachedProcessStart): DetachedRecordOutcome {
   const leaderStart = leaderStarts([start.pid])?.get(start.pid);
-  if (!leaderStart) return false;
+  if (!leaderStart) return { recorded: false, reason: 'its start time could not be read (it may already have ended)' };
   const record: DetachedProcessRecord = { ...start, command: redactSensitiveData(start.command), boot: currentBoot(), leaderStart };
   const path = storePath(shellPaths);
-  const { dropped, kept } = runStoreFileUpdateSync(path, () => {
-    const others = readRecords(path).filter(row => row.processId !== record.processId);
+  const outcome = runStoreFileUpdateSync(path, () => {
+    let current: DetachedProcessRecord[];
+    try { current = readRecords(path); } catch (error) { return { unreadable: unreadableReason(error) }; }
+    const others = current.filter(row => row.processId !== record.processId);
     const starts = leaderStarts(others.map(row => row.pid));
     const live = starts ? others.filter(row => stillOurs(row, starts)) : others;
     writeStoreJson(path, { version: 1, processes: [...live, record] });
     return { dropped: others.filter(row => !live.includes(row)), kept: [...live, record] };
   });
-  for (const row of dropped) removeLog(shellPaths, row.logPath);
-  sweepOrphanLogs(shellPaths, kept);
-  return true;
+  if ('unreadable' in outcome) return { recorded: false, reason: `the detached-process records could not be read (${outcome.unreadable})` };
+  for (const row of outcome.dropped) removeLog(shellPaths, row.logPath);
+  sweepOrphanLogs(shellPaths, outcome.kept);
+  return { recorded: true };
 }
 
 /**
@@ -278,7 +318,9 @@ export function recordDetachedProcess(shellPaths: DetachedPaths, start: Detached
 export function forgetDetachedProcess(shellPaths: DetachedPaths, processId: string): void {
   const path = storePath(shellPaths);
   const forgotten = runStoreFileUpdateSync(path, () => {
-    const records = readRecords(path);
+    // An unreadable record file is left as it is; it cannot hold a record this session can reach.
+    let records: DetachedProcessRecord[];
+    try { records = readRecords(path); } catch (error) { unreadableReason(error); return undefined; }
     const record = records.find(row => row.processId === processId);
     if (record) writeStoreJson(path, { version: 1, processes: records.filter(row => row.processId !== processId) });
     return record;

@@ -6,7 +6,8 @@
  * and the scan button. Scanning the QR that command shows opens a link back here
  * with the sign-in code in the URL fragment (usePairingHandoff), or, with the
  * in-page scanner (PairingQrScanner), reads that link or the JSON payload the
- * desktop app and terminal print. A scan feeds the SAME tokenMutation /
+ * desktop app and terminal print. A pasted link or payload is read the same way
+ * as a scan before the text is tried as a bare code. A scan feeds the SAME tokenMutation /
  * loginMutation / relay calls the forms use, so a code is checked in one place
  * and a refusal is reported in one place.
  *
@@ -37,6 +38,7 @@ import { RelayPairingOffer } from './RelayPairingOffer';
 import {
   describeScannedPairing,
   isDifferentOrigin,
+  parseScannedPairing,
   type ScannedPairing,
 } from '../../lib/pairing-qr';
 import { PairingQrScanner } from '../pairing/PairingQrScanner';
@@ -149,9 +151,22 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
 
   const tokenError = tokenMutation.error ?? (!loginMutation.error ? validationError : null);
 
+  // What `goodvibes pair` prints is a link carrying the code (and a scanned QR's JSON is
+  // pasteable too): read it as a scan first, so the link's code, its daemon address, a
+  // password payload or a relay code each go where a scan sends them. Text that is no
+  // pairing payload is a bare code.
   function submitToken(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (token.trim()) tokenMutation.mutate(token);
+    const pasted = token.trim();
+    if (!pasted) return;
+    let parsed: ScannedPairing;
+    try {
+      parsed = parseScannedPairing(pasted);
+    } catch {
+      tokenMutation.mutate(pasted);
+      return;
+    }
+    acceptScan(parsed, 'paste');
   }
 
   // Relay pairing is transport-only, it never signs anyone in, so this is a plain
@@ -199,9 +214,9 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   // and the scanned secret is never written to component state or rendered.
   // Plain function, not useCallback: PairingQrScanner reads this through a ref
   // precisely so an unstable identity cannot restart its camera.
-  function acceptScan(scanned: ScannedPairing) {
+  function acceptScan(scanned: ScannedPairing, from: 'scan' | 'paste' = 'scan') {
     setScanOpen(false);
-    setScanNotice(describeScannedPairing(scanned));
+    setScanNotice(from === 'scan' ? describeScannedPairing(scanned) : null);
     scannedElsewhere = null;
     // A sign-in for another daemon is never submitted here: it is offered for that daemon instead.
     if (scanned.kind !== 'relay' && scanned.url && isDifferentOrigin(scanned.url, GOODVIBES_BASE_URL)) {
@@ -303,13 +318,13 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
           <summary className="dv-disclosure__summary">Other ways to sign in</summary>
           <div className="dv-disclosure__body signed-out-other__body">
             <form className="signed-out-form" onSubmit={submitToken}>
-              <Field label="Sign-in code">
+              <Field label="Paste the link or code goodvibes pair prints">
                 <Input
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                   type="password"
                   autoComplete="off"
-                  placeholder="Paste the code from goodvibes pair"
+                  placeholder="Paste the link or code goodvibes pair prints"
                 />
               </Field>
               {tokenError != null && (

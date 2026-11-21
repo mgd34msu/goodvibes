@@ -32,6 +32,9 @@ import { channelCredentials } from './credential-holder.js';
 import { logger } from '../utils/logger.js';
 import { PRIVATE_DELIVERY_HOSTS_SETTING, parseApprovedHosts } from '../runtime/network/destination.js';
 import { describeStructuralDeliveryError } from '../integrations/delivery-diagnostics.js';
+import { DeliveryError } from '../integrations/delivery.js';
+import { classifyFailure } from '@goodvibes/engine/errors';
+import { fetchFailurePhase, outcomeOfFailure } from '../state/operation.js';
 import { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery/types.js';
 import type {
   ChannelDeliveryRequest,
@@ -80,6 +83,41 @@ function publishDiagnostic(message: string, fields: Record<string, unknown>): vo
 }
 
 export { resolveChannelDeliverySurfaceKind } from './delivery/shared.js';
+
+function strategyIsRepeatSafe(strategy: ChannelDeliveryStrategy, request: ChannelDeliveryRequest): boolean {
+  try { return strategy.repeatSafe?.(request) === true; }
+  catch { return false; }
+}
+
+/**
+ * A failed send the caller would repeat, on a surface that cannot drop a
+ * repeat, whose request may have arrived (a timeout or reset after it left, a
+ * 5xx, a 408/409/425/429 answer): sending it again could post it twice, so it
+ * becomes a final failure that says it may have arrived. Anything else is
+ * returned as it is: a failure that carries no transport facts (our own check
+ * before sending), one already final, a refusal the far side answered (a
+ * DeliveryError with its answer's status), or one that cannot have left.
+ */
+function finalWhenOutcomeUnknown(
+  strategy: ChannelDeliveryStrategy,
+  request: ChannelDeliveryRequest,
+  surfaceKind: string | undefined,
+  error: unknown,
+): unknown {
+  const failure = classifyFailure(error);
+  if (failure === undefined || failure.retryable === false) return error;
+  if (error instanceof DeliveryError && error.statusCode !== undefined) return error;
+  if (strategyIsRepeatSafe(strategy, request)) return error;
+  const surface = surfaceKind ?? 'the channel';
+  const outcome = outcomeOfFailure(error, fetchFailurePhase(error), undefined, `Look in the ${surface} conversation for the message`);
+  if (outcome.state === 'failed') return error;
+  return new DeliveryError(
+    `The message to ${surface} may have arrived: the send failed after the request left, and ${surface} cannot drop a repeat, so it was not sent again. Look in the conversation before sending it again.`,
+    'terminal',
+    undefined,
+    { cause: error },
+  );
+}
 
 /**
  * `secretsManager` is REQUIRED, not optional, and that is the whole point.
@@ -256,7 +294,10 @@ export class ChannelDeliveryRouter {
       } : request;
       assertDeliveryCurrent(deliveryRequest);
       const parts = this.partsFor(deliveryRequest, surfaceKind);
-      const result = await strategy.deliver(parts.length > 1 ? { ...deliveryRequest, body: parts[0]! } : deliveryRequest);
+      const first = parts.length > 1 ? { ...deliveryRequest, body: parts[0]! } : deliveryRequest;
+      const result = await strategy.deliver(first).catch((error: unknown) => {
+        throw finalWhenOutcomeUnknown(strategy, first, surfaceKind, error);
+      });
       const receipt = result.receipt;
       const following = parts.length > 1
         ? await this.deliverFollowingParts(strategy, deliveryRequest, parts, surfaceKind)

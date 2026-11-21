@@ -370,6 +370,15 @@ export class AgentMessageBus {
     if (found) this.taken.set(messageId, found);
   }
 
+  /**
+   * The request these messages were taken into never succeeded (its run
+   * failed): they are no longer held as taken. One still in the store then
+   * expires as a message no request delivered.
+   */
+  releaseTaken(messageIds: readonly string[]): void {
+    for (const messageId of messageIds) this.taken.delete(messageId);
+  }
+
   cleanup(): void {
     const now = Date.now();
     for (const [key, messages] of this.messages) {

@@ -1023,8 +1023,8 @@ value and maps to one concrete maintenance routine.
 | --- | --- |
 | `lint` | Scan the store for integrity issues and report them |
 | `reindex` | Rebuild the search index over sources, nodes, and edges |
-| `refresh-stale` | Re-fetch sources whose content has gone stale, and sources held pending by an earlier ingest; when the fetched bytes hash to the stored `contentHash` only `lastCrawledAt` (and `metadata.lastCrawlUnchangedAt`) moves, with no model request, recompile or lint; a source that already has indexed content stays indexed when its re-fetch fails, with `crawlError` and `metadata.lastCrawlFailedAt` recorded |
-| `refresh-bookmarks` | Re-fetch bookmark-backed sources |
+| `refresh-stale` | Re-fetch sources whose content has gone stale, and sources held pending by an earlier ingest; when the fetched bytes hash to the stored `contentHash` only `lastCrawledAt` (and `metadata.lastCrawlUnchangedAt`) moves, with no model request, recompile or lint; a source that already has indexed content stays indexed when its re-fetch fails, with `crawlError` and `metadata.lastCrawlFailedAt` recorded. The run's result counts `refreshed`, `attempted` and `failed`, with each failure's `sourceId` and `reason` under `failures`; a run in which every source it tried failed is recorded `failed`, naming the first reason, and a run with nothing due is `completed` with `attempted` 0 |
+| `refresh-bookmarks` | Re-fetch bookmark-backed sources; its result and failure rule are those of `refresh-stale` |
 | `sync-browser-history` | Pull new browser-history entries into the store |
 | `rebuild-projections` | Re-materialize the overview and bundle projections |
 | `semantic-enrichment` | Re-run semantic extraction over sources to refresh derived facts |

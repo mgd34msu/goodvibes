@@ -1,3 +1,4 @@
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySettingValue, isSecretBearingConfigKey, isSecretReferenceValue, type SubscriptionImportEntry } from '@goodvibes/engine/platform/platform/config';
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
@@ -6,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant } from '@goodvibes/engine/platform/platform/config';
 import { setHarnessSetting } from '../agent/harness-control.ts';
-import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
+import { takeAppliedThemeMessage, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';
 import { buildAgentWorkspaceSetupPart } from './agent-workspace-snapshot.ts';
 import type { CommandContext } from './command-registry.ts';
@@ -511,11 +512,10 @@ export async function applyAgentWorkspaceSettingValue(
   }
   if (String(setting.key) === THEME_NAME_CONFIG_KEY) {
     try {
-      // Written through the same path as every other key, then applied to
-      // this process now (palettes rebuild, full repaint); this surface has no
-      // onSettingApplied hook, so it runs the shared apply hook directly.
+      // Written through the same path as every other key; the start-up theme
+      // subscription (startup-theme-probe.ts) applies it, and this reports what it did.
       const written = await setHarnessSetting(configManager, context?.platform?.secretsManager, setting.key, value);
-      const { message } = applyThemeNameSettingChange(written.current, () => context?.clearScreen?.());
+      const message = takeAppliedThemeMessage(setting.key) ?? `Theme: ${String(written.current)}`;
       return {
         status: message,
         result: {
@@ -540,20 +540,10 @@ export async function applyAgentWorkspaceSettingValue(
   }
   if (setting.key === THEME_MODE_CONFIG_KEY) {
     try {
-      // display.themeMode is a real CONFIG_SCHEMA entry now (platform 2.0+), so
-      // this branch is no longer working around a missing schema key, the
-      // direct setDynamic write below is the same round-trip every other
-      // client-owned key would get, and this key isn't daemon-owned or
-      // secret-backed, so there is no ownership routing to gain by going
-      // through setHarnessSetting instead. What still makes this key special
-      // is the live single-process side effect below: the classic settings
-      // modal wires onSettingApplied (ui-openers.ts) to flip the active
-      // render mode and repaint; this workspace surface has no equivalent
-      // hook, so it runs the ONE shared apply hook directly, forced
-      // dark/light flips the active mode now with a full repaint; auto only
-      // re-probes at startup, stated honestly in the returned message.
+      // A client-owned key written directly; the start-up theme subscription
+      // (startup-theme-probe.ts) applies it, and this reports what it did.
       configManager.setDynamic(setting.key, value);
-      const { message } = applyThemeModeSettingChange(value, () => context?.clearScreen?.());
+      const message = takeAppliedThemeMessage(setting.key) ?? `Theme mode: ${String(configManager.get(setting.key))}`;
       return {
         status: message,
         result: {
@@ -993,7 +983,7 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   }
 
   const changing = plan.settings.filter((entry) => entry.status === 'would_import');
-  const undoPath = shellPaths.resolveUserPath('agent', 'settings-import-undo.json');
+  const undoPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings-import-undo.json');
   if (changing.length > 0) {
     // A credential's previous value is kept only as the goodvibes://secrets/
     // reference that was stored in its place; a credential that was not a

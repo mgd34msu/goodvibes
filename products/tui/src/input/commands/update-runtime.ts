@@ -1,6 +1,6 @@
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
 import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
-import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes/engine/terminal-shell/release-update-preflight';
+import { createSelfUpdateCommand, daemonRestartFooter, retainSuiteUpdateConfiguration, formatSuiteUpdateReport, type RunCommand } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
   prepareReleaseUpdate,
@@ -19,7 +19,6 @@ import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/te
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import {
   captureUpdateFileIo,
   PREVIOUS_FILE_SUFFIX,
@@ -31,7 +30,7 @@ import { VERSION } from '../../version.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
-import { resolveCliServiceName, type CliServiceNameSource } from '../../cli/service-posture.ts';
+import type { CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
@@ -72,47 +71,6 @@ function abortableFetch(fetchImpl: UpdateFetchLike, signal: AbortSignal | undefi
  * one definition everywhere.
  */
 export { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
-
-export interface DaemonServiceRestartInfo {
-  readonly managed: boolean;
-  readonly unitName: string;
-  readonly restartCommand: string;
-}
-
-/** Injectable so tests never shell out to a real systemctl. */
-export type RunCommand = (command: string, args: string[]) => { readonly status: number | null; readonly stdout: string };
-
-const defaultRunCommand: RunCommand = (command, args) => {
-  try {
-    const result = spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8' });
-    return { status: result.status, stdout: result.stdout ?? '' };
-  } catch {
-    return { status: null, stdout: '' };
-  }
-};
-
-/**
- * Detects, honestly, whether the daemon is currently running as a systemd
- * user service, so the post-update message can tell the user the real
- * restart command instead of assuming one. Only Linux/systemd is checked
- * (this repo's PlatformServiceManager also supports launchd on macOS and
- * Scheduled Tasks on Windows, but those aren't restarted with `systemctl`,
- * so on those platforms this honestly reports "not managed here" rather
- * than printing a command that would not work).
- */
-export function detectDaemonServiceManaged(
-  platform: NodeJS.Platform,
-  configManager: CliServiceNameSource,
-  runCommand: RunCommand = defaultRunCommand,
-): DaemonServiceRestartInfo {
-  const unitName = resolveCliServiceName(configManager);
-  if (platform !== 'linux') {
-    return { managed: false, unitName, restartCommand: '' };
-  }
-  const result = runCommand('systemctl', ['--user', 'is-active', `${unitName}.service`]);
-  const managed = result.status === 0 && result.stdout.trim() === 'active';
-  return { managed, unitName, restartCommand: `systemctl --user restart ${unitName}.service` };
-}
 
 export type CheckForUpdateResult = ReleaseUpdateCheck;
 
@@ -186,8 +144,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
       beforeCommit: () => { if (progress) progress.begun = true; },
     });
     if (progress) { progress.begun = true; progress.committed = true; }
-    const service = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
-    options.print(formatSuiteUpdateReport(result, 'updated', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
+    options.print(formatSuiteUpdateReport(result, 'updated', await daemonRestartFooter(result, options.platform, options.configManager, options.runCommand)));
     return result;
   } catch (error) {
     recordSwapFailure(progress, error);
@@ -207,14 +164,13 @@ export interface RollbackUpdateOptions {
 }
 
 /** Restore the selected suite and its directory assets together. */
-export function rollbackUpdate(options: RollbackUpdateOptions): void {
+export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<void> {
   if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
 
   const configuration = retainSuiteUpdateConfiguration(options.configManager);
   const result = rollbackSuiteUpdate({ ...options, currentVersion: VERSION,
     webuiDirectory: configuration.webuiDirectory, assertCurrent: configuration.assertCurrent });
-  const service = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
-  options.print(formatSuiteUpdateReport(result, 'restored', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
+  options.print(formatSuiteUpdateReport(result, 'restored', await daemonRestartFooter(result, options.platform, options.configManager, options.runCommand)));
 }
 
 /** What `/update review` prints and `/update save-review` saves, built once for both. */
@@ -340,5 +296,4 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
       }
     },
   },
-  elsewhere: 'the terminal app (goodvibes)',
 });

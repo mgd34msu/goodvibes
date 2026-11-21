@@ -798,16 +798,32 @@ export async function syncChannelDrafts(
   return { attempted: pending.length, synced, refused };
 }
 
-/** Draft ids being promoted to 'queued' in this process; see queueDraftToSend. */
-const queueingDraftIds = new Set<string>();
+/**
+ * Why a draft with this status may not move to 'queued', or undefined when it
+ * may. Queued is written before delivery starts, so a queued draft is in flight
+ * or was handed to delivery with no outcome recorded (the sender exited, or the
+ * receipt could not be written). Either way it may have been delivered.
+ */
+function queueRefusal(draft: ChannelDraft, draftId: string): string | undefined {
+  if (draft.status === 'sent') return `Draft ${draftId} is already sent.`;
+  const move = channelDraftLifecycle.check(draft.status, 'queued');
+  if (move.ok) return undefined;
+  return draft.status === 'queued'
+    ? `Draft ${draftId} was handed to delivery at ${draft.updatedAt} and no outcome is recorded, so it may already have been delivered; it is not sent again. `
+      + 'If the recipient did not get it, save its text as a new draft (agent_harness mode:"channel_draft_save" without draftId) and send that.'
+    : `Draft ${draftId}: ${move.reason}.`;
+}
 
 /**
  * Promote a draft to 'queued' status and return an AgentChannelDeliveryInput
  * ready to pass to `deliverAgentChannelMessage`.
  *
- * The draft is updated to status 'queued'. The caller is responsible for
- * calling `deliverAgentChannelMessage` and then `markDraftSent` or
- * `markDraftFailed` to record the outcome.
+ * The move to 'queued' is a compare-and-set under the drafts store lock: the
+ * stored status is checked and 'queued' written in one locked step, so of two
+ * calls (in this process or another Agent) sending one draft, exactly one gets
+ * it and the other is refused. The caller is responsible for calling
+ * `deliverAgentChannelMessage` and then `markDraftSent` or `markDraftFailed`
+ * to record the outcome.
  *
  * This routes through the EXISTING confirmed send path, no new platform contract.
  */
@@ -826,29 +842,9 @@ export async function queueDraftToSend(
   // A draft written on another surface is on the daemon, the store of record.
   const draft = getDraft(shellPaths, draftId) ?? await adoptDaemonDraft(shellPaths, draftId, options);
   if (!draft) throw new Error(`Draft not found: ${draftId}`);
-  if (draft.status === 'sent') throw new Error(`Draft ${draftId} is already sent.`);
-  const move = channelDraftLifecycle.check(draft.status, 'queued');
-  if (!move.ok) {
-    // Queued is written before delivery starts, so a queued draft is in flight
-    // or was handed to delivery with no outcome recorded (the sender exited, or
-    // the receipt could not be written). Either way it may have been delivered.
-    throw new Error(draft.status === 'queued'
-      ? `Draft ${draftId} was handed to delivery at ${draft.updatedAt} and no outcome is recorded, so it may already have been delivered; it is not sent again. `
-        + 'If the recipient did not get it, save its text as a new draft (agent_harness mode:"channel_draft_save" without draftId) and send that.'
-      : `Draft ${draftId}: ${move.reason}.`);
-  }
-
-  // The status check above and the 'queued' write below are separated by the
-  // daemon call, so a second overlapping call would pass the same check and
-  // deliver the draft twice. Claim the draft here, with no await between the
-  // check and the claim.
-  if (queueingDraftIds.has(draft.id)) throw new Error(`Draft ${draftId} is already being queued for delivery by another call, so this one sent nothing. Wait for that send to finish, then check the draft's status.`);
-  queueingDraftIds.add(draft.id);
-  try {
-    return await promoteDraftToQueued(shellPaths, draft, draftId, options, admit);
-  } finally {
-    queueingDraftIds.delete(draft.id);
-  }
+  const refused = queueRefusal(draft, draftId);
+  if (refused) throw new Error(refused);
+  return promoteDraftToQueued(shellPaths, draft, draftId, options, admit);
 }
 
 async function promoteDraftToQueued(
@@ -878,22 +874,47 @@ async function promoteDraftToQueued(
 
   if (admit) await admit(deliveryInput);
 
-  // The webhook is not passed back in: the save keeps the stored one, and the
-  // URL stays out of the draft file.
-  const { webhook: _webhook, ...saveFields } = deliveryInput;
-  const queuedDraft = (await saveDraft(
-    shellPaths,
-    {
-      id: draft.id,
-      ...saveFields,
-      ...(draft.title ? { title: draft.title } : {}),
-      ...(draft.tags ? { tags: draft.tags } : {}),
-      status: 'queued',
-    },
-    options,
-  )).draft;
+  // A webhook URL an older version wrote into the file moves to the secret
+  // store when the draft is sent with one available; the file then holds only its key.
+  const movedWebhook = draft.webhook && options.webhookSecrets
+    ? await resolveDraftWebhook(draft.id, undefined, draft, options.webhookSecrets)
+    : undefined;
 
-  return { draftId, deliveryInput, draft: queuedDraft };
+  const path = channelDraftFilePath(shellPaths);
+  const assertCurrent = retainChannelStoreSource(path, options);
+  assertCurrent();
+  const queuedDraft = runStoreFileUpdateSync(path, () => {
+    const fresh = writableDraftSnapshot(shellPaths);
+    const index = matchingDraftIndex(fresh.drafts, draft.id);
+    const stored = index >= 0 ? fresh.drafts[index]! : undefined;
+    if (!stored) throw new Error(`Draft ${draftId} was deleted while this send was being checked, so nothing was sent.`);
+    const refused = queueRefusal(stored, draftId);
+    if (refused) throw new Error(refused);
+    if (stored.updatedAt !== draft.updatedAt) {
+      throw new Error(`Draft ${draftId} was changed while this send was being checked, so nothing was sent and it is not queued. Send it again to send what it holds now.`);
+    }
+    const { sendError: _sendError, webhook: legacyWebhook, ...kept } = stored;
+    const patched: ChannelDraft = {
+      ...kept,
+      ...(movedWebhook?.secretKey ? { webhookSecretKey: movedWebhook.secretKey } : legacyWebhook ? { webhook: legacyWebhook } : {}),
+      updatedAt: new Date().toISOString(),
+      status: 'queued',
+      daemonSyncState: 'pending',
+    };
+    writeDrafts(fresh, fresh.drafts.map((entry, i) => (i === index ? patched : entry)), assertCurrent, options);
+    return patched;
+  });
+
+  // The daemon's copy learns the draft is queued after the lock is released;
+  // a daemon that does not answer leaves it pending, and changes nothing here.
+  if (options.invoke) {
+    try {
+      await syncChannelDrafts(shellPaths, options.invoke, { ...options, draftId: queuedDraft.id });
+    } catch {
+      // The local queued write is the record; the daemon is offered it again at the next sync.
+    }
+  }
+  return { draftId, deliveryInput, draft: getDraft(shellPaths, queuedDraft.id) ?? queuedDraft };
 }
 
 /**

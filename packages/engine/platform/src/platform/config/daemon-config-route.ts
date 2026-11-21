@@ -50,6 +50,7 @@ import { DAEMON_CHALLENGE_HEADER, dialledPort, verifyDaemonIdentityAnswer } from
 import { randomBytes } from 'node:crypto';
 import { fetchFailurePhase } from '../state/operation.js';
 import { readDotPath } from './shared-config-tier.js';
+import { isThisMachineHost } from '../runtime/client/daemon-target-resolver.js';
 
 /** How to reach a daemon's control plane for config reads and writes. */
 export interface DaemonConfigEndpoint {
@@ -121,11 +122,11 @@ export class DaemonConfigOutcomeUnknownError extends Error {
   readonly lostBecause: string;
   constructor(key: string, endpoint: string, cause: string, settled?: string | undefined) {
     const firstKey = key.split(', ')[0] ?? key;
-    const readBack = `goodvibes config get ${firstKey}`;
+    const readBack = daemonReadBackCommand(endpoint, firstKey);
     super(
       `${key}: the write was sent to the daemon at ${endpoint}, but ${cause}, so whether it was applied is not known; it may have been applied. `
       + (settled ? `${settled} ` : '')
-      + `Read it back with \`${readBack}\` before setting it again.`,
+      + `Read it back before setting it again: ${readBack}.`,
     );
     this.name = 'DaemonConfigOutcomeUnknownError';
     this.key = key;
@@ -133,6 +134,17 @@ export class DaemonConfigOutcomeUnknownError extends Error {
     this.readBack = readBack;
     this.lostBecause = cause;
   }
+}
+
+/**
+ * The command that reads a daemon's value of `key`. Only the daemon program
+ * has a config command; a daemon on another machine is asked there.
+ */
+function daemonReadBackCommand(endpoint: string, key: string): string {
+  const command = `goodvibes-daemon config get ${key}`;
+  let host = '';
+  try { host = new URL(endpoint).hostname.replace(/^\[(.*)\]$/, '$1'); } catch { /* not a URL: say where it was sent */ }
+  return host && isThisMachineHost(host) ? command : `on the machine at ${endpoint}: ${command}`;
 }
 
 /** Thrown when the daemon answered but refused or did not apply the write. */

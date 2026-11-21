@@ -1,7 +1,7 @@
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { serviceExpectedOutcome, type ServiceMethodId } from '@goodvibes/engine/terminal-shell/agent-turn/service-lifecycle';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -74,7 +74,7 @@ export async function connectedHostAuthPosture(
 ): Promise<SetupConnectedHostAuthPosture> {
   const caller = captureAsyncHarnessInput(snapshot, options);
   const shellPaths = requireShellPaths(context);
-  const token = readConnectedHostOperatorToken(shellPaths.homeDirectory, resolveConnectedHostBaseUrl(requirePlatform(context).configManager));
+  const token = readConnectedHostOperatorToken(shellPaths.homeDirectory, resolveConnectedHostAddress(requirePlatform(context).configManager).baseUrl);
   const nativeIntake = await readConnectedHostReadiness({ configManager: requirePlatform(context).configManager, homeDirectory: () => requireShellPaths(context).homeDirectory }, caller.options);
   caller.assertCurrent();
   const usable = Boolean(token.token);

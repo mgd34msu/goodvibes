@@ -1,3 +1,4 @@
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { registerProviderCommand } from '@goodvibes/engine/terminal-shell/provider-command';
 import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -12,7 +13,7 @@ export function registerLocalProviderRuntimeCommands(registry: CommandRegistry):
     requireSubscriptionManager,
     requireServiceRegistry,
     beforeSelection: (_ctx, _provider, complete) => complete(),
-    surfaceRoot: 'agent',
+    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     signInListens: false,
     codeEditing: false,
     formatSource: formatAgentRecordSource,

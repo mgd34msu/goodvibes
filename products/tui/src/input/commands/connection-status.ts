@@ -220,10 +220,11 @@ export const EXPLICIT_WRITE_INVOCATION_CONTEXT = {
 };
 
 /**
- * Irreversible writes (a sent mail, a created event) carry no idempotency key
- * on the wire, so a retry after a timeout the server had already accepted would
- * do it twice. This remembers, per gateway, which exact writes this process has
- * already attempted, whether or not the attempt reported success.
+ * A calendar event add carries no idempotency key on the wire, so a retry after
+ * a timeout the server had already accepted would add it twice. This remembers,
+ * per gateway, which exact adds this process has already attempted, whether or
+ * not the attempt reported success. (A mail send carries its own `clientSendId`
+ * instead; see mail-runtime.ts.)
  */
 const attemptedWrites = new WeakMap<object, Set<string>>();
 

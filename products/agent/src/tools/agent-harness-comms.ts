@@ -48,7 +48,7 @@ import {
   channelProfileRouteFilePath,
 } from '../agent/channel-profile-routing.ts';
 import { buildAgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import { deliverAgentChannelMessage } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
+import { ChannelDeliveryNotStartedError, deliverAgentChannelMessage } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
 import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection, type DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
@@ -597,6 +597,25 @@ export async function channelDraftSendHandoff(
         policy: recorded
           ? 'The message was delivered and the draft is marked sent; a step after delivery reported an error. Do not send it again.'
           : 'The message was delivered, but recording it on the draft failed, so the draft still reads queued. A queued draft is never sent again; the delivery receipt is the responseId.',
+      };
+    }
+    if (err instanceof ChannelDeliveryNotStartedError) {
+      // Stopped before the router was handed the message (a stop, the card
+      // screen, a failed authority check): nothing reached any provider. Record
+      // that fact without the authority checks, as the delivered branch does, so
+      // the draft reads failed with its reason and may be sent again.
+      let failedDraft: ReturnType<typeof markDraftFailed> | undefined;
+      try { failedDraft = markDraftFailed(shellPaths, draftId, errorMessage, {}); } catch { failedDraft = undefined; }
+      if (failedDraft) await offerOutcome(failedDraft);
+      return {
+        mode: 'channel_draft_send',
+        status: 'failed',
+        done: false,
+        draftId: publicReference,
+        error: errorMessage,
+        policy: failedDraft
+          ? 'Nothing was sent: the send stopped before the message reached any provider. The draft is marked failed and may be sent again.'
+          : 'Nothing was sent: the send stopped before the message reached any provider, but recording that on the draft failed, so it still reads queued.',
       };
     }
     let markedFailed = false;

@@ -103,7 +103,7 @@ function hostSetupItems(input: AgentWorkspaceSetupChecklistInput, reading: Agent
     // A credential says a host was paired, but the Agent still works without
     // it, so a host that is down is a recommendation, not a blocker.
     return {
-      runtime: { status: 'recommended', detail: `${reading.detail} Start goodvibes-daemon, or check controlPlane.host and controlPlane.port.${at}` },
+      runtime: { status: 'recommended', detail: `${reading.detail} Start goodvibes-daemon, or check daemon.connectedHost.url (for the daemon on this machine, controlPlane.host and controlPlane.port).${at}` },
       auth: { status: 'recommended', detail: `Not checked: the host did not answer.${at}` },
       knowledge: { status: 'optional', detail: 'Agent Knowledge needs the connected host.' },
     };

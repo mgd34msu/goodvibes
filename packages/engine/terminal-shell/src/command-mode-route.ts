@@ -1,6 +1,7 @@
 import { loadSkillByTrigger } from '@goodvibes/engine/platform/platform/tools';
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
+import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { activeTokens } from './renderer/theme.js';
 import { commandHistoryLine, type CommandSecretArgs } from './command-registry.js';
 export interface CommandRouteContext {
@@ -68,8 +69,6 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
         readonly context: Context;
       }
     | undefined;
-  readonly unknownCommand: (name: string) => string;
-  readonly commandError: (error: unknown, name: string) => string;
   /** The product's surface folder, so `/<skill>` finds skills in `.goodvibes/<surface>/skills` too. */
   readonly surfaceRoot: string;
 }) {
@@ -158,7 +157,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
                 state.conversationManager?.log(`The skill /${name} was found, but this surface cannot send it as a message.`, { fg: activeTokens().error });
                 state.requestRender();
               } else {
-                state.conversationManager?.log(presentation.unknownCommand(name), { fg: activeTokens().error });
+                state.conversationManager?.log(`Unknown command: /${name}. Type /help for available commands.`, { fg: activeTokens().error });
                 state.requestRender();
               }
             }
@@ -166,7 +165,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
           .catch((error: unknown) => {
             // A command that refused threw its refusal; it reads as the reason and the next step, not as a crash.
             const refused = readRefusal(error);
-            const message = refused ? formatRefusal(refused) : presentation.commandError(error, name);
+            const message = refused ? formatRefusal(refused) : `Command /${name} failed: ${summarizeError(error)}`;
             state.conversationManager?.log(message, { fg: activeTokens().error });
             state.requestRender();
           });

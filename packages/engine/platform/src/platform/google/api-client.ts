@@ -367,6 +367,13 @@ export interface CreateEventInput {
   readonly recurrence?: readonly string[];
   /** The source calendar's UID, kept as a private property so an import can recognise an event it already made. */
   readonly sourceUid?: string;
+  /**
+   * The event id to create the event under (base32hex: `a`-`v` and `0`-`9`,
+   * 5 to 1024 characters). Google refuses a second event with the same id
+   * (409), so a create sent again after a lost answer does not make a second
+   * event.
+   */
+  readonly id?: string;
 }
 
 /** The private extended property an imported event's source UID is kept under. */
@@ -926,6 +933,7 @@ export class GoogleApiClient {
     const zone = input.timeZone === undefined || allDay ? {} : { timeZone: input.timeZone };
     const attendees = (input.attendees ?? []).map((email) => email.trim()).filter((email) => email.length > 0);
     const body = {
+      ...(input.id === undefined ? {} : { id: input.id }),
       summary: input.summary,
       ...(input.location === undefined ? {} : { location: input.location }),
       ...(input.description === undefined ? {} : { description: input.description }),
@@ -944,7 +952,18 @@ export class GoogleApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!result.ok) return result;
+    if (!result.ok) {
+      if (result.transport === 'unreachable') {
+        return {
+          ...result,
+          problem: `${result.problem} The event may or may not have been created: the connection failed after the request left.`,
+          fix: input.id === undefined
+            ? 'Check the calendar before creating it again; creating it blindly can add it twice and invite the guests twice.'
+            : `Check the calendar for event ${input.id} before creating it again.`,
+        };
+      }
+      return result;
+    }
     const event = toCalendarEvent(result.value);
     return event === null
       ? { ok: false, status: null, problem: 'Google accepted the event but returned no usable record.', fix: 'Check the calendar directly.' }

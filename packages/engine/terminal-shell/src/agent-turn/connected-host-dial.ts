@@ -1,40 +1,40 @@
 /**
- * Turning a CONFIGURED host value into an address this process can dial.
+ * Where the Agent dials its connected host, decided in one place.
  *
- * `controlPlane.host` (and `httpListener.host`) hold a BIND address, the
- * interface the daemon listens on. `0.0.0.0` and `::` are wildcards: they mean
- * "every interface", and they are legitimate, common values to bind to. They
- * are not addresses anything can connect TO. Handing `http://0.0.0.0:3421` to
- * fetch() is how the profile calls came back refused: the wildcard was copied
- * straight out of config into a dial URL.
+ * The address is an origin, never a host and port glued to `http://`:
  *
- * A wildcard bind is not a dial target; loopback is the interface it answers
- * on. Every client-side base URL built from configured host values goes through
- * here so that mapping exists in one place instead of being re-derived, and
- * re-forgotten, per call site.
+ * - `daemon.connectedHost.url`, when set, is the stated origin and its scheme
+ *   is used as written. `--runtime-url` and its environment variables set it
+ *   for one run.
+ * - Otherwise the daemon on this machine, at the address derived from its bind
+ *   (`controlPlane.hostMode`, `host`, `port` and `tls.mode`) by the same rule
+ *   the daemon and the terminal app use.
+ * - A bind host that names another machine with no stated origin is refused:
+ *   inferring that machine's scheme from this machine's TLS setting could send
+ *   pairing and operator credentials across the network unencrypted.
  *
- * NOT for advertised addresses. A URL handed to ANOTHER machine, a pairing QR
- * code, a phone-facing web link, must resolve a wildcard to this host's LAN
- * address, never to loopback, because loopback on the phone is the phone. Those
- * sites resolve through the engine's `stableUrlHostForBindHost` on purpose.
- * This module is client-dial-side only, and it never rewrites the bind config
- * itself.
+ * Client-dial-side only. An address handed to ANOTHER machine (a pairing QR
+ * code, a phone-facing link) resolves a wildcard to a LAN address through the
+ * engine's `stableUrlHostForBindHost`, never here.
  */
+import {
+  deriveControlPlaneBaseUrl,
+  parseDaemonOrigin,
+  readConnectedDaemonOrigin,
+  readControlPlaneBinding,
+} from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { isThisMachineHost } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 
 /** The interface a wildcard-bound listener answers on locally. */
 export const LOOPBACK_DIAL_HOST = '127.0.0.1';
-
-/** The connected host's port when config carries no usable one. */
-export const DEFAULT_CONNECTED_HOST_PORT = 3421;
 
 /** Bind addresses that name every interface rather than a reachable one. */
 const WILDCARD_BIND_HOSTS: ReadonlySet<string> = new Set(['0.0.0.0', '::', '[::]']);
 
 /**
- * The host this process should dial for a given configured bind host.
- *
- * Wildcards and blank/absent values both resolve to loopback, a missing host
- * means the local daemon, which is the same place a wildcard answers.
+ * The host this process connects to for a configured bind host, for a TCP
+ * probe of a listener on this machine. Wildcards and blank values resolve to
+ * loopback, the interface a wildcard answers on.
  */
 export function dialHostForConfiguredHost(host: unknown): string {
   const trimmed = typeof host === 'string' ? host.trim() : '';
@@ -43,44 +43,46 @@ export function dialHostForConfiguredHost(host: unknown): string {
   return trimmed;
 }
 
-/**
- * The same dial host, in the form a URL authority needs: a bare IPv6 literal
- * gets its brackets, so `::1` becomes `[::1]` and the URL stays parseable.
- */
-export function urlHostForConfiguredHost(host: unknown): string {
-  const dialHost = dialHostForConfiguredHost(host);
-  return dialHost.includes(':') && !dialHost.startsWith('[') ? `[${dialHost}]` : dialHost;
+/** The settings the connected-host address is read from. */
+export type ConnectedHostAddressKey =
+  | 'daemon.connectedHost.url'
+  | 'controlPlane.hostMode'
+  | 'controlPlane.host'
+  | 'controlPlane.port'
+  | 'controlPlane.tls.mode'
+  | 'controlPlane.publicBaseUrl';
+
+export interface ConnectedHostAddressReader {
+  get(key: ConnectedHostAddressKey): unknown;
 }
 
-/** The connected host's port, defaulting when config carries no usable TCP port (null, blank, non-integer or outside 1..65535). */
-export function connectedHostPort(port: unknown, fallback = DEFAULT_CONNECTED_HOST_PORT): number {
-  if (port === null || (typeof port === 'string' && port.trim() === '')) return fallback;
-  const value = typeof port === 'number' ? port : Number(port);
-  return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : fallback;
-}
-
-/**
- * The connected host's base URL: the one construction every client-side dial
- * site shares. Takes the raw config values so no caller has to remember either
- * the wildcard mapping or the IPv6 bracketing.
- */
-export function connectedHostBaseUrl(
-  host: unknown,
-  port: unknown,
-  portFallback = DEFAULT_CONNECTED_HOST_PORT,
-): string {
-  return `http://${urlHostForConfiguredHost(host)}:${connectedHostPort(port, portFallback)}`;
+export interface ConnectedHostAddress {
+  /** The origin (`scheme://host:port`, no trailing slash). Also the key credentials and pairings are stored under. */
+  readonly baseUrl: string;
+  /** Set when the Agent must not dial `baseUrl`: why, and what to set instead. Nothing is sent while it is set. */
+  readonly refusal: string | null;
 }
 
 /**
- * Read `controlPlane.host`/`controlPlane.port` off a config reader and resolve
- * them to a dial address in one step, what most call sites actually want.
+ * The Agent's connected-host address: the stated `daemon.connectedHost.url`,
+ * else this machine's daemon at its derived address. A bind host that is
+ * another machine, with no stated origin, comes back with a refusal.
  */
-export function resolveConnectedHostBaseUrl(
-  configManager: { get(key: 'controlPlane.host' | 'controlPlane.port'): unknown },
-): string {
-  return connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
+export function resolveConnectedHostAddress(config: ConnectedHostAddressReader): ConnectedHostAddress {
+  const stated = readConnectedDaemonOrigin((key) => config.get(key));
+  if (stated) return { baseUrl: stated.baseUrl, refusal: null };
+  const baseUrl = deriveControlPlaneBaseUrl(
+    readControlPlaneBinding((key) => config.get(key as ConnectedHostAddressKey)),
+    'loopback',
   );
+  const origin = parseDaemonOrigin(baseUrl);
+  if (origin && isThisMachineHost(origin.host)) return { baseUrl: origin.baseUrl, refusal: null };
+  const host = origin?.host ?? baseUrl;
+  const bracketed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  const port = origin?.port ?? '';
+  return {
+    baseUrl: origin?.baseUrl ?? baseUrl,
+    refusal: `controlPlane.host names ${host}, which is another machine, and how to reach it was not stated. `
+      + `Set daemon.connectedHost.url to https://${bracketed}${port === '' ? '' : `:${port}`} (encrypted), or to http://${bracketed}${port === '' ? '' : `:${port}`} to send this Agent's credentials unencrypted over the network; controlPlane.host and controlPlane.port say only how a daemon on this machine listens.`,
+  };
 }

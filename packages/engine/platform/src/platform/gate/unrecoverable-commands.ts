@@ -1,41 +1,34 @@
 /**
  * Shell commands that delete or overwrite something nothing on this machine
  * keeps a copy of, recognised by code from the parsed command, before and
- * regardless of any reading. Pure: no I/O, no model.
+ * regardless of any reading. No model.
  *
  * The exec tool records no undo for what a command does, so a command that
  * removes files, discards uncommitted work, rewrites shared history, wipes a
  * device or drops a database table is a deletion only the owner decides
  * (gate/classify.ts `unrecoverable-delete`). Each rule below names one program
- * and the arguments with which it destroys; a program run under `sudo`, `env`,
- * `xargs`, `nice`, `timeout` and the like is read as itself, and a command
- * string handed to `sh -c`, `bash -c` or `eval`, or written inside `$(...)`,
- * is read as a command too. What these rules do not name stays a judgment,
- * where a confident reading still puts it on the owner's list.
+ * and the arguments with which it destroys. The programs are found by the
+ * gate's one command walk (command-walk.ts): through `sudo`, `env`, `xargs`,
+ * `setsid`, `flock` and the other wrappers, into `sh -c` / `eval` strings,
+ * `$(...)`, `find -exec`, and the shell scripts a command runs. A command
+ * nested too deeply to read, or a script too large to read, counts as a
+ * deletion, so what code cannot see fails closed. What these rules do not
+ * name stays a judgment, where a confident reading still puts it on the
+ * owner's list.
  *
  * Cost per call: one parse of each command string the call carries (the same
- * parser the exec tool uses), only for calls that carry a command.
+ * parser the exec tool uses), only for calls that carry a command; per shell
+ * script a command runs, one stat and one read of at most 256 KiB.
  */
-import { collectCommandNodes, type CommandNode } from '../runtime/permissions/normalization/ast.js';
-import { parseCommandAST } from '../runtime/permissions/normalization/parser.js';
+import { walkCommands } from './command-walk.js';
 
-/** Programs that run the command after them: `sudo rm -rf x` is `rm -rf x`. */
-const WRAPPERS: ReadonlySet<string> = new Set([
-  'sudo', 'doas', 'env', 'nice', 'nohup', 'time', 'timeout', 'stdbuf', 'ionice', 'command', 'builtin', 'exec', 'xargs', 'chronic', 'unbuffer',
-]);
-/** The options of a wrapper that take the next word as their value. */
-const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
-  sudo: new Set(['-u', '-g', '-C', '-h', '-p', '-U', '-r', '-t', '-D', '-R']),
-  doas: new Set(['-u', '-C']),
-  env: new Set(['-u', '-C', '-S']),
-  nice: new Set(['-n']),
-  ionice: new Set(['-c', '-n', '-p']),
-  timeout: new Set(['-s', '-k', '--signal', '--kill-after']),
-  stdbuf: new Set(['-i', '-o', '-e']),
-  xargs: new Set(['-I', '-n', '-P', '-L', '-d', '-a', '-E', '-s', '-i']),
-};
-/** Shells and `eval`: their command-string argument is itself a command. */
-const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+/** What a call destroys, in words. */
+export interface Destruction {
+  readonly reason: string;
+  /** Code could not read what the command runs (nested too deeply, a script too large); held as a deletion so it fails closed. */
+  readonly unread: boolean;
+}
+
 /** Programs whose every run removes or destroys what it names. */
 const REMOVERS: ReadonlySet<string> = new Set(['rm', 'unlink', 'shred', 'srm', 'wipe', 'wipefs', 'mkswap', 'blkdiscard']);
 /** Database clients whose statement text is read for a drop or truncate. */
@@ -43,39 +36,6 @@ const DATABASE_CLIENTS: ReadonlySet<string> = new Set([
   'psql', 'mysql', 'mariadb', 'sqlite3', 'sqlcmd', 'clickhouse-client', 'cockroach', 'mongo', 'mongosh', 'redis-cli', 'duckdb',
 ]);
 const DATABASE_DESTRUCTION = /\b(?:drop\s+(?:table|database|schema|collection|index|view)|truncate\s+(?:table\s+)?[`"\w]|flushall|flushdb|dropdatabase\s*\(|\.drop\s*\()/i;
-
-const MAX_DEPTH = 4;
-
-/** A token's text as the shell hands it to the program: outer quotes removed. */
-function unquote(value: string): string {
-  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) return value.slice(1, -1);
-  return value;
-}
-
-/** The words a command node runs with, redirections and their targets left out. */
-function wordsOf(node: CommandNode): { readonly words: string[]; readonly nested: string[] } {
-  const words: string[] = [];
-  const nested: string[] = [];
-  let skipNext = false;
-  for (const token of node.tokens) {
-    if (skipNext) { skipNext = false; continue; }
-    if (token.type === 'redirect') {
-      // `>`, `2>` take the next token as their target; `2>&1` and `>file` carry it themselves.
-      skipNext = /^[0-9&]*[<>]{1,2}$/.test(token.value);
-      continue;
-    }
-    if (token.type === 'subshell') {
-      const inner = token.value.startsWith('$(') ? token.value.slice(2, -1) : token.value.startsWith('`') ? token.value.slice(1, -1) : '';
-      if (inner.trim()) nested.push(inner);
-      continue;
-    }
-    words.push(unquote(token.value));
-  }
-  return { words, nested };
-}
-
-const baseName = (word: string): string => (word.slice(word.lastIndexOf('/') + 1)).toLowerCase();
-const isAssignment = (word: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 
 /** What `git <subcommand> ...` destroys, or undefined. */
 function gitDestroys(args: readonly string[]): string | undefined {
@@ -110,7 +70,7 @@ function gitDestroys(args: readonly string[]): string | undefined {
   }
 }
 
-/** What one program run with these arguments destroys, or undefined. Wrappers, shells and `find -exec` are read by the walker. */
+/** What one program run with these arguments destroys, or undefined. Wrappers, shells, scripts and `find -exec` are read by the walk. */
 function programDestroys(name: string, args: readonly string[]): string | undefined {
   if (REMOVERS.has(name)) return `${name} deletes what it names, and nothing keeps a copy`;
   if (name.startsWith('mkfs')) return `${name} formats a device, erasing it`;
@@ -127,90 +87,21 @@ function programDestroys(name: string, args: readonly string[]): string | undefi
 }
 
 /**
- * Reads one program run by the walker: `visit` answers for the program
- * itself; then the command `find -exec` runs, and the command string a shell
- * or `eval` is handed, are read as commands of their own.
+ * The first destruction the commands carry (`git clean deletes untracked
+ * files, which git keeps no copy of`); undefined when none of them is one
+ * these rules recognise. `directory` is where a relative script path is read
+ * from.
  */
-type ProgramVisitor<T> = (name: string, args: readonly string[]) => T | undefined;
-/** What the walker answers for a command nested deeper than it reads (`bash -c "bash -c ..."` past the limit). */
-type TooDeep<T> = (name: string) => T | undefined;
-
-function walkProgram<T>(name: string, args: readonly string[], depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
-  const found = visit(name, args);
-  if (found !== undefined) return found;
-  if (name === 'find') {
-    const exec = args.findIndex((word) => word === '-exec' || word === '-execdir' || word === '-ok' || word === '-okdir');
-    if (exec >= 0 && args[exec + 1] !== undefined) return walkProgram(baseName(args[exec + 1]!), args.slice(exec + 2), depth, visit, tooDeep);
-  }
-  if (SHELLS.has(name) || name === 'eval') {
-    const flag = args.findIndex((word) => /^-[a-z]*c[a-z]*$/.test(word));
-    const script = name === 'eval' ? args.join(' ') : flag >= 0 ? args[flag + 1] : undefined;
-    if (script !== undefined && script.trim().length > 0) {
-      return depth < MAX_DEPTH ? walkCommand(script, depth + 1, visit, tooDeep) : tooDeep(name);
-    }
-  }
-  return undefined;
-}
-
-/** One parsed command node: what `$(...)` inside it runs, then its program, read through wrappers. */
-function walkNode<T>(node: CommandNode, depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
-  const { words, nested } = wordsOf(node);
-  for (const inner of nested) {
-    const found = depth < MAX_DEPTH ? walkCommand(inner, depth + 1, visit, tooDeep) : undefined;
-    if (found !== undefined) return found;
-  }
-  let index = 0;
-  while (index < words.length) {
-    while (index < words.length && isAssignment(words[index]!)) index++;
-    const name = baseName(words[index] ?? '');
-    if (!name) return undefined;
-    if (!WRAPPERS.has(name)) return walkProgram(name, words.slice(index + 1), depth, visit, tooDeep);
-    // Past the wrapper's own options, their values (and `timeout`'s duration) to the program it runs.
-    const valued = WRAPPER_VALUE_FLAGS[name];
-    index++;
-    while (index < words.length) {
-      const word = words[index]!;
-      if (valued?.has(word)) { index += 2; continue; }
-      if (word.startsWith('-') || isAssignment(word) || (name === 'timeout' && /^[0-9.]+[smhd]?$/.test(word))) { index++; continue; }
-      break;
-    }
-  }
-  return undefined;
-}
-
-function walkCommand<T>(command: string, depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
-  let nodes: CommandNode[];
-  try { nodes = collectCommandNodes(parseCommandAST(command)); }
-  catch { return undefined; }
-  for (const node of nodes) {
-    const found = walkNode(node, depth, visit, tooDeep);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-/**
- * The first answer `visit` gives for a program the commands run, read the way
- * the deletion rules read them: through `sudo`, `env`, `xargs`, `timeout` and
- * the other wrappers, into `sh -c` / `eval` command strings, `$(...)` and
- * `find -exec`. `tooDeep` answers for a shell command string nested past the
- * depth the walker reads. One parse of each command string.
- */
-export function firstProgramAnswer<T>(commands: readonly string[], visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
-  for (const command of commands) {
-    const found = walkCommand(command, 0, visit, tooDeep);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-/**
- * The first destruction the commands carry, in words (`git clean deletes
- * untracked files, which git keeps no copy of`); undefined when none of them
- * is one these rules recognise.
- */
-export function unrecoverableDeletionIn(commands: readonly string[]): string | undefined {
-  return firstProgramAnswer(commands, programDestroys, (name) => `${name} runs a command nested too deeply to read`);
+export function unrecoverableDeletionIn(commands: readonly string[], directory: string | undefined): Destruction | undefined {
+  return walkCommands<Destruction>(commands, (run) => {
+    const reason = programDestroys(run.name, run.args);
+    return reason === undefined ? undefined : { reason, unread: false };
+  }, {
+    directory,
+    tooDeep: (name) => ({ reason: `${name} runs a command nested too deeply to read`, unread: true }),
+    onScriptTooLarge: (path) => ({ reason: `it runs the script ${path}, which is too large to read`, unread: true }),
+    fromScript: (path, found) => found.unread ? found : { reason: `the script ${path} it runs: ${found.reason}`, unread: false },
+  });
 }
 
 /** An exec file operation that deletes, or overwrites its destination, is a deletion too. */

@@ -421,9 +421,21 @@ export class PhoneNodeClient {
         return;
       }
       if (status >= 400) {
+        const refusal = (json ?? {}) as { readonly code?: unknown; readonly error?: unknown };
+        // 410 REMOTE_PAIR_REQUEST_SETTLED: the request was rejected, expired or already
+        // used; it can never be finished, and the daemon's text says to ask again.
+        if (status === 410 || refusal.code === 'REMOTE_PAIR_REQUEST_SETTLED') {
+          this.pendingChallenge = '';
+          this.setState({ pendingRequestId: '' });
+          this.failPairing(typeof refusal.error === 'string' && refusal.error
+            ? refusal.error
+            : 'This pairing request is no longer open. Request pairing again.');
+          return;
+        }
+        // 404 while the request still waits for the owner's approval.
         this.setState({
           status: 'awaiting-approval',
-          message: status === 409 || status === 403
+          message: status === 404
             ? 'Not approved yet. Approve this device on the desktop, then press Finish pairing again.'
             : `Pairing could not be finished (HTTP ${status}).`,
         });

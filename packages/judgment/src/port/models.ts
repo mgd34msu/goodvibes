@@ -1,7 +1,7 @@
 import type { ModelCard } from '@typesafe-ai/sdk';
 import { requestWithoutDeadline, toJudgmentError } from './client.ts';
 import { judgmentAdapter } from './backends.ts';
-import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
+import { DEFAULT_ATTEMPT_TIMEOUT_MS, validateJudgmentConfig, type JudgmentConfig } from './config.ts';
 import { JudgmentError } from './errors.ts';
 
 /** The model names an endpoint accepts (GET /v1/models). */
@@ -23,7 +23,7 @@ export function createModelCatalog(input: JudgmentConfig): ModelCatalog {
         if (adapter === 'cloudflare-workers-ai' || adapter === 'laya') {
           return [{ name: config.model, description: `Configured ${adapter} decision model`, release_date: '' }];
         }
-        const deadline = AbortSignal.timeout(config.timeoutMs || 30_000);
+        const deadline = AbortSignal.timeout(config.timeoutMs || DEFAULT_ATTEMPT_TIMEOUT_MS);
         const signal = config.signal ? AbortSignal.any([deadline, config.signal]) : deadline;
         const result = await requestWithoutDeadline(config, 'GET', '/v1/models', signal);
         if (result && typeof result === 'object' && 'data' in result && Array.isArray(result.data)) {

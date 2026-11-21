@@ -199,6 +199,8 @@ export function normalizePairRequest(record: unknown): StoredPairRequest | null 
     expiresAt: typeof candidate.expiresAt === 'number' ? candidate.expiresAt : Date.now() + 10 * 60_000,
     peerId: typeof candidate.peerId === 'string' ? candidate.peerId : undefined,
     remoteAddress: typeof candidate.remoteAddress === 'string' ? candidate.remoteAddress : undefined,
+    // Absent (never verified, or verified without the id kept): the verify is not answered again.
+    verifiedTokenId: typeof candidate.verifiedTokenId === 'string' ? candidate.verifiedTokenId : undefined,
     metadata: typeof candidate.metadata === 'object' && candidate.metadata !== null ? candidate.metadata as Record<string, unknown> : {},
   };
 }

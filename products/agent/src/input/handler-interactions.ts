@@ -1,5 +1,4 @@
 import { createHandlerContentBindings } from '@goodvibes/engine/terminal-shell/handler-content-bindings';
-import '@goodvibes/engine/terminal-shell/input-content';
 import {
   expandPrompt,
   handleBlockCopy,
@@ -12,7 +11,6 @@ import { handleEscape } from './handler-modal-stack.ts';
 
 import { missingClipboardReaderHint } from '../utils/clipboard.ts';
 import type { InputHandler } from './handler.ts';
-import '../renderer/theme.ts';
 
 /**
  * handlePasteForHandler - Shared paste path for Ctrl+V and middle-click.

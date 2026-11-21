@@ -362,7 +362,8 @@ export const automationRunLifecycle = defineLifecycle<AutomationRunStatus>('auto
  * The automation job lifecycle. Only `enabled` <-> `paused` is performed today.
  * `error` and `archived` are never assigned here, but the persisted job schema
  * and the operator contract accept them (and `archivedAt` is a job field), so a
- * stored or imported job can carry them; they stay declared. `archived` is final.
+ * stored or imported job can carry them; they stay declared. `archived` is
+ * final: nextJobEnablement refuses to enable such a job.
  */
 export const automationJobLifecycle = defineLifecycle<AutomationJobStatus>('automation job', {
   enabled: ['paused', 'error', 'archived'],
@@ -382,9 +383,76 @@ export function resolveJobEnablement(job: { readonly enabled?: boolean | undefin
   return { enabled, status: job.status ?? (enabled ? 'enabled' : 'paused') };
 }
 
-/** `enabled` and `status` for a job being switched on or off. */
-export function jobEnablement(enabled: boolean): { readonly enabled: boolean; readonly status: AutomationJobStatus } {
-  return { enabled, status: enabled ? 'enabled' : 'paused' };
+/** An enable the job lifecycle refuses (an archived job is final). Nothing was changed. */
+export class AutomationJobEnableRefusedError extends Error {
+  readonly code = 'INVALID_ARGUMENT';
+  readonly status = 400;
+  constructor(reason: string) {
+    super(`${reason}. Nothing was changed.`);
+    this.name = 'AutomationJobEnableRefusedError';
+  }
+}
+
+/** What switching a job on or off writes on its record. */
+export interface JobEnablement {
+  readonly enabled: boolean;
+  readonly status: AutomationJobStatus;
+  readonly pausedReason: string | undefined;
+  readonly nextRunAt: number | undefined;
+  /** The job's source record with the new switch, when there is a job to take it from. */
+  readonly source?: AutomationSourceRecord;
+  /** Zero when a disabled job is switched back on, so the failure policy counts its failures afresh. */
+  readonly failureCount?: number;
+}
+
+/**
+ * The one rule for switching a job on or off, whoever does it (an owner's
+ * toggle or edit, a create, the scheduler pausing a job): `job` is the record
+ * as it stands (undefined for a new job), `requestedEnabled` the switch asked
+ * for, `schedule` the schedule the record will have.
+ *
+ * - Enabling follows the job lifecycle: an `archived` job is final, and
+ *   enabling one throws AutomationJobEnableRefusedError naming why.
+ * - An enable whose schedule has no next run (a one-time schedule already in
+ *   the past) leaves the job disabled with `schedule-expired`, so no record is
+ *   ever enabled with nothing left to run.
+ * - An enabled job keeps its next run time when its schedule did not change;
+ *   otherwise the next run is computed from `now`.
+ * - Disabling keeps a status other than `enabled` as it is (an `error` or
+ *   `archived` label survives). `disabledReason` names why the job is switched
+ *   off; without one an already disabled job keeps the reason it was paused
+ *   for, and any other job is `operator-disabled`.
+ */
+export function nextJobEnablement(
+  job: AutomationJob | undefined,
+  requestedEnabled: boolean,
+  schedule: import('./schedules.js').AutomationScheduleDefinition,
+  now: number,
+  disabledReason?: string,
+): JobEnablement {
+  const offStatus: AutomationJobStatus = job && job.status !== 'enabled' ? job.status : 'paused';
+  const source = (enabled: boolean): Pick<JobEnablement, 'source'> => job ? { source: { ...job.source, enabled, updatedAt: now } } : {};
+  if (!requestedEnabled) {
+    const pausedReason = disabledReason ?? (job && !job.enabled ? job.pausedReason : undefined) ?? 'operator-disabled';
+    return { enabled: false, status: offStatus, pausedReason, nextRunAt: undefined, ...source(false) };
+  }
+  if (job && job.status !== 'enabled') {
+    const move = automationJobLifecycle.check(job.status, 'enabled');
+    if (!move.ok) throw new AutomationJobEnableRefusedError(move.reason);
+  }
+  const kept = job?.enabled && JSON.stringify(job.schedule) === JSON.stringify(schedule) ? job.nextRunAt : undefined;
+  const nextRunAt = kept ?? computeNextRun(schedule, now);
+  if (nextRunAt === undefined) {
+    return { enabled: false, status: offStatus, pausedReason: 'schedule-expired', nextRunAt: undefined, ...source(false) };
+  }
+  return {
+    enabled: true,
+    status: 'enabled',
+    pausedReason: undefined,
+    nextRunAt,
+    ...source(true),
+    ...(job && !job.enabled ? { failureCount: 0 } : {}),
+  };
 }
 
 /**

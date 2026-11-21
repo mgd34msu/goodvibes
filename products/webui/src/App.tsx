@@ -27,7 +27,8 @@ import { RelayOverflowBanner } from './components/status/RelayOverflowBanner';
 import { WakeBanner } from './components/voice/WakeBanner';
 import { useWakeHost } from './lib/voice/useWake';
 import { DaemonReceipts } from './components/status/DaemonReceipts';
-import { forgetUnendedSignIn, getCurrentAuth, hasSignInSync, retryDaemonSignOut, signOut, client as platformClient } from './lib/goodvibes';
+import { getCurrentAuth, hasSignInSync, client as platformClient } from './lib/goodvibes';
+import { useSignOut } from './hooks/useSignOut';
 import { queryKeys } from './lib/queries';
 import { hostedSessionsFromListResult } from './lib/hosted-sessions';
 import { ChatView } from './views/ChatView';
@@ -41,7 +42,6 @@ import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
 import { shellCounts } from './lib/needs-you';
 import { useOpenAsks } from './hooks/useOpenAsks';
-import { unpairRelay } from './lib/relay-connection';
 import { useEventStreamState } from './lib/event-stream';
 import { asRecord, bestId, bestTitle, firstString } from './lib/object';
 import { nonEmpty } from './lib/non-empty';
@@ -470,7 +470,7 @@ export default function App() {
   // owner's, so his name comes from his profile (one read per sign-in, kept).
   const ownerDevice = asRecord(auth.data).admin === true;
   const ownerName = useQuery({
-    queryKey: ['profile', 'field', 'identity.name'],
+    queryKey: queryKeys.ownerProfileField('identity.name'),
     queryFn: () => platformClient.operator.profile.get('identity.name'),
     enabled: auth.isSuccess && !signedInName && ownerDevice,
     staleTime: Infinity,
@@ -532,31 +532,10 @@ export default function App() {
     getCommands().find((command) => command.id === 'system.palette')?.run();
   }, []);
   // A sign-out whose daemon session could not be ended: signed out here, and the reason, with a retry.
-  const [signOutProblem, setSignOutProblem] = useState<{ readonly error: string; readonly retrying: boolean } | null>(null);
-  const finishSignOut = useCallback(() => {
-    // A relay pairing routes this browser's requests to one daemon; signing out must not leave it behind.
-    // It goes once the daemon session is ended (or given up on): the retry may need the relay route.
-    unpairRelay();
-    setSignOutProblem(null);
-  }, []);
-  const handleSignOut = useCallback(() => {
-    void signOut().then((outcome) => {
-      if (outcome.endedOnDaemon) finishSignOut();
-      else setSignOutProblem({ error: outcome.error ?? 'no answer', retrying: false });
-      return queryClient.invalidateQueries();
-    });
-  }, [queryClient, finishSignOut]);
-  const handleRetrySignOut = useCallback(() => {
-    setSignOutProblem((current) => current && { ...current, retrying: true });
-    void retryDaemonSignOut().then((outcome) => {
-      if (outcome.endedOnDaemon) finishSignOut();
-      else setSignOutProblem({ error: outcome.error ?? 'no answer', retrying: false });
-    });
-  }, [finishSignOut]);
-  const handleDismissSignOut = useCallback(() => {
-    forgetUnendedSignIn();
-    finishSignOut();
-  }, [finishSignOut]);
+  // The outcome outlives this mount (signing out remounts the app), so it is read from useSignOut.
+  const { problem: signOutProblem, signOut: signOutEverywhere, retry: retrySignOut, leaveIt: leaveSignOutUnended } = useSignOut();
+  const handleSignOut = useCallback(() => { void signOutEverywhere(); }, [signOutEverywhere]);
+  const handleRetrySignOut = useCallback(() => { void retrySignOut(); }, [retrySignOut]);
 
   // Honest login gate. Signed-out (auth.current 401 → query error) shows the front door
   // instead of the shell. On first load with a stored token, show a neutral splash while
@@ -629,7 +608,7 @@ export default function App() {
             <Button variant="secondary" size="sm" onClick={handleRetrySignOut} disabled={signOutProblem.retrying}>
               {signOutProblem.retrying ? 'Trying…' : 'Try again'}
             </Button>{' '}
-            <Button variant="ghost" size="sm" onClick={handleDismissSignOut}>Leave it</Button>
+            <Button variant="ghost" size="sm" onClick={leaveSignOutUnended}>Leave it</Button>
           </div>
         )}
         <SignedOutGate

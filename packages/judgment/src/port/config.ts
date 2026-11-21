@@ -15,6 +15,9 @@ export const HOSTED_BASE_URL = 'https://api.typesafe.ai';
 /** Follow TypeSafe's most recent stable Jev release. Responses retain the resolved version. */
 export const DEFAULT_MODEL = 'jev-latest';
 
+/** How long one attempt at one target may take when the configuration names no time. */
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
+
 
 /**
  * Where judgments are answered. `hosted` is TypeSafe's Jev endpoint; `local`
@@ -41,7 +44,7 @@ export interface JudgmentConfig {
   readonly endpoint: JudgmentEndpoint;
   /** The model id or alias to ask; defaults to {@link DEFAULT_MODEL}. */
   readonly model: string;
-  /** Finite per-target timeout in milliseconds; legacy 0 selects the 30-second default. */
+  /** Finite per-target timeout in milliseconds; 0 selects {@link DEFAULT_ATTEMPT_TIMEOUT_MS}. */
   readonly timeoutMs: number;
   /**
    * The deadline `judge` gives a decision a person or tool call waits on when
@@ -95,7 +98,7 @@ export function judgmentConfigFromEnv(
   return {
     endpoint: { kind: endpointKind(baseURL), baseURL, apiKey },
     model: overrides.model ?? (env['TYPESAFE_DEFAULT_MODEL']?.trim() || DEFAULT_MODEL),
-    timeoutMs: overrides.timeoutMs ?? 30_000,
+    timeoutMs: overrides.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS,
     retry: overrides.retry ?? {},
     ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     ...(overrides.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: overrides.decisionDeadlineMs }),

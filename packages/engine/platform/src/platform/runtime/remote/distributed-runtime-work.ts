@@ -9,7 +9,6 @@ import type {
   DistributedRuntimeManagerState,
   DistributedWorkPriority,
   DistributedWorkType,
-  StoredPeerRecord,
 } from './distributed-runtime-types.js';
 import {
   buildAudit,
@@ -32,8 +31,10 @@ import {
   recordDistributedRuntimeAudit,
   requeueDistributedExpiredClaims,
   resolveDistributedRuntimeWaiters,
+  standInBridgePeer,
   startDistributedRuntime,
   waitForDistributedWork,
+  withOwedDistributedBridges,
 } from './distributed-runtime-store.js';
 
 // The marker survives restart; its executable owner deliberately does not.
@@ -400,9 +401,10 @@ export async function completeDistributedWork(
   };
   releaseAdmission(state, workId);
   // The record that is stored, published and bridged carries no capture bytes;
-  // only the caller waiting on this work gets them, in memory.
+  // only the caller waiting on this work gets them, in memory. It is stored
+  // naming the bridges it owes, so the persist below makes them durable.
   const recorded = withoutCaptureMedia(updated);
-  state.work.set(workId, recorded);
+  state.work.set(workId, withOwedDistributedBridges(recorded));
   const peer = state.peers.get(auth.peer.id);
   if (peer) {
     state.peers.set(peer.id, {
@@ -422,15 +424,16 @@ export async function completeDistributedWork(
       note: status === 'completed' ? summarizeValue(recorded.result) || 'no result' : (input.error ?? status),
     },
   ));
-  const bridgePeer = state.peers.get(auth.peer.id) ?? bridgePeerFor(auth.peer.id, current.peerKind);
+  const bridgePeer = state.peers.get(auth.peer.id) ?? standInBridgePeer(auth.peer.id, current.peerKind, Date.now());
   await pruneAndPersistDistributedRuntime(state);
   await bridgeSettledAndRemember(state, bridgePeer, recorded);
+  const settled = state.work.get(workId) ?? recorded;
   publishDistributedRuntimeEvent(state, 'remote-work-settled', {
     peer: sanitizePeer(state.peers.get(auth.peer.id) ?? bridgePeer),
-    work: recorded,
+    work: settled,
   });
   resolveDistributedRuntimeWaiters(state, updated);
-  return recorded;
+  return settled;
 }
 
 /**
@@ -470,36 +473,18 @@ export async function cancelDistributedWork(
     updatedAt: Date.now(),
     leaseExpiresAt: undefined,
   };
-  state.work.set(workId, updated);
+  // Stored naming the bridges it owes, so the persist below makes them durable.
+  state.work.set(workId, withOwedDistributedBridges(updated));
   recordDistributedRuntimeAudit(state, buildAudit('work-cancelled', input.actor ?? 'operator', {
     peerId: updated.peerId,
     workId,
     note: updated.error,
   }));
-  const bridgePeer = state.peers.get(updated.peerId) ?? bridgePeerFor(updated.peerId, updated.peerKind);
+  const bridgePeer = state.peers.get(updated.peerId) ?? standInBridgePeer(updated.peerId, updated.peerKind, Date.now());
   await pruneAndPersistDistributedRuntime(state);
   await bridgeSettledAndRemember(state, bridgePeer, updated);
-  publishDistributedRuntimeEvent(state, 'remote-work-cancelled', updated);
-  resolveDistributedRuntimeWaiters(state, updated);
-  return updated;
-}
-
-/** The record the bridges are told about when the work's peer is gone; it is not stored as a peer. */
-function bridgePeerFor(
-  peerId: string,
-  kind: DistributedPeerRecord['kind'],
-): StoredPeerRecord {
-  return {
-    id: peerId,
-    kind,
-    label: peerId,
-    requestedId: peerId,
-    capabilities: [],
-    commands: [],
-    permissions: undefined,
-    status: 'idle',
-    pairedAt: Date.now(),
-    tokens: [],
-    metadata: {},
-  };
+  const settled = state.work.get(workId) ?? updated;
+  publishDistributedRuntimeEvent(state, 'remote-work-cancelled', settled);
+  resolveDistributedRuntimeWaiters(state, settled);
+  return settled;
 }

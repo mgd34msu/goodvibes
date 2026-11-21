@@ -27,7 +27,7 @@
  * BILLING: 'none', a local engine has no billing dimension, so it emits no
  * cost-attribution usage at all (honest absence, never a fake $0.00).
  */
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,15 +59,25 @@ export type LocalEngineRunner = (input: {
   readonly signal?: AbortSignal | undefined;
 }) => Promise<{ stdout: string }>;
 
+/** The most stdout or stderr one engine run may write; past it the run fails, as execFile's maxBuffer did. */
+const LOCAL_ENGINE_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
 /**
  * Run one engine binary to completion. The one runner for local speech: the
  * provider and the install proof both use it, so the proof runs the engines
  * the way the product does.
  *
- * Settles only when the child has closed, so a caller's scratch cleanup cannot
- * race a child that ignored SIGTERM and is still writing its output file. A
- * failure carries the exit `code`, `signal` and `stderr`; a deadline or abort
- * rejects with a `TimeoutError` or `AbortError`.
+ * The engine runs in a process group of its own, and a deadline, an abort or
+ * a failure signals the whole group (SIGTERM, then SIGKILL 250 ms later): a
+ * wrapper script's engine (bash starting python, as the documented
+ * faster-whisper and Kokoro wrappers do) holds the same pipes and is stopped
+ * with it, instead of running on and keeping the call from settling.
+ *
+ * Settles only when the child has closed (every holder of its pipes is gone),
+ * so a caller's scratch cleanup cannot race a child that ignored SIGTERM and
+ * is still writing its output file. A failure carries the exit `code`,
+ * `signal` and `stderr`; a deadline or abort rejects with a `TimeoutError` or
+ * `AbortError`.
  */
 export const runLocalEngine: LocalEngineRunner = (input) =>
   new Promise((resolve, reject) => {
@@ -76,18 +86,46 @@ export const runLocalEngine: LocalEngineRunner = (input) =>
       return;
     }
     let failure: unknown;
-    let output = '';
     let escalation: ReturnType<typeof setTimeout> | undefined;
     let closing = false;
-    const child = execFile(input.binary, [...input.args], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
-      output = stdout;
-      if (error) { failure ??= Object.assign(error, { stderr }); terminate(); }
-    });
-    const terminate = () => {
-      if (closing || child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      escalation ??= setTimeout(() => { if (!closing) child.kill('SIGKILL'); }, 250);
+    let settled = false;
+    let terminated = false;
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const child = spawn(input.binary, [...input.args], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const signalGroup = (signal: NodeJS.Signals) => {
+      const pid = child.pid;
+      if (pid === undefined) return;
+      try { process.kill(-pid, signal); }
+      catch {
+        // The group is already gone; signal the child itself in case it left its group.
+        try { child.kill(signal); } catch { /* already exited */ }
+      }
     };
+    const terminate = () => {
+      if (closing) return;
+      terminated = true;
+      signalGroup('SIGTERM');
+      escalation ??= setTimeout(() => { if (!closing) signalGroup('SIGKILL'); }, 250);
+    };
+    const overflow = (stream: 'stdout' | 'stderr') => {
+      failure ??= Object.assign(new Error(`${input.binary} wrote more than ${LOCAL_ENGINE_MAX_OUTPUT_BYTES} bytes to ${stream}.`), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      });
+      terminate();
+    };
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > LOCAL_ENGINE_MAX_OUTPUT_BYTES) { overflow('stdout'); return; }
+      stdout.push(chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > LOCAL_ENGINE_MAX_OUTPUT_BYTES) { overflow('stderr'); return; }
+      stderr.push(chunk);
+    });
     const abort = () => {
       failure ??= input.signal?.reason ?? new DOMException('The local engine run was cancelled.', 'AbortError');
       terminate();
@@ -97,19 +135,40 @@ export const runLocalEngine: LocalEngineRunner = (input) =>
       terminate();
     }, input.timeoutMs);
     input.signal?.addEventListener('abort', abort, { once: true });
-    child.once('close', () => {
+    const finish = () => {
+      if (settled) return;
+      settled = true;
       closing = true;
       clearTimeout(timeout);
       if (escalation) clearTimeout(escalation);
       input.signal?.removeEventListener('abort', abort);
       if (failure !== undefined) reject(failure);
-      else resolve({ stdout: output });
+      else resolve({ stdout: Buffer.concat(stdout).toString('utf8') });
+    };
+    child.once('error', (error) => {
+      failure ??= Object.assign(error, { stderr: Buffer.concat(stderr).toString('utf8') });
+      // A binary that could not be started has no pipes to wait for.
+      if (child.pid === undefined) finish();
+      else terminate();
+    });
+    child.once('close', (code, signal) => {
+      if (failure === undefined && (code !== 0 || signal !== null)) {
+        failure = Object.assign(new Error(`${input.binary} ${signal !== null ? `was stopped by ${signal}` : `exited with code ${code}`}.`), {
+          code: code ?? undefined,
+          signal: signal ?? undefined,
+          killed: terminated,
+          stderr: Buffer.concat(stderr).toString('utf8'),
+        });
+      }
+      finish();
     });
     if (input.stdinText !== undefined && child.stdin) {
       // A binary that exits before reading all of stdin breaks the pipe; the
-      // process-exit callback above already reports that failure.
+      // close handler above already reports that failure.
       child.stdin.on('error', () => {});
       child.stdin.end(input.stdinText);
+    } else {
+      child.stdin?.end();
     }
   });
 

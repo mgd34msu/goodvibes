@@ -1,9 +1,7 @@
 import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
 import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
-import 'node:fs';
 import { join } from 'node:path';
-import 'node:url';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
 // The install-kind module alone: `--version` must not load the runtime operations.
@@ -465,7 +463,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'plugin bundles list',
     ],
     summary:
-      'Browse a governed marketplace index, install a SHA-256-pinned capability bundle, remove one, or list the installed ones. An install is never unpinned: a missing or mismatched --sha256 is refused, not overridable. Without --yes, install prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with --yes it installs that plan and writes the receipt the plugin loader enforces. /plugin-trust trust <plugin> <tier> sets what an installed plugin may register.',
+      'Browse a governed marketplace index, install a SHA-256-pinned capability bundle, remove one, or list the installed ones. An install is never unpinned: a missing or mismatched --sha256 is refused, not overridable. Without --yes, install prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with --yes it installs that plan and writes the receipt the plugin loader enforces. /plugin trust <plugin> <tier> sets what an installed plugin may register.',
     examples: [
       'plugin bundles browse ./marketplace-index.json',
       'plugin bundles install ./bundle.json --sha256 <64-hex>',

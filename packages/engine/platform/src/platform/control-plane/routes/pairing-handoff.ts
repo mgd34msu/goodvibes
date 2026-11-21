@@ -39,6 +39,9 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { mintedPairingScopes } from './pairing.js';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
+import { admitEffects } from '../../security/effect-authority.js';
+import { PAIRING_HANDOFF_COMPLETE_EFFECTS } from '../method-catalog-pairing.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
@@ -77,6 +80,20 @@ function availableOffers(deps: PairingHandoffDeps): Set<PairingHandoffOfferKind>
   return available;
 }
 
+/**
+ * The actor a freshly minted pairing token will be (daemon-api actor.ts): a
+ * full pairing is the owner's device or an admin, a narrowed one a device
+ * holding its list.
+ */
+function mintedActor(scopes: readonly string[] | undefined, ownerPairing: boolean): Actor {
+  return {
+    class: scopes !== undefined ? 'device' : ownerPairing ? 'owner' : 'admin',
+    id: 'pairing:minted',
+    scopes: scopes !== undefined ? new Set(scopes) : 'all',
+    via: 'http',
+  };
+}
+
 function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
@@ -93,10 +110,17 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
       throw new GatewayVerbError('fromSharedToken is for a client signed in with the shared operator token; this credential is not.', 'INVALID_ARGUMENT', 400, 'fromSharedToken');
     }
     const available = availableOffers(deps);
-    // A pairing minted narrower than full authority cannot register a passkey
-    // (stepup.credential.register needs admin), so it is not offered one.
-    const narrowed = mintedPairingScopes(invocation.context, undefined) !== undefined;
-    const offers = requestedOffers(params.offers).filter((kind) => available.has(kind) && !(kind === 'passkey' && narrowed));
+    const scopes = mintedPairingScopes(invocation.context, undefined);
+    // The owner's pairing flow: a device paired by the owner himself (his actor, not a
+    // model acting for him) with full authority is his device. From an admin who is not
+    // the owner, the Agent, or narrowed, it is automation. Recorded at the mint and never
+    // changed afterwards.
+    const callerActor = invocation.context.actor;
+    const ownerPairing = scopes === undefined && callerActor?.class === 'owner' && callerActor.agentFor === undefined;
+    // Offered only what the paired device can complete: the completion's own effects, judged
+    // for the actor the minted token will be (a narrowed pairing cannot complete, so it is offered nothing).
+    const completable = admitEffects(mintedActor(scopes, ownerPairing), PAIRING_HANDOFF_COMPLETE_EFFECTS).kind === 'allowed';
+    const offers = completable ? requestedOffers(params.offers).filter((kind) => available.has(kind)) : [];
 
     // Resolved before minting: a token whose secret is never returned would still count toward the paired-node cap.
     const offerDetails = await Promise.all(offers.map(async (kind) => {
@@ -115,13 +139,6 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // token too; a device whose own pairing is gone is refused (403).
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
-        const scopes = mintedPairingScopes(invocation.context, undefined);
-        // The owner's pairing flow: a device paired by the owner himself (his actor, not a
-        // model acting for him) with full authority is his device. From an admin who is not
-        // the owner, the Agent, or narrowed, it is automation. Recorded at the mint and never
-        // changed afterwards.
-        const actor = invocation.context.actor;
-        const ownerPairing = scopes === undefined && actor?.class === 'owner' && actor.agentFor === undefined;
         const input = { name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
           ...(scopes !== undefined ? { scopes } : {}), ...(ownerPairing ? { origin: 'owner-pairing' as const } : {}) };
         // A client moving off the shared token pairs ITSELF through this flow: it already

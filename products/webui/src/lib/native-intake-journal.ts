@@ -187,7 +187,9 @@ function encodedBytes(value: unknown): number {
 /**
  * A record that fails the current strict shape (damaged, or written by another build) is
  * skipped and counted, never allowed to make every other saved original unreadable or to
- * block saving a new one. It stays in the store untouched.
+ * block saving a new one. It stays in the store untouched. Reading has no cap: the cap
+ * refuses only a new record (save), so listing, confirming, releasing and discarding
+ * work at any count, including after another build's records became readable.
  */
 function readRecords(values: unknown[]): { records: NativeIntakeBrowserRecord[]; unreadable: number } {
   const records: NativeIntakeBrowserRecord[] = [];
@@ -198,13 +200,6 @@ function readRecords(values: unknown[]): { records: NativeIntakeBrowserRecord[];
     } catch {
       unreadable += 1;
     }
-  }
-  if (
-    records.length > NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS ||
-    records.reduce((total, record) => total + encodedBytes(record), 0) >
-      NATIVE_INTAKE_BROWSER_JOURNAL_MAX_BYTES
-  ) {
-    throw new NativeIntakeBrowserJournalError("capacity");
   }
   return { records, unreadable };
 }

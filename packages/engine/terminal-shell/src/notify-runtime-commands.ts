@@ -7,6 +7,7 @@
 import { isSecretReferenceValue, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   forgetNotificationWebhook,
+  notificationWebhookSecretKey,
   resolveNotificationWebhook,
   shownNotificationWebhook,
   storeNotificationWebhook,
@@ -69,10 +70,41 @@ function storedUrls(context: NotifyContext): string[] {
  * its reference, so it keeps being sent to. Done once: afterwards every member
  * is a reference.
  */
-async function writableUrls(context: NotifyContext, secrets: Parameters<typeof storeNotificationWebhook>[1]): Promise<string[]> {
+async function writableUrls(context: NotifyContext, secrets: Parameters<typeof storeNotificationWebhook>[1], created: string[] = []): Promise<string[]> {
   const urls: string[] = [];
-  for (const entry of storedUrls(context)) urls.push(isSecretReferenceValue(entry) ? entry : await storeNotificationWebhook(entry, secrets));
+  for (const entry of storedUrls(context)) {
+    if (isSecretReferenceValue(entry)) urls.push(entry);
+    else {
+      const reference = await storeNotificationWebhook(entry, secrets);
+      created.push(reference);
+      urls.push(reference);
+    }
+  }
   return urls;
+}
+/**
+ * Delete the stored URL each removed list member names, and say which were
+ * not deleted: a failed delete, or a session with no secret store, leaves the
+ * key (which carries posting rights) in the store with nothing referring to it,
+ * so each such key is named with the command that deletes it.
+ */
+async function forgetRemovedWebhooks(entries: readonly string[], secrets: NotificationWebhookSecretStore | undefined): Promise<string[]> {
+  const kept: string[] = [];
+  for (const entry of entries) {
+    const key = notificationWebhookSecretKey(entry);
+    if (key === null) continue;
+    let reason: string | undefined;
+    if (!secrets) reason = 'this session has no secret store';
+    else {
+      try {
+        await forgetNotificationWebhook(entry, secrets);
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (reason !== undefined) kept.push(`its stored key was not deleted (${reason}); it is kept as ${key}; delete it with /secrets delete ${key}.`);
+  }
+  return kept;
 }
 async function resolveUrl(context: NotifyContext, entry: string): Promise<string | null> {
   const secrets = context.platform.secretsManager ?? undefined;
@@ -175,14 +207,19 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
           const problem = notifier.targetProblem(url);
           if (problem !== undefined) throw commandRefusal(`Nothing was added: ${problem}`);
           if ((await Promise.all(storedUrls(context).map((entry) => resolveUrl(context, entry)))).includes(url)) return `Already set: ${shownNotificationWebhook(url)}`;
-          const urls = await writableUrls(context, secrets);
-          // The address goes to the secret store; the list keeps its reference.
-          const reference = await storeNotificationWebhook(url, secrets);
-          urls.push(reference);
+          // References this call creates: one for each plain address the list held, and the new address's.
+          const created: string[] = [];
+          let urls: string[];
           try {
+            urls = await writableUrls(context, secrets, created);
+            // The address goes to the secret store; the list keeps its reference.
+            const reference = await storeNotificationWebhook(url, secrets);
+            created.push(reference);
+            urls.push(reference);
             context.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
           } catch (error) {
-            await forgetNotificationWebhook(reference, secrets).catch(() => undefined);
+            // The list was not written, so nothing refers to what this call stored: forget all of it.
+            for (const entry of created) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
             throw error;
           }
           notifier.setUrls(urls);
@@ -206,8 +243,8 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
           const next = urls.filter((_, at) => at !== index);
           context.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
           host().webhookNotifier(context).setUrls(next);
-          if (secrets) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
-          return `Webhook removed: ${shown}`;
+          const kept = await forgetRemovedWebhooks([entry], secrets);
+          return kept.length === 0 ? `Webhook removed: ${shown}` : `Webhook removed: ${shown}; ${kept[0]}`;
         },
       },
       {
@@ -220,9 +257,9 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
           const urls = storedUrls(context);
           context.platform.configManager.mergeCategory('notifications', { webhookUrls: [] });
           host().webhookNotifier(context).setUrls([]);
-          const secrets = context.platform.secretsManager ?? undefined;
-          if (secrets) for (const entry of urls) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
-          return 'All webhook addresses cleared.';
+          const kept = await forgetRemovedWebhooks(urls, context.platform.secretsManager ?? undefined);
+          if (kept.length === 0) return 'All webhook addresses cleared.';
+          return ['All webhook addresses cleared, but for some the stored key remains:', ...kept.map((line) => `  ${line.charAt(0).toUpperCase()}${line.slice(1)}`)].join('\n');
         },
       },
       doAction<Context>({

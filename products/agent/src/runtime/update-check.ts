@@ -11,7 +11,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_REBUILD_COMMAND } from './workspac
  * (platform/runtime/install-kind): the same three-way answer, compiled
  * binary, package-managed vendored binary, or a source run, everywhere. What
  * stays here is this product's own answer to "then what should I run
- * instead", which names this package.
+ * instead", which passes this package's name to the platform's rule.
  *
  * The self-update download/verify/swap orchestration that USES these lives in
  * src/input/commands/update-runtime.ts; this module only decides "is there a
@@ -28,18 +28,18 @@ export {
 export type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 export { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 
+import { fallbackUpdateCommand as platformFallbackUpdateCommand } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
 
+/** The package name a package-managed install of the Agent is identified by. */
+const AGENT_PACKAGE_NAME = '@goodvibes/agent';
+
 /**
- * The exact command to tell the user to run instead of an in-place swap.
- *
- * The Agent's supported managed install path is the Bun global package (see
- * README), and a source checkout is a developer running this repo, both are
- * moved by the package manager, so both point there rather than at the suite
- * installer.
+ * The exact command to tell the user to run instead of an in-place swap: the
+ * workspace rebuild for a run from this repository, otherwise the platform's
+ * answer (the suite installer for this product's private package name).
  */
 export function fallbackUpdateCommand(kind: Exclude<InstallKind, 'binary'>): string {
   if (IS_WORKSPACE_DISTRIBUTION) return WORKSPACE_REBUILD_COMMAND;
-  void kind;
-  return 'bun add -g @goodvibes/agent';
+  return platformFallbackUpdateCommand(kind, AGENT_PACKAGE_NAME);
 }

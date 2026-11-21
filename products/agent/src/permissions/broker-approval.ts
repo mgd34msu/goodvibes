@@ -31,6 +31,7 @@
  * worktrees, see DisabledAgentWorktreeRegistry in runtime/services.ts).
  */
 
+import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
 import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes/engine/terminal-shell/hunk-selection';
 import type { PermissionPromptRequest, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
@@ -61,7 +62,7 @@ export interface BrokerApprovalBroker {
 export interface BrokerCardRecord {
   readonly id: string;
   readonly callId: string;
-  readonly status: string;
+  readonly status: SharedApprovalStatus;
   readonly revision: number;
   readonly request: PermissionPromptRequest;
 }
@@ -83,8 +84,6 @@ export interface BrokerApprovalChangeParams {
   readonly onResolveFailed?: (error: unknown) => void;
 }
 
-const isActiveStatus = (status: string): boolean => status === 'pending' || status === 'claimed';
-
 /**
  * React to one broker approval change: clear the active card when ITS
  * approval resolves (answered here, elsewhere, or expired), or open a card
@@ -93,7 +92,7 @@ const isActiveStatus = (status: string): boolean => status === 'pending' || stat
 export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): void {
   const { approval, getPending, setPending, broker, render } = params;
   const defer = params.defer ?? queueMicrotask;
-  const active = isActiveStatus(approval.status);
+  const active = isOpenApprovalStatus(approval.status);
 
   const pending = getPending();
   if (pending && pending.callId === approval.callId) {
@@ -107,7 +106,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
   defer(() => {
     if (getPending()) return; // a local card (or another broker card) is already up
     const current = broker.getApproval(approval.id);
-    if (!current || !isActiveStatus(current.status)) return;
+    if (!current || !isOpenApprovalStatus(current.status)) return;
     const card: PendingPermissionState = {
       ...current.request,
       openedAt: Date.now(),
@@ -127,7 +126,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           // The record this card was drawn from: a stale answer is refused and the card is drawn again from the current one.
           expectedRevision: current.revision,
         }).then((outcome) => {
-          if (outcome.applied || !outcome.record || !isActiveStatus(outcome.record.status) || getPending()) return;
+          if (outcome.applied || !outcome.record || !isOpenApprovalStatus(outcome.record.status) || getPending()) return;
           const latest = outcome.record;
           defer(() => handleBrokerApprovalChange({ ...params, approval: latest }));
         }, (error: unknown) => {
@@ -135,7 +134,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           // (the answer was not recorded), bring the card back so the ask is not left
           // pending with nothing on screen; an ask that is already resolved needs nothing.
           const latest = broker.getApproval(approval.id);
-          if (latest && isActiveStatus(latest.status) && !getPending()) {
+          if (latest && isOpenApprovalStatus(latest.status) && !getPending()) {
             setPending({ ...card, openedAt: Date.now(), lastTypedAt: undefined, addressed: undefined });
             render();
           }

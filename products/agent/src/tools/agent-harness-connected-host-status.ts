@@ -1,5 +1,5 @@
 import { resolveWebSurfaceExposure } from '@goodvibes/engine/terminal-shell/cli-network-posture';
-import { resolveConnectedHostBaseUrl } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../cli/external-runtime.ts';
@@ -99,7 +99,7 @@ export async function connectedHostStatusSummary(
 ): Promise<Record<string, unknown>> {
   const homeDirectory = resolveHomeDirectory(context);
   const workingDirectory = resolveWorkingDirectory(context);
-  const token = readConnectedHostOperatorToken(homeDirectory, resolveConnectedHostBaseUrl(context.platform.configManager));
+  const token = readConnectedHostOperatorToken(homeDirectory, resolveConnectedHostAddress(context.platform.configManager).baseUrl);
   const runtime = await inspectCliExternalRuntime({
     configManager: context.platform.configManager,
     homeDirectory,

@@ -52,6 +52,7 @@ import type {
   McpConfigScope,
   McpEffectiveConfig,
   McpServerConfig,
+  McpServerConfigEntry,
   McpToolRule,
 } from './config.js';
 import type { HookDispatcher } from '../hooks/dispatcher.js';
@@ -137,6 +138,23 @@ function withoutToolRules(config: McpServerConfig | undefined): McpServerConfig 
   return copy;
 }
 
+/**
+ * The program a server name stands for: the file that defines it and how it is
+ * started or reached. A trust mode or role set this session belongs to this,
+ * not to the name; its own trust, role and scope fields are left out so a
+ * config edit to those does not end a session value that still applies.
+ */
+function launchIdentity(config: McpServerConfig, source: string | undefined): string {
+  return JSON.stringify([
+    source ?? null,
+    config.command ?? null,
+    config.args ?? [],
+    config.env ?? {},
+    config.url ?? null,
+    config.headers ?? {},
+  ]);
+}
+
 function sameToolRules(a: McpServerConfig, b: McpServerConfig): boolean {
   return JSON.stringify([a.deniedTools ?? [], a.allowedTools ?? []]) === JSON.stringify([b.deniedTools ?? [], b.allowedTools ?? []]);
 }
@@ -190,8 +208,16 @@ export class McpRegistry {
   /** Why a configured server's last connect attempt failed; a failed client is not kept, so this is the only record. */
   private readonly connectFailures = new Map<string, string>();
   private permissions = new McpPermissionManager();
-  /** Trust and role the owner set this session. They outlive a reconnect or reload and end with the process or the server's removal. */
-  private readonly sessionPolicy = new Map<string, { trustMode?: McpTrustMode; role?: McpServerRole }>();
+  /**
+   * Trust and role the owner set this session, each bound to the program it
+   * was set for (`launch`, from launchIdentity). They outlive a reconnect or a
+   * reload that keeps that program, and end with the process, the server's
+   * removal, or a reload that puts a different program (another file, command,
+   * address or environment) behind the name.
+   */
+  private readonly sessionPolicy = new Map<string, { trustMode?: McpTrustMode; role?: McpServerRole; launch: string }>();
+  /** The file each configured server was read from, as the last reload found it. */
+  private serverSources = new Map<string, string>();
   /** Tools the owner denied this session, by server. Like the session trust mode, they outlive a reconnect or reload. */
   private readonly sessionToolDenials = new Map<string, Set<string>>();
   /** The policy a server runs under: what the owner set this session, else its config, else the defaults. */
@@ -350,7 +376,7 @@ export class McpRegistry {
 
   async reload(roots: McpConfigRoots): Promise<McpReloadResult> {
     const effective = await this.startableConfig(roots);
-    return this.applyConfig(effective.servers.map((entry) => entry.server));
+    return this.applyConfig(effective.servers);
   }
 
   getEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfig {
@@ -375,13 +401,29 @@ export class McpRegistry {
     return { path: written.path, removed: written.removed, reload: await this.reload(roots) };
   }
 
-  async applyConfig(serverConfigs: readonly McpServerConfig[]): Promise<McpReloadResult> {
+  async applyConfig(entries: readonly McpServerConfigEntry[]): Promise<McpReloadResult> {
     this.permissionHost?.signal.throwIfAborted();
-    const next = new Map(serverConfigs.map((serverConfig) => [serverConfig.name, structuredClone(serverConfig)] as const));
+    const next = new Map(entries.map((entry) => [entry.server.name, structuredClone(entry.server)] as const));
     const previousConfigs = this.serverConfigs;
     // Publish the complete new intent before any drain. An older reload may
     // never delete or reconnect a destination installed while it was awaiting.
     this.serverConfigs = new Map(next); this.#revision++;
+    this.serverSources = new Map(entries.map((entry) => [entry.server.name, entry.source.path] as const));
+    // A trust mode or role set this session for a name now standing for a
+    // different program no longer applies, before anything connects under it.
+    for (const [name, session] of [...this.sessionPolicy]) {
+      const serverConfig = next.get(name);
+      if (!serverConfig || launchIdentity(serverConfig, this.serverSources.get(name)) === session.launch) continue;
+      this.sessionPolicy.delete(name);
+      logger.info('MCP server changed behind its name; the trust mode and role set for it this session no longer apply', { server: name });
+      if (this.permissions.getServerPermissions(name)) {
+        const profile = this.policyProfile(name, serverConfig);
+        this.invalidatePolicyLifetime(name, 'the server behind its name changed, so the trust mode and role set for it this session no longer apply');
+        this.permissions.setTrustMode(name, profile.mode);
+        this.permissions.setServerRole(name, profile.role);
+        this._emitPolicyUpdate(name);
+      }
+    }
     // A per-tool rule that changed applies now, before any drain: a call not yet sent to a newly denied tool ends here.
     for (const name of next.keys()) this.syncToolRules(name);
     const disconnecting: Promise<boolean>[] = [];
@@ -1085,11 +1127,19 @@ export class McpRegistry {
     this.permissions.replaceToolOverrides(serverName, this.toolOverridesFor(serverName));
   }
 
+  /** This session's values for a server, bound to the program now configured under its name. */
+  private sessionPolicyFor(serverName: string): { trustMode?: McpTrustMode; role?: McpServerRole; launch: string } {
+    const config = this.serverConfigs.get(serverName);
+    const launch = config ? launchIdentity(config, this.serverSources.get(serverName)) : '';
+    const session = this.sessionPolicy.get(serverName);
+    return session && session.launch === launch ? session : { launch };
+  }
+
   setServerTrustMode(serverName: string, mode: McpTrustMode): void {
     this.ensurePolicyOwner(serverName, 'trust mode');
     this.invalidatePolicyLifetime(serverName, 'its trust mode was changed');
     this.permissions.setTrustMode(serverName, mode);
-    this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), trustMode: mode });
+    this.sessionPolicy.set(serverName, { ...this.sessionPolicyFor(serverName), trustMode: mode });
     this._emitPolicyUpdate(serverName);
   }
 
@@ -1097,7 +1147,7 @@ export class McpRegistry {
     this.ensurePolicyOwner(serverName, 'role');
     this.invalidatePolicyLifetime(serverName, 'its role was changed');
     this.permissions.setServerRole(serverName, role);
-    this.sessionPolicy.set(serverName, { ...this.sessionPolicy.get(serverName), role });
+    this.sessionPolicy.set(serverName, { ...this.sessionPolicyFor(serverName), role });
     this._emitPolicyUpdate(serverName);
   }
 
@@ -1412,8 +1462,6 @@ export class McpRegistry {
     const elicitationHandler = this.elicitationHandler;
     const client: McpClient = new McpClient(serverConfig, {
       ...(processSpec ? { processSpec } : {}),
-      // Reconnecting is the lifecycle owner's job, so a crash is reported here instead of restarted in place.
-      restartAttempts: 0,
       onUnexpectedExit: (reason) => this.#clientDropped(name, client, reason),
       ...(host && serverConfig.command ? { beforeProcessStart: assertProcessCurrent } : {}),
       onNotification: (notification) => this._handleClientNotification(notification),

@@ -293,6 +293,10 @@ export class BrowserSessionManager {
   readonly #unpublishedHosts = new Set<BrowserHostClient>();
   readonly #hostRetirements = new Map<BrowserHostClient, Promise<void>>();
   private readonly sessions = new Map<string, TrackedSession>();
+  /** Told when a session ends, by any path (close, release, the browser going away, shutdown). */
+  readonly #sessionEndedListeners = new Set<(sessionId: string) => void>();
+  /** Told when a page ends, by any path (closed by the agent or the person, or never published). */
+  readonly #pageEndedListeners = new Set<(sessionId: string, pageId: string) => void>();
   /** Node-hosted driver processes, one per session that needed one. */
   private readonly hosts = new Map<string, BrowserHostClient>();
   /** Saved tool/journal references must never select another manager's first
@@ -808,11 +812,34 @@ export class BrowserSessionManager {
     catch (error) { this.forgetPage(session, tracked); throw error; }
   }
 
+  /**
+   * Be told whenever a session ends, whichever path ends it. This manager is
+   * the one owner of that moment, so what others hold for a session (typed
+   * card material, snapshots) is dropped from here. Returns the unsubscribe.
+   */
+  onSessionEnded(listener: (sessionId: string) => void): () => void {
+    this.#sessionEndedListeners.add(listener);
+    return () => { this.#sessionEndedListeners.delete(listener); };
+  }
+
+  /** Be told whenever a page ends, whichever path ends it. Returns the unsubscribe. */
+  onPageEnded(listener: (sessionId: string, pageId: string) => void): () => void {
+    this.#pageEndedListeners.add(listener);
+    return () => { this.#pageEndedListeners.delete(listener); };
+  }
+
+  #tell(label: string, sessionId: string, call: () => void): void {
+    try { call(); } catch (error) {
+      logger.warn(`A browser ${label} listener failed`, { sessionId, error: summarizeError(error) });
+    }
+  }
+
   private forgetPage(session: TrackedSession, tracked: TrackedPage): void {
     if (session.pages.get(tracked.pageId) !== tracked) return;
     session.pages.delete(tracked.pageId);
     if (session.activePageId === tracked.pageId) session.activePageId = session.pages.keys().next().value ?? null;
     tracked.lifetime.abort(new BrowserSessionError('The original browser page was closed.'));
+    for (const listener of this.#pageEndedListeners) this.#tell('page-ended', session.sessionId, () => listener(session.sessionId, tracked.pageId));
   }
 
   /** Drop a session whose browser went away underneath it, releasing an attached transport too. */
@@ -834,6 +861,7 @@ export class BrowserSessionManager {
   private forgetSession(session: TrackedSession): void {
     if (this.sessions.get(session.sessionId) === session) this.sessions.delete(session.sessionId);
     session.lifetime.abort(new BrowserSessionError('The original browser session was closed or released.'));
+    for (const listener of this.#sessionEndedListeners) this.#tell('session-ended', session.sessionId, () => listener(session.sessionId));
   }
 
   private describe(session: TrackedSession): BrowserSessionInfo {

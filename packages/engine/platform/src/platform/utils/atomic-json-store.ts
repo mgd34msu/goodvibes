@@ -432,7 +432,8 @@ function ensureAtomicParent(dir: string, mkdirp: boolean, beforeCreate: (() => v
   return created;
 }
 
-function syncDirectory(path: string): void {
+/** Make a directory's entries durable: a file created, linked, renamed or removed in it survives a crash. */
+export function syncDirectory(path: string): void {
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY);
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }

@@ -1,5 +1,5 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString } from '../helpers.js';
-import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
+import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, surfaceCredentialAbsent } from '../helpers.js';
+import { resolveInboundCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
@@ -31,20 +31,9 @@ function matrixMentioned(payload: Record<string, unknown>, content: Record<strin
 }
 
 export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
-  const credential = await resolveSurfaceCredential(
-    context,
-    // A secret of its own for inbound calls comes first, so the account's
-    // delivery credential is not the shared secret a caller must hold. The
-    // delivery credential stays as the fallback for a surface that has not set one.
-    { kind: 'config', key: 'surfaces.matrix.webhookSecret' },
-    { kind: 'registry', service: 'matrix', field: 'signingSecret' },
-    { kind: 'env', name: 'MATRIX_WEBHOOK_SECRET' },
-    { kind: 'config', key: 'surfaces.matrix.accessToken' },
-    { kind: 'registry', service: 'matrix', field: 'primary' },
-    { kind: 'env', name: 'MATRIX_ACCESS_TOKEN' },
-  );
+  const credential = await resolveInboundCredential(context, 'matrix');
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('matrix', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+  if (credential.state === 'absent') return surfaceCredentialAbsent('matrix', credential.setting);
   const providedToken = readBearerOrHeaderToken(req, 'x-goodvibes-matrix-token');
   if (credential.state === 'resolved' && !constantTimeEquals(credential.value, providedToken)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });

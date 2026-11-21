@@ -11,7 +11,14 @@
  * and refreshes what the change touched. From the owner's own credential
  * (an owner device, a sign-in) the daemon applies the change directly and
  * none of this runs.
+ *
+ * Each change is held with the client lifetime (sign-in, daemon route) it was
+ * raised under. When that lifetime ends (a sign-out, another sign-in, a relay
+ * re-pairing) the change is settled as `left`: this tab can no longer follow it,
+ * and the approval is still decided on the daemon that asked. It is never read
+ * as cancelled through another identity or daemon.
  */
+import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from './client-lifetime';
 
 /** The daemon's answer to a change it put to the owner. */
 export interface OwnerApprovalPendingAnswer {
@@ -54,33 +61,50 @@ export class OwnerApprovalPendingError extends Error {
   }
 }
 
-export type OwnerApprovalOutcome = 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled';
+/** `left`: the tab signed out or changed daemon while the change waited; the daemon that asked still decides it. */
+export type OwnerApprovalOutcome = 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled' | 'left';
 
 export interface PendingOwnerChange {
   readonly approvalId: string;
   readonly summary: string;
   readonly keys: readonly string[];
   readonly sessionId?: string | undefined;
+  /** The client lifetime the change was raised under; only it can read the approval's outcome. */
+  readonly lifetime: ClientLifetime;
   readonly outcome: OwnerApprovalOutcome;
 }
 
 type Listener = () => void;
 let changes: readonly PendingOwnerChange[] = [];
 const listeners = new Set<Listener>();
+let watchingLifetime = false;
 
 function publish(next: readonly PendingOwnerChange[]): void {
   changes = next;
   for (const listener of listeners) listener();
 }
 
+/** Settle every waiting change raised under a lifetime that has ended as `left`. */
+function leaveRetiredChanges(): void {
+  if (!changes.some((change) => change.outcome === 'pending' && !isClientLifetimeCurrent(change.lifetime))) return;
+  publish(changes.map((change) => (
+    change.outcome === 'pending' && !isClientLifetimeCurrent(change.lifetime) ? { ...change, outcome: 'left' } : change
+  )));
+}
+
 /** Record a change the daemon put to the owner. */
 export function trackOwnerApproval(answer: OwnerApprovalPendingAnswer): void {
+  if (!watchingLifetime) {
+    watchingLifetime = true;
+    subscribeClientLifetime(leaveRetiredChanges);
+  }
   if (changes.some((change) => change.approvalId === answer.approvalId)) return;
   publish([...changes, {
     approvalId: answer.approvalId,
     summary: describe(answer),
     keys: [...(answer.keys ?? [])],
     ...(answer.sessionId ? { sessionId: answer.sessionId } : {}),
+    lifetime: getClientLifetime(),
     outcome: 'pending',
   }]);
 }
@@ -90,10 +114,16 @@ export function outcomeOfApprovalStatus(status: unknown): OwnerApprovalOutcome {
   return status === 'approved' || status === 'denied' || status === 'expired' || status === 'cancelled' ? status : 'pending';
 }
 
-/** Record how a pending change's approval settled. */
-export function settleOwnerApproval(approvalId: string, outcome: OwnerApprovalOutcome): void {
-  if (outcome === 'pending') return;
-  publish(changes.map((change) => (change.approvalId === approvalId ? { ...change, outcome } : change)));
+/**
+ * Record how a pending change's approval settled, as read under `lifetime`. A
+ * reading taken under a lifetime that is not the change's own (or no longer
+ * current) is dropped: only the identity and daemon that raised the change know it.
+ */
+export function settleOwnerApproval(approvalId: string, outcome: OwnerApprovalOutcome, lifetime: ClientLifetime): void {
+  if (outcome === 'pending' || !isClientLifetimeCurrent(lifetime)) return;
+  publish(changes.map((change) => (
+    change.approvalId === approvalId && change.outcome === 'pending' && change.lifetime === lifetime ? { ...change, outcome } : change
+  )));
 }
 
 /** Forget a change once its outcome was shown. */

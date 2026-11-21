@@ -1,7 +1,8 @@
 import type { FetchLike } from '@goodvibes/engine/transport-core';
 import type { StreamEnd, StreamGap } from '@goodvibes/engine/transport-http';
-import type { Page } from '@goodvibes/engine/errors';
+import type { Page, Refusal } from '@goodvibes/engine/errors';
 import type {
+  ApprovalReading,
   ControlPlaneRecentEvent,
   ControlPlaneAuthSnapshot,
   SharedApprovalRecord,
@@ -12,6 +13,7 @@ import type {
 } from '../../control-plane/index.js';
 import type { RegisterSharedSessionInput, SharedSessionRegisterResult, SteerSharedSessionMessageInput } from '../../control-plane/index.js';
 import type { ProviderRuntimeSnapshot, ProviderUsageSnapshot } from '../../providers/runtime-snapshot.js';
+import type { RememberTier } from '../../permissions/approval-rules.js';
 import type {
   TelemetryAggregates,
   TelemetryCapabilities,
@@ -127,14 +129,77 @@ export interface HttpTransportTasksClient {
   retry(taskId: string): Promise<HttpTaskRetryResponse>;
 }
 
+/**
+ * What an approval action sends. `expectedRevision` is the `revision` of the
+ * approval the caller showed or read; the daemon refuses a stale one with
+ * APPROVAL_CHANGED. Who acted is taken from the credential, never the body.
+ */
+export interface HttpApprovalActionInput {
+  readonly expectedRevision: number;
+  readonly note?: string | undefined;
+  readonly remember?: boolean | undefined;
+}
+
+export interface HttpApprovalApproveInput extends HttpApprovalActionInput {
+  /** Edit-tool approvals only: the hunk indices to apply; absent approves the whole request. */
+  readonly selectedHunks?: readonly number[] | undefined;
+  readonly rememberTier?: RememberTier | undefined;
+  readonly reason?: string | undefined;
+  /** An argument-modifying approval (e.g. the typed answer to a command's prompt); `selectedHunks` supersedes it. */
+  readonly modifiedArgs?: Record<string, unknown> | undefined;
+}
+
+export interface HttpApprovalDenyInput extends HttpApprovalActionInput {
+  /** `amended` asks for a change instead of refusing outright; it cannot be remembered. Default `denied`. */
+  readonly disposition?: 'denied' | 'amended' | undefined;
+  readonly rememberTier?: RememberTier | undefined;
+  readonly reason?: string | undefined;
+}
+
+/**
+ * A cancel names the revision it read; a surface that raised the ask gives up
+ * its own hold instead with `release: true` and the `holdId` approvals.raise
+ * returned, and needs no revision.
+ */
+export type HttpApprovalCancelInput =
+  | (HttpApprovalActionInput & { readonly release?: false | undefined })
+  | {
+    readonly release: true;
+    readonly holdId?: string | undefined;
+    readonly expectedRevision?: number | undefined;
+    readonly note?: string | undefined;
+  };
+
+/**
+ * The daemon's answer to an approval action. `applied` false means nothing
+ * changed as asked, and `refusal.code` says why (APPROVAL_SETTLED,
+ * APPROVAL_CHANGED, APPROVAL_EXPIRED, OWNER_DECISION_REQUIRED); the record and
+ * the caller's reading are as they are now, so a stale action can be shown
+ * again and retried at the current revision.
+ */
+export interface HttpApprovalActionOutcome {
+  readonly applied: boolean;
+  readonly approval?: SharedApprovalRecord | undefined;
+  readonly reading?: ApprovalReading | undefined;
+  readonly refusal?: Refusal | undefined;
+  /** Approve and deny: what the daemon recorded on the decision. */
+  readonly recorded?: {
+    readonly approved: boolean;
+    readonly rememberTier: RememberTier | null;
+    readonly reasonStored: boolean;
+    readonly modifiedArgsDelivered: boolean;
+  } | undefined;
+}
+
 export interface HttpTransportApprovalsClient {
   /** The daemon's newest approvals; it takes no page size. */
   list(): Promise<readonly SharedApprovalRecord[]>;
   get(approvalId: string): Promise<SharedApprovalRecord | null>;
-  claim(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  approve(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  deny(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
-  cancel(approvalId: string, actor: string, actorSurface?: string, note?: string): Promise<SharedApprovalRecord | null>;
+  /** Each action resolves to the daemon's outcome, or null for an approval the daemon does not know (404). */
+  claim(approvalId: string, input: HttpApprovalActionInput): Promise<HttpApprovalActionOutcome | null>;
+  approve(approvalId: string, input: HttpApprovalApproveInput): Promise<HttpApprovalActionOutcome | null>;
+  deny(approvalId: string, input: HttpApprovalDenyInput): Promise<HttpApprovalActionOutcome | null>;
+  cancel(approvalId: string, input: HttpApprovalCancelInput): Promise<HttpApprovalActionOutcome | null>;
 }
 
 export interface HttpTransportProvidersClient {

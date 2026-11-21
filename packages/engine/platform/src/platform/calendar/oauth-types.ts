@@ -22,6 +22,7 @@
  */
 
 import type { CalendarEvent, EventDateTime } from './types.js';
+import type { ConfigKey } from '../config/schema-types.js';
 
 // The calendar module already defines the injected Clock (() => number); reuse it
 // so the merged module has one clock type and the index barrel has no name clash.
@@ -77,14 +78,14 @@ export interface OAuthProviderProfile {
    * at the call site, so the refusal message, the setup steps and the docs all
    * quote the same key and cannot drift apart.
    */
-  readonly clientIdConfigKey: string;
+  readonly clientIdConfigKey: ConfigKey;
   /**
    * The config key holding a reference to the operator's client secret, e.g.
    * `calendar.google.clientSecretRef`. The secret itself lives in the secret
    * store; config holds only the reference. Only a confidential-client
    * registration needs one, a desktop/public client with PKCE does not.
    */
-  readonly clientSecretRefConfigKey: string;
+  readonly clientSecretRefConfigKey: ConfigKey;
   /** Extra fixed authorization-request params (e.g. Google's access_type=offline). */
   readonly extraAuthParams?: Readonly<Record<string, string>>;
 }
@@ -144,9 +145,9 @@ export interface ResolvedClientConfig {
    * The config key the client id is expected in, carried through from the profile
    * so a refusal can name the exact key to set without re-deriving it.
    */
-  readonly clientIdConfigKey: string;
+  readonly clientIdConfigKey: ConfigKey;
   /** The config key a client-secret reference is expected in. */
-  readonly clientSecretRefConfigKey: string;
+  readonly clientSecretRefConfigKey: ConfigKey;
 }
 
 // ---------------------------------------------------------------------------

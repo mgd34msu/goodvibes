@@ -12,8 +12,6 @@
 import type { SharedSessionRecord } from '@goodvibes/engine/platform/platform/control-plane';
 import { activeTokens } from './theme.ts';
 import type { SessionPickerModal } from '../input/session-picker-modal.ts';
-import './modal-utils.ts';
-import './surface-kit.ts';
 import { type KitRow } from './surface-kit-list.ts';
 
 // ---------------------------------------------------------------------------

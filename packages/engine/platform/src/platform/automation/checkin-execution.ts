@@ -32,7 +32,19 @@ export interface AutomationCheckinOutcome {
   readonly deliveryId?: string | undefined;
   /** Failure detail, or a durability warning alongside an already confirmed delivery. */
   readonly error?: string | undefined;
+  /**
+   * True on an `error` whose send was already handed to the channel when it
+   * failed: the note may have reached the owner, so the run is not retried.
+   */
+  readonly deliveryMayHaveBegun?: boolean | undefined;
 }
+
+/** A check-in whose send may have begun: another attempt could send the note twice. */
+const CHECKIN_SEND_MAY_HAVE_BEGUN = {
+  failureClass: 'terminal',
+  basis: 'explicit',
+  detail: 'the check-in note may already have been sent',
+} as const;
 
 /**
  * The check-in evaluator the CheckinService attaches to the AutomationManager. `signal` is the run's fence signal:
@@ -101,8 +113,9 @@ export async function executeCheckinJob(
   }
   const end = Date.now();
   const result = { checkin: evaluation.outcome, summary: evaluation.summary };
+  const failureText = evaluation.error ?? evaluation.summary;
   return await settleCheckinRun(fence, context, baseRun, evaluation.outcome === 'error'
-    ? { status: 'failed', endedAt: end, error: evaluation.error ?? evaluation.summary, failure: { error: evaluation.error ?? evaluation.summary } }
+    ? { status: 'failed', endedAt: end, error: failureText, failure: evaluation.deliveryMayHaveBegun ? { known: CHECKIN_SEND_MAY_HAVE_BEGUN } : { error: failureText } }
     : { status: 'completed', endedAt: end, result }, evaluation);
 }
 
@@ -135,13 +148,17 @@ async function settleCheckinRun(
       ...(evaluation.error ? { error: evaluation.error } : {}),
     });
   }
-  const terminal = context.settleRun(context.runs.get(baseRun.id) ?? baseRun, settlement, 'automation.checkin');
+  const ending = context.settleRun(context.runs.get(baseRun.id) ?? baseRun, settlement, 'automation.checkin');
+  const terminal = ending.run;
   context.pruneRunHistory(baseRun.jobId);
-  // A manager that stopped (or a role that moved) while the check-in ran saves nothing more for it.
+  // A manager that stopped (or a role that moved) while the check-in ran saves nothing more for it; its
+  // answer and failure notice still go out, since the check-in already ran.
   if (!fence.current) {
     logger.info('AutomationManager: a check-in ended after its owner ended; its outcome was not saved', { jobId: baseRun.jobId, runId: baseRun.id, status: terminal.status });
-    return terminal;
+    ending.followUp();
+    return context.runs.get(baseRun.id) ?? terminal;
   }
+  // Save, then deliver: the run's end is on disk before its answer or failure notice goes out.
   try { await Promise.all([context.saveJobs(), context.saveRuns()]); }
   catch (error) {
     // The outcome is recorded in memory and announced; only saving it failed.
@@ -149,5 +166,6 @@ async function settleCheckinRun(
       jobId: baseRun.jobId, runId: baseRun.id, status: terminal.status, error: error instanceof Error ? error.message : String(error),
     });
   }
-  return terminal;
+  ending.followUp();
+  return context.runs.get(baseRun.id) ?? terminal;
 }

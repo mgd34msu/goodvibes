@@ -1,4 +1,4 @@
-import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
+import { createSessionShutdown, drainShutdownRegistry, type SessionShutdown } from '@goodvibes/engine/terminal-shell/ordered-shutdown';
 /**
  * bootstrap-shutdown.ts, how a session lets go of everything it took.
  *
@@ -51,15 +51,19 @@ export interface RuntimeShutdownDependencies {
   readonly shutdownOptions: Parameters<typeof shutdownRuntime>[9];
 }
 
-/** Build the session's `shutdown(sessionData)` handler. */
+/**
+ * Build the session's `shutdown(sessionData)` handler. A release that fails
+ * after the save is thrown as a ShutdownReleaseError, and `sessionSaved()`
+ * says the save landed while releases are still running.
+ */
 export function createRuntimeShutdown(
   deps: RuntimeShutdownDependencies,
-): (sessionData: Parameters<typeof shutdownRuntime>[1]) => Promise<void> {
+): SessionShutdown<Parameters<typeof shutdownRuntime>[1]> {
   // Latch before invoking any collaborator, including a synchronously reentrant
   // close. Repeated callers share the same completion and failure result.
   // Collaborators must not await this owner's shutdown from inside their own
   // disposal: that is a dependency cycle, including indirectly wrapped waits.
-  return createOrderedShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt) => {
+  return createSessionShutdown<Parameters<typeof shutdownRuntime>[1]>(async (sessionData, attempt, markSaved) => {
     // Local timers stop first so nothing fires into a half-torn-down runtime.
     await attempt(() => {
       const timer = deps.takeMemorySpineTimer();
@@ -83,6 +87,8 @@ export function createRuntimeShutdown(
         deps.providerRegistry,
         deps.sessionOrchestration,
         deps.shutdownOptions,
+        // Durable before the session hooks are waited for: a slow hook is not a failed save.
+        markSaved,
       ),
     );
     await attempt(() => deps.sessionSpineClient.close(deps.sessionId));
@@ -99,5 +105,5 @@ export function createRuntimeShutdown(
     await attempt(() => deps.agentExternalServices.stop());
     // Always last: final flushes and platform shutdown still need the graph.
     await attempt(() => deps.disposeRuntimeGraph());
-  }, 'Agent shutdown failed to release one or more owned resources');
+  }, 'Agent shutdown failed to release one or more owned resources', 'Agent shutdown saved the session but failed to release one or more owned resources');
 }

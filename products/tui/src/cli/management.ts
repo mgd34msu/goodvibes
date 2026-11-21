@@ -9,24 +9,11 @@ import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/
 import { resolveRemoteDaemonTarget, type DaemonFailure, type RemoteDaemonTarget } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
 import { callDaemonMethod, callDaemonRoute } from '@goodvibes/engine/terminal-shell/raw-reply-route';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
-import 'node:fs';
-import 'node:path';
 
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/providers';
-import '../config/secrets.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
-import '@goodvibes/engine/platform/platform/providers';
 
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@goodvibes/engine/platform/platform/config';
-import '@/runtime/index.ts';
 import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';
-import '../providers/provider-classification.ts';
-import '@goodvibes/engine/terminal-shell';
-import '@goodvibes/engine/terminal-shell';
 
 import { handleServiceCommand } from './service-command.ts';
 import { handleBundleCommand } from './bundle-command.ts';

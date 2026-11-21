@@ -254,6 +254,16 @@ interface LiveGrant {
  * Durable grants on the authority record, with this machine's use counts and
  * audit ledger beside it.
  */
+/** A revoke named a grant id the authority record has never held (a mistyped or made-up id). */
+export class DeviceGrantNotFoundError extends Error {
+  readonly code = 'GRANT_NOT_FOUND';
+  readonly status = 404;
+  constructor(readonly grantId: string) {
+    super(`No grant ${grantId} was ever recorded. Nothing was revoked. Read devices.grants.list for the grant ids.`);
+    this.name = 'DeviceGrantNotFoundError';
+  }
+}
+
 export class DeviceGrantStore {
   private readonly store: PersistentStore<DeviceGrantSnapshot>;
   private readonly authority: AuthorityRecordFile;
@@ -512,7 +522,9 @@ export class DeviceGrantStore {
    * Revoke grants on the authority record, on every machine of the group. A
    * revocation is terminal: no later write, merge or restart brings the grant
    * back, and work still waiting for the phone under it is withdrawn.
-   * Returns the itemised removals for disclosure.
+   * Returns the itemised removals for disclosure: none when what was named is
+   * already revoked, so a repeat after a lost reply still succeeds. A grant id
+   * the record never held is refused with DeviceGrantNotFoundError.
    */
   async revoke(input: {
     readonly grantId?: string | undefined;
@@ -523,7 +535,10 @@ export class DeviceGrantStore {
   }): Promise<readonly DeviceGrantRemoval[]> {
     if (!(input.grantId ?? input.nodeId ?? input.capabilityId)) return [];
     const now = this.now();
+    let neverHeld = false;
     const written = await this.authority.write((view) => {
+      neverHeld = input.grantId !== undefined && view.entry('device-grant', input.grantId) === null;
+      if (neverHeld) return { kind: 'none', value: [] as DeviceGrantRemoval[] };
       const matches = this.liveOnRecord(view).live.filter(({ grant }) =>
         (input.grantId ? grant.id === input.grantId : true)
         && (input.nodeId ? grant.nodeId === input.nodeId : true)
@@ -545,6 +560,7 @@ export class DeviceGrantStore {
         changes: matches.map(({ grant }): AuthorityChange<null> => ({ kind: 'revoke', key: grantKey(grant.id), by: input.actor, reason, value: null })),
       };
     });
+    if (neverHeld) throw new DeviceGrantNotFoundError(input.grantId!);
     await this.recordRemovals(written.value, input.actor);
     return written.value;
   }

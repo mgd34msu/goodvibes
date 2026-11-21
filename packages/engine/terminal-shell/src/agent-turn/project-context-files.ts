@@ -82,9 +82,25 @@ function findGitRoot(workingDirectory: string): string | null {
   return null;
 }
 
-function pathInside(parent: string, child: string): boolean {
+export function pathInside(parent: string, child: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * Why a file found in the workspace must not be loaded into a prompt: its real
+ * path (links followed) is outside the real path of the walk boundary (the git
+ * root, else the working directory), or it could not be resolved. Undefined
+ * when it is inside. A repository file symlinked to somewhere else would
+ * otherwise pull that file into the system prompt. Both the project context
+ * files and the project VIBE.md files are checked with this one rule.
+ */
+export function workspaceContainmentRefusal(boundary: string, path: string): string | undefined {
+  try {
+    return pathInside(realpathSync(boundary), realpathSync(path)) ? undefined : 'Symlink resolves outside the workspace; not loaded.';
+  } catch (error) {
+    return `Could not resolve file: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 function resolveTargetDirectory(shellPaths: AgentProjectContextPaths, targetPath?: string): string {
@@ -188,16 +204,10 @@ function dedupeCandidates(candidates: readonly CandidateContextFile[]): readonly
 function readContextCandidate(candidate: CandidateContextFile, boundary: string): AgentProjectContextFile | BlockedAgentProjectContextFile | null {
   const stat = safeStat(candidate.path);
   if (!stat?.isFile()) return null;
-  // A repository file symlinked to somewhere else would pull that file into
-  // the system prompt. The user-level SOUL.md is outside the workspace by design.
+  // The user-level SOUL.md is outside the workspace by design.
   if (candidate.scope !== 'global') {
-    try {
-      if (!pathInside(realpathSync(boundary), realpathSync(candidate.path))) {
-        return { ...candidate, id: contextFileId(candidate), reason: 'Symlink resolves outside the workspace; not loaded.' };
-      }
-    } catch (error) {
-      return { ...candidate, id: contextFileId(candidate), reason: `Could not resolve file: ${error instanceof Error ? error.message : String(error)}` };
-    }
+    const refusal = workspaceContainmentRefusal(boundary, candidate.path);
+    if (refusal !== undefined) return { ...candidate, id: contextFileId(candidate), reason: refusal };
   }
   if (stat.size > MAX_PROJECT_CONTEXT_FILE_BYTES) {
     return { ...candidate, id: contextFileId(candidate), reason: `File is ${stat.size} bytes, over the ${MAX_PROJECT_CONTEXT_FILE_BYTES} byte limit; not loaded.` };

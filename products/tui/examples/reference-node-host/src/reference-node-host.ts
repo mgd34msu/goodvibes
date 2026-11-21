@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { resolveGoodVibesTreeDirectory } from '@goodvibes/engine/platform/platform/config';
@@ -628,16 +627,11 @@ export class ReferenceNodeHostClient {
 }
 
 /**
- * The local daemon's control plane: GOODVIBES_DAEMON_URL, else the `controlPlane.port` saved in the terminal settings,
- * else the default port, resolved the same way the live verifier does.
+ * The local daemon's control plane: GOODVIBES_DAEMON_URL, else the address the daemon's own settings bind
+ * (scheme, host and port), resolved the same way the live verifier does.
  */
 export function resolveDefaultReferenceNodeHostBaseUrl(): string {
-  return resolveVerificationHostUrl(
-    resolveGoodVibesTreeDirectory(),
-    undefined,
-    ['GOODVIBES_DAEMON_URL'],
-    (path) => JSON.parse(readFileSync(path, 'utf-8')) as unknown,
-  );
+  return resolveVerificationHostUrl(resolveGoodVibesTreeDirectory(), undefined, ['GOODVIBES_DAEMON_URL']);
 }
 
 export function createDefaultReferenceNodeHostConfig(overrides: Partial<ReferenceNodeHostConfig> = {}): ReferenceNodeHostConfig {

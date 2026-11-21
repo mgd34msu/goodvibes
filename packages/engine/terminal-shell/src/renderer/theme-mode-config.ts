@@ -76,3 +76,36 @@ export function applyThemeNameSettingChange(value: unknown, requestFullRepaint?:
     requestFullRepaint?.();
     return { message: `Theme: ${applied} (applied now)` };
 }
+/** The message of the last theme change the subscription below applied, per key, until a writer takes it. */
+const appliedThemeMessages = new Map<ConfigKey, string>();
+/**
+ * Keep the live theme in step with `display.theme` and `display.themeMode`,
+ * whoever writes them (the settings screen, `/settings set`, a settings-sync
+ * pull, a file edit): each change is applied through the functions above and
+ * the product's full-repaint hook runs. Installed once where the product
+ * applies its start-up theme; returns the unsubscribe.
+ */
+export function subscribeThemeSettings(
+    configManager: Pick<ConfigManager, 'subscribe'>,
+    requestFullRepaint: () => void,
+): () => void {
+    const offName = configManager.subscribe(THEME_NAME_CONFIG_KEY, (next) => {
+        appliedThemeMessages.set(THEME_NAME_CONFIG_KEY, applyThemeNameSettingChange(next, requestFullRepaint).message);
+    });
+    const offMode = configManager.subscribe(THEME_MODE_CONFIG_KEY, (next) => {
+        appliedThemeMessages.set(THEME_MODE_CONFIG_KEY, applyThemeModeSettingChange(next, requestFullRepaint).message);
+    });
+    return () => { offName(); offMode(); };
+}
+/**
+ * What the theme subscription did for the last change of `key`, for a writer
+ * that reports it; undefined when the key is not a theme key or nothing was
+ * applied. Reading it clears it.
+ */
+export function takeAppliedThemeMessage(key: unknown): string | undefined {
+    const themeKey = key === THEME_NAME_CONFIG_KEY ? THEME_NAME_CONFIG_KEY : key === THEME_MODE_CONFIG_KEY ? THEME_MODE_CONFIG_KEY : undefined;
+    if (themeKey === undefined) return undefined;
+    const message = appliedThemeMessages.get(themeKey);
+    appliedThemeMessages.delete(themeKey);
+    return message;
+}

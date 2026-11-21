@@ -419,11 +419,7 @@ export class LocalRoutineRunner {
       return false;
     }
     if (!lock) {
-      if (this.#retry === null) {
-        const retry = setInterval(() => { void this.ensure(); }, TAKEOVER_RETRY_MS);
-        retry.unref?.();
-        this.#retry = retry;
-      }
+      this.#armRetry();
       return false;
     }
     this.#lock = lock;
@@ -432,7 +428,10 @@ export class LocalRoutineRunner {
     try {
       await this.manager.start();
     } catch (error) {
-      this.release();
+      // The lock is freed, and the takeover check stays armed so routines start
+      // once the manager can; only shutdown or a daemon takeover ends the retry.
+      this.#releaseLock();
+      this.#armRetry();
       throw error;
     }
     return true;
@@ -442,10 +441,31 @@ export class LocalRoutineRunner {
   release(): void {
     if (this.#retry) clearInterval(this.#retry);
     this.#retry = null;
+    this.#releaseLock();
+  }
+
+  /** Stops the manager and frees the lock, leaving the takeover check as it is. */
+  #releaseLock(): void {
     if (!this.#lock) return;
     this.manager.stop();
     this.#lock.release();
     this.#lock = null;
+  }
+
+  #armRetry(): void {
+    if (this.#retry !== null) return;
+    const retry = setInterval(() => { void this.#retryTick(); }, TAKEOVER_RETRY_MS);
+    retry.unref?.();
+    this.#retry = retry;
+  }
+
+  /** One takeover check; a manager that fails to start is logged and tried again at the next check, never thrown into nothing. */
+  async #retryTick(): Promise<void> {
+    try {
+      await this.ensure();
+    } catch (error) {
+      logger.warn('Local routines: the routines could not be started; trying again at the next takeover check', { lockPath: this.lockPath, error: summarizeError(error) });
+    }
   }
 }
 

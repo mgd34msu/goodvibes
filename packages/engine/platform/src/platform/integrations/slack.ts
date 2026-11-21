@@ -454,13 +454,19 @@ export class SlackIntegration {
     }));
     if (!res.ok) {
       const err = await res.text();
+      if (res.status === 429) {
+        // Slack posts nothing for a rate-limited call: an answered refusal, safe to send again.
+        throw new DeliveryError(`SlackIntegration.postMessage rate limited (429): ${err}`, 'retryable', 429);
+      }
       throw new HttpStatusError(`SlackIntegration.postMessage failed (${res.status}): ${err}`, { status: res.status });
     }
     const data = (await res.json()) as { ok: boolean; error?: string };
     if (data?.ok !== true) {
       const code = data?.error ?? 'unknown';
-      // Slack names the failure by code; only these can clear on another attempt.
-      throw new DeliveryError(`SlackIntegration.postMessage API error: ${code}`, SLACK_TRANSIENT_API_ERRORS.has(code) ? 'retryable' : 'terminal');
+      // Slack answered and posted nothing; the answer's status says so to the
+      // channel router, which may then send it again. Slack names the failure
+      // by code; only these can clear on another attempt.
+      throw new DeliveryError(`SlackIntegration.postMessage API error: ${code}`, SLACK_TRANSIENT_API_ERRORS.has(code) ? 'retryable' : 'terminal', res.status);
     }
   }
 

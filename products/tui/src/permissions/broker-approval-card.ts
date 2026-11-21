@@ -16,6 +16,7 @@
  * decision on a broker-originated ask reaches every waiter on that record.
  */
 
+import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { buildPendingPermissionExtras } from './hunk-selection.ts';
 import type { ApprovalRequesterLookup } from './hunk-selection.ts';
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
@@ -47,7 +48,7 @@ export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
 export interface BrokerCardRecord {
   readonly id: string;
   readonly callId: string;
-  readonly status: string;
+  readonly status: SharedApprovalStatus;
   readonly revision: number;
   readonly request: PermissionPromptRequest;
 }
@@ -69,8 +70,6 @@ export interface BrokerApprovalChangeParams {
   readonly notify?: (message: string) => void;
 }
 
-const isActiveStatus = (status: string): boolean => status === 'pending' || status === 'claimed';
-
 /**
  * React to one broker approval change: clear the active card when ITS approval
  * resolves, or open a card for a newly-pending broker-originated ask that no
@@ -79,7 +78,7 @@ const isActiveStatus = (status: string): boolean => status === 'pending' || stat
 export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): void {
   const { approval, getPending, setPending, broker, render } = params;
   const defer = params.defer ?? queueMicrotask;
-  const active = isActiveStatus(approval.status);
+  const active = isOpenApprovalStatus(approval.status);
 
   const pending = getPending();
   if (pending && pending.callId === approval.callId) {
@@ -92,7 +91,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
   defer(() => {
     if (getPending()) return; // a local card (or another broker card) is already up
     const current = broker.getApproval(approval.id);
-    if (!current || !isActiveStatus(current.status)) return;
+    if (!current || !isOpenApprovalStatus(current.status)) return;
     setPending({
       ...current.request,
       ...buildPendingPermissionExtras(current.request, (decision) => {
@@ -110,7 +109,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           // The record this card was drawn from: a stale answer is refused and the card is drawn again from the current one.
           expectedRevision: current.revision,
         }).then((outcome) => {
-          if (outcome.applied || !outcome.record || !isActiveStatus(outcome.record.status)) return;
+          if (outcome.applied || !outcome.record || !isOpenApprovalStatus(outcome.record.status)) return;
           params.notify?.(`Your answer was not taken: ${outcome.refusal.reason} The request is shown again.`);
           const latest = outcome.record;
           defer(() => handleBrokerApprovalChange({ ...params, approval: latest }));
@@ -137,14 +136,14 @@ export function sweepBrokerApprovals(
 ): void {
   const { listApprovals, ...rest } = params;
   for (const waiting of listApprovals()) {
-    if (isActiveStatus(waiting.status)) handleBrokerApprovalChange({ ...rest, approval: waiting });
+    if (isOpenApprovalStatus(waiting.status)) handleBrokerApprovalChange({ ...rest, approval: waiting });
   }
 }
 
 /** A broker record, as far as settling a queued local ask needs it. */
 export interface SettledApprovalRecord {
   readonly callId: string;
-  readonly status: string;
+  readonly status: SharedApprovalStatus;
   readonly updatedAt: number;
   readonly resolvedAt?: number | undefined;
   readonly decision?: {
@@ -170,7 +169,7 @@ export function settledAskDecision(
 ): PermissionPromptDecision | null {
   let newest: SettledApprovalRecord | null = null;
   for (const record of records) {
-    if (record.callId !== callId || isActiveStatus(record.status)) continue;
+    if (record.callId !== callId || isOpenApprovalStatus(record.status)) continue;
     const settledAt = record.resolvedAt ?? record.updatedAt;
     if (settledAt < queuedAt) continue;
     if (newest === null || settledAt >= (newest.resolvedAt ?? newest.updatedAt)) newest = record;
@@ -193,6 +192,8 @@ export interface ApprovalCardQueue<T> {
   readonly offer: (entry: T) => void;
   /** Call whenever the card slot may have emptied. */
   readonly next: () => void;
+  /** Take a waiting entry out of the queue; false when it was not waiting (shown, or never offered). */
+  readonly withdraw: (entry: T) => boolean;
   readonly size: () => number;
 }
 
@@ -225,6 +226,12 @@ export function createApprovalCardQueue<T>(deps: {
       waiting.push(entry);
     },
     next,
+    withdraw: (entry) => {
+      const index = waiting.indexOf(entry);
+      if (index < 0) return false;
+      waiting.splice(index, 1);
+      return true;
+    },
     size: () => waiting.length,
   };
 }

@@ -80,7 +80,7 @@ A few keys worth knowing up front:
 Other useful overrides:
 
 - `GOODVIBES_AGENT_HOME=/path/to/agent-home`: run with an isolated Agent home instead of the default one.
-- `GOODVIBES_AGENT_RUNTIME_URL=http://host:port` (or the `--runtime-url` flag): point at a GoodVibes host on a different address; `GOODVIBES_AGENT_BASE_URL` is accepted as a legacy alias.
+- `GOODVIBES_AGENT_RUNTIME_URL=https://host:port` (or the `--runtime-url` flag; `http://` is accepted too): point at a GoodVibes host on a different address for one run, as `daemon.connectedHost.url` does persistently; `GOODVIBES_AGENT_BASE_URL` is accepted as a legacy alias.
 - `~/.goodvibes/agent/providers/*.json`: local, hot-reloaded custom provider definitions.
 - `/setup import-settings` (or the model tool `import_goodvibes_settings`): preview, then apply, provider/UI/permission/subscription/surface/tool/daemon-endpoint settings already configured for goodvibes-tui or another published GoodVibes platform store, without mutating the source.
 

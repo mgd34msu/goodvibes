@@ -1,8 +1,9 @@
+import { nativeSubmissionJournalPath } from '@goodvibes/engine/terminal-shell/native';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
 import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
-import 'node:path';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 import type { ConversationManager } from '../core/conversation';
@@ -173,7 +174,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   let commandContextRef: CommandContext | null = null;
   const nativeWorkLedgerHost = createNativeWorkLedgerHost({
     configManager,
-    journalPath: services.shellPaths.resolveUserPath('tui', 'native-work-submission.json'),
+    journalPath: nativeSubmissionJournalPath(services.shellPaths, GOODVIBES_TUI_SURFACE_ROOT),
     ...(options.daemonHomeDirectory ? { daemonHomeDirectory: options.daemonHomeDirectory } : {}),
     homeDirectory: uiServices.environment.shellPaths.homeDirectory,
     workspace: () => services.workingDirectory,
@@ -324,7 +325,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
 
   const saveHistory = configManager.get('behavior.saveHistory') as boolean;
   const inputHistory = new InputHistory({
-    historyPath: services.shellPaths.resolveUserPath('tui', 'input-history.json'),
+    historyPath: services.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'input-history.json'),
     persist: saveHistory,
   });
 

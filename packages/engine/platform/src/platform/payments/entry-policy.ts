@@ -72,6 +72,7 @@
  * the number on someone else's server. Refusing the answer afterwards is too
  * late.
  */
+import { TRANSPORT_SURFACE_KINDS } from '../../events/surfaces.js';
 
 /**
  * Surfaces where card details may be typed.
@@ -108,15 +109,10 @@ export const WEBUI_CARD_ENTRY_CONDITIONS: readonly string[] = [
 ];
 
 /**
- * Remote messaging surfaces, named so a refusal can say which one it refused.
- *
- * The list is a courtesy for the message, not the defence: `mayEnterCardDetails`
- * allows only the three entry surfaces, so anything not on that allowlist is
- * refused whether or not it appears here.
+ * Route surfaces that are GoodVibes' own HTTP and service routes rather than a
+ * messaging service with servers of its own; a refusal does not name them.
  */
-const REMOTE_MESSAGE_SURFACES: readonly string[] = [
-  'telegram', 'ntfy', 'discord', 'slack', 'whatsapp', 'signal', 'webhook', 'email', 'sms', 'matrix',
-];
+const OWN_ROUTE_SURFACES: readonly string[] = ['web', 'service'];
 
 /**
  * May card details be typed on this surface?
@@ -128,8 +124,15 @@ export function mayEnterCardDetails(surface: string): boolean {
   return CARD_ENTRY_SURFACES.includes(surface.trim().toLowerCase());
 }
 
+/**
+ * Is this a remote messaging surface, named so a refusal can say which one it
+ * refused? Every route surface (TRANSPORT_SURFACE_KINDS) that is neither a card
+ * entry surface nor one of GoodVibes' own routes. A courtesy for the message,
+ * not the defence: `mayEnterCardDetails` allows only the entry surfaces.
+ */
 export function isRemoteMessageSurface(surface: string): boolean {
-  return REMOTE_MESSAGE_SURFACES.includes(surface.trim().toLowerCase());
+  const kind = surface.trim().toLowerCase();
+  return (TRANSPORT_SURFACE_KINDS as readonly string[]).includes(kind) && !CARD_ENTRY_SURFACES.includes(kind) && !OWN_ROUTE_SURFACES.includes(kind);
 }
 
 /**

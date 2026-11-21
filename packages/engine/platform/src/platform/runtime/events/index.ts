@@ -152,8 +152,9 @@ export function runtimeEventBusOptionsFrom(
 /**
  * Under the engine's test runner every emitted event is checked against the
  * rules generated from its event union, so an emitter that drifts from its
- * event fails the test that drives it. Never in a product run: no per-event
- * cost where nothing reads the answer.
+ * event fails the test that drives it, and a listener-cap overflow throws
+ * instead of warning. Never in a product run: no per-event cost where nothing
+ * reads the answer, and a cap overflow only warns.
  */
 const VALIDATE_EMITTED_EVENTS = typeof process !== 'undefined' && process.env?.['GOODVIBES_ENGINE_TEST_RUNNER'] === '1';
 
@@ -231,7 +232,7 @@ export class RuntimeEventBus {
     const subscription: Subscription = { callback: callback as EnvelopeListener, active: true };
     set.add(subscription);
     if (set.size > this._maxListeners) {
-      if (process.env['NODE_ENV'] === 'development') {
+      if (VALIDATE_EMITTED_EVENTS) {
         // Remove the just-added listener before throwing to maintain state consistency.
         subscription.active = false;
         set.delete(subscription);
@@ -267,7 +268,7 @@ export class RuntimeEventBus {
     const subscription: Subscription = { callback: callback as EnvelopeListener, active: true };
     set.add(subscription);
     if (set.size > this._maxListeners) {
-      if (process.env['NODE_ENV'] === 'development') {
+      if (VALIDATE_EMITTED_EVENTS) {
         // Remove the just-added listener before throwing to maintain state consistency.
         subscription.active = false;
         set.delete(subscription);

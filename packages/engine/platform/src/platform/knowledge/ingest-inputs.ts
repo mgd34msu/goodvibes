@@ -437,8 +437,16 @@ export async function ingestKnowledgeConnectorInput(context: KnowledgeIngestCont
   return ingestKnowledgeWithConnector(context, connectorId, resolvedInput, input.sessionId, input.allowPrivateHosts, input.metadata);
 }
 
-export async function refreshKnowledgeSources(context: KnowledgeIngestContext, sources: readonly KnowledgeSourceRecord[]): Promise<number> {
+/** What one refresh pass did: how many sources it tried, how many it refreshed, and why each failure failed. */
+export interface KnowledgeRefreshResult {
+  readonly attempted: number;
+  readonly refreshed: number;
+  readonly failed: readonly { readonly sourceId: string; readonly reason: string }[];
+}
+
+export async function refreshKnowledgeSources(context: KnowledgeIngestContext, sources: readonly KnowledgeSourceRecord[]): Promise<KnowledgeRefreshResult> {
   let refreshed = 0;
+  const failed: { sourceId: string; reason: string }[] = [];
   const batch = deferPostIngestWork(context);
   for (const source of sources) {
     try {
@@ -458,14 +466,17 @@ export async function refreshKnowledgeSources(context: KnowledgeIngestContext, s
         },
       });
       // A failed refresh keeps an indexed source indexed but records crawlError.
-      if (result.source.status === 'indexed' && !result.source.crawlError) refreshed += 1;
+      if (result.source.crawlError) failed.push({ sourceId: source.id, reason: result.source.crawlError });
+      else if (result.source.status === 'indexed') refreshed += 1;
     } catch (error) {
       // One held or failing source must not stop the rest of the refresh or discard the count.
-      logger.warn('Knowledge source refresh failed', { sourceId: source.id, error: summarizeError(error) });
+      const reason = summarizeError(error);
+      logger.warn('Knowledge source refresh failed', { sourceId: source.id, error: reason });
+      failed.push({ sourceId: source.id, reason });
     }
   }
   for (const error of await batch.flush()) logger.warn('Knowledge refresh follow-up failed', { error });
-  return refreshed;
+  return { attempted: sources.length, refreshed, failed };
 }
 
 /**

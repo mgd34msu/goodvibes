@@ -19,12 +19,13 @@ import {
   requireTokenAuditor,
 } from './runtime-services.ts';
 import { createPolicyCommandContext } from './policy-dispatch.ts';
+import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
   serviceNames: (ctx) => Object.keys(requireServiceRegistry(ctx).getAll()),
   security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
-  permissionMode: (ctx) => ctx.platform.configManager.get('permissions.mode'),
+  permissionMode: (ctx) => describePermissionModeInForce(ctx.platform.configManager),
   serviceLabel: 'services',
 });
 

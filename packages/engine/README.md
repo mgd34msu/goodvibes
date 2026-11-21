@@ -159,10 +159,10 @@ Each file runs in its own `bun test` process with its own home and temp
 directory, provider credentials removed from the environment and the network
 blocked, from one pool of workers (cores minus one; `--jobs <n>` sets it).
 
-The limits are fixed; no flag, variable or bunfig setting raises them: 5
-seconds per test, 10 seconds per file (30 under `test/live/` and
-`src/test/e2e/`), and 600 file-seconds for the default suite. A file past its
-limit is killed and reported as failed. Before any file starts, the runner
+The runner sets no time limit of any kind: no test, file or run is stopped or
+fails for how long it takes (bun is started with `--timeout=0`, which turns
+its own per-test timeout off), and a file that never finishes keeps running.
+Before any file starts, the runner
 parses every selected file and refuses the whole run, naming file and line, if
 one sleeps (`Bun.sleep`, a promise resolved by `setTimeout`, a timer from
 `timers/promises`), uses a snapshot, calls `mock.module`, skips a test (`.skip`,

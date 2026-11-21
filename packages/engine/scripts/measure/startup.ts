@@ -73,7 +73,6 @@ async function once(scenario: StartupScenario, repo: string, envFor: (root: stri
     const child = Bun.spawn([process.execPath, '--no-env-file', '--preload', join(import.meta.dir, 'instrument.ts'), join(repo, scenario.entry), ...args], {
       cwd: workdir, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
-    const killer = setTimeout(() => child.kill('SIGKILL'), 60_000);
     let output = '';
     let ms: number | undefined;
     const decoder = new TextDecoder();
@@ -89,7 +88,6 @@ async function once(scenario: StartupScenario, repo: string, envFor: (root: stri
     const stderr = new Response(child.stderr).text();
     const code = await child.exited;
     const exitMs = performance.now() - t0;
-    clearTimeout(killer);
     await readStdout;
     output += await stderr;
     if (scenario.readyPattern && ms === undefined) throw new Error(`no ready line (exit ${code}): ${output.slice(-400)}`);

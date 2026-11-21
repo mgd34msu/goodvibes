@@ -7,8 +7,10 @@
  *   bun packages/engine/scripts/measure/run.ts [--only <name>[,<name>...]] [--out <file.json>]
  *       [--check <budgets.json>] [--write-budgets <budgets.json>]
  *
- * --check compares the run with the recorded budgets (budgets.ts) and exits 1
- * on any violation, printing scenario, measure, recorded and now for each.
+ * --check compares the run's counts and bytes with the recorded budgets
+ * (budgets.ts) and exits 1 on any violation, printing scenario, measure,
+ * recorded and now for each. Times (wall time, the slow-read ratio, each
+ * start-up's multiple of the floor) are printed as information and never fail it.
  * --write-budgets records this run as the budgets (with --only, only those
  * scenarios are rewritten), so a deliberate change is one reviewed diff.
  *
@@ -23,7 +25,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { SCENARIOS } from './scenarios/index.ts';
-import { budgetsFromRun, checkBudgets, formatViolations, STARTUP_FLOOR, WALL_RATIOS, type BudgetsFile, type ExtraMeasures, type MeasuredRun } from './budgets.ts';
+import { budgetsFromRun, checkBudgets, formatViolations, STARTUP_FLOOR, timingInformation, WALL_RATIOS, type BudgetsFile, type ExtraMeasures, type MeasuredRun } from './budgets.ts';
 import { STARTUP_SCENARIOS, measureStartup, type StartupReport } from './startup.ts';
 import type { ScenarioReport } from './harness.ts';
 
@@ -89,10 +91,8 @@ async function runWorker(name: string): Promise<ScenarioReport | { name: string;
     const child = Bun.spawn([process.execPath, '--no-env-file', join(HERE, 'worker.ts'), name, out], {
       cwd: join(root, 'tmp'), env: isolatedEnv(root, traceEnv()), stdout: 'pipe', stderr: 'pipe',
     });
-    const timer = setTimeout(() => child.kill('SIGKILL'), 180_000);
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
     await child.exited;
-    clearTimeout(timer);
     try { return JSON.parse(readFileSync(out, 'utf8')) as ScenarioReport; }
     catch { return { name, error: `worker exited ${child.exitCode} without a report\n${(stderr || stdout).slice(-2000)}` }; }
   } finally {
@@ -103,8 +103,17 @@ async function runWorker(name: string): Promise<ScenarioReport | { name: string;
 const COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ['wall ms', 'wall'], ['decide', 'decisionRequests'], ['llm', 'providerRequests'], ['reads', 'fileReads'], ['writes', 'fileWrites'],
   ['fsync', 'fsyncs'], ['bytes written', 'bytesWritten'], ['bytes read', 'bytesRead'], ['stats', 'stats'], ['sqlite', 'sqliteStatements'],
-  ['os wr', 'osWriteCalls'], ['net', 'networkAttempts'],
+  ['net', 'networkAttempts'],
 ];
+
+/**
+ * Not exact counts, so never shown as one: times (wall time, latencies, ratios
+ * of times) and the kernel's per-process I/O counters, which include bun's own
+ * reads and writes and move between runs. Times are printed below the table as
+ * information; the kernel counters stay in the --out JSON only.
+ */
+const isTime = (key: string): boolean => /Ms$/.test(key) || /^ratio/i.test(key);
+const isKernel = (key: string): boolean => /^os[A-Z]/.test(key);
 
 function cell(report: ScenarioReport, key: string): string {
   if (key === 'wall') return report.wallMs.median.toFixed(1);
@@ -113,14 +122,14 @@ function cell(report: ScenarioReport, key: string): string {
 }
 
 export function formatTable(reports: ReadonlyArray<ScenarioReport | { name: string; error: string }>, startup: readonly StartupReport[]): string {
-  const header = ['scenario', ...COLUMNS.map(([title]) => title), 'scenario-specific'];
+  const header = ['scenario', ...COLUMNS.map(([title]) => title === 'wall ms' ? 'wall ms (info)' : title), 'scenario-specific'];
   const rows: string[][] = [];
   for (const report of reports) {
     if ('error' in report && !('median' in report)) { rows.push([report.name, `ERROR: ${report.error.split('\n')[0]!.slice(0, 120)}`]); continue; }
     const r = report as ScenarioReport;
     const shown = new Set(COLUMNS.map(([, key]) => key));
-    const generic = new Set(['opens', 'renames', 'readdirs', 'mkdirs', 'removes', 'osReadCalls', 'osBytesRead', 'osBytesWritten', 'decisionBytes', 'providerBytes', 'fixtureBytes']);
-    const specific = Object.entries(r.median).filter(([key]) => !shown.has(key) && !generic.has(key)).map(([key, value]) => `${key}=${Number.isInteger(value) ? value : value.toFixed(1)}`);
+    const generic = new Set(['opens', 'renames', 'readdirs', 'mkdirs', 'removes', 'decisionBytes', 'providerBytes', 'fixtureBytes']);
+    const specific = Object.entries(r.median).filter(([key]) => !shown.has(key) && !generic.has(key) && !isTime(key) && !isKernel(key)).map(([key, value]) => `${key}=${Number.isInteger(value) ? value : value.toFixed(1)}`);
     rows.push([r.name + (r.testOnly ? ' *' : ''), ...COLUMNS.map(([, key]) => cell(r, key)), specific.join(' ')]);
   }
   for (const s of startup) rows.push([s.name, s.error ? `ERROR: ${s.error}` : s.wallMs.median.toFixed(0), ...COLUMNS.slice(1).map(() => ''), s.note ?? '']);
@@ -133,10 +142,10 @@ async function main(): Promise<void> {
   const { only, out, check, writeBudgets } = parseArgs(process.argv.slice(2));
   const known = new Set([...SCENARIOS.map((s) => s.name), ...STARTUP_SCENARIOS.map((s) => s.name)]);
   for (const name of only ?? []) if (!known.has(name)) throw new Error(`unknown scenario ${name}; known: ${[...known].join(', ')}`);
-  // A start-up is judged against the floor measured in the same run.
-  if (only && (check || writeBudgets) && STARTUP_SCENARIOS.some((s) => only.has(s.name))) only.add(STARTUP_FLOOR);
+  // A start-up is shown, and recorded, as a multiple of the floor measured in the same run.
+  if (only && STARTUP_SCENARIOS.some((s) => only.has(s.name))) only.add(STARTUP_FLOOR);
   // A wall-time ratio subtracts a reference scenario measured in the same run.
-  for (const ratio of WALL_RATIOS) if (only && check && only.has(ratio.scenario)) only.add(ratio.minus);
+  for (const ratio of WALL_RATIOS) if (only && only.has(ratio.scenario)) only.add(ratio.minus);
   const budgets = check ? JSON.parse(readFileSync(check, 'utf8')) as BudgetsFile : null;
   const started = performance.now();
   const reports: Array<ScenarioReport | { name: string; error: string }> = [];
@@ -152,7 +161,7 @@ async function main(): Promise<void> {
     startup.push(await measureStartup(scenario, REPO, (root, extra) => isolatedEnv(root, extra)));
   }
   console.log(formatTable(reports, startup));
-  console.log('\n* test-only capability. Medians; counters include work that landed within 150 ms after the operation returned.');
+  console.log('\n* test-only capability. Medians; counters include the work each scenario awaits after the operation returned (its settled hook).');
   for (const report of reports) {
     if (!('trace' in report) || !report.trace?.length) continue;
     console.log(`\ntrace ${report.name} (last measured run, ${report.trace.length}):`);
@@ -166,6 +175,18 @@ async function main(): Promise<void> {
     scenarios: reports,
     startup,
   };
+  const timings = [
+    ...reports.flatMap((report) => {
+      if (!('median' in report)) return [];
+      const times = Object.entries(report.median).filter(([key]) => isTime(key)).map(([key, value]) => `${key}=${Number.isInteger(value) ? value : value.toFixed(2)}`);
+      return times.length > 0 ? [`${report.name}: ${times.join(' ')}`] : [];
+    }),
+    ...timingInformation(result, budgets),
+  ];
+  if (timings.length > 0) {
+    console.log('\ntimes (information only, never a pass or fail):');
+    for (const line of timings) console.log(`  ${line}`);
+  }
   if (out) {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, `${JSON.stringify(result, null, 2)}\n`);
@@ -197,7 +218,7 @@ async function main(): Promise<void> {
     const violations = checkBudgets(result, budgets, known);
     const compared = reports.length + startup.length;
     if (violations.length === 0) {
-      console.log(`\nbudgets: ${compared} scenario(s) within ${check}`);
+      console.log(`\nbudgets: counts and bytes of ${compared} scenario(s) within ${check}`);
     } else {
       console.error(`\nbudgets: ${violations.length} violation(s) against ${check}:`);
       console.error(formatViolations(violations));

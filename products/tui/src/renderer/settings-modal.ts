@@ -1,7 +1,6 @@
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsTopicRailRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
 import { createSettingsDocumentation, fitValue } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
-import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigation';
 /**
  * renderSettingsModal, the settings screen drawn with the surface kit.
  *
@@ -10,9 +9,7 @@ import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigati
  *   ▏Search settings by name, key or what they do
  *
  *   General                 Stream the answer as it arrives          On
- *   Account                   Display · display.stream
- *   Models and providers    Show the model's thinking               Off
- *   Voice                     Display · display.showThinking
+ *   Account                 Show the model's thinking               Off
  *   …
  *                           Shows what the model was reasoning about.
  *                           Takes effect at once. The default is Off.
@@ -20,9 +17,8 @@ import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigati
  *   ↑↓ move   ⏎ change   ctrl+r reset to Off   ← topics
  *
  * The seven topics the web UI shows, in its order and words; each lists its
- * sections' settings by name with the value in words, and the section and key
- * small beneath. Typing searches every setting by name, key or description
- * (the topics step aside). Under the rows, the selected one explained in a
+ * sections' settings by name with the value in words, one line each. Typing
+ * searches every setting by name, key or description (the topics step aside). Under the rows, the selected one explained in a
  * few sentences. Changes to the theme preview live (see theme-settings-actions).
  */
 
@@ -67,12 +63,11 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCat
   color: valueColor,
   currentValue: currentSettingValue,
   unavailable: (entry) => !!entry.metadataUnavailable,
-  placeOf: (entry) => settingPlace(entry.setting.key, entry.setting.key.split('.', 1)[0] ?? ''),
   visibleRows: (modal) => modal.visibleRows(),
   listCount: listItemCount,
   focused: (modal) => modal.searchFocused || (modal.focusRegion ?? 'settings') === 'settings',
   routeLabel: (route) => route,
-  specialRow(modal, entry, selected, focused, width, sub) {
+  specialRow(modal, entry, selected, focused, width) {
     if (!entry.flag) return undefined;
     const t = activeTokens();
     const editing = selected && modal.editingMode;
@@ -82,7 +77,6 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCat
     const value = pendingRestart ? `${raw} after a restart` : raw;
     return {
       label: feature.name,
-      sub,
       right: fitValue(value, width, editing, feature.name),
       rightFg: valueColor(entry),
       selected: selected && focused,

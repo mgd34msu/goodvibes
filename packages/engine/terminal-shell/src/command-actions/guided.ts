@@ -121,6 +121,8 @@ async function fillInputs(
   typedFirst: ReadonlySet<string>,
   ctx: CommandActionContext,
 ): Promise<Record<string, string> | 'back'> {
+  // Its blanks are only typed: chosen from the list, it runs with what was typed and its defaults.
+  if (action.blanksTypedOnly) return { ...Object.fromEntries(action.inputs.flatMap((input) => input.required === true ? [] : [[input.id, input.required.default]])), ...values };
   const open = action.inputs.filter((input) => !typedFirst.has(input.id));
   if (open.length >= FORM_THRESHOLD) return runForm(command, action, values, ctx);
   let index = open.findIndex((input) => values[input.id] === undefined);

@@ -844,7 +844,7 @@ Every tool that changes something outside the conversation (a message, a reminde
 
 ## Agent settings
 
-Settings work as in the terminal app (`/settings`, `goodvibes-agent -c key=value`), stored under `~/.goodvibes/agent/`. The settings screen is the terminal app's: the seven topics, each setting by name with its value in words and its section and key beneath, search by name, key or description, and the selected setting explained in a few sentences. A setting the daemon owns shows the daemon's value (`Held by the daemon.`), or `Unknown` with why while the daemon has not given it.
+Settings work as in the terminal app (`/settings`, `goodvibes-agent -c key=value`), stored under `~/.goodvibes/agent/`. The settings screen is the terminal app's: the seven topics, each setting on one line by name with its value in words, search by name, key or description, and the selected setting explained in a few sentences. A setting the daemon owns shows the daemon's value (`Held by the daemon.`), or `Unknown` with why while the daemon has not given it.
 A project settings file cannot change permission, approval, provider, tool, surface, automation or helper settings.
 The settings the Agent adds or uses most:
 

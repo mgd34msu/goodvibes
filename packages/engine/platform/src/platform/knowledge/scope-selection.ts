@@ -265,12 +265,23 @@ export async function prepareKnowledgeScopeSelection(
 
 /** One background reading pass per store at a time; a request while one runs asks for one more pass. */
 const scopeReadingPasses = new WeakMap<KnowledgeStore, { again: boolean }>();
+/** Per store, while readings are queued or running: settled when the last pass ends with nothing queued after it. */
+const scopeReadingsBusy = new WeakMap<KnowledgeStore, { readonly settled: Promise<void>; readonly resolve: () => void }>();
+
+/**
+ * Resolves once no scope reading is queued or running for the store: every
+ * record a view found unread has been read and its verdict stored (or its
+ * reading failed and waits for its retry). Resolves at once when none is.
+ */
+export function knowledgeScopeReadingsSettled(store: KnowledgeStore): Promise<void> {
+  return scopeReadingsBusy.get(store)?.settled ?? Promise.resolve();
+}
 
 /**
  * Reads the ordinary-view eligibility of default-space records that have no
  * current reading, a bounded batch per pass, and stores each verdict with the
- * content version it was read from. Runs after the view was answered; nothing
- * waits on it. With no decision model (or No Decision Model) nothing is read and the
+ * content version it was read from. Runs after the view was answered; the
+ * view never waits on it (knowledgeScopeReadingsSettled reports when it is done). With no decision model (or No Decision Model) nothing is read and the
  * records stay shown.
  */
 function queueScopeReadings(store: KnowledgeStore): void {
@@ -279,6 +290,11 @@ function queueScopeReadings(store: KnowledgeStore): void {
   if (running) { running.again = true; return; }
   const pass = { again: false };
   scopeReadingPasses.set(store, pass);
+  if (!scopeReadingsBusy.has(store)) {
+    let resolve!: () => void;
+    const settled = new Promise<void>((done) => { resolve = done; });
+    scopeReadingsBusy.set(store, { settled, resolve });
+  }
   const timer = setTimeout(() => {
     void withConfiguredDecisionModelPolicy(() => runScopeReadingPass(store))
       .catch((error: unknown) => {
@@ -288,6 +304,10 @@ function queueScopeReadings(store: KnowledgeStore): void {
       .then((more) => {
         scopeReadingPasses.delete(store);
         if ((more || pass.again) && store.isReady) queueScopeReadings(store);
+        if (!scopeReadingPasses.has(store)) {
+          scopeReadingsBusy.get(store)?.resolve();
+          scopeReadingsBusy.delete(store);
+        }
       });
   }, 0);
   timer.unref?.();

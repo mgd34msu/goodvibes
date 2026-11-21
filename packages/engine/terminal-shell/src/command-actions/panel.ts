@@ -48,6 +48,11 @@ function rowLabel(row: MenuRow): string {
   return opens && !row.label.endsWith('…') ? `${row.label}…` : row.label;
 }
 
+/** An action's optional blanks at their defaults: what it runs with when it shows no form. */
+function defaultValues(action: ActionDescription<never>): ActionValues {
+  return Object.fromEntries(action.inputs.flatMap((input) => input.required === true ? [] : [[input.id, input.required.default]]));
+}
+
 function stepsOf(action: ActionDescription<never>): number[] {
   return [...new Set(action.inputs.filter((input) => !('impliedBy' in input.typed) || fixedChoices(input)).map((input) => input.step ?? 1))].sort((a, b) => a - b);
 }
@@ -198,6 +203,7 @@ export class GuidedPanel implements SurfaceModal {
     }
     if (!row.action) return;
     if (row.action.inputs.length === 0) { this.settle({ kind: 'run', action: row.action, values: {} }); return; }
+    if (row.action.blanksTypedOnly) { this.settle({ kind: 'run', action: row.action, values: defaultValues(row.action) }); return; }
     this.openForm(row.action, {}, 0);
   }
 

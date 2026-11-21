@@ -32,20 +32,7 @@ const P = 'packages/engine/platform/src/platform';
 const ACCOUNT = 'primary';
 const MAILBOX = 'INBOX';
 const SETTINGS: Readonly<Record<string, unknown>> = { 'surfaces.email.inbound.enabled': true, 'surfaces.email.inbound.source': 'imap' };
-/** Waits shorter than this are moved on the watcher's clock while waiting for it (a reconnect backoff); the IDLE re-issue timer never is. */
-const SHORT_WAIT_MS = 60_000;
-
 const idles = (server: FakeMailboxServer): number => server.commands.filter((line) => /^\S+ IDLE$/.test(line)).length;
-
-/** Socket turns until `done`, moving only short waits on the watcher's clock. Bounded in steps, never in milliseconds. */
-async function until(clock: FakeClock, done: () => boolean, what: string): Promise<void> {
-  for (let step = 0; step < 40_000; step++) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-    if (step % 200 === 199 && clock.pending > 0 && clock.nextDueIn < SHORT_WAIT_MS) await clock.advance(Math.max(1, clock.nextDueIn));
-  }
-  if (!done()) throw new Error(`gave up waiting for ${what}`);
-}
 
 const mailboxPoll: Scenario = {
   name: 'mailbox-poll-nothing-new',
@@ -82,7 +69,9 @@ const mailboxPoll: Scenario = {
       readerLease: () => holdProcessLock(join(dir, 'email-inbound-reader.lock')),
     });
     await supervisor.start();
-    await until(clock, () => idles(server) >= 1, 'the reader to sign in, establish its cursor and IDLE');
+    // Quiet: the reader signed in, established its cursor and waits on its open IDLE.
+    await supervisor.whenQuiet();
+    assertOutcome(idles(server) >= 1, 'the reader did not sign in, establish its cursor and IDLE');
     let before = { commands: 0, connections: 0, idles: 0 };
     let cursorBefore = '';
     return {
@@ -91,8 +80,11 @@ const mailboxPoll: Scenario = {
         cursorBefore = JSON.stringify(await cursors.get(ACCOUNT, MAILBOX));
       },
       async op() {
+        // Resolves once the step the wake caused is done: the mailbox read and the IDLE open again.
+        const quiet = supervisor.nextQuiet();
         server.push(`* ${server.uids.length} EXISTS`);
-        await until(clock, () => idles(server) > before.idles, 'the reader to read the mailbox and IDLE again');
+        await quiet;
+        assertOutcome(idles(server) > before.idles, 'the reader did not read the mailbox and IDLE again after the wake');
         const sent = server.commands.slice(before.commands);
         const imapLogins = sent.filter((line) => /^\S+ LOGIN /.test(line)).length;
         const imapConnections = server.connectionCount - before.connections;

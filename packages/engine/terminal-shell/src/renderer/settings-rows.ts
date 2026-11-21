@@ -2,7 +2,7 @@ import { activeTokens } from './theme.js';
 import { fitValue } from './settings-documentation.js';
 import { mcpTrustRows, type McpTrustRowEntry } from './mcp-form-rows.js';
 import { type SubscriptionEntry } from '../settings-subscriptions.js';
-import type { SettingPlace, SettingsTopicRow } from '../settings-navigation.js';
+import type { SettingsTopicRow } from '../settings-navigation.js';
 import type { KitRow } from './surface-kit-list.js';
 import type { KitHint } from './surface-kit.js';
 interface SettingRowEntry {
@@ -23,17 +23,17 @@ interface SettingsRowState<Entry, Category extends string> {
   readonly subscriptionEntries: readonly SubscriptionEntry[];
 }
 /**
- * A settings row: the setting's plain name with its value in words, and under
- * it in small secondary text its section and key. Search results, a topic's
- * rows and the lists a topic opens are drawn here for both terminal programs.
+ * A settings row, one line: the setting's plain name with its value in words.
+ * Its key, section and state stay out of the row (search still matches the
+ * key; a lock or conflict is said in the help under the rows). Search
+ * results, a topic's rows and the lists a topic opens are drawn here for both
+ * terminal programs.
  */
 export function createSettingsRows<Modal extends SettingsRowState<Entry, Category>, Entry extends SettingRowEntry, Category extends string>(policy: {
   readonly label: (entry: Entry) => string;
   readonly color: (entry: Entry) => string;
   readonly currentValue: (modal: Modal, entry: Entry, selected: boolean) => string;
   readonly unavailable: (entry: Entry) => boolean;
-  /** Where a search result is filed (a topic row carries its own place). */
-  readonly placeOf: (entry: Entry) => SettingPlace;
   /** The chosen topic's rows as shown (a program may hide a row its other settings make moot). */
   readonly visibleRows: (modal: Modal) => readonly SettingsTopicRow<Entry, Category>[];
   /** What a list row shows on its right: how many items the list holds. */
@@ -41,7 +41,7 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
   readonly focused: (modal: Modal) => boolean;
   readonly routeLabel: (route: string) => string;
   readonly specialRow?:
-    | ((modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, sub: string) => KitRow | undefined)
+    | ((modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number) => KitRow | undefined)
     | undefined;
   readonly specialList?:
     | ((
@@ -52,21 +52,13 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
       ) => { rows: KitRow[]; selected: number } | undefined)
     | undefined;
 }) {
-  function subLine(entry: Entry, place: SettingPlace): string {
-    const state = [policy.unavailable(entry) ? 'cannot be read' : '', entry.locked ? 'locked' : '', entry.conflict ? 'in conflict' : '']
-      .filter(Boolean)
-      .join(', ');
-    return `${place.section} · ${entry.setting.key}${state ? ` · ${state}` : ''}`;
-  }
-  function settingRow(modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, place: SettingPlace): KitRow {
-    const sub = subLine(entry, place);
-    const special = policy.specialRow?.(modal, entry, selected, focused, width, sub);
+  function settingRow(modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number): KitRow {
+    const special = policy.specialRow?.(modal, entry, selected, focused, width);
     if (special) return special;
     const tokens = activeTokens();
     const label = policy.label(entry);
     return {
       label,
-      sub,
       right: fitValue(policy.currentValue(modal, entry, selected), width, selected && modal.editingMode, label),
       rightFg: policy.color(entry),
       selected: selected && focused,
@@ -82,7 +74,7 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
       if (!rows.length) return { rows: [{ label: 'No setting matches the search.', muted: true }], selected: -1 };
       const selected = clamp(rows.length);
       return {
-        rows: rows.map((entry, index) => settingRow(modal, entry, index === selected, true, width, policy.placeOf(entry))),
+        rows: rows.map((entry, index) => settingRow(modal, entry, index === selected, true, width)),
         selected,
       };
     }
@@ -125,10 +117,9 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
     return {
       rows: rows.map((row, index) =>
         row.kind === 'setting'
-          ? settingRow(modal, row.entry, index === selected, focused, width, row.place)
+          ? settingRow(modal, row.entry, index === selected, focused, width)
           : {
               label: row.list.label,
-              sub: `${row.place.section} · ${row.list.description}`,
               right: policy.listCount(modal, row.list.category),
               selected: index === selected && focused,
               current: index === selected && !focused,

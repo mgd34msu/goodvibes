@@ -14,6 +14,13 @@ export interface Instance {
   prepare?(run: number): Promise<void> | void;
   /** The measured operation; may return scenario-specific counts. Checks that cost nothing (its own return value) belong here. */
   op(run: number): Promise<Record<string, number> | void>;
+  /**
+   * Resolves when the work the operation started but did not await (a debounced
+   * save, a delivery, a decision record) is done, by awaiting what the product
+   * reports (a store's flush, a broker's idle, a manager's settled promise).
+   * Called after `prepare` and after `op`, before the counters are read.
+   */
+  settled?(): Promise<void> | void;
   /** Checks of the operation's outcome that read stores or files: run after the counters are taken, so they are not counted. */
   verify?(run: number): Promise<void> | void;
   dispose?(): Promise<void> | void;
@@ -75,13 +82,28 @@ export class ScenarioFailure extends Error {
   constructor(message: string) { super(message); this.name = 'ScenarioFailure'; }
 }
 
+/**
+ * The file list (tools/find/file-list.ts RACY_MS) lists a directory again while
+ * its change time is within 2 s of the clock, so whether an earlier run's or
+ * setup's writes are re-listed would depend on how fast the machine got here.
+ * Scenarios that list files run the process clock this far ahead of the real
+ * one, so no directory reads as just changed and changes are found by their
+ * stamps alone. A change time cannot be set back (utimes moves it to now), so
+ * the clock is the stand-in.
+ */
+export const CLOCK_AHEAD_MS = 2_100;
+
+/** Runs the process clock {@link CLOCK_AHEAD_MS} ahead of the real one; returns the restore. */
+export function clockAhead(): () => void {
+  const real = Date.now;
+  Date.now = () => real() + CLOCK_AHEAD_MS;
+  return () => { Date.now = real; };
+}
+
 /** Every scenario checks its own outcome with this after each run, the warm-up included. */
 export function assertOutcome(condition: unknown, reason: string): asserts condition {
   if (!condition) throw new ScenarioFailure(reason);
 }
-
-/** Work an operation starts but does not await (debounced saves, decision log records) is counted if it lands within this window. */
-export const SETTLE_MS = 150;
 
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -89,9 +111,14 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-async function settle(): Promise<void> {
+/**
+ * Work an operation starts but does not await is counted when the scenario's
+ * `settled` reports it done; the event-loop turns before it let promise
+ * chains the operation left queued (no timer, no clock) reach that point.
+ */
+async function settle(instance: Instance): Promise<void> {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+  await instance.settled?.();
 }
 
 /** The kernel counters include this read of /proc/self/io; measured once and subtracted. */
@@ -102,13 +129,13 @@ function kernelBaseline(): KernelIo {
 
 async function measureOnce(instance: Instance, run: number, base: KernelIo): Promise<RunSample> {
   await instance.prepare?.(run);
-  await settle();
+  await settle(instance);
   resetCounters(); resetFakeCounts(); resetFixtureTraffic();
   const k0 = readKernelIo();
   const t0 = performance.now();
   const extra = (await instance.op(run)) ?? {};
   const wallMs = performance.now() - t0;
-  await settle();
+  await settle(instance);
   // Requests to an in-process fixture server standing in for a remote model service.
   if (fixtureTraffic.requests > 0) Object.assign(extra, { fixtureRequests: fixtureTraffic.requests, fixtureBytes: fixtureTraffic.bytes });
   const k1 = readKernelIo();

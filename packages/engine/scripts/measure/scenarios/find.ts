@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFindTool } from '../../../platform/src/platform/tools/find/executor.ts';
 import { FindRuntimeService } from '../../../platform/src/platform/tools/find/shared.ts';
-import { assertOutcome, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
+import { assertOutcome, clockAhead, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
 
 const P = 'packages/engine/platform/src/platform';
 const TOP_DIRS = 30;
@@ -19,12 +19,6 @@ const FILES_PER_DIR = 12;
 const NEEDLE_FILES = 6;
 const FILE_COUNT = TOP_DIRS * (1 + SUB_DIRS) * FILES_PER_DIR;
 const NEEDLES = FILE_COUNT / NEEDLE_FILES;
-/**
- * The file list lists a directory again while its change time is this recent
- * (file-list.ts RACY_MS); the seeded project is left to age past it before the
- * first measured search, so a run's counts do not depend on how fast setup was.
- */
-const SETTLE_AFTER_SEED_MS = 2_100;
 
 function fileText(index: number): string {
   const lines = [`// module ${index}`, `export const value${index} = ${index};`];
@@ -48,7 +42,6 @@ function seedProject(root: string): string[] {
   return directories;
 }
 
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, SETTLE_AFTER_SEED_MS));
 
 type Ripgrep = 'none' | 'host';
 
@@ -110,9 +103,9 @@ function repeatScenario(name: string, ripgrep: Ripgrep, drives: string): Scenari
     name, drives, entries: [...ENTRIES, ...(ripgrep === 'host' ? [`${P}/tools/find/ripgrep.ts ripgrepCandidates`] : [])],
     async setup(env: MeasureEnv): Promise<Instance> {
       seedProject(env.workspace);
-      await settle();
+      const restoreClock = clockAhead();
       const tool = createFindTool(env.workspace, null, service(ripgrep));
-      return { op: (run) => search(tool, `needle${run + 1}x`, NEEDLE_FILES) };
+      return { op: (run) => search(tool, `needle${run + 1}x`, NEEDLE_FILES), dispose: restoreClock };
     },
   };
 }
@@ -125,9 +118,9 @@ export const scenarios: Scenario[] = [
     async setup(env: MeasureEnv): Promise<Instance> {
       // One copy per run (the warm-up included), so each search is the first of its project.
       for (let copy = 0; copy <= 5; copy++) seedProject(join(env.workspace, `project-${copy}`));
-      await settle();
+      const restoreClock = clockAhead();
       const tool = createFindTool(env.workspace, null, service('none'));
-      return { op: (run) => search(tool, 'needle7x', NEEDLE_FILES, `project-${run + 1}`) };
+      return { op: (run) => search(tool, 'needle7x', NEEDLE_FILES, `project-${run + 1}`), dispose: restoreClock };
     },
   },
   repeatScenario('find-content-repeat', 'none', `Repeated content searches of one project (${FILE_COUNT} files in ${TOP_DIRS * (1 + SUB_DIRS)} directories), a different identifier each run, nothing changed in between; no ripgrep. The held file list is checked by one stat per directory and nothing is walked; every file is read.`),
@@ -141,9 +134,9 @@ export const scenarios: Scenario[] = [
         seedProject(join(env.workspace, `project-${copy}`));
         seedNestedIgnore(join(env.workspace, `project-${copy}`));
       }
-      await settle();
+      const restoreClock = clockAhead();
       const tool = createFindTool(env.workspace, null, service('none'));
-      return { op: (run) => listFiles(tool, 'file-7.ts', `project-${run + 1}`) };
+      return { op: (run) => listFiles(tool, 'file-7.ts', `project-${run + 1}`), dispose: restoreClock };
     },
   },
   {
@@ -153,9 +146,9 @@ export const scenarios: Scenario[] = [
     async setup(env: MeasureEnv): Promise<Instance> {
       seedProject(env.workspace);
       seedNestedIgnore(env.workspace);
-      await settle();
+      const restoreClock = clockAhead();
       const tool = createFindTool(env.workspace, null, service('none'));
-      return { op: (run) => listFiles(tool, `file-${(run + 1) % FILES_PER_DIR}.ts`) };
+      return { op: (run) => listFiles(tool, `file-${(run + 1) % FILES_PER_DIR}.ts`), dispose: restoreClock };
     },
   },
   {
@@ -164,10 +157,11 @@ export const scenarios: Scenario[] = [
     entries: ENTRIES,
     async setup(env: MeasureEnv): Promise<Instance> {
       const directories = seedProject(env.workspace);
-      await settle();
+      const restoreClock = clockAhead();
       const tool = createFindTool(env.workspace, null, service('none'));
       const edited = directories[Math.floor(directories.length / 2)]!;
       return {
+        dispose: restoreClock,
         prepare(run) { writeFileSync(join(edited, `added-${run + 1}.ts`), `export const added = 'fresh${run + 1}y';\n`); },
         op: (run) => search(tool, `fresh${run + 1}y`, 1),
       };

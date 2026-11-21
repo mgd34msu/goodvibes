@@ -19,7 +19,7 @@ import { openStateDecisionLogWithNotice } from '../../platform/src/platform/stat
 import { SloCollector } from '../../platform/src/platform/runtime/perf/slo-collector.ts';
 import type { JudgmentServices } from '../../platform/src/platform/runtime/judgment-services.ts';
 import { countingProvider, installCountingJudgment, MODEL, measureModel, PROVIDER, type ExtraRoute } from './fakes.ts';
-import type { MeasureEnv } from './harness.ts';
+import { clockAhead, type MeasureEnv } from './harness.ts';
 
 export const SURFACE = 'tui';
 
@@ -47,6 +47,8 @@ export function seedWorkspace(workspace: string): void {
 }
 
 export async function createFloor(env: MeasureEnv, options: { readonly extra?: ExtraRoute } = {}): Promise<Floor> {
+  // The turns list files: no directory may read as just changed (harness.ts CLOCK_AHEAD_MS).
+  const restoreClock = clockAhead();
   const runtimeBus = new RuntimeEventBus();
   const configManager = new ConfigManager({ surfaceRoot: SURFACE, homeDir: env.home, workingDir: env.workspace });
   const shellPaths = createShellPathService({ workingDirectory: env.workspace, homeDirectory: env.home });
@@ -74,6 +76,10 @@ export async function createFloor(env: MeasureEnv, options: { readonly extra?: E
     requestApproval: async () => ({ approved: true }),
     modelDiscovery: 'skip',
   });
+  // The settings-file watcher polls on a 250 ms timer for edits made outside the process; none are made
+  // here, and its polls would land in an operation or not depending on the clock. It is stopped so every
+  // count is the operation's own.
+  configManager.stopWatchingConfigFiles();
   const script: ChatResponse[] = [];
   // The same collector /doctor reads: turn start, cancel and gate decision p95 on this bus.
   const slo = new SloCollector(runtimeBus);
@@ -94,6 +100,7 @@ export async function createFloor(env: MeasureEnv, options: { readonly extra?: E
       judgmentInstall.restore();
       await Promise.resolve(services.dispose());
       log[Symbol.dispose]();
+      restoreClock();
     },
   };
 }

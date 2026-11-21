@@ -117,6 +117,7 @@ import { isGeneratedKnowledgeSource } from './generated-projections.js';
 import {
   prepareKnowledgeScopeSelection,
   KnowledgeScopeSelectionHeldError,
+  knowledgeScopeReadingsSettled,
   type KnowledgeScopeSelection,
   type KnowledgeScopeSelectionOptions,
 } from './scope-selection.js';
@@ -1207,6 +1208,15 @@ export class KnowledgeService {
   /** Stop timers immediately and drain startup plus internally owned semantic
    * background work. Injected semantic services remain their creator's property;
    * foreground operations retain their original caller cancellation signals. */
+  /**
+   * Resolves once the ordinary-view readings a view queued have finished: each
+   * record is read once per content version, in the background, after the view
+   * that found it unread was answered.
+   */
+  scopeReadingsSettled(): Promise<void> {
+    return knowledgeScopeReadingsSettled(this.store);
+  }
+
   dispose(): Promise<void> {
     if (this.closing) return this.closing;
     const closing = Promise.withResolvers<void>();

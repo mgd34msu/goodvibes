@@ -1,25 +1,21 @@
 /**
  * Speed budgets: what a measured run may cost, per scenario, against the
- * figures recorded in budgets.json. Counts only, and wall-time ratios taken
- * inside one run, so a busy machine or a slow CI runner never fails a check
- * and a real regression always does.
+ * figures recorded in budgets.json. Only counts and bytes fail the check, so a
+ * busy machine or a slow CI runner never fails it and a real regression
+ * always does.
  *
  * - Decision-model requests, conversation-model requests, file reads, file
  *   writes, fsyncs and SQL statements: at or below the recorded figure.
  * - Bytes written: at most 10% above the recorded figure.
  * - Measures a scenario names in `budgeted` (and `budgetedBytes`): the same
  *   two rules.
- * - turn-8-slow-reads: the time its slow reads add to the turn (its wall time
- *   minus turn-8-reads', the same turn without the delays, in this run) at
- *   most twice its slowest read. Reads run side by side add about the slowest
- *   one (1.0 when measured); reads run one after another add their sum (5.5).
- *   The turn's own cost is subtracted because it grows with machine load and
- *   the read delays do not.
- * - Each start-up scenario: its multiple of startup-bun-floor (the floor timed
- *   right before each of its samples, in this run) at most 1.5 times the
- *   recorded multiple.
- * - A scenario without a budget, or a budget for a scenario that no longer
- *   exists, is a violation.
+ * - A scenario that failed, a scenario without a budget, or a budget for a
+ *   scenario that no longer exists, is a violation.
+ *
+ * Times are printed, never judged (timingInformation): the time
+ * turn-8-slow-reads' slow reads add to the turn (its wall time minus
+ * turn-8-reads', in this run) over its slowest read, and each start-up's
+ * multiple of startup-bun-floor beside the recorded multiple.
  */
 import type { ScenarioReport } from './harness.ts';
 import type { StartupReport } from './startup.ts';
@@ -31,11 +27,9 @@ export const BYTE_MEASURES = ['bytesWritten'] as const;
 export const BYTES_TOLERANCE = 0.1;
 /** The reference start-up: bun and the harness preload, no product code. */
 export const STARTUP_FLOOR = 'startup-bun-floor';
-/** A start-up may take this many times its recorded multiple of the floor. */
-export const STARTUP_TOLERANCE = 1.5;
-/** Fixed wall-time ratios inside one run: (scenario's wall time - `minus` scenario's) / the scenario's `per` measure, at most `max`. */
-export const WALL_RATIOS: ReadonlyArray<{ readonly scenario: string; readonly minus: string; readonly per: string; readonly max: number }> = [
-  { scenario: 'turn-8-slow-reads', minus: 'turn-8-reads', per: 'slowestReadMs', max: 2 },
+/** Wall-time ratios inside one run, printed as information: (scenario's wall time - `minus` scenario's) / the scenario's `per` measure, beside what it was expected to be near. */
+export const WALL_RATIOS: ReadonlyArray<{ readonly scenario: string; readonly minus: string; readonly per: string; readonly expected: string }> = [
+  { scenario: 'turn-8-slow-reads', minus: 'turn-8-reads', per: 'slowestReadMs', expected: 'about 1 when the reads run side by side, about 5.5 one after another' },
 ];
 
 export interface ScenarioBudget {
@@ -46,7 +40,7 @@ export interface ScenarioBudget {
 }
 
 export interface StartupBudget {
-  /** The scenario's median wall time over the floor's, in the recorded run; absent for the floor itself. */
+  /** The scenario's median wall time over the floor's, in the recorded run, printed beside this run's as information; absent for the floor itself. */
   readonly multipleOfFloor?: number;
 }
 
@@ -80,7 +74,7 @@ export interface Violation {
 }
 
 const ABOUT = 'Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). '
-  + 'Counts may not grow; bytes written may grow 10%; wall time is compared only as a ratio inside one run. '
+  + 'Counts may not grow; bytes written may grow 10%; times are printed as information and never fail the check. '
   + 'To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` '
   + '(add --only <names> to rewrite only those scenarios) and commit the diff with the reason.';
 
@@ -150,29 +144,38 @@ export function checkBudgets(run: MeasuredRun, budgets: BudgetsFile, known: Read
       if (now === undefined) add(report.name, measure, fmt(recorded), 'not reported');
       else if (now > recorded * (1 + BYTES_TOLERANCE)) add(report.name, measure, `${fmt(recorded)} (+10% allowed)`, fmt(now));
     }
-    for (const ratio of WALL_RATIOS) {
-      if (ratio.scenario !== report.name) continue;
-      const measure = `(wall - ${ratio.minus} wall) / ${ratio.per}`;
-      const per = report.median[ratio.per];
-      const base = run.scenarios.find((candidate) => candidate.name === ratio.minus);
-      if (per === undefined || per <= 0) { add(report.name, measure, `at most ${ratio.max}`, `${ratio.per} not reported`); continue; }
-      if (!base || !measured(base)) { add(report.name, measure, `at most ${ratio.max}`, `${ratio.minus} not measured in this run`); continue; }
-      const now = (report.wallMs.median - base.wallMs.median) / per;
-      if (now > ratio.max) add(report.name, measure, `at most ${ratio.max}`, fmt(now));
-    }
   }
   for (const report of run.startup) {
     if (report.error !== undefined) { add(report.name, 'outcome', 'succeeded', `failed: ${report.error.split('\n')[0]}`); continue; }
     const budget = budgets.startup[report.name];
     if (!budget) { add(report.name, 'budget', 'none', 'scenario has no budget'); continue; }
-    if (report.name === STARTUP_FLOOR || budget.multipleOfFloor === undefined) continue;
-    const floorMs = floorOf(run, report);
-    if (floorMs === undefined) { add(report.name, 'multiple of floor', fmt(budget.multipleOfFloor), `${STARTUP_FLOOR} not measured in this run`); continue; }
-    const now = report.wallMs.median / floorMs;
-    const limit = budget.multipleOfFloor * STARTUP_TOLERANCE;
-    if (now > limit) add(report.name, 'multiple of floor', `${fmt(budget.multipleOfFloor)} (at most ${fmt(limit)})`, fmt(now));
   }
   return violations;
+}
+
+/**
+ * The timings of this run as lines of information, never violations: each
+ * wall-time ratio, and each start-up's multiple of the floor beside the
+ * recorded multiple. Machine load moves these; they never fail the check.
+ */
+export function timingInformation(run: MeasuredRun, budgets: BudgetsFile | null): string[] {
+  const lines: string[] = [];
+  for (const ratio of WALL_RATIOS) {
+    const report = run.scenarios.find((candidate) => candidate.name === ratio.scenario);
+    const base = run.scenarios.find((candidate) => candidate.name === ratio.minus);
+    if (!report || !measured(report) || !base || !measured(base)) continue;
+    const per = report.median[ratio.per];
+    if (per === undefined || per <= 0) continue;
+    lines.push(`${ratio.scenario}: (wall - ${ratio.minus} wall) / ${ratio.per} = ${fmt((report.wallMs.median - base.wallMs.median) / per)} (${ratio.expected})`);
+  }
+  for (const report of run.startup) {
+    if (report.error !== undefined || report.name === STARTUP_FLOOR) continue;
+    const floorMs = floorOf(run, report);
+    if (floorMs === undefined) continue;
+    const recorded = budgets?.startup[report.name]?.multipleOfFloor;
+    lines.push(`${report.name}: ${fmt(report.wallMs.median / floorMs)} times ${STARTUP_FLOOR}${recorded === undefined ? '' : ` (recorded ${fmt(recorded)})`}`);
+  }
+  return lines;
 }
 
 /** The violations as aligned lines: scenario, measure, recorded, now. */

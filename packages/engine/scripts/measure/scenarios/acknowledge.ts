@@ -39,15 +39,6 @@ import { localOwnerActor } from '../../../daemon-api/src/actor.ts';
 
 const P = 'packages/engine/platform/src/platform';
 
-/** Event-loop turns until `done` holds; bounded in turns, never in milliseconds. */
-async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 200_000; turn += 1) {
-    if (done()) return;
-    await new Promise<void>((resolve) => { setImmediate(resolve); });
-  }
-  assertOutcome(done(), `gave up waiting for ${what}`);
-}
-
 /** The far side of a send: an ntfy server on loopback that records every message by topic. */
 async function recorder(): Promise<{ readonly url: string; readonly received: Array<{ topic: string; body: string }>; close(): Promise<void> }> {
   const received: Array<{ topic: string; body: string }> = [];
@@ -163,6 +154,7 @@ const channelReplyFinal: Scenario = {
     let agentId = '';
     let sessionId = '';
     return {
+      settled: () => broker.idle(),
       async prepare(run) {
         topic = `measure-topic-${run + 1}`;
         agentId = `agent-measure-${run + 1}`;
@@ -239,18 +231,21 @@ const automationRunSettle: Scenario = {
     let runId = '';
     let agentId = '';
     return {
+      async settled() { await manager.deliveriesSettled(); await broker.idle(); },
       async prepare() {
         const run = await manager.runNow(job.id);
         runId = run.id;
         agentId = run.agentId!;
-        // The run's start writes land before the measured settle.
-        await until(() => manager.getRun(runId)?.status === 'running', `run ${runId} to be running`);
+        // runNow returns once the run has started and its start writes are saved.
+        assertOutcome(manager.getRun(runId)?.status === 'running', `run ${runId} is ${manager.getRun(runId)?.status} after runNow, not running`);
       },
       async op() {
         const before = ntfy.received.length;
         agents.set(agentId, 'completed');
+        // The read settles the run; its delivery goes on after the read returns and is awaited here.
         manager.listJobs();
-        await until(() => (manager.getRun(runId)?.deliveryIds.length ?? 0) > 0, `run ${runId} to record its delivery`);
+        await manager.deliveriesSettled();
+        assertOutcome((manager.getRun(runId)?.deliveryIds.length ?? 0) > 0, `run ${runId} recorded no delivery`);
         assertOutcome(manager.getRun(runId)?.status === 'completed', `run ${runId} ended ${manager.getRun(runId)?.status}`);
         assertOutcome(ntfy.received.length === before + 1 && ntfy.received.at(-1)!.topic === 'job-target', `the target received ${ntfy.received.length - before} messages`);
       },

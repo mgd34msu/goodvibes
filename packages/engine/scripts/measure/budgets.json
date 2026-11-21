@@ -1,5 +1,5 @@
 {
-  "about": "Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). Counts may not grow; bytes written may grow 10%; wall time is compared only as a ratio inside one run. To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (add --only <names> to rewrite only those scenarios) and commit the diff with the reason.",
+  "about": "Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). Counts may not grow; bytes written may grow 10%; times are printed as information and never fail the check. To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (add --only <names> to rewrite only those scenarios) and commit the diff with the reason.",
   "recorded": {
     "commit": "e542e7fde",
     "measuredAt": "2026-11-20T06:52:11.295Z",

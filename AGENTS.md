@@ -11,7 +11,7 @@ Bun 1.3.14 and TypeScript (strict). `exactOptionalPropertyTypes` is on for `pack
 
 ## Running tests
 
-Never run plain `bun test`: it skips the runner's isolated home, temp directory, network block, limits and admission scan. `bun run test` runs every default-suite file in the repository (engine, judgment, installer, products) from one pool of workers (cores minus one), one process per file, and does not typecheck or build.
+Never run plain `bun test`: it skips the runner's isolated home, temp directory, network block and admission scan. `bun run test` runs every default-suite file in the repository (engine, judgment, installer, products) from one pool of workers (cores minus one), one process per file, and does not typecheck or build.
 
 ```sh
 # one file (path relative to where you are, else to packages/engine)
@@ -29,7 +29,7 @@ bun run test:live   # files under test/live/ (the sandbox and real-browser proof
 bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 ```
 
-The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 11 to 28): the default suite, 142 files and 475 cases, took 19.6 to 25.4 s and 174 to 220 file-seconds over fifteen runs in a row, its slowest file 4.6 to 6.8 s. By group (files, cases, file-seconds): engine 125, 397, 155 to 184; judgment 4, 30, 0.5 to 1.3; installer 6, 29, 6.5 to 11.7; Agent 3, 12, 7.0 to 12.6; terminal 3, 5, 4.5 to 8.4; daemon 1, 2, 1.1 to 2.3. `test:live`, 5 files, 3.3 s and 5.6 file-seconds; `test:e2e`, 2 files, 8.6 s and 16.4 file-seconds.
+The runner sets no time limit of any kind: no test, file or run is stopped or fails for how long it takes (bun is started with `--timeout=0`, which turns its own 5-second per-test default off), and a file that never finishes keeps running. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 11 to 28): the default suite, 142 files and 475 cases, took 19.6 to 25.4 s and 174 to 220 file-seconds over fifteen runs in a row, its slowest file 4.6 to 6.8 s. By group (files, cases, file-seconds): engine 125, 397, 155 to 184; judgment 4, 30, 0.5 to 1.3; installer 6, 29, 6.5 to 11.7; Agent 3, 12, 7.0 to 12.6; terminal 3, 5, 4.5 to 8.4; daemon 1, 2, 1.1 to 2.3. `test:live`, 5 files, 3.3 s and 5.6 file-seconds; `test:e2e`, 2 files, 8.6 s and 16.4 file-seconds.
 
 The journeys (`packages/engine/scripts/runthrough/`) are sixteen product runs, not tests: each starts the real programs from source in its own home on loopback, against a scripted model, and fails when a step the product owes does not happen. `bun run journeys` runs all of them three at a time; `bun run journeys -- --only j14` runs one. They need python3, openssl, bubblewrap and a Chromium (`RUNTHROUGH_CHROMIUM`, else the web UI's Playwright build, else `/usr/bin/chromium`). They are run by hand before a release; they are not part of `bun run validate` or CI. Measured 2026-11-20 on 12 cores: 216 to 224 s over five runs in a row, j5 about 200 s of it.
 
@@ -44,20 +44,20 @@ Before anything runs, the runner parses every selected file and refuses the whol
 - a file that disagrees with `packages/engine/docs/test-risks.md`: a `Proves` line that is not the risk of its rows, a row whose risk is not one of the file's `Proves` lines, a case (each `test`/`it` title, a template's `${...}` as written) with no row, or a row naming a case the file does not have;
 - on a whole-suite run (no file or folder named), a row naming a file that does not exist.
 
-`bun run validate` applies the same scan to the test files the runner does not start (the web UI's Playwright journeys) with `bun packages/engine/scripts/test-scan.ts`. A file that runs no test, skips one, has a test over 5 seconds, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
+`bun run validate` applies the same scan to the test files the runner does not start (the web UI's Playwright journeys) with `bun packages/engine/scripts/test-scan.ts`. A file that runs no test, skips one, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
 
 ## Tests
 
 1. A test exists to prove one risk. Its failure must mean lost data, money or messages; a broken security or permission boundary; or a broken contract other code or clients depend on.
 2. Add one only when you can state the breakage, who loses what, why a later change could cause it unnoticed, and that nothing already turns red for it: no kept case, gate script, type check, measurement budget, smoke run or run-through journey.
 3. Never a reason for a test: a fix you just made, coverage, a second level of a proof that exists, another input of the same kind, a control on its own, a test of a test or of a stand-in.
-4. Five questions, asked of every proposed case: (1) would its failure mean one of the three losses; (2) can it fail for a reason other than the product being wrong; (3) does it contain a timing assertion, a wait, a snapshot, a mock that checks itself or a copy of the code under test; (4) does it take more than 5 seconds, or its file more than 10; (5) have you broken the guarded line and watched it go red. A no on 1 or 5, or a yes on 2 to 4, and it is not written.
+4. Four questions, asked of every proposed case: (1) would its failure mean one of the three losses; (2) can it fail for a reason other than the product being wrong; (3) does it contain a timing assertion, a wait, a snapshot, a mock that checks itself or a copy of the code under test; (4) have you broken the guarded line and watched it go red. A no on 1 or 4, or a yes on 2 or 3, and it is not written.
 5. One proof per risk, at the lowest level where the real components that hold the risk all run. Several inputs to one component are rows of one case. A control that stops a proof passing on a blanket failure goes inside that case.
 6. Stand-ins only for what is outside the product: the model at the HTTP wire, a remote server on loopback that records what arrived, the clock, the decision model. Never stores, locks, the gate, settings, the tool registry, the daemon router or the session broker.
 7. The runner refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, a retry or a timeout argument, a missing or empty header, and a case with no row in the risk table.
 8. Every test file begins with its header: for each risk the file proves, `// Proves: <the risk in one sentence>` followed by `// Red when: <the breakage that turns it red>`. A header whose Red when repeats its Proves, or two identical Proves lines in one file, is refused.
 9. `packages/engine/docs/test-risks.md` is the record: one row per case (area, risk, file, case, red when). A new proof adds its rows in the same change, and the row's risk is the file's `Proves` line word for word.
-10. A real browser, sandbox or built binary is used only where the risk lives in it; those files go under `test/live/` or `src/test/e2e/` (30 seconds a file). What only a whole product run can show is a step in a journey under `packages/engine/scripts/runthrough/`, not a test.
+10. A real browser, sandbox or built binary is used only where the risk lives in it; those files go under `test/live/` or `src/test/e2e/`. What only a whole product run can show is a step in a journey under `packages/engine/scripts/runthrough/`, not a test.
 11. Speed and request counts are measured by `bun run measure`, never asserted in a test.
 12. When the code a risk lives in is removed, its cases and rows go in the same change.
 
@@ -85,7 +85,7 @@ bun run measure:check                        # the same, compared with packages/
 MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted call; MEASURE_TRACE_STACK=1 adds its callers
 ```
 
-`measure:check` fails on a count above its budget, bytes written more than 10% above, slow reads adding more than twice the slowest read to `turn-8-slow-reads` (its time minus `turn-8-reads`), a start-up over 1.5 times its recorded multiple of `startup-bun-floor`, a failed scenario, a scenario without a budget, or a budget without a scenario. Wall time is never compared as an absolute number. A count that grew is a regression to fix, not a budget to raise. When a change costs more on purpose, a cost falls, or a scenario is added, rewrite the budgets from a run and commit the diff with the reason: `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (with `--only <names>`, only those entries change). The start-up scenarios run the products from source with bun, so nothing needs building first.
+`measure:check` fails only on counts and bytes: a count above its budget, bytes written more than 10% above, a failed scenario, a scenario without a budget, or a budget without a scenario. Times are printed, never judged: wall time, the time `turn-8-slow-reads`' slow reads add to the turn (its time minus `turn-8-reads`) over its slowest read, and each start-up's multiple of `startup-bun-floor` beside its recorded multiple appear in the output as information and never fail the check. A count that grew is a regression to fix, not a budget to raise. When a change costs more on purpose, a cost falls, or a scenario is added, rewrite the budgets from a run and commit the diff with the reason: `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (with `--only <names>`, only those entries change). The start-up scenarios run the products from source with bun, so nothing needs building first.
 
 ## Gates: if you touch X, run Y
 

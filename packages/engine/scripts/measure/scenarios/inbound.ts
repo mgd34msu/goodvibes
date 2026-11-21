@@ -59,6 +59,7 @@ const inboundMessage: Scenario = {
     };
     let externalId = '';
     return {
+      settled: () => b.broker.idle(),
       async op(run) {
         spawned = 0;
         externalId = `conversation-${run}-${createHash('sha1').update(String(Date.now())).digest('hex').slice(0, 8)}`;

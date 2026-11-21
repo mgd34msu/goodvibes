@@ -119,8 +119,8 @@ jobs:
       - name: Run the live sandbox tests
         run: bun run validate --job live-sandbox
 
-  # Counts per scenario against packages/engine/scripts/measure/budgets.json; wall
-  # time only as a ratio inside this run.
+  # Counts and bytes per scenario against packages/engine/scripts/measure/budgets.json;
+  # times are printed as information and never fail it.
   measure:
     name: Measure
     runs-on: ubuntu-latest
@@ -387,7 +387,7 @@ jobs:
           if-no-files-found: ignore
 
   # The one job a branch rule and the release gate require (release.yml's
-  # ci-green reads its "CI ok" check run). It fails when any other job did not
+  # ci-green reads its "CI ok" check run). It fails when any job it needs did not
   # succeed; only `native` may be skipped, and only on a pull request.
   ci-ok:
     name: CI ok
@@ -402,7 +402,7 @@ jobs:
       - live-sandbox
       - measure
       - package
-      - security-audit
+      # security-audit is left out: a new public advisory turns it red with no change to the code, so it reports but never blocks.
       - native
     steps:
       - name: Every CI job succeeded

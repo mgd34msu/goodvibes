@@ -1,12 +1,10 @@
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
 import { createSettingsLayout, settingsTopicRailRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
 import { createSettingsDocumentation } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
-import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigation';
 /**
  * renderSettingsModal, the settings screen drawn with the surface kit: the
  * seven topics the web UI shows, in its order and words; each lists its
- * sections' settings by name with the value in words, and the section and key
- * small beneath. Typing searches every setting by name, key or description
+ * sections' settings by name with the value in words, one line each. Typing searches every setting by name, key or description
  * (the topics step aside). Under the rows, the selected one explained in a
  * few sentences. The same screen as the terminal app's (see its renderer).
  */
@@ -21,7 +19,6 @@ import { type KitRow } from './surface-kit-list.ts';
 function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow {
   return {
     label: entry.feature.name,
-    sub: entry.feature.restartRequired ? 'takes effect the next time the Agent starts' : 'takes effect at once',
     right: entry.state === 'enabled' ? 'On' : 'Off',
     rightFg: flagStateColor(entry.state),
     selected: selected && focused,
@@ -49,7 +46,6 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCat
   color: valueColor,
   currentValue: currentSettingValue,
   unavailable: () => false,
-  placeOf: (entry) => settingPlace(entry.setting.key, entry.setting.key.split('.', 1)[0] ?? ''),
   visibleRows: (modal) => modal.visibleRows(),
   listCount: listItemCount,
   focused: (modal) => modal.searchFocused || (modal.focusPane ?? 'settings') === 'settings',

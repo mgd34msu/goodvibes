@@ -16,7 +16,8 @@
  *     question: `asksItself`), or one that loosens a protection can be run by a
  *     model;
  *  7. an action cannot be reached from the guided path (a blank's list depends
- *     on a blank that comes after it, or on none);
+ *     on a blank that comes after it, or on none, or the action shows no form
+ *     and has a blank that must be filled);
  *  8. one choice of a blank does what another action does (a reversing word);
  *  9. two actions do the same thing (same word, label or sentence);
  * 10. the same command differs between the two terminal apps;
@@ -69,6 +70,8 @@ export function checkDescription(description: CommandDescription<never>, problem
       if (other) at(action, `it has the same ${key} as ${other}: two actions do the same thing`);
       map.set(value, action.id);
     }
+    // 7: an action that shows no form may not have a blank that must be filled.
+    if (action.blanksTypedOnly && action.inputs.some((input) => input.required === true)) at(action, 'it shows no form but has a blank that must be filled, so the guided path cannot fill it');
     // 4
     if (!action.sentence.trim()) at(action, 'it has no sentence');
     for (const input of action.inputs) {

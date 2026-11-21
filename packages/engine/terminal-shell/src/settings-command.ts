@@ -57,6 +57,8 @@ export function settingsCommandDescription<Ctx>(runs: SettingsCommandRuns<Ctx>):
         })],
         sentence: 'Opens settings at {where}.',
         example: { where: 'permissions.mode' },
+        // The settings screen has its own topics and search, so choosing this opens it at once.
+        blanksTypedOnly: true,
         run: (values: ActionValues, ctx: Ctx) => runs.open(values.where ?? '', ctx),
       }),
       readAction<Ctx>({

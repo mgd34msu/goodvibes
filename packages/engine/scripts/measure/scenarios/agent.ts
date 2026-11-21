@@ -57,6 +57,10 @@ async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   // With none set the composition runs every decision without one and the route plan is held unread.
   configManager.set('judgment.model', 'jev-latest', { daemonNotRunning: true });
   const services = await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: env.home, modelDiscovery: 'skip' });
+  // The settings-file watcher polls on a 250 ms timer for edits made outside the process; none are made
+  // here, and its polls would land in an operation or not depending on the clock. It is stopped so every
+  // count is the operation's own.
+  configManager.stopWatchingConfigFiles();
   // As runtime/bootstrap-core.ts composes the main conversation's registry.
   const composed = composeAgentToolRegistry({
     services, configManager, homeDirectory: env.home, resolveSessionId: () => 'measure-agent',

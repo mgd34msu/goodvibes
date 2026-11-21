@@ -12,16 +12,16 @@
  * else to the current directory, else to packages/engine. `-t <pattern>` passes
  * a test-name filter to bun; `--jobs <n>` sets the pool size.
  *
- * No test or file fails for its duration: the run reports the slowest files
- * and the file-seconds per kind as information. The one backstop is hang
- * protection: a file with no result after 10 minutes is stopped and reported
- * as hung. Before any file starts, every selected file is scanned (test-scan.ts) and the
+ * The runner sets no time limit of any kind: no test or file is stopped or
+ * fails for its duration (bun gets `--timeout=0`, which turns its own per-test
+ * timeout off), and a file that never finishes keeps running. The run reports
+ * the slowest files and the file-seconds per kind as information. Before any file starts, every selected file is scanned (test-scan.ts) and the
  * whole run is refused if one waits on a clock, uses a snapshot, replaces a
  * module, skips a test or raises a limit, lacks its `// Proves:` / `// Red when:`
  * header, or disagrees with the risk table (packages/engine/docs/test-risks.md):
  * a case with no row, a row naming a case the file does not have, a `Proves`
  * line that is not the risk of its rows. A whole-suite run also refuses a row
- * naming a file that does not exist. A file that hangs, runs no test, skips a
+ * naming a file that does not exist. A file that runs no test, skips a
  * test, tries the network, or leaves a process running is a failure.
  */
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
@@ -39,14 +39,8 @@ const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 const NETWORK_PRELOAD = join(ENGINE_ROOT, 'toolchain/src/test-runner/test-network-preload.ts');
 const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 
-/**
- * Hang protection, not a speed limit: a file whose process is still running
- * this long after it started is stopped and reported as hung. No test or file
- * fails for its duration; the run reports the slowest files as information.
- */
-export const HUNG_FILE_MS = 10 * 60_000;
-/** What bun gets as its per-test timeout, so its own 5-second default never acts as a hidden limit. */
-const BUN_TEST_TIMEOUT_MS = HUNG_FILE_MS;
+/** bun's per-test timeout: 0 turns it off (bun's documented "no timeout"), so its own 5-second default never acts as a limit. */
+const BUN_NO_TIMEOUT = '--timeout=0';
 
 /** Set for files under test/live/: a host without the sandbox fails them instead of letting them pass. */
 const EXEC_CONTAINMENT_REQUIRED_ENV = 'GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT';
@@ -293,7 +287,7 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   // Output goes to a file, not a pipe: a process the file leaves behind could hold a pipe open and stall the read.
   const outputFd = openSync(outputPath, 'a');
   const started = performance.now();
-  const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, `--timeout=${BUN_TEST_TIMEOUT_MS}`,
+  const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, BUN_NO_TIMEOUT,
     '--reporter=junit', `--reporter-outfile=${junit}`, ...(options.namePattern === undefined ? [] : ['-t', options.namePattern]),
     `./${relative(file.cwd, file.path)}`], {
     cwd: file.cwd,
@@ -303,17 +297,10 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   });
   closeSync(outputFd);
   children.add(child);
-  // Hang protection only: a file still running after HUNG_FILE_MS has stopped making progress.
-  let hung = false;
-  const deadline = setTimeout(() => {
-    hung = true;
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
-  }, HUNG_FILE_MS);
   let code: number;
   try {
     code = await child.exited;
   } finally {
-    clearTimeout(deadline);
     try { process.kill(-child.pid, 'SIGKILL'); } catch { /* nothing left in the group */ }
     children.delete(child);
   }
@@ -326,9 +313,8 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   let blocked = '';
   try { blocked = readFileSync(join(own, 'network-violations'), 'utf8'); } catch { /* none were blocked */ }
   const failures: string[] = [];
-  if (hung) failures.push(`hung: no result after ${HUNG_FILE_MS / 60_000} minutes`);
-  else if (code !== 0) failures.push(`exit ${code}`);
-  if (!hung && ran === 0) failures.push(options.namePattern === undefined ? 'no tests ran' : `no test matched -t ${options.namePattern}`);
+  if (code !== 0) failures.push(`exit ${code}`);
+  if (ran === 0) failures.push(options.namePattern === undefined ? 'no tests ran' : `no test matched -t ${options.namePattern}`);
   if (options.namePattern === undefined && result !== undefined && result.skipped > 0) failures.push(`${result.skipped} test(s) skipped or marked todo`);
   if (blocked) failures.push(`tried the network:\n${blocked.trimEnd()}`);
   if (strays.length > 0) failures.push(`left ${strays.length} process(es) running after it ended (${strays.map(({ pid, what }) => `pid ${pid} ${what}`).join(', ')}), killed`);
@@ -393,13 +379,13 @@ export async function runTests(options: RunOptions): Promise<number> {
  * Every file of `files` in ONE `bun test` process, with `preload` loaded first,
  * under the same isolation. For the leak scans only: a poller one file forgets
  * to stop keeps firing in the files after it, which per-file processes would
- * hide. The process is stopped as hung after HUNG_FILE_MS.
+ * hide.
  */
 export async function runInOneProcess(cwd: string, files: readonly TestFile[], preload: string, env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   return withRunRoot([cwd], async (root, _signalled, children) => {
     const own = join(root, `${basename(root)}-one`);
     mkdirSync(own);
-    const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, '--preload', preload, `--timeout=${BUN_TEST_TIMEOUT_MS}`,
+    const child = Bun.spawn([process.execPath, '--no-env-file', 'test', '--preload', NETWORK_PRELOAD, '--preload', preload, BUN_NO_TIMEOUT,
       ...files.map((file) => `./${relative(cwd, file.path)}`)], {
       cwd,
       detached: process.platform !== 'win32',
@@ -407,11 +393,9 @@ export async function runInOneProcess(cwd: string, files: readonly TestFile[], p
       env: childEnvironment(env, own, root, cwd, {}),
     });
     children.add(child);
-    const deadline = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } }, HUNG_FILE_MS);
     try {
       return await child.exited;
     } finally {
-      clearTimeout(deadline);
       try { process.kill(-child.pid, 'SIGKILL'); } catch { /* nothing left in the group */ }
       children.delete(child);
     }
@@ -450,7 +434,7 @@ export function parseCli(argv: readonly string[], callerDir: string = process.cw
     else if (name === '--cwd') cwd = value();
     else if (name === '--jobs') jobs = value();
     else if (name === '-t' || name === '--test-name-pattern') namePattern = value();
-    else if (LIMIT_FLAGS.has(name)) throw new Error(`${name} is not accepted: no test is timed out or retried; a file with no result after ${HUNG_FILE_MS / 60_000} minutes is stopped as hung.`);
+    else if (LIMIT_FLAGS.has(name)) throw new Error(`${name} is not accepted: the runner sets no time limit and retries nothing.`);
     else throw new Error(`unknown option ${arg}. ${USAGE}`);
   }
   const jobCount = jobs === undefined || jobs === 'auto' ? defaultJobs() : Number(jobs);

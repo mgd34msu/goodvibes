@@ -132,6 +132,13 @@ export interface ActionDescription<Ctx> {
    * command's rows is selected; any other report waits for Ctrl+R.
    */
   readonly readsOnlyThisMachine?: true | undefined;
+  /**
+   * Chosen from the bare command's list, the action runs at once with its
+   * defaults and shows no form: its blanks are only typed (`/settings open
+   * permissions`). Only for an action whose blanks are all optional and whose
+   * result has its own way to choose them (the settings screen's topics and search).
+   */
+  readonly blanksTypedOnly?: true | undefined;
 }
 
 export interface CommandDescription<Ctx> {

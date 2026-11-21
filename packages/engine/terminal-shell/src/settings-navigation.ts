@@ -62,11 +62,11 @@ export function selectedSettingsCategoryEntry<Entry>(
 // Topics: the seven the web UI shows, each listing its sections' settings
 // ---------------------------------------------------------------------------
 
-/** Where a setting is filed: a topic and the section whose name a row shows beside the key. */
+/** Where a setting is filed: a topic and a section. */
 export interface SettingPlace {
   readonly topic: SettingTopicId;
   readonly sectionId: string;
-  /** The section's name, shown as `<section> · <key>` under the setting's name. */
+  /** The section's name; `/settings <section>` lands on its first row. */
   readonly section: string;
 }
 
@@ -86,7 +86,7 @@ export interface SettingsTopicList<Category extends string> {
   readonly category: Category;
   /** Its name in a topic's rows. */
   readonly label: string;
-  /** What it is, in a sentence: the row's secondary line and its help. */
+  /** What it is, in a sentence: the help under the rows when it is selected. */
   readonly description: string;
   readonly topic: SettingTopicId;
   /** The section id it is filed under. */

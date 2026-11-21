@@ -91,6 +91,7 @@ const sessionHeartbeat: Scenario = {
   async setup(env): Promise<Instance> {
     const b = await openBroker(env);
     return {
+      settled: () => b.broker.idle(),
       async op() {
         const seen = Date.now();
         const registered = await b.broker.register({ sessionId: b.firstId, kind: 'tui', project: env.workspace, participant: { surfaceKind: 'tui', surfaceId: 'tui-0', lastSeenAt: seen } } as Parameters<SharedSessionBroker['register']>[0]);
@@ -114,6 +115,7 @@ const sessionAppend: Scenario = {
     const b = await openBroker(env);
     let appended = '';
     return {
+      settled: () => b.broker.idle(),
       async op(run) {
         appended = `measure-${run}-${Date.now()}`;
         await b.broker.appendCompanionMessage(b.firstId, { messageId: appended, body: 'one more message from the companion', timestamp: Date.now(), source: 'measure' });
@@ -158,6 +160,10 @@ async function openKnowledge(env: MeasureEnv): Promise<{ service: KnowledgeServi
   const memory = new MemoryStore(':memory:', { embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }), enableVectorIndex: false });
   await memory.init();
   const service = new KnowledgeService(store, new ArtifactStore({ configManager }), undefined, { memoryRegistry: new MemoryRegistry(memory) });
+  // The first view of new records queues their ordinary-view readings (one decision request per record, once per
+  // content version). That is the cost of new records, not of a list: it is paid here, before anything is measured.
+  await service.listSources(SOURCES);
+  await service.scopeReadingsSettled();
   return { service, store, memory, restore: () => judgment.restore() };
 }
 
@@ -170,11 +176,12 @@ const knowledgeEntries = [
 const knowledgeList: Scenario = {
   name: 'knowledge-list-200',
   runs: 3,
-  drives: `KnowledgeService.listSources(${SOURCES}) over a store holding ${SOURCES} sources (added with upsertSource in one batch). No semantic service (the product attaches one; it is not on the list path).`,
+  drives: `KnowledgeService.listSources(${SOURCES}) over a store holding ${SOURCES} sources (added with upsertSource in one batch). No semantic service (the product attaches one; it is not on the list path). The records' one-time ordinary-view readings are taken in setup.`,
   entries: [`${P}/knowledge/service.ts:320 KnowledgeService.listSources`, ...knowledgeEntries],
   async setup(env): Promise<Instance> {
     const k = await openKnowledge(env);
     return {
+      settled: () => k.service.scopeReadingsSettled(),
       async op() {
         const listed = await k.service.listSources(SOURCES);
         assertOutcome(listed.length === SOURCES && new Set(listed.map((source) => source.id)).size === SOURCES,
@@ -198,6 +205,7 @@ function knowledgeSearchScenario(name: string, drives: string, queryOf: (run: nu
     async setup(env): Promise<Instance> {
       const k = await openKnowledge(env);
       return {
+        settled: () => k.service.scopeReadingsSettled(),
         async op(run) {
           const results = await k.service.search(queryOf(run), 10);
           const titles = results.map((result) => result.source?.title ?? result.node?.title ?? '');

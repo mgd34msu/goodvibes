@@ -6,10 +6,11 @@ import type {
   ConfigModalSurface,
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
-import type {
-  PluginManager,
-  PluginManagerObserver,
-  PluginStatus,
+import {
+  describeUnappliedTier,
+  type PluginManager,
+  type PluginManagerObserver,
+  type PluginStatus,
 } from '@goodvibes/engine/platform/platform/plugins';
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,8 @@ class PluginsModalSurface implements ConfigModalSurface {
       const recorded = this.verifyResults.get(plugin.name);
       const verify = recorded && recorded.stamp === verifyStamp(plugin) ? recorded : undefined;
       const suffix = [
+        // A tier set for other files or another folder is named, so it does not read as never trusted.
+        plugin.unappliedTier ? describeUnappliedTier(plugin.name, plugin.unappliedTier) : null,
         trustRecord?.signatureFingerprint ? `sig ${trustRecord.signatureFingerprint}` : 'unsigned',
         caps ? `caps ${caps.requested.length}/${caps.highRisk.length}hr${caps.blocked.length > 0 ? `, withheld ${caps.blocked.join(',')}` : ''}` : null,
         quarantineRecord ? `quarantine: ${quarantineRecord.reason}` : null,

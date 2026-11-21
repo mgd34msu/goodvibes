@@ -13,7 +13,8 @@ import { formatMinorUnits } from '../message.js';
 import { readPaymentsServiceConfig } from '../payments-config.js';
 import { purchaseDisposition } from '../operation-view.js';
 import type { CurrencyCode } from '../types.js';
-import { HandlerError, type TypedHandler } from './handler-plumbing.js';
+import type { TypedHandler } from './handler-plumbing.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { DurablePaymentOperations } from './operation-store.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import {
@@ -45,21 +46,21 @@ function asRecord(body: unknown): Record<string, unknown> {
   return typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
-function invalid(field: string, requirement: string): HandlerError {
-  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400);
+function invalid(field: string, requirement: string): GatewayVerbError {
+  return new GatewayVerbError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400);
 }
 
-function unavailable(): HandlerError {
-  return new HandlerError('Standing purchase authorisations are not kept on this payment host.', 'FAILED_PRECONDITION', 409);
+function unavailable(): GatewayVerbError {
+  return new GatewayVerbError('Standing purchase authorisations are not kept on this payment host.', 'FAILED_PRECONDITION', 409);
 }
 
 function overStore<T>(run: () => T): T {
   try { return run(); }
   catch (error) {
     if (error instanceof StandingAuthorizationError) {
-      throw new HandlerError(error.message, error.kind === 'invalid' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION', error.kind === 'invalid' ? 400 : 409);
+      throw new GatewayVerbError(error.message, error.kind === 'invalid' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION', error.kind === 'invalid' ? 400 : 409);
     }
-    throw new HandlerError('The standing purchase authorisations could not be used. Nothing was changed.', 'INTERNAL_ERROR', 500);
+    throw new GatewayVerbError('The standing purchase authorisations could not be used. Nothing was changed.', 'INTERNAL_ERROR', 500);
   }
 }
 

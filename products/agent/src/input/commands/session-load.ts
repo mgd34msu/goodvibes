@@ -29,7 +29,7 @@ export interface LoadedSavedSession {
  */
 export async function loadSavedSessionIntoLive(
   ctx: Pick<CommandContext, 'isGenerating' | 'session' | 'abandonHostedSession'> & Partial<Pick<CommandContext, 'clients'>>,
-  sessionManager: Pick<SessionManager, 'load' | 'save'>,
+  sessionManager: Pick<SessionManager, 'load' | 'save' | 'openForWriting' | 'closeForWriting'>,
   name: string,
   options: LoadSavedSessionOptions = {},
 ): Promise<LoadedSavedSession> {

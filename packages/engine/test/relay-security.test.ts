@@ -50,7 +50,7 @@ describe('relay step-up is decided by what the call does', () => {
     for (const [path, method] of [['/api/devices/artifacts', 'GET'], ['/api/approvals/a1/approve', 'POST'], ['/api/control-plane/methods/approvals.approve/invoke', 'POST']] as const) {
       const response = (await dispatch(relayed(path, method)))!;
       expect(response.status, `${method} ${path}`).toBe(401);
-      expect((await response.json() as { code?: string }).code).toBe('step-up-required');
+      expect((await response.json() as { code?: string }).code).toBe('STEP_UP_REQUIRED');
     }
     expect(ran()).toBe(0);
   });

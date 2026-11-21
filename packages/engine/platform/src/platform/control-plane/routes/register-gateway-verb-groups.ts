@@ -431,7 +431,11 @@ export function blockedFleetNotices(registry: Pick<ProcessRegistry, 'query'>): F
 }
 
 export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: GatewayVerbGroupDeps): void {
-  registerFleetCheckpointsSearchGatewayMethods(catalog, deps);
+  const liveTurnHolder = deps.sessionLiveTurnControls;
+  registerFleetCheckpointsSearchGatewayMethods(catalog, {
+    ...deps,
+    ...(liveTurnHolder ? { sessionOwners: (sessionId: string) => liveTurnHolder.ownersOf(sessionId) } : {}),
+  });
   if (deps.triggerSupervisor) registerTriggerSupervisorGatewayMethods(catalog, deps.triggerSupervisor);
 
   // fleet.conflicts.*: a conflict row's actions are a seeded resolution session

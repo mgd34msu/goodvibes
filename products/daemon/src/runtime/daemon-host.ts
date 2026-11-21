@@ -46,8 +46,7 @@ export interface DaemonHostOptions {
   readonly onIncompleteHandover?: () => void;
 }
 
-export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>
-  & Partial<Pick<DaemonServer, 'onSharedTokenReplaced'>>;
+export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>;
 export type DaemonHostListener = Pick<HttpListener, 'enable' | 'start' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning'>;
 
 /** Narrow construction seams also permit held-acquisition lifecycle tests. */
@@ -335,13 +334,8 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
           serveFactory: createSafeHostServeFactory('Configured HTTP listener', http.serveFactory),
         });
         ownListener('HTTP listener', listener);
-        const listenerToken = http.token ?? binding?.token;
-        listener.enable({ httpListener: true }, listenerToken);
-        // Started with the daemon's own shared token: a revocation that replaces it replaces it here too.
-        const sharedListener = listener;
-        if (listenerToken !== undefined && listenerToken === binding?.token && daemon.onSharedTokenReplaced) {
-          scope.registry.add('HTTP listener shared token', daemon.onSharedTokenReplaced((token) => { sharedListener.enable({ httpListener: true }, token); }));
-        }
+        // The listener's own secret (GOODVIBES_HTTP_TOKEN or its token file), never the operator token.
+        listener.enable({ httpListener: true }, http.token);
       }
 
       phase = 'cluster startup';

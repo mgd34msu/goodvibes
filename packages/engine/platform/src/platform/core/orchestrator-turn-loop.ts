@@ -165,7 +165,7 @@ export interface OrchestratorTurnLoopContext {
   readonly runtimeBus: RuntimeEventBus | null;
   readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'getConversationSnapshot' | 'join'>>;
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getWorkingDirectory'>>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'require' | 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getTokenLimitsForModel' | 'getContextWindowForModel' | 'recordContextWindowRejection' | 'reconcileObservedContextWindow' | 'resolveModelPricing'>;
+  readonly providerRegistry: Pick<ProviderRegistry, 'require' | 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getTokenLimitsForModel' | 'getContextWindowForModel' | 'recordContextWindowRejection' | 'reconcileObservedContextWindow' | 'resolveModelPricing' | 'cacheRatios'>;
   readonly favoritesStore?: Pick<FavoritesStore, 'recordUsage'> | undefined;
   readonly cacheHitTracker: Pick<CacheHitTracker, 'getMetrics'>;
   readonly helperModel: HelperModel;
@@ -179,7 +179,6 @@ export interface OrchestratorTurnLoopContext {
   readonly emitterContext: (turnId: string) => EmitterContext;
   readonly executeToolCalls: (turnId: string, calls: ToolCall[], sourceOf?: () => AutonomousToolSource) => Promise<ToolResult[]>;
   readonly checkContextWindowPreflight: (turnId: string, model: ModelDefinition) => Promise<'ok' | 'compacted' | 'error'>;
-  readonly normalizeUsage: (usage: Awaited<ReturnType<LLMProvider['chat']>>['usage']) => Awaited<ReturnType<LLMProvider['chat']>>['usage'];
   readonly estimateFreshTurnInputTokens: (
     currentEstimatedTokens: number,
     text: string,
@@ -394,7 +393,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         context.usage.cacheRead += response.usage.cacheReadTokens ?? 0; context.usage.cacheWrite += response.usage.cacheWriteTokens ?? 0;
         const costUsdCents = reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(context.turnId),
           turnId: context.turnId, provider: model.provider, model: model.id,
-          pricing: context.providerRegistry.resolveModelPricing(model.id, model.provider, response.signInRoute?.route ?? null), response, durationMs });
+          pricing: context.providerRegistry.resolveModelPricing(model.id, model.provider, response.signInRoute?.route ?? null),
+          cacheRatio: context.providerRegistry.cacheRatios(model.provider), response, durationMs });
         if (costUsdCents !== null) context.usage.costUsd = (context.usage.costUsd ?? 0) + costUsdCents / 100;
       },
     }),
@@ -888,11 +888,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
 
     endStream(true, response.toolCalls.length === 0);
 
-    response = {
-      ...response,
-      usage: context.normalizeUsage(response.usage),
-    };
-
+    // Every provider reports inputTokens as the fresh input only, apart from
+    // cacheReadTokens and cacheWriteTokens (ChatResponse.usage), so it is read as sent.
     void context.favoritesStore?.recordUsage(model.registryKey).catch((err) => logger.warn('favoritesStore.recordUsage failed', {
       error: err instanceof Error ? err.message : String(err),
     }));
@@ -949,7 +946,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     // 'unknown' with NO costUsdCents, an explicit unpriced marker, never a silent $0.
     // Priced by the sign-in that served this request, as its response says (never a shared "last answered" map).
     const resolvedPricing = context.providerRegistry.resolveModelPricing(model.id, model.provider, response.signInRoute?.route ?? null);
-    const costUsdCents = computeUsageCostUsdCents(resolvedPricing, response.usage, model.provider);
+    const costUsdCents = computeUsageCostUsdCents(resolvedPricing, response.usage, model.provider, context.providerRegistry.cacheRatios(model.provider));
     if (costUsdCents !== null) context.usage.costUsd = (context.usage.costUsd ?? 0) + costUsdCents / 100;
     if (context.runtimeBus) {
       emitLlmResponseReceived(context.runtimeBus, context.emitterContext(context.turnId), {

@@ -4,7 +4,7 @@ import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/plat
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
-import { readConnectedHostBootstrapToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { environmentConnectedHostToken, readConnectedHostBootstrapToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from './native-paired-principal.ts';
 import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing, removeAgentHostPairing, type RemoveAgentHostPairingResult } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 
@@ -62,7 +62,8 @@ const connectionRefused = (error: unknown): boolean => {
 };
 const changed = (): AgentHostPairingResult => ({ status: 'changed', message: 'The selected host, effective credential or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): AgentHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
-const envOverride = (): boolean => Boolean(process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim());
+/** Whether an environment token outranks the pairing for `host` (this machine's daemon token only for this machine). */
+const envOverride = (host: string): boolean => environmentConnectedHostToken(host) !== null;
 
 /**
  * A failed auth check, worded from the failure's code and status. The host's own
@@ -264,8 +265,8 @@ export async function previewAgentHostPairing(
       const finalHome = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
       if (finalHome !== home || !resolveConnectedHostDialEnabled(options.configManager)
         || selectedHostNow() !== pairingHost
-        || (envOverride() && readConnectedHostBootstrapToken(home, pairingHost).token !== sourceToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
-      if (envOverride()) return { status: 'paired-shadowed', host: pairingHost, message: 'Pairing credential stored for this host. An environment token still takes precedence. Review that override before rerunning setup status; no environment variable was changed.' };
+        || (envOverride(pairingHost) && readConnectedHostBootstrapToken(home, pairingHost).token !== sourceToken)) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current host, home, dialing or environment credential changed; preview setup status again.' };
+      if (envOverride(pairingHost)) return { status: 'paired-shadowed', host: pairingHost, message: 'Pairing credential stored for this host. An environment token still takes precedence. Review that override before rerunning setup status; no environment variable was changed.' };
       const effective = resolveConnectedHost(selection);
       if (canonicalizePairingHost(effective.baseUrl) !== pairingHost || effective.token !== minted.token) return { status: 'paired-unverified', host: pairingHost, message: 'Pairing credential stored for the original host. Current configuration or authority is unverified; rerun setup status before native work.' };
       return { status: 'paired', host: pairingHost, message: 'Agent pairing is stored and the selected host verified native intake authority. Provider, workspace, Jev and execution readiness remain separate checks.' };

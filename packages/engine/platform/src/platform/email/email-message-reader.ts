@@ -20,7 +20,9 @@ export async function readEmailMessage(
   const current = (): void => sourceRead?.assertCurrent();
   current();
   if (read.outcome === 'read') {
-    recordIngest([{ from: read.detail.from, text: `${read.detail.subject}\n${read.detail.bodyText}`.trim() }], current);
+    // A body that was not fetched is not recorded as the message's text: only the subject is.
+    const text = read.detail.bodyUnavailable ? read.detail.subject : `${read.detail.subject}\n${read.detail.bodyText}`;
+    recordIngest([{ from: read.detail.from, text: text.trim() }], current);
     current();
     return { outcome: 'read', detail: read.detail, uidValidity };
   }

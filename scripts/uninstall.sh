@@ -72,8 +72,10 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-uninstall.XXXXXXXX")
 trap 'rm -rf -- "$work"' 0
 trap 'exit 130' INT
 trap 'exit 143' TERM
-# Without a receipt there is no installed version to match, so the default is the current main script.
-# GOODVIBES_VERSION=vX.Y.Z runs that release's script instead.
+# The release installer that wrote this installation is the one that removes it: it reads the installed
+# daemon's output in that release's form. The version comes from the installed goodvibes-daemon
+# (`goodvibes-daemon --version` prints `goodvibes-daemon X.Y.Z`); GOODVIBES_VERSION=vX.Y.Z names it instead.
+# Only when neither answers is the current main script used.
 ref=main
 # Same repository as REPO in install.sh; a downloaded script cannot read it from there.
 repo=mgd34msu/goodvibes
@@ -82,6 +84,18 @@ if [ -n "${GOODVIBES_VERSION:-}" ]; then
     v[0-9]*.[0-9]*.[0-9]*) ref=$GOODVIBES_VERSION ;;
     *) echo "GOODVIBES_VERSION must look like v3.2.0, not '$GOODVIBES_VERSION'." >&2; exit 1 ;;
   esac
+else
+  installed_daemon="${GOODVIBES_INSTALL_DIR:-$HOME/.local/bin}/goodvibes-daemon"
+  [ -x "$installed_daemon" ] || installed_daemon=$(command -v goodvibes-daemon 2>/dev/null || true)
+  installed_version=
+  if [ -n "$installed_daemon" ]; then
+    installed_version=$("$installed_daemon" --version 2>/dev/null | sed -n 's/^goodvibes-daemon v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | head -n 1) || installed_version=
+  fi
+  if [ -n "$installed_version" ]; then
+    ref="v$installed_version"
+  else
+    echo "Could not read the installed goodvibes-daemon's version; using the current release installer to remove it." >&2
+  fi
 fi
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   --connect-timeout 15 --max-time 120 --retry 2 \

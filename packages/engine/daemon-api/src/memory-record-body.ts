@@ -26,7 +26,7 @@ const MEMORY_REVIEW_STATES: readonly string[] = ['fresh', 'reviewed', 'stale', '
 const MAX_MEMORY_TAGS = 128;
 
 function invalidField(field: string, expected: string): Response {
-  return jsonErrorResponse({ error: `${field} must be ${expected}.`, code: 'INVALID_REQUEST' }, { status: 400 });
+  return jsonErrorResponse({ error: `${field} must be ${expected}.`, code: 'INVALID_ARGUMENT' }, { status: 400 });
 }
 
 /** A field that is absent or JSON null is "not supplied"; anything else must pass its reader. */
@@ -149,8 +149,8 @@ export function parseMemoryRecordAddBody(body: JsonRecord): MemoryRecordAddInput
   if (cls instanceof Response) return cls;
   const summary = readString(body, 'summary');
   if (summary instanceof Response) return summary;
-  if (!cls.value) return jsonErrorResponse({ error: 'Missing cls', code: 'INVALID_REQUEST' }, { status: 400 });
-  if (!summary.value) return jsonErrorResponse({ error: 'Missing summary', code: 'INVALID_REQUEST' }, { status: 400 });
+  if (!cls.value) return jsonErrorResponse({ error: 'Missing cls', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  if (!summary.value) return jsonErrorResponse({ error: 'Missing summary', code: 'INVALID_ARGUMENT' }, { status: 400 });
   const scope = readEnum(body, 'scope', MEMORY_SCOPES);
   if (scope instanceof Response) return scope;
   const detail = readString(body, 'detail');
@@ -272,8 +272,8 @@ export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdat
 export function parseMemoryLinkBody(body: JsonRecord): MemoryLinkInput | Response {
   const toId = readOptionalStringField(body, 'toId');
   const relation = readOptionalStringField(body, 'relation');
-  if (!toId) return jsonErrorResponse({ error: 'Missing toId', code: 'INVALID_REQUEST' }, { status: 400 });
-  if (!relation) return jsonErrorResponse({ error: 'Missing relation', code: 'INVALID_REQUEST' }, { status: 400 });
+  if (!toId) return jsonErrorResponse({ error: 'Missing toId', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  if (!relation) return jsonErrorResponse({ error: 'Missing relation', code: 'INVALID_ARGUMENT' }, { status: 400 });
   return { toId, relation };
 }
 
@@ -285,13 +285,13 @@ export function parseMemoryLinkBody(body: JsonRecord): MemoryLinkInput | Respons
 export function parseMemoryBundleImportBody(body: JsonRecord): MemoryBundleInput | Response {
   const bundle = body.bundle;
   if (!isJsonRecord(bundle)) {
-    return jsonErrorResponse({ error: 'Missing bundle', code: 'INVALID_REQUEST' }, { status: 400 });
+    return jsonErrorResponse({ error: 'Missing bundle', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   if (!Array.isArray(bundle.records)) {
-    return jsonErrorResponse({ error: 'bundle.records must be an array', code: 'INVALID_REQUEST' }, { status: 400 });
+    return jsonErrorResponse({ error: 'bundle.records must be an array', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   if (bundle.links !== undefined && !Array.isArray(bundle.links)) {
-    return jsonErrorResponse({ error: 'bundle.links must be an array', code: 'INVALID_REQUEST' }, { status: 400 });
+    return jsonErrorResponse({ error: 'bundle.links must be an array', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   return { bundle: bundle as unknown as MemoryBundleInput['bundle'] };
 }

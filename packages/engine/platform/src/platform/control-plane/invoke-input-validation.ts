@@ -32,7 +32,7 @@ import { canonicalJson, type EntryType } from '@goodvibes/judgment';
 
 /** Structured result of a rejected invocation, same 400 shape the router uses. */
 export interface InvokeValidationError {
-  readonly code: 'INVALID_INPUT';
+  readonly code: 'INVALID_ARGUMENT';
   readonly detail: string;
 }
 
@@ -259,7 +259,7 @@ export function validateInvocationInput(
   if (classifyInputSchema(schema) !== 'validated') return null;
   const value = params === undefined ? {} : params;
   const detail = validateValue(value, schema as Record<string, unknown>, '');
-  return detail ? { code: 'INVALID_INPUT', detail } : null;
+  return detail ? { code: 'INVALID_ARGUMENT', detail } : null;
 }
 
 /** Coverage tallies for the operator contract manifest: how many cataloged verbs

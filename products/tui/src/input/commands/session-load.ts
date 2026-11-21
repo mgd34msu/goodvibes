@@ -15,7 +15,7 @@ export type { LoadedSavedSession } from '@goodvibes/engine/terminal-shell/sessio
  */
 export function loadSavedSessionIntoLive(
   ctx: Pick<CommandContext, 'session' | 'workspace'> & Partial<Pick<CommandContext, 'clients' | 'isGenerating'>>,
-  sessionManager: Pick<SessionManager, 'load' | 'save'>,
+  sessionManager: Pick<SessionManager, 'load' | 'save' | 'openForWriting' | 'closeForWriting'>,
   name: string,
   agents?: SessionAgentRecordSink,
 ): Promise<LoadedSavedSession> {

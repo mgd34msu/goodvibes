@@ -53,7 +53,7 @@ export interface VoiceSetupServicesDeps {
    * Opt into boot-time wake-model provisioning and the recovery sweeper.
    *
    * Off unless a real entrypoint asks for it, matching how this graph treats the
-   * host power seam: `daemon/cli.ts` and `runtime/bootstrap-core.ts` opt in, the
+   * host power seam: the daemon's `serve` and `runtime/bootstrap-core.ts` opt in, the
    * one-shot CLI commands do not, and a test composing the graph gets neither a
    * network fetch nor a repeating timer it did not ask for.
    */

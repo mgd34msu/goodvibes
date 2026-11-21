@@ -59,6 +59,8 @@ const ROWS = [
   /** Live `turn`/`tools`/`gate`/`session` frames and approval and hosted-session notices of a session (the event stream reads it). */
   { id: 'session.watch', least: 'device', scope: 'read:own-sessions', subject: 'own' },
   { id: 'session.end', least: 'device', scope: 'write:sessions', subject: 'own', irreversible: true },
+  /** Live control of a session's running turn: cancel the turn or one tool call, edit or delete a queued message. */
+  { id: 'session.steer', least: 'device', scope: 'write:sessions', subject: 'own' },
   /** A turn started in a conversation: a guest's becomes the owner's question for everything beyond a plain read. */
   { id: 'turn.start', least: 'member', scope: 'write:sessions', subject: 'own', ask: { kind: 'channel-request', floor: 'guest' } },
   { id: 'run.cancel', least: 'member', scope: 'write:automation', subject: 'own' },

@@ -63,7 +63,7 @@ import {
 export { SecretStoreUnreadableError } from './secrets-keyfile.js';
 import { requireAbsoluteOwnedPath } from './manager-bootstrap.js';
 import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
-import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef, useSecretProviderHostConfig, type SecretProviderHostConfig } from './secret-refs.js';
+import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, readSecretProviderHostConfig, resolveSecretRef, type SecretProviderHostConfig } from './secret-refs.js';
 import { ProjectSecretApprovals } from './project-secret-approvals.js';
 import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
 import { logger } from '../utils/logger.js';
@@ -237,21 +237,6 @@ export interface SecretsManagerOptions {
 
 function normalizeOptionalOwnedPath(path: string | undefined, name: string): string | undefined {
   return requireAbsoluteOwnedPath(path, name, 'SecretsManager');
-}
-
-/** The owner's password-manager host settings (`storage.secretProviders.*`); empty fields fall back to each provider's defaults. */
-export function readSecretProviderHostConfig(configManager: Pick<ConfigManager, 'get'>): SecretProviderHostConfig {
-  const read = (key: 'onePasswordCli' | 'bitwardenCli' | 'bitwardenAppDataDir' | 'bitwardenSessionEnv' | 'bwsCli' | 'bwsAccessTokenEnv' | 'bwsConfigFile' | 'bwsServerUrl'): string | undefined => {
-    try {
-      const value = configManager.get(`storage.secretProviders.${key}`);
-      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-    } catch { return undefined; }
-  };
-  return {
-    onePassword: { cli: read('onePasswordCli') },
-    bitwarden: { cli: read('bitwardenCli'), appDataDir: read('bitwardenAppDataDir'), sessionEnv: read('bitwardenSessionEnv') },
-    bitwardenSecretsManager: { cli: read('bwsCli'), accessTokenEnv: read('bwsAccessTokenEnv'), configFile: read('bwsConfigFile'), serverUrl: read('bwsServerUrl') },
-  };
 }
 
 function loadConfiguredSecretPolicy(configManager?: Pick<ConfigManager, 'get'>): SecretStorageMode {
@@ -799,7 +784,7 @@ export class SecretsManager {
       for (const publication of record.publications) {
         uncertainPath = publication.path; current();
         if (publication.keyfile) writeFileSync(publication.path, publication.payload as string, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-        else writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, cleanupStaleTemps: false, assertCurrent: current });
+        else writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, durable: true, cleanupStaleTemps: false, assertCurrent: current });
         this.#noteOwnWrite(publication.path);
         completedPaths.push(publication.path);
         record.observations.find(observation => observation.path === publication.path)!.observation = observeImportFile(publication.path);
@@ -892,7 +877,7 @@ export class SecretsManager {
           current();
           for (const publication of entry.publications) {
             current();
-            writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, cleanupStaleTemps: false });
+            writeJsonFileAtomic(publication.path, publication.payload, { mode: 0o600, durable: true, cleanupStaleTemps: false });
             this.#noteOwnWrite(publication.path);
             completedPaths.push(publication.path);
             observations.find(item => item.path === publication.path)!.stamp = deletionFileObservation(publication.path).stamp;
@@ -990,9 +975,6 @@ export class SecretsManager {
     };
     this.keyFilePath = normalizeOptionalOwnedPath(options.keyFilePath, 'keyFilePath')
       ?? resolveSharedDirectory(this.options.globalHome, 'secrets.key');
-    const configManager = this.options.configManager;
-    // References resolved anywhere in this process run the password managers this owner's settings name.
-    if (configManager) useSecretProviderHostConfig(() => readSecretProviderHostConfig(configManager));
     this.#approvals = new ProjectSecretApprovals(join(dirname(secretWriteTarget(this.layout, 'user', 'secure').path), 'project-secret-approvals.json'));
   }
 
@@ -1010,6 +992,17 @@ export class SecretsManager {
 
   getGlobalHome(): string {
     return this.options.globalHome;
+  }
+
+  /**
+   * The password-manager host settings of this store's owner, read now from
+   * its settings; undefined when it was built without settings (each provider
+   * then runs with its own defaults). Passed as `providers` by every
+   * resolution made on this store's behalf.
+   */
+  getSecretProviderHostConfig(): SecretProviderHostConfig | undefined {
+    const configManager = this.options.configManager;
+    return configManager ? readSecretProviderHostConfig(configManager) : undefined;
   }
 
   /**
@@ -1416,6 +1409,7 @@ export class SecretsManager {
           return this.getInternal(nextKey, nextSeen);
         },
         homeDirectory: this.options.globalHome,
+        providers: this.getSecretProviderHostConfig(),
       });
       logger.debug('SecretsManager: resolved secret reference', { key, refSource: resolved.source });
       // Taken out once, inside the store, to be wrapped again as the Secret `get` returns.
@@ -1932,7 +1926,7 @@ export class SecretsManager {
     // The 0700 directory mode is this store's own; the helper only creates the
     // directory when it is missing, so establishing it here keeps the mode.
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-    writeJsonFileAtomic(filePath, store, { mode: 0o600 });
+    writeJsonFileAtomic(filePath, store, { mode: 0o600, durable: true });
     this.#noteOwnWrite(filePath);
   }
 
@@ -1976,7 +1970,7 @@ export class SecretsManager {
   private writePlaintextFile(filePath: string, secrets: Record<string, string>): void {
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     const payload: PlaintextStore = { version: 1, secrets };
-    writeJsonFileAtomic(filePath, payload, { mode: 0o600 });
+    writeJsonFileAtomic(filePath, payload, { mode: 0o600, durable: true });
     this.#noteOwnWrite(filePath);
   }
 }

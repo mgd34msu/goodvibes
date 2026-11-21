@@ -440,11 +440,17 @@ export interface ChatResponse {
    */
   textSource?: 'reasoning' | undefined;
   toolCalls: ToolCall[];
+  /**
+   * Token counts, with one meaning for every provider: `inputTokens` is the
+   * fresh (uncached) input only, disjoint from `cacheReadTokens` and
+   * `cacheWriteTokens`, so the whole prompt is their sum. A provider whose wire
+   * count includes cached tokens subtracts them in its adapter.
+   */
   usage: {
-    inputTokens: number;       // Billed input tokens (excludes cache tokens on Anthropic)
+    inputTokens: number;       // Fresh input tokens, not read from or written to a prompt cache
     outputTokens: number;
-    cacheReadTokens?: number;  // Anthropic: tokens read from prompt cache
-    cacheWriteTokens?: number; // Anthropic: tokens written to prompt cache
+    cacheReadTokens?: number;  // Input tokens read from the prompt cache
+    cacheWriteTokens?: number; // Input tokens written to the prompt cache
     /** The part of cacheWriteTokens written with a one-hour lifetime, billed at a higher rate. */
     cacheWriteLongTokens?: number;
   };

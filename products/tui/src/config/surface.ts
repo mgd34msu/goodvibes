@@ -9,13 +9,15 @@
  * it and silently resolved to the shared, unscoped `.goodvibes/` directory,
  * so `--continue` looked at an empty file forever.
  *
- * The constant below is the one place that name is written. It feeds
- * `createSessionSurface` in runtime/services.ts, which resolves every session
- * path once at startup into the `SessionSurface` handle threaded through the
- * rest of the runtime, and every other path under the TUI's own root (config
- * storage, keybindings, onboarding state, catalogs, journals) names it too.
+ * The name is written once, in the platform's goodvibes-home.ts (the daemon
+ * credential records under the same root read it there), and re-exported here.
+ * It feeds `createSessionSurface` in runtime/services.ts, which resolves every
+ * session path once at startup into the `SessionSurface` handle threaded
+ * through the rest of the runtime, and every other path under the TUI's own
+ * root (config storage, keybindings, onboarding state, catalogs, journals)
+ * names it too.
  */
-export const GOODVIBES_TUI_SURFACE_ROOT = 'tui';
+export { GOODVIBES_TUI_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 
 /**
  * Which servers the terminal app's saved scan (`discovered-providers.json`)

@@ -44,7 +44,8 @@ import type {
   PaymentsGatewayService,
 } from '../../control-plane/routes/payments.js';
 import { logger } from '../../utils/logger.js';
-import { HandlerError, registerCatalogHandlers } from './handler-plumbing.js';
+import { registerCatalogHandlers } from './handler-plumbing.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { TypedHandler, Unregister } from './handler-plumbing.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler } from './checkout-handlers.js';
@@ -118,8 +119,8 @@ export interface PaymentsHandlerDeps {
 // module enforces: an error string is a read path like any other.
 // ---------------------------------------------------------------------------
 
-function invalid(field: string, requirement: string): HandlerError {
-  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
+function invalid(field: string, requirement: string): GatewayVerbError {
+  return new GatewayVerbError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
 }
 
 /**
@@ -143,10 +144,10 @@ async function overStore<T>(what: string, run: () => Promise<T>): Promise<T> {
     return await run();
   } catch (error) {
     if (error instanceof CardStoreUnreadableError || error instanceof PaymentPurchaseLedgerError) {
-      throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
     }
     void error;
-    throw new HandlerError(`${what} failed.`, 'INTERNAL_ERROR', 500);
+    throw new GatewayVerbError(`${what} failed.`, 'INTERNAL_ERROR', 500);
   }
 }
 
@@ -262,7 +263,7 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
 function budgetStatusHandler(deps: PaymentsHandlerDeps, service: PaymentsGatewayService, holder: CheckoutServiceHolder): TypedHandler<unknown, unknown> {
   return async () => {
     const stop = holder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) });
-    if (stop && deps.budget.stopped()) throw new HandlerError(paymentHostStopSentence(stop), 'FAILED_PRECONDITION', 409);
+    if (stop && deps.budget.stopped()) throw new GatewayVerbError(paymentHostStopSentence(stop), 'FAILED_PRECONDITION', 409);
     const view = await service.budgetStatus();
     return {
       enabled: view.enabled, dayKey: view.pools.dayKey, timezone: view.pools.timezone, currency: view.currency,
@@ -321,12 +322,12 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
         // so it is forwarded; see overStore. Everything else is discarded, because
         // the failing call had the card in its arguments.
         if (error instanceof CardStoreUnreadableError) {
-          throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+          throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
         }
         // Part of the card stayed saved: said, with the id that removes it.
-        if (error instanceof CardCreateIncompleteError) throw new HandlerError(error.message, 'INTERNAL_ERROR', 500);
+        if (error instanceof CardCreateIncompleteError) throw new GatewayVerbError(error.message, 'INTERNAL_ERROR', 500);
         void error;
-        throw new HandlerError('Storing the card failed. Nothing was saved.', 'INTERNAL_ERROR', 500);
+        throw new GatewayVerbError('Storing the card failed. Nothing was saved.', 'INTERNAL_ERROR', 500);
       }
       return cardView(card, await overStore('Reading the card back', () => deps.cards.materialComplete(card.id)));
     },
@@ -433,7 +434,7 @@ export function registerPaymentsMethods(
 
   const cardsCreate: TypedHandler<unknown, Record<string, unknown>> = async ({ body, context }) => {
     // card.enter crosses only this machine, TLS or the tailnet; refused before the body is read.
-    if (!mayCrossWithCardDetails(context.transport)) throw new HandlerError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
+    if (!mayCrossWithCardDetails(context.transport)) throw new GatewayVerbError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
     const params = asRecord(body);
     const kind = readString(params, 'kind');
     if (kind !== 'virtual' && kind !== 'real') {

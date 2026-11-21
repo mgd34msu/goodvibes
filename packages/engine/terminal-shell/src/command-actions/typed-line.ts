@@ -185,6 +185,9 @@ export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: 
     const match = choices.find((choice) => choice.value.toLowerCase() === value.toLowerCase());
     if (!match) {
       problem = `${input.label}: "${value}" is not one of ${choices.map((choice) => choice.value).join(', ')}.`;
+      // The value is another action's word of this command ("/permissions add never ..."): name that action's line.
+      const other = findAction(description, value);
+      if (other && other !== action) problem += ` Use /${description.name} ${linePattern(other)}.`;
       return done();
     }
     values[input.id] = match.value;

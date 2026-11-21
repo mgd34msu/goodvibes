@@ -1788,6 +1788,11 @@
       "types": "./platform/dist/browser-reasoning-effort.d.ts",
       "import": "./platform/dist/browser-reasoning-effort.js"
     },
+    "./platform/browser/device-capabilities": {
+      "bun": "./platform/src/browser-device-capabilities.ts",
+      "types": "./platform/dist/browser-device-capabilities.d.ts",
+      "import": "./platform/dist/browser-device-capabilities.js"
+    },
     "./terminal-shell/session-focus": {
       "bun": "./terminal-shell/src/session-focus.ts",
       "types": "./terminal-shell/dist/session-focus.d.ts",

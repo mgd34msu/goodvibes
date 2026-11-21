@@ -254,6 +254,9 @@ that stays failing is mentioned again every six hours.
 Every channel tool and operator action call ends in one of four outcomes: ok,
 not found, refused, or unknown action (with the surface's valid action ids).
 Only ok is reported as success; the others carry the reason and the next step.
+The model's `channel` tool names a surface it was given that the daemon does
+not know, or one that is disabled, with the enabled surfaces, instead of
+answering it with no accounts or an unknown action.
 Provider-native operations are separate actions, each with a closed input and
 its own dangerous flag: `runtime-status`, `live-directory`, `oauth-url` and
 `subscribe-url` read; `runtime-start`, `runtime-stop`, `register-command`

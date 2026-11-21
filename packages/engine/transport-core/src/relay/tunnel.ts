@@ -142,11 +142,11 @@ export function decodeTunnelFrame(
  * owned by the daemon, so a surface-supplied copy is dropped on decode rather
  * than merged with the daemon's own value.
  */
-const RELAY_VIA_HEADER_NAME = 'x-goodvibes-via-relay';
+export const RELAY_VIA_HEADER = 'x-goodvibes-via-relay';
 
 function withoutDaemonOwnedHeaders(header: TunnelHeader): TunnelHeader {
   if (header.kind !== 'request' && header.kind !== 'stream-open') return header;
-  return { ...header, headers: header.headers.filter(([name]) => name.toLowerCase() !== RELAY_VIA_HEADER_NAME) };
+  return { ...header, headers: header.headers.filter(([name]) => name.toLowerCase() !== RELAY_VIA_HEADER) };
 }
 
 function isHeaderPairs(value: unknown): boolean {

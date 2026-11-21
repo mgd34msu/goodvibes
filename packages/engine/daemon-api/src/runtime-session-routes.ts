@@ -289,6 +289,27 @@ function readParticipants(value: unknown): SharedSessionParticipantResponse[] {
   return output;
 }
 
+/**
+ * A session the caller may not read (a hosted session it neither created nor
+ * was shared, below admin) is refused 403 NOT_YOURS before anything is read.
+ * Null when the read may go ahead (or the session is unknown, which the
+ * handler answers itself).
+ */
+async function refuseUnreadableSession(
+  context: DaemonRuntimeRouteContext,
+  sessionId: string,
+  request: Request | undefined,
+): Promise<Response | null> {
+  if (!request || !context.mayReadSession) return null;
+  await context.sessionBroker.start();
+  const session = context.sessionBroker.getSession(sessionId);
+  if (!session || context.mayReadSession(request, session)) return null;
+  return jsonErrorResponse({
+    error: `Session ${sessionId} was not created by this credential or shared with it, so it is not shown. Ask an owner of the session to share it with you (sessions.hosted.share), or read it with an admin credential.`,
+    code: 'NOT_YOURS',
+  }, { status: 403 });
+}
+
 export function createDaemonRuntimeSessionRouteHandlers(
   context: DaemonRuntimeRouteContext,
 ): DaemonRuntimeSessionRouteHandlers & DaemonRuntimeTaskRouteHandlers {
@@ -296,12 +317,12 @@ export function createDaemonRuntimeSessionRouteHandlers(
     createSharedSession: async (request) => withAdmin(context, request, () => handleCreateSharedSession(context, request)),
     registerSharedSession: async (request) => withAdmin(context, request, () => handleRegisterSharedSession(context, request)),
     postTask: async (request) => withAdmin(context, request, () => handlePostTask(context, request)),
-    getSharedSession: async (sessionId) => handleGetSharedSession(context, sessionId),
+    getSharedSession: async (sessionId, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSession(context, sessionId),
     closeSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionLifecycle(context, sessionId, 'close')),
     reopenSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionLifecycle(context, sessionId, 'reopen')),
     detachSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionDetach(context, sessionId, request)),
     deleteSharedSession: (sessionId, request) => withAdmin(context, request, () => handleDeleteSharedSession(context, sessionId)),
-    getSharedSessionMessages: async (sessionId, url) => handleGetSharedSessionMessages(context, sessionId, url),
+    getSharedSessionMessages: async (sessionId, url, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSessionMessages(context, sessionId, url),
     getSharedSessionInputs: async (sessionId, url) => handleGetSharedSessionInputs(context, sessionId, url),
     postSharedSessionMessage: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionMessage(context, sessionId, request)),
     postSharedSessionSteer: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionSteer(context, sessionId, request)),

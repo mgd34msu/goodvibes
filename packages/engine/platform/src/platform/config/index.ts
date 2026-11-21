@@ -91,7 +91,6 @@ export type { SettingsReaderFloor } from './settings-reader-floor.js';
 export {
   DAEMON_CONFIG_ROOT,
   DAEMON_SETTINGS_FILE,
-  daemonConfigPath,
   daemonConfigPathForHome,
   readDaemonTierFile,
 } from './daemon-config-tier.js';

@@ -127,9 +127,11 @@ WebSocket or proxy callers the same policy or alter system trust.
 - Call the existing `getOrCreateCompanionToken('tui', ...)` owner using the
   canonical, already-resolved `daemonHomeDirectory`. The historical surface
   argument and `<daemonHomeDirectory>/operator-tokens.json` identity stay intact.
-- An explicit `GOODVIBES_DAEMON_TOKEN` takes precedence over that stored token;
-  `GOODVIBES_HTTP_TOKEN` takes precedence over the effective daemon token for the
-  optional HTTP listener. Overrides affect this process and do not replace the
+- An explicit `GOODVIBES_DAEMON_TOKEN` takes precedence over that stored token.
+  The optional HTTP listener never accepts the operator token: it takes
+  `GOODVIBES_HTTP_TOKEN`, otherwise its own `<daemonHomeDirectory>/http-listener-token.json`
+  (created at mode 0600 on first use by `getOrCreateHttpListenerToken`, printed
+  once to an interactive terminal). Overrides affect this process and do not replace the
   persisted companion identity. Clients using an override must use that same
   override; a different stored token does not authenticate the running server.
 - Reuse the existing token record byte-for-byte on restart. Never search another

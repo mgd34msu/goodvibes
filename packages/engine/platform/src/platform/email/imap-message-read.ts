@@ -43,7 +43,7 @@ import {
   hasCompleteSubjectHeader,
 } from './imap-headers.js';
 import type { ImapSession } from './imap-session.js';
-import type { ImapFetchProblem, ImapMessageDetail, ImapMessageRead } from './imap-types.js';
+import type { ImapBodySectionFailure, ImapFetchProblem, ImapMessageDetail, ImapMessageRead } from './imap-types.js';
 
 // Private exact-result evidence. Legacy lenient reads remain readable but do
 // not establish UID-bound provenance for a downstream subject snapshot.
@@ -104,22 +104,27 @@ export function unreadableHeaderResponses(
 }
 
 /**
- * One text part, decoded, or '' when it could not be fetched.
+ * One text part, decoded, or why it could not be fetched.
  *
- * Failures are swallowed on purpose and only here: a message whose body part
- * will not come back is still a message with headers worth returning, and the
- * caller asked to read mail rather than to audit the server.
+ * A failure does not fail the read: a message whose body part will not come
+ * back is still a message with headers worth returning. It is returned as an
+ * error, so the read says the body is missing instead of passing on an empty
+ * body as the message's text.
  */
 async function fetchTextSection(
   session: ImapSession,
   uid: number,
   part: ImapBodyPart,
-): Promise<string> {
+): Promise<{ readonly text: string; readonly error?: string }> {
   try {
     const lines = await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[${part.section}]`);
-    return decodeTextPart(extractFetchSection(lines) ?? '', part.encoding, part.charset);
-  } catch {
-    return '';
+    const raw = extractFetchSection(lines);
+    if (raw === null) {
+      return { text: '', error: `the server's answer carried no text for body section ${part.section}` };
+    }
+    return { text: decodeTextPart(raw, part.encoding, part.charset) };
+  } catch (error) {
+    return { text: '', error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -151,7 +156,7 @@ async function fetchTextSection(
  * message, and returning it as a `read` with an empty body is exactly the
  * "quiet mailbox" impostor `imap-body-probe.ts` exists to catch. Off unless a
  * caller asks, because the ordinary mail reader leaves a section it could not
- * fetch empty and returns the rest.
+ * fetch empty, names it in `bodyUnavailable`, and returns the rest.
  */
 export async function readMessageDetail(
   session: ImapSession,
@@ -170,8 +175,15 @@ export async function readMessageDetail(
 
   const textPart = selectBodyPart(parts, 'plain');
   const htmlPart = selectBodyPart(parts, 'html');
-  let bodyText = textPart === null ? '' : await fetchTextSection(session, uid, textPart);
-  let bodyHtml = htmlPart === null ? '' : await fetchTextSection(session, uid, htmlPart);
+  const bodyUnavailable: ImapBodySectionFailure[] = [];
+  const fetchPart = async (part: ImapBodyPart | null): Promise<string> => {
+    if (part === null) return '';
+    const fetched = await fetchTextSection(session, uid, part);
+    if (fetched.error !== undefined) bodyUnavailable.push({ section: part.section, reason: fetched.error });
+    return fetched.text;
+  };
+  let bodyText = await fetchPart(textPart);
+  let bodyHtml = await fetchPart(htmlPart);
 
   if (parts.length === 0) {
     // The server's own description of the message was unreadable. Falling back
@@ -226,6 +238,7 @@ export async function readMessageDetail(
     bodyText,
     bodyHtml,
     attachments: attachmentsFromParts(parts),
+    ...(bodyUnavailable.length > 0 ? { bodyUnavailable } : {}),
   };
   const responses = parseFetchResponses(headerLines);
   const header = responses[0];

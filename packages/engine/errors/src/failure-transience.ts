@@ -60,9 +60,10 @@ const TIMEOUT_ERROR_NAMES: ReadonlySet<string> = new Set(['TimeoutError']);
 
 /**
  * The reading's categories, split by whether sending the same thing again
- * could succeed. The rest ('unknown') leave the wording unsettled.
+ * could succeed. The rest ('unknown') leave the wording unsettled. The
+ * transient set is also the wire categories `classifyFailure` calls retryable.
  */
-const TRANSIENT_CATEGORIES: ReadonlySet<FailureCategory> = new Set(['rate_limit', 'timeout', 'network', 'service', 'protocol']);
+const TRANSIENT_CATEGORIES: ReadonlySet<string> = new Set<FailureCategory & DaemonErrorCategory>(['rate_limit', 'timeout', 'network', 'service', 'protocol']);
 const PERMANENT_CATEGORIES: ReadonlySet<FailureCategory> = new Set(['authentication', 'authorization', 'billing', 'not_found', 'bad_request']);
 
 /** Categories an error may carry that a retry cannot clear; the reading's permanent ones plus the platform's own. */
@@ -155,7 +156,7 @@ export function structuredTransience(error: unknown): FailureTransience | undefi
   if (isTimeout(error, name)) return { failureClass: 'retryable', basis: 'error-type', detail: name! };
   if (name === 'AbortError') return { failureClass: 'terminal', basis: 'cancelled', detail: 'the operation was cancelled' };
   const category = stringField(error, 'category');
-  if (category !== undefined && TRANSIENT_CATEGORIES.has(category as FailureCategory)) {
+  if (category !== undefined && TRANSIENT_CATEGORIES.has(category)) {
     return { failureClass: 'retryable', basis: 'explicit', detail: `category ${category}` };
   }
   if (category !== undefined && PERMANENT_OWN_CATEGORIES.has(category)) {
@@ -172,7 +173,6 @@ export interface FailureClassification {
 }
 
 const WIRE_CATEGORIES: ReadonlySet<string> = new Set(Object.values(DaemonErrorCategory));
-const RETRYABLE_CATEGORIES: ReadonlySet<DaemonErrorCategory> = new Set(['rate_limit', 'timeout', 'network', 'service', 'protocol']);
 
 /**
  * Classifies a failure from its fields and the status, errno and error-class
@@ -204,7 +204,7 @@ export function classifyFailure(error: unknown): FailureClassification | undefin
     ?? (status !== undefined || retryAfterMs !== undefined || cancelled ? 'unknown' : undefined);
   if (category === undefined) return undefined;
   const decided = structuredTransience(error);
-  const retryable = decided !== undefined ? decided.failureClass === 'retryable' : RETRYABLE_CATEGORIES.has(category);
+  const retryable = decided !== undefined ? decided.failureClass === 'retryable' : TRANSIENT_CATEGORIES.has(category);
   return retryAfterMs === undefined ? { category, retryable } : { category, retryable, retryAfterMs };
 }
 

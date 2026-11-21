@@ -172,9 +172,14 @@ provides no protected-source authority.
 Once explicit startup is admitted, the launcher loads or creates the shared
 `operator-tokens.json` in the selected daemon home. The same token authenticates
 HTTP and WebSocket clients, and `status` reads that selected-home record without
-requiring `--token`. `GOODVIBES_DAEMON_TOKEN` overrides the running server token;
-`GOODVIBES_HTTP_TOKEN` overrides the optional HTTP listener token. These overrides
-do not rewrite the shared identity. A corrupt store is preserved beside the
+requiring `--token`. `GOODVIBES_DAEMON_TOKEN` overrides the running server token,
+and every command of this program that talks to this machine's daemon sends it.
+The optional webhook listener (`danger.httpListener`) has its own token, never the
+operator token: `GOODVIBES_HTTP_TOKEN` when set, otherwise the one the daemon
+creates in `http-listener-token.json` in the daemon home (mode 0600) the first
+time the listener is on. A new listener token is printed once on an interactive
+terminal; afterwards read it from that file and give it to webhook senders.
+These overrides do not rewrite the shared identity. A corrupt store is preserved beside the
 replacement when possible, with an explicit warning that clients must pair
 again. See [companion token bootstrap contract](docs/cli-and-package-contracts.md#companion-identity-and-startup-pairing) for the boundaries.
 

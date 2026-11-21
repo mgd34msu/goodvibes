@@ -83,7 +83,7 @@ const COMPANION_MODEL_ROUTE_DEPENDENCY: Readonly<Record<string, readonly string[
 export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'companion.chat.sessions.create',
-    repeat: 'unsafe',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Companion Chat Session',
     description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.',
     category: 'companion',

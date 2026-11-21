@@ -25,6 +25,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, ty
 import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir, uptime } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { productWorktreePath } from '../git/product-worktree-marker.js';
 
 /** Runtime state and known credential-store directories are never contract input, even when tracked. */
 export const CONTRACT_INPUT_EXCLUSIONS = ['.git', '.goodvibes', '.ssh', '.aws', '.gnupg'] as const;
@@ -381,7 +382,7 @@ export function isContractInputSnapshot(value: unknown): value is ContractInputS
 
 /** Each generation has a distinct planner path, so read decisions are never reused across generations. */
 export function contractInputPath(snapshot: ContractInputSnapshot): string {
-  return join(snapshot.sourceRoot, '.goodvibes', '.worktrees', 'contract-input', snapshot.id);
+  return productWorktreePath(snapshot.sourceRoot, 'contract-input', snapshot.id);
 }
 
 /** Regular files of captured trees with their blob ids, by repository and tree id; a tree id never changes meaning, so a reading is reused. */

@@ -17,16 +17,15 @@ import type { FocusTracker } from './focus-tracker.js';
 /** Minimal config-read surface every gating check needs. */
 export type ConfigGet = (key: string) => unknown;
 
-/** Read a host-local synthetic boolean setting, defaulting when absent/invalid. */
+/**
+ * Read a product-owned boolean setting: the stored boolean, else `defaultValue`.
+ * A product that registers the key as a host setting has its manager resolve a
+ * value of any other type to the declared default already, so a settings row
+ * and this reader agree.
+ */
 export function readBooleanConfig(configGet: ConfigGet, key: string, defaultValue: boolean): boolean {
   const raw = configGet(key);
-  if (typeof raw === 'boolean') return raw;
-  if (raw === undefined || raw === null) return defaultValue;
-  // Tolerate string/number forms the same way the rest of the config layer does
-  // (settings-modal writes real booleans, but env/file edits may not).
-  if (raw === 'true' || raw === 1) return true;
-  if (raw === 'false' || raw === 0) return false;
-  return defaultValue;
+  return typeof raw === 'boolean' ? raw : defaultValue;
 }
 
 /** `behavior.notifyOnlyWhenUnfocused`, master gate, default on. */

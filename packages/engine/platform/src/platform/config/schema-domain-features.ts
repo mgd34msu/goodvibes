@@ -35,6 +35,12 @@ export interface FetchConfig {
   allowedPrivateHosts: string;
 }
 
+/** Web search tool: which provider answers a search that names none. */
+export interface WebSearchConfig {
+  /** A registered provider id, or `auto`: the first configured provider, else the keyless built-in. */
+  defaultProvider: string;
+}
+
 /** API token audit: enablement, rotation cadence / warning window / managed enforcement. */
 export interface SecurityConfig {
   tokenAudit: {
@@ -93,6 +99,7 @@ export interface AgentsConfig {
 
 export const featureConfigDefaults: {
   fetch: FetchConfig;
+  webSearch: WebSearchConfig;
   security: SecurityConfig;
   integrations: IntegrationsConfig;
   policy: PolicyConfig;
@@ -104,6 +111,9 @@ export const featureConfigDefaults: {
     blockedHosts: '',
     allowLocalhost: false,
     allowedPrivateHosts: '',
+  },
+  webSearch: {
+    defaultProvider: 'auto',
   },
   security: {
     tokenAudit: {
@@ -182,6 +192,14 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     type: 'string',
     description:
       'Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode.',
+  },
+  {
+    key: 'webSearch.defaultProvider',
+    label: 'Web search provider',
+    appliesWhen: 'now',
+    type: 'string',
+    description:
+      'The provider that answers a web search that names none: a registered provider id (duckduckgo, searxng, brave, exa, firecrawl, tavily, perplexity, or one a plugin adds). auto (the default) uses the first configured of searxng, brave, exa, firecrawl, tavily and perplexity, else duckduckgo, which needs no key. A provider named here that is not registered or has no credential falls back to the auto rule; a search that passes providerId uses that one.',
   },
   {
     key: 'security.tokenAudit.enabled',

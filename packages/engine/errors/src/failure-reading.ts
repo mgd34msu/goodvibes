@@ -407,6 +407,7 @@ const CODE_FACTS: ReadonlyMap<string, CodeFact> = new Map([
   ['EHOSTUNREACH', fact('network', 'none', true)],
   ['ENETUNREACH', fact('network', 'none', true)],
   ['ECONNRESET', fact('network', 'none', false)],
+  ['EPIPE', fact('network', 'none', false)],
   ['ETIMEDOUT', fact('timeout', 'timed_out', false)],
   ['ECONNABORTED', fact('timeout', 'none', false)],
   ['CONNECTIONREFUSED', fact('network', 'refused', true)],
@@ -418,6 +419,8 @@ const CODE_FACTS: ReadonlyMap<string, CodeFact> = new Map([
   ['CONNECTIONTIMEDOUT', fact('timeout', 'timed_out', false)],
   ['CONNECTIONTIMEOUT', fact('timeout', 'timed_out', false)],
   ['UND_ERR_CONNECT_TIMEOUT', fact('timeout', 'timed_out', true)],
+  ['UND_ERR_HEADERS_TIMEOUT', fact('timeout', 'timed_out', false)],
+  ['UND_ERR_BODY_TIMEOUT', fact('timeout', 'timed_out', false)],
   ['UND_ERR_SOCKET', fact('network', 'none', false)],
 ]);
 

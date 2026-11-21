@@ -12,20 +12,21 @@
  * them into one 400 is how a caller ends up retrying the one thing that will
  * never work.
  */
-import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
-import { admitEffects, type EffectId } from '../../security/effect-authority.js';
+import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { admitOnSession, mayReadSession } from './session-admission.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import {
   HostedSessionArgumentError,
   HostedSessionClientOwnerError,
+  HostedSessionLastOwnerError,
   HostedSessionLimitError,
   HostedSessionNotFoundError,
   HostedSessionNotReadyError,
   HostedSessionTerminatedError,
   HostedSessionUnavailableError,
+  HostedSessionUnknownPrincipalError,
 } from '../../hosted-sessions/manager.js';
 import type { HostedSessionAttachment } from '../../hosted-sessions/manager.js';
 import { ModelReferenceError } from '../../providers/model-id-resolution.js';
@@ -55,30 +56,16 @@ export interface HostedSessionVerbService {
   isOwnedBy(sessionId: string, principalId: string | undefined): boolean;
   ownersOf(sessionId: string): readonly string[];
   share(sessionId: string, principalId: string): Promise<{ readonly session: HostedSessionRecord; readonly owners: readonly string[]; readonly added: boolean }>;
+  unshare(sessionId: string, principalId: string): Promise<{ readonly session: HostedSessionRecord; readonly owners: readonly string[]; readonly removed: boolean }>;
 }
 
-/**
- * Admit what a call causes on one session for the caller (the effect table,
- * security/effect-authority.ts): the session's owners are the subject, so a
- * credential below admin acts only on a session it created or was shared.
- * A call the daemon makes in-process is the program's own.
- */
-function admitOnSession(invocation: GatewayMethodInvocation, effects: readonly EffectId[], owners: readonly string[]): void {
-  const admission = admitEffects(invocation.context.actor ?? systemActor('in-process'), effects, { owners });
-  if (admission.kind === 'allowed') return;
-  if (admission.kind === 'ask-owner') {
-    throw new GatewayVerbError(`${admission.reason}; nothing was done.`, 'OWNER_ONLY', 403, 'sessionId');
-  }
-  const next = admission.code === 'NOT_YOURS'
-    ? ' Ask an owner of the session to share it with you (sessions.hosted.share), or use an admin credential.'
-    : ` ${admission.next}`;
-  throw new GatewayVerbError(`${admission.reason} (${admission.effect}; missing ${admission.missing}); nothing was done.${next}`,
-    admission.code, 403, 'sessionId');
-}
-
-/** Whether the caller may read this session's transcript (and so its record, whose title is its first prompt). */
-function mayReadSession(invocation: GatewayMethodInvocation, owners: readonly string[]): boolean {
-  return admitEffects(invocation.context.actor ?? systemActor('in-process'), ['session.transcript.read'], { owners }).kind === 'allowed';
+/** What the verbs read beside the engine. */
+export interface HostedSessionVerbOptions {
+  /**
+   * Whether a principal id names a principal this daemon knows (a sign-in user,
+   * a live pairing, the owner's own credential). Absent: every id is accepted.
+   */
+  readonly isKnownPrincipal?: ((principalId: string) => boolean) | undefined;
 }
 
 function optionalString(params: Record<string, unknown>, field: string): string | undefined {
@@ -140,6 +127,12 @@ export function toGatewayVerbError(error: unknown): never {
   }
   if (error instanceof HostedSessionClientOwnerError) {
     throw new GatewayVerbError(error.message, 'HOSTED_CLIENT_FORBIDDEN', 403, 'clientId');
+  }
+  if (error instanceof HostedSessionLastOwnerError) {
+    throw new GatewayVerbError(error.message, 'HOSTED_SESSION_LAST_OWNER', 409, 'principalId');
+  }
+  if (error instanceof HostedSessionUnknownPrincipalError) {
+    throw new GatewayVerbError(error.message, 'PRINCIPAL_NOT_FOUND', 404, 'principalId');
   }
   if (error instanceof HostedSessionLimitError) {
     throw new GatewayVerbError(error.message, 'HOSTED_SESSION_LIMIT_REACHED', 429);
@@ -241,14 +234,34 @@ export function createHostedSessionAttachHandler(service: HostedSessionVerbServi
  * transcript and watch its turns live. Only an owner of the session (or an
  * admin) shares it.
  */
-export function createHostedSessionShareHandler(service: HostedSessionVerbService): GatewayMethodHandler {
+export function createHostedSessionShareHandler(service: HostedSessionVerbService, options: HostedSessionVerbOptions = {}): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     try {
       const sessionId = requireString(params, 'sessionId');
       const principalId = requireString(params, 'principalId');
       admitOnSession(invocation, ['session.share'], service.ownersOf(sessionId));
+      // A mistyped id is refused, not reported as added for a principal that can never use it.
+      if (options.isKnownPrincipal && !options.isKnownPrincipal(principalId)) throw new HostedSessionUnknownPrincipalError(principalId);
       return await service.share(sessionId, principalId);
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
+/**
+ * Remove a principal from a session's owners and end its attachments. Only an
+ * owner of the session (or an admin) does it; the last owner is never removed.
+ */
+export function createHostedSessionUnshareHandler(service: HostedSessionVerbService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    try {
+      const sessionId = requireString(params, 'sessionId');
+      const principalId = requireString(params, 'principalId');
+      admitOnSession(invocation, ['session.share'], service.ownersOf(sessionId));
+      return await service.unshare(sessionId, principalId);
     } catch (error) {
       return toGatewayVerbError(error);
     }
@@ -322,6 +335,7 @@ export const HOSTED_SESSION_METHOD_IDS: readonly string[] = [
   'sessions.hosted.list',
   'sessions.hosted.history',
   'sessions.hosted.share',
+  'sessions.hosted.unshare',
 ];
 
 /**
@@ -331,6 +345,7 @@ export const HOSTED_SESSION_METHOD_IDS: readonly string[] = [
 export function registerHostedSessionGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: HostedSessionVerbService,
+  options: HostedSessionVerbOptions = {},
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => {
     const descriptor = catalog.get(id);
@@ -347,7 +362,8 @@ export function registerHostedSessionGatewayMethods(
   attach('sessions.hosted.kill', createHostedSessionKillHandler(service));
   attach('sessions.hosted.list', createHostedSessionListHandler(service));
   attach('sessions.hosted.history', createHostedSessionHistoryHandler(service));
-  attach('sessions.hosted.share', createHostedSessionShareHandler(service));
+  attach('sessions.hosted.share', createHostedSessionShareHandler(service, options));
+  attach('sessions.hosted.unshare', createHostedSessionUnshareHandler(service));
 }
 
 /**

@@ -107,7 +107,9 @@ const SMTP_AUTH_REFUSED = new Set([530, 534, 535]);
  * whose final reply was lost is 409, not a 5xx, because every retry policy
  * treats a 5xx as "try again" and that send may already have been delivered.
  * Only a server that is down or unreachable is 503, the one answer a retry can
- * fix.
+ * fix. The mail server refusing the stored password is 424: the request
+ * failed on a credential the daemon holds for a third party, not on the
+ * caller's own sign-in, so no client treats it as an expired session (401).
  */
 function translate(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
@@ -131,7 +133,7 @@ function translate(error: unknown): never {
       throw new GatewayVerbError(
         `${message} The mail server refused the stored password, so nothing was sent. Store a current one and send again.`,
         'EMAIL_CREDENTIALS_REJECTED',
-        401,
+        424,
       );
     }
     if (error.stage === 'RCPT TO' && error.code >= 500) {
@@ -155,7 +157,7 @@ function translate(error: unknown): never {
     const owner = error.notice.ownerMessage;
     switch (error.reason) {
       case 'authentication-rejected':
-        throw new GatewayVerbError(owner, 'EMAIL_CREDENTIALS_REJECTED', 401);
+        throw new GatewayVerbError(owner, 'EMAIL_CREDENTIALS_REJECTED', 424);
       case 'mailbox-unavailable':
         throw new GatewayVerbError(owner, 'EMAIL_MAILBOX_UNAVAILABLE', 409);
       case 'server-unavailable':
@@ -228,6 +230,7 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
           ...(message.bodyHtml.length > 0 ? { bodyHtml: message.bodyHtml } : {}),
           ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
           ...(message.uidValidity === null ? {} : { uidValidity: message.uidValidity }),
+          ...(message.bodyUnavailable === undefined ? {} : { bodyUnavailable: message.bodyUnavailable }),
         };
         return detail;
       });

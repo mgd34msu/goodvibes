@@ -18,6 +18,12 @@ export type NativeWorkExecutionActivationOptions = Omit<NativeOptions, 'agentMan
   readonly retry?: NativeSessionDriverOptions['retry'];
   /** Where the owner answers a paused turn's retry-or-cancel question; absent, that question cannot be answered over the operator surface. */
   readonly contractOperator?: Pick<ContractOperatorService, 'attachNative'> | undefined;
+  /**
+   * Told each time native work frees a slot of the shared fleet (an agent of its
+   * graph or a session turn ended): the daemon's own manager, whose releases
+   * `onFleetSlotReleased` then subscribes to for the native contract engine.
+   */
+  readonly notifyFleetSlotReleased?: (() => void) | undefined;
 };
 
 /** Public lifetime boundary: opaque execution authority stays behind the engine host type. */
@@ -37,13 +43,15 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
     const graph = createAgentExecutionGraph({ runtimeBus: options.runtimeBus, workingDirectory: options.projectRoot,
       configManager: options.configManager, providerRegistry: options.providerRegistry,
       additionalFleetOwnership: () => [...(options.additionalFleetOwnership?.() ?? []), ...foregroundFleetOwnership(),
-        ...options.acpHost.list().map(session => ({ id: `acp:${session.id}`, active: true }))] });
+        ...options.acpHost.fleetOwnership()] });
     localFleetOwnership = () => {
       const agents = new Map<string, boolean>();
       for (const agent of [...graph.agentManager.fleetOwnership(), ...foregroundFleetOwnership()])
         agents.set(agent.id, agents.get(agent.id) === true || agent.active);
       return Object.freeze([...agents].map(([id, active]) => Object.freeze({ id, active })));
     };
+    const releaseSlot = (): void => { options.notifyFleetSlotReleased?.(); };
+    graph.agentManager.onFleetSlotReleased(releaseSlot);
     graph.agentOrchestrator.setCancellationSource({ get: id => graph.agentManager.getCancellationSignal(id) });
     graph.agentOrchestrator.setFeatureFlagManager(options.featureFlags);
     const processManager = new ProcessManager();
@@ -71,7 +79,7 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
         contractRunner: native.runner, contractHooks: native.runner.hooks(), permissionManager: options.permissionManager };
       graph.agentOrchestrator.setDependencies(toolDependencies);
       const owner = native;
-      const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies,
+      const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies, onSlotReleased: releaseSlot,
         assertCurrent: contract => { owner.execution.nativeOwner.decisions.authorityOf(contract); } });
       foregroundFleetOwnership = driver.fleetOwnership;
       options.contractOperator?.attachNative(owner.runner);

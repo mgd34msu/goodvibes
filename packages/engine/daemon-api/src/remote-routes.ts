@@ -133,7 +133,7 @@ function readPeerBody(route: PeerRoute, body: JsonRecord, limits: PeerFieldLimit
     if (allowed && value !== undefined && !allowed.includes(value)) {
       return jsonErrorResponse({
         error: `${field} must be one of ${allowed.map(String).join(', ')} for ${target}`,
-        code: 'INVALID_REQUEST',
+        code: 'INVALID_ARGUMENT',
         state: `${field} was ${JSON.stringify(value)}`,
         next: [`Send ${field} as one of ${allowed.map(String).join(', ')}.`],
       }, { status: 400 });
@@ -142,7 +142,7 @@ function readPeerBody(route: PeerRoute, body: JsonRecord, limits: PeerFieldLimit
       if (required.has(field)) {
         return jsonErrorResponse({
           error: `Missing ${field} for ${target}`,
-          code: 'INVALID_REQUEST',
+          code: 'INVALID_ARGUMENT',
           state: `the request body has no ${field}`,
           next: [`Send ${field}; the peer contract lists it as required for ${target}.`],
         }, { status: 400 });
@@ -332,7 +332,7 @@ const remoteBodySchemas = createRouteBodySchemaRegistry({
     if (scopes !== undefined && firstScope === undefined) {
       return jsonErrorResponse({
         error: 'scopes is an empty list: a peer token needs at least one scope; omit scopes for the published set.',
-        code: 'INVALID_REQUEST',
+        code: 'INVALID_ARGUMENT',
       }, { status: 400 });
     }
     return {

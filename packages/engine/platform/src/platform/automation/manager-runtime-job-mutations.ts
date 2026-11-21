@@ -1,4 +1,4 @@
-import { ensureAutomationCronPhase, withCronTimezone, type AutomationScheduleDefinition } from './schedules.js';
+import { ensureAutomationCronPhase, ownerTimezone, withCronTimezone, type AutomationScheduleDefinition } from './schedules.js';
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -59,7 +59,7 @@ export async function createAutomationJobRecord(
 ): Promise<ManagedAutomationJob> {
   const now = Date.now();
   const jobId = input.id?.trim() || `auto-${randomUUID().slice(0, 8)}`;
-  const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule)), now);
+  const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule, ownerTimezone(context.configManager))), now);
   const enablement = nextJobEnablement(undefined, input.enabled ?? true, schedule, now, 'created-disabled');
   const job: AutomationJob = {
     id: jobId,
@@ -134,7 +134,7 @@ export async function updateAutomationJobRecord(
     : undefined;
   const thinkingPatch = normalizeOptionalString(patch.thinking);
   const nextSchedule = patch.schedule
-    ? anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(patch.schedule), job.schedule), updatedAt)
+    ? anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(patch.schedule, ownerTimezone(context.configManager)), job.schedule), updatedAt)
     : job.schedule;
   // The next run moves only when what decides it moved: the schedule, or
   // whether the job is enabled. A rename or a prompt fix keeps it.

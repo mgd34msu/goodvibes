@@ -15,6 +15,11 @@ import {
 } from './operator-contract-schemas-shared.js';
 import { REASONING_EFFORT_SEVERITY } from '../providers/reasoning-effort.js';
 import { ROUTE_SURFACE_KINDS } from '../../events/routes.js';
+import {
+  EXECUTION_FILESYSTEM_POLICIES,
+  EXECUTION_NETWORK_POLICIES,
+  EXECUTION_RISK_CLASSES,
+} from '../runtime/execution-intents.js';
 
 export const LOCAL_AUTH_USER_SCHEMA = objectSchema({
   username: STRING_SCHEMA,
@@ -221,7 +226,9 @@ const AUTOMATION_SOURCE_KIND_SCHEMA = enumSchema([
   'watcher',
 ]);
 const AUTOMATION_EXECUTION_KIND_SCHEMA = enumSchema(['isolated', 'current', 'pinned', 'background', 'main']);
-const AUTOMATION_EXECUTION_TARGET_KIND_SCHEMA = enumSchema([
+// The tuples below are exported so the daemon's automation route checks
+// (daemon/http/runtime-routes.ts) admit exactly what this schema publishes.
+export const AUTOMATION_EXECUTION_TARGET_KINDS = [
   'isolated',
   'current',
   'pinned',
@@ -229,24 +236,31 @@ const AUTOMATION_EXECUTION_TARGET_KIND_SCHEMA = enumSchema([
   'main',
   'session',
   'route',
-]);
-const AUTOMATION_DELIVERY_MODE_SCHEMA = enumSchema(['none', 'webhook', 'surface', 'integration', 'link']);
-const AUTOMATION_FAILURE_ACTION_SCHEMA = enumSchema(['retry', 'cooldown', 'disable', 'dead_letter']);
-const AUTOMATION_RETRY_STRATEGY_SCHEMA = enumSchema(['fixed', 'linear', 'exponential']);
-const PROVIDER_SELECTION_SCHEMA = enumSchema(['inherit-current', 'concrete', 'synthetic']);
-const PROVIDER_FAILURE_POLICY_SCHEMA = enumSchema(['ordered-fallbacks', 'fail']);
+] as const;
+const AUTOMATION_EXECUTION_TARGET_KIND_SCHEMA = enumSchema(AUTOMATION_EXECUTION_TARGET_KINDS);
+export const AUTOMATION_DELIVERY_MODES = ['none', 'webhook', 'surface', 'integration', 'link'] as const;
+const AUTOMATION_DELIVERY_MODE_SCHEMA = enumSchema(AUTOMATION_DELIVERY_MODES);
+export const AUTOMATION_FAILURE_ACTIONS = ['retry', 'cooldown', 'disable', 'dead_letter'] as const;
+const AUTOMATION_FAILURE_ACTION_SCHEMA = enumSchema(AUTOMATION_FAILURE_ACTIONS);
+export const AUTOMATION_RETRY_STRATEGIES = ['fixed', 'linear', 'exponential'] as const;
+const AUTOMATION_RETRY_STRATEGY_SCHEMA = enumSchema(AUTOMATION_RETRY_STRATEGIES);
+export const AUTOMATION_PROVIDER_SELECTIONS = ['inherit-current', 'concrete', 'synthetic'] as const;
+const PROVIDER_SELECTION_SCHEMA = enumSchema(AUTOMATION_PROVIDER_SELECTIONS);
+export const AUTOMATION_PROVIDER_FAILURE_POLICIES = ['ordered-fallbacks', 'fail'] as const;
+const PROVIDER_FAILURE_POLICY_SCHEMA = enumSchema(AUTOMATION_PROVIDER_FAILURE_POLICIES);
 const AUTOMATION_EXECUTION_MODE_SCHEMA = enumSchema(['spawn', 'shared-session', 'continued-live', 'background']);
 const AUTOMATION_SESSION_POLICY_SCHEMA = enumSchema(['create-or-bind', 'continue-existing', 'require-existing']);
 const AUTOMATION_THREAD_POLICY_SCHEMA = enumSchema(['preserve', 'replace', 'detached']);
 const AUTOMATION_DELIVERY_GUARANTEE_SCHEMA = enumSchema(['best-effort', 'at-least-once']);
-const EXECUTION_RISK_CLASS_SCHEMA = enumSchema(['safe', 'elevated', 'dangerous']);
-const EXECUTION_NETWORK_POLICY_SCHEMA = enumSchema(['inherit', 'allow', 'deny', 'scoped']);
-const EXECUTION_FILESYSTEM_POLICY_SCHEMA = enumSchema(['inherit', 'workspace-write', 'read-only', 'isolated']);
+const EXECUTION_RISK_CLASS_SCHEMA = enumSchema(EXECUTION_RISK_CLASSES);
+const EXECUTION_NETWORK_POLICY_SCHEMA = enumSchema(EXECUTION_NETWORK_POLICIES);
+const EXECUTION_FILESYSTEM_POLICY_SCHEMA = enumSchema(EXECUTION_FILESYSTEM_POLICIES);
 // Full severity ladder, not a fixed 4-value list, see the matching comment
 // in operator-contract-schemas-runtime.ts.
 const AUTOMATION_REASONING_EFFORT_SCHEMA = enumSchema([...REASONING_EFFORT_SEVERITY]);
-const AUTOMATION_WAKE_MODE_SCHEMA = enumSchema(['next-heartbeat', 'now']);
-const AUTOMATION_EXTERNAL_CONTENT_SOURCE_KIND_SCHEMA = enumSchema([
+export const AUTOMATION_WAKE_MODES = ['next-heartbeat', 'now'] as const;
+const AUTOMATION_WAKE_MODE_SCHEMA = enumSchema(AUTOMATION_WAKE_MODES);
+export const AUTOMATION_EXTERNAL_CONTENT_SOURCE_KINDS = [
   'gmail',
   'email',
   'webhook',
@@ -259,7 +273,8 @@ const AUTOMATION_EXTERNAL_CONTENT_SOURCE_KIND_SCHEMA = enumSchema([
   'discord',
   'ntfy',
   'unknown',
-]);
+] as const;
+const AUTOMATION_EXTERNAL_CONTENT_SOURCE_KIND_SCHEMA = enumSchema(AUTOMATION_EXTERNAL_CONTENT_SOURCE_KINDS);
 const INBOUND_TLS_MODE_SCHEMA = enumSchema(['off', 'proxy', 'direct']);
 const INBOUND_TLS_SCHEME_SCHEMA = enumSchema(['http', 'https']);
 const OUTBOUND_TRUST_MODE_SCHEMA = enumSchema(['bundled', 'bundled+custom', 'custom']);
@@ -614,7 +629,7 @@ export const AUTOMATION_HEARTBEAT_RESULT_SCHEMA = objectSchema({
 export const AUTOMATION_SCHEDULES_OUTPUT_SCHEMA = objectSchema({
   jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
   runs: arraySchema(AUTOMATION_RUN_SCHEMA),
-  defaultTimezone: { ...STRING_SCHEMA, description: 'The IANA zone a cron schedule created without a timezone is stored in: the host\'s own zone.' },
+  defaultTimezone: { ...STRING_SCHEMA, description: 'The IANA zone a cron schedule created without a timezone is stored in: daemon.timezone (where the owner is) when set, else the host\'s own zone.' },
 }, ['jobs', 'runs']);
 
 export const DELIVERY_SNAPSHOT_SCHEMA = objectSchema({

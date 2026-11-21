@@ -109,7 +109,7 @@ function inferCodeFromCategory(category: ErrorCategory): EngineErrorCode {
     case 'protocol': return 'PROTOCOL_ERROR';
     case 'internal': return 'INTERNAL_ERROR';
     case 'service': return 'SERVICE_UNAVAILABLE';
-    case 'bad_request': return 'VALIDATION_FAILED';
+    case 'bad_request': return 'INVALID_ARGUMENT';
     case 'tool': return 'TOOL_EXEC_FAILED';
     case 'unknown':
     default:
@@ -166,7 +166,7 @@ function inferCategory(status?: number): ErrorCategory {
  */
 function inferCodeFromStatus(status: number): EngineErrorCode | undefined {
   switch (status) {
-    case 400: return 'VALIDATION_FAILED';
+    case 400: return 'INVALID_ARGUMENT';
     case 401: return 'AUTH_REQUIRED';
     case 402: return 'PAYMENT_REQUIRED';
     case 403: return 'PERMISSION_DENIED';
@@ -527,7 +527,7 @@ export class ContractError extends GoodVibesError {
  * - Any other status (or when constructed without a `status`) → `'unknown'`
  *
  * The `code` field is inferred from `status` automatically:
- * - `400` → `'VALIDATION_FAILED'`
+ * - `400` → `'INVALID_ARGUMENT'`
  * - `401` → `'AUTH_REQUIRED'`
  * - `402` → `'PAYMENT_REQUIRED'`
  * - `403` → `'PERMISSION_DENIED'`

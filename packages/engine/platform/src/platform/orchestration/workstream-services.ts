@@ -66,7 +66,8 @@ import type { RuntimeStore } from '../runtime/store/index.js';
 import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export interface WorkstreamServicesDeps {
-  readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'>;
+  readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'>
+    & Partial<Pick<AgentManager, 'onFleetSlotReleased'>>;
   readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'>;
   readonly adaptivePlanner: AdaptivePlanner;
   readonly runtimeBus: RuntimeEventBus;
@@ -555,6 +556,7 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
     runtimeBus: deps.runtimeBus,
     projectRoot: deps.projectRoot,
     sessionId: deps.sessionId,
+    onFleetSlotReleased: deps.agentManager.onFleetSlotReleased?.bind(deps.agentManager),
     priceUsage: (model, usage) => {
       const modelId = model ?? 'unknown';
       if (!isModelPriced(modelId)) return null;

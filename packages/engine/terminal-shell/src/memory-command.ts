@@ -8,7 +8,7 @@
  * search index stay on this app's own store, as before.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { atomicWriteFileSync, type ConfigKey, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { atomicWriteFileSync, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
@@ -149,14 +149,9 @@ const MEMORY_PROPOSALS = defineList<MemoryCommandContext>({
   operator: { terminalOnly: 'Memory files live in the terminal app\'s project.' },
 });
 
-/** The memory files folder setting (`memory.projection.dir`), relative to the project. */
-const PROJECTION_DIR_KEY = 'memory.projection.dir' as ConfigKey;
-const PROJECTION_DIR_DEFAULT = '.goodvibes/memory/projection';
+/** The folder given, else the memory files folder setting (`memory.projection.dir`), relative to the project. */
 function projectionDirFor(ctx: MemoryCommandContext, given: string): string {
-  let configured: unknown;
-  try { configured = ctx.platform.configManager.get(PROJECTION_DIR_KEY); } catch { configured = undefined; }
-  const relative = given || (typeof configured === 'string' && configured ? configured : PROJECTION_DIR_DEFAULT);
-  return confinedPath(ctx, relative);
+  return confinedPath(ctx, given || ctx.platform.configManager.get('memory.projection.dir'));
 }
 
 async function readAllForProjection(ctx: MemoryCommandContext): Promise<{ readonly records: readonly MemoryRecord[]; readonly complete: boolean }> {

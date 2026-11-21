@@ -23,6 +23,7 @@ import { createOwnedPluginCapabilities } from './owned-capabilities.js';
 import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
 import { enforceBundleCapability, type BundleCapabilityGuard } from '../runtime/ecosystem/bundle-manifest.js';
 import type { PluginGrant } from '../runtime/plugins/manifest.js';
+import { describeUnappliedTier, type PluginUnappliedTier } from '../runtime/plugins/trust.js';
 
 /**
  * PluginProviderConfig, minimal config for registering a custom LLM provider
@@ -211,6 +212,12 @@ export interface PluginAPIContext {
    * Absent only for an embedding that loads a plugin without a trust owner.
    */
   grant?: PluginGrant | undefined;
+  /**
+   * A tier the owner set that is not applied to this copy (its files changed,
+   * or it was given to another folder), read when a refusal is worded so the
+   * refusal says so instead of reading as never trusted.
+   */
+  unappliedTier?: (() => PluginUnappliedTier | undefined) | undefined;
 }
 
 const REGISTRATION_NOUN: Readonly<Record<'register.tool' | 'register.provider' | 'register.hook', string>> = {
@@ -220,13 +227,16 @@ const REGISTRATION_NOUN: Readonly<Record<'register.tool' | 'register.provider' |
 };
 
 /** Why a registration outside the plugin's grant is refused, and what changes it. */
-function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'register.tool' | 'register.provider' | 'register.hook'): Error {
+function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'register.tool' | 'register.provider' | 'register.hook', unapplied: PluginUnappliedTier | undefined): Error {
   const what = REGISTRATION_NOUN[capability];
-  return new Error(grant.declared.has(capability)
-    ? `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
-      + `Run /plugin trust ${pluginName} limited, then enable or reload it`
-    : `plugin '${pluginName}' registered ${what} without declaring '${capability}' in its manifest; `
+  if (!grant.declared.has(capability)) {
+    return new Error(`plugin '${pluginName}' registered ${what} without declaring '${capability}' in its manifest; `
       + `add "${capability}" to "capabilities" in its manifest.json`);
+  }
+  return new Error(unapplied !== undefined
+    ? `plugin '${pluginName}' may not register ${what}: ${describeUnappliedTier(pluginName, unapplied)}, then enable or reload it`
+    : `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
+      + `Run /plugin trust ${pluginName} limited, then enable or reload it`);
 }
 
 /**
@@ -301,7 +311,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
    * the first being the one reported.
    */
   const permit = (runtime: 'register.tool' | 'register.provider' | 'register.hook', surface?: { kind: 'tool' | 'hook'; names: readonly [string, ...string[]] }): void => {
-    if (grant && !grant.granted.has(runtime)) throw grantRefusal(ctx.pluginName, grant, runtime);
+    if (grant && !grant.granted.has(runtime)) throw grantRefusal(ctx.pluginName, grant, runtime, ctx.unappliedTier?.());
     if (!guard) return;
     enforceBundleCapability(guard, 'runtime', runtime);
     if (!surface) return;
@@ -310,8 +320,11 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
   };
   const permitOutward = (kind: keyof typeof OUTWARD_REGISTRATION): void => {
     if (grant?.tier !== 'untrusted') return;
-    throw new Error(`plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and its trust tier is 'untrusted'. `
-      + `Run /plugin trust ${ctx.pluginName} limited, then enable or reload it`);
+    const unapplied = ctx.unappliedTier?.();
+    throw new Error(unapplied !== undefined
+      ? `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and ${describeUnappliedTier(ctx.pluginName, unapplied)}, then enable or reload it`
+      : `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and its trust tier is 'untrusted'. `
+        + `Run /plugin trust ${ctx.pluginName} limited, then enable or reload it`);
   };
   return {
     registerCommand(name, description, handler) {

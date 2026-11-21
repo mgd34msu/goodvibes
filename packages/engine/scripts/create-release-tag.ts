@@ -94,7 +94,9 @@ function main(): void {
     }
     console.log(`[release:tag] Pushed. This will trigger the Release workflow.`);
   } else {
-    console.log(`[release:tag] Tag created locally. To push and trigger release:`);
+    console.log(created
+      ? `[release:tag] Tag created locally. To push and trigger release:`
+      : `[release:tag] Tag ${tag} is on this commit. To push and trigger release:`);
     console.log(`  git push origin ${tag}`);
   }
 }

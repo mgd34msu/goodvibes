@@ -124,7 +124,7 @@ export function errorText(error: unknown): string {
 /**
  * Pull the daemon's machine code off a thrown handler error.
  *
- * In-process the throw is the daemon's own `HandlerError`, which carries
+ * In-process the throw is the daemon's own `GatewayVerbError`, which carries
  * `code` directly. The structured wire body is also checked so the same
  * derivation keeps working if a surface ever reaches these verbs over HTTP.
  */

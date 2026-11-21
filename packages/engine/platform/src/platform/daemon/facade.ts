@@ -7,6 +7,7 @@ import { applyAssignedChannelProfile, assignedChannelProfile, spawnModelOpen } f
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { channelTurnScope, withTurnSurfaceId } from '../security/turn-boundary.js';
 import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
+import { sayCarriedForwardNow } from '../state/carried-forward.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
 import { ModelReferenceError } from '../providers/model-id-resolution.js';
@@ -95,7 +96,7 @@ import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveCli
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
-import { recoverGitHubReplies, type GitHubReplyOperation } from '../adapters/github/index.js';
+import { recoverGitHubReplies, resolveGitHubToken, type GitHubReplyOperation } from '../adapters/github/index.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
 import { existsSync } from 'node:fs';
 
@@ -180,7 +181,6 @@ export class DaemonServer {
   private configManager: ConfigManager;
   private authToken: string | null = null;
   private unbindSharedToken: (() => void) | null = null;
-  readonly #sharedTokenListeners = new Set<(token: string) => void>();
   /** Exact serving lifetime, retired before stop callbacks and token/bind ABA. */
   private settingsLifetime: object | null = null;
   private userAuth: UserAuthManager;
@@ -233,6 +233,10 @@ export class DaemonServer {
   private readonly companionChatManager: CompanionChatManager;
   private readonly hostedSessions: HostedSessionManager | null;
   private relayReachability: RelayReachability | null = null;
+  /** Ends the subscriptions that bring the relay registration in line with relay.enabled, relay.url and the relay-connect flag. */
+  private relaySettingsUnsubscribe: (() => void) | null = null;
+  /** Ends the warning logged each time telemetry.includeRawPrompts is turned on. */
+  private readonly stopTelemetryOptInWarning: () => void;
   /** One relay code per device paired through the relay, listed and revoked like a device token (relay/relay-codes.ts). */
   private relayCodeStore: RelayCodeStore | null = null;
   private get relayCodes(): RelayCodeStore {
@@ -397,6 +401,7 @@ export class DaemonServer {
     this.transportEventsHelper = collaborators.transportEventsHelper;
     this.httpRouter = collaborators.httpRouter;
     this.workAdmission = collaborators.workAdmission;
+    this.stopTelemetryOptInWarning = collaborators.stopTelemetryOptInWarning;
     this.channelHealth = buildDaemonChannelHealthWatcher(resolved, {
       delivery: collaborators.surfaceDeliveryHelper,
       ingressAlarm: collaborators.ingressAlarm,
@@ -446,8 +451,8 @@ export class DaemonServer {
     registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability, this.relayCodes);
     this.httpRouter.setDaemonStatusProviders({
       // Update/crash receipts, and which node currently reads the inbox.
-      peekReceipts: () => this.peekDaemonReceipts(),
-      acknowledgeReceipts: (ids) => this.acknowledgeDaemonReceipts(ids),
+      peekReceipts: (owner) => this.peekDaemonReceipts(owner),
+      acknowledgeReceipts: (ids, owner) => this.acknowledgeDaemonReceipts(ids, owner),
       collectClusterStatus: () => this.clusterCoordinator.status(),
       // The artifact's own release version, when this host ships one. Reported
       // beside the platform build rather than instead of it.
@@ -512,16 +517,6 @@ export class DaemonServer {
   }
 
   /**
-   * Told the new value after revoking the shared token replaced the one this
-   * daemon serves with, so a listener started with the same token follows it.
-   * Returns the unsubscribe.
-   */
-  onSharedTokenReplaced(listener: (token: string) => void): () => void {
-    this.#sharedTokenListeners.add(listener);
-    return () => { this.#sharedTokenListeners.delete(listener); };
-  }
-
-  /**
    * Bind this daemon's shared token to the pairing store, so revoking it
    * replaces the value in `<daemon home>/operator-tokens.json`, which the apps
    * on this machine read, and here. Without a daemon home, or with a token the
@@ -543,10 +538,6 @@ export class DaemonServer {
       replace: (commit) => {
         const replaced = replaceCompanionToken({ daemonHomeDir }, commit);
         this.authToken = replaced.token;
-        for (const listener of [...this.#sharedTokenListeners]) {
-          try { listener(replaced.token); }
-          catch (error) { logger.warn('A shared token replacement listener failed', { error: summarizeError(error) }); }
-        }
       },
     });
   }
@@ -830,7 +821,7 @@ export class DaemonServer {
         if (existsSync(daemonOperationsPath(this.configManager))) void recoverGitHubReplies({
           operations: daemonOperationLog<GitHubReplyOperation>(this.configManager),
           awaitAgent: async (agentId) => { await this.agentManager.join(agentId); return this.agentManager.getStatus(agentId); },
-          resolveToken: async () => (await this.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null,
+          resolveToken: () => resolveGitHubToken(this.serviceRegistry),
           // Events taken while the previous process held its update admission start now, once.
           trySpawnAgent: (input, logLabel, sessionId) => this.trySpawnAgent(input, logLabel, sessionId),
         }).catch((error: unknown) => {
@@ -889,6 +880,20 @@ export class DaemonServer {
       void this.relayReachability.start().catch((error: unknown) =>
         logger.warn('DaemonServer: relay reachability failed to start', { error: summarizeError(error) }),
       );
+      // A relay setting or the relay-connect flag changed while the daemon runs:
+      // start, stop or restart the registration to match, without a restart.
+      const reachability = this.relayReachability;
+      const reconcileRelay = (): void => {
+        void reachability.reconcile().catch((error: unknown) =>
+          logger.warn('DaemonServer: relay reachability could not follow a relay setting change', { error: summarizeError(error) }),
+        );
+      };
+      const relaySettingUnsubscribes = [
+        this.configManager.subscribe('relay.enabled', reconcileRelay),
+        this.configManager.subscribe('relay.url', reconcileRelay),
+        this.runtimeServices.featureFlags.subscribe((flagId) => { if (flagId === 'relay-connect') reconcileRelay(); }),
+      ];
+      this.relaySettingsUnsubscribe = () => { for (const unsubscribe of relaySettingUnsubscribes) unsubscribe(); };
       logger.info('DaemonServer started', {
         port: this.port,
         host: this.host,
@@ -921,6 +926,8 @@ export class DaemonServer {
       this.surfaceEventsDetach?.();
       this.surfaceEventsDetach = null;
       this.surfaceActionHelper.closeDelegatedTelegram();
+      this.relaySettingsUnsubscribe?.();
+      this.relaySettingsUnsubscribe = null;
       this.relayReachability?.stop();
       this.relayReachability = null;
       await this.detachControlPlaneListener();
@@ -1279,6 +1286,9 @@ export class DaemonServer {
   }
 
   private async performStopRuntime(forHandover: boolean): Promise<void> {
+    // Every way the daemon ends comes through here; what this start carried
+    // forward is said now, while the receipt store still takes it.
+    sayCarriedForwardNow();
     const alreadyTornDown = this.tornDown;
     // Both public and update/rollback stops retire SETTINGS before synchronous
     // abort callbacks can re-enter enable() and mint a new serving lifetime.
@@ -1328,6 +1338,9 @@ export class DaemonServer {
     this.approvalBrokerUnsubscribe = null;
     this.surfaceEventsDetach?.();
     this.surfaceEventsDetach = null;
+    this.relaySettingsUnsubscribe?.();
+    this.relaySettingsUnsubscribe = null;
+    this.stopTelemetryOptInWarning();
     this.relayReachability?.stop();
     this.relayReachability = null;
     this.stopRelayRevocationWatch?.();
@@ -1392,14 +1405,14 @@ export class DaemonServer {
     if (runtimeCloseFailures.length > 0) throw new AggregateError(runtimeCloseFailures, 'Daemon runtime services cleanup failed');
   }
 
-  /** Undelivered receipts for a `?receipts=peek` read; nothing is marked delivered. */
-  peekDaemonReceipts(): readonly { id: string; text: string; at: number }[] {
-    return this.lifecycle?.peekReceipts() ?? [];
+  /** Undelivered receipts for a `?receipts=peek` read; nothing is marked delivered. Owner-only receipts reach an owner-class reader only. */
+  peekDaemonReceipts(owner: boolean): readonly { id: string; text: string; at: number }[] {
+    return this.lifecycle?.peekReceipts(owner) ?? [];
   }
 
-  /** Marks the receipts a `?receipts=ack` reader says it received as delivered. */
-  acknowledgeDaemonReceipts(ids: readonly string[]): void {
-    this.lifecycle?.acknowledgeReceipts(ids);
+  /** Marks the receipts a `?receipts=ack` reader says it received as delivered; a non-owner cannot take an owner-only one. */
+  acknowledgeDaemonReceipts(ids: readonly string[], owner: boolean): void {
+    this.lifecycle?.acknowledgeReceipts(ids, owner);
   }
 
   /**

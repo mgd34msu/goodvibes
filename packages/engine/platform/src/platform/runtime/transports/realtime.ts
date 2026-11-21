@@ -3,6 +3,7 @@ import { createClientTransport } from './client-transport.js';
 import type { DaemonHttpTransportOptions, HttpTransportPeerClient, HttpTransportOperatorClient, HttpTransportSnapshot } from './http-types.js';
 import { createWebSocketConnector } from './shared.js';
 import { createRemoteUiRuntimeEvents } from './ui-runtime-events.js';
+import { authenticatedSocketFactory } from '../client/daemon-target.js';
 
 export interface RealtimeTransportOptions extends DaemonHttpTransportOptions {
   readonly webSocketImpl?: typeof WebSocket | undefined;
@@ -31,8 +32,12 @@ export function createRealtimeTransport(options: RealtimeTransportOptions): Real
     ...(options.onRetryExecuted ? { onRetryExecuted: options.onRetryExecuted } : {}),
   });
   const WebSocketImpl = options.webSocketImpl ?? WebSocket;
+  // The daemon refuses a WebSocket upgrade without a credential, so the token
+  // resolved for each connect goes on the upgrade request itself.
   const events = createRemoteUiRuntimeEvents(
-    createWebSocketConnector(options.baseUrl, options.authToken, WebSocketImpl),
+    createWebSocketConnector(options.baseUrl, options.authToken, WebSocketImpl, {
+      createSocket: authenticatedSocketFactory(options.baseUrl, WebSocketImpl),
+    }),
   );
   const operator = {
     ...baseTransport.operator,

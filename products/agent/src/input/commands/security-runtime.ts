@@ -90,7 +90,7 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
         return [
           level === 'trusted'
             ? `${manager.workspaceRoot} is trusted: its hooks file loads and the MCP servers its files name start.`
-            : `${manager.workspaceRoot} is restricted: its hooks file and the MCP servers its files name stay off from the next start.`,
+            : `${manager.workspaceRoot} is restricted: its hooks file and the MCP servers its files name are stopped now; your own hooks and MCP files are not affected.`,
           ...(saved.saved ? [] : [`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`]),
         ].join('\n');
       },

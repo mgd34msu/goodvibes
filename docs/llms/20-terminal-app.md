@@ -82,7 +82,7 @@ How each option behaves:
 | `-r, --resume [id\|latest]` | Opens a saved session. Without an id it opens the last session of this working directory. |
 | `-s, --session <id>` | `run` only: continue that saved session. Every other command refuses it. |
 | `--continue` | Opens the last session of this working directory. |
-| `--fork [id]` | Bare `--fork` forks the session that is active when the app starts. `--fork <id>` opens that session, then forks it. `run` refuses `--fork`. |
+| `--fork [id]` | Bare `--fork` resumes the last session of this working directory (the one `--continue` opens), then forks it. `--fork <id>` opens that session, then forks it. A session that cannot be resumed (no such id, or open in another running copy) is reported as `[Resume] Could not resume session <id>: <reason>` (`resume and fork` for `--fork`) and the app starts as a plain launch; nothing is forked. The same holds for `--resume` and `--continue`. `run` refuses `--fork`. |
 | `--timeout <duration>` | `run` only: cancel after this long. A bare number is seconds; `ms`, `s`, `m` and `h` suffixes are accepted. Exit code `124`. |
 | `--max-turns <n>` | `run` only: stop after `n` model answers that still ask for tools. Exit code `1`. |
 | `--omit-accumulated` | `run` with `stream-json` only: leave `accumulated` out of `STREAM_DELTA` frames. |
@@ -893,9 +893,10 @@ The app also compacts on its own when context use reaches `behavior.autoCompactT
 `/image <file> [message]` sends an image file (PNG, JPEG, WebP, GIF, up to 20 MB, inside the project) to the model with the message at once (`Attached image: <name>` when no message is given). Bare `/image` opens a form for the file and the message, showing the line it will run.
 `/editor` opens the composer draft in `$VISUAL` or `$EDITOR`, suspends the interface while the editor runs, and puts the saved text back in the composer. Set `export EDITOR=nvim` first.
 
-`/template` manages prompt templates: `list` (the report; picking one sends it, Del deletes, Ctrl+E edits), `use <template> [name=value ...]`, `save <name>` (your last message), `show <template>`, `edit <template>` and `delete <template> [--everywhere]` (asks first; `--everywhere` deletes the one every project shares).
+`/template` manages prompt templates: `list` (the report; picking one sends it, Del deletes, Ctrl+E edits), `use <template> [name=value ...]`, `save <name> [--everywhere]` (your last message; `--everywhere` saves it for every project), `show <template>`, `edit <template>` and `delete <template> [--everywhere]` (asks first; `--everywhere` deletes the one every project shares).
 Project templates live in `<project>/.goodvibes/templates/`; templates for every project live in `~/.goodvibes/templates/`.
-`/template save review` saves your last message as `review`; `/template use review file=src/api.ts` sends it with its blanks filled in.
+A template's file is `<stored name>.md`: the name in lower case, spaces as `-`, letters and digits of any script with `-` and `_` kept, everything else dropped, so `My Plan` and `my-plan` are one template and `会議メモ` and `計画` are two. A name that keeps nothing is refused (`TEMPLATE_NAME_UNSTORABLE`). A file in a templates folder whose name is not its own stored name is not listed (a warning in the log names it); rename it to use it.
+`/template save review` saves your last message as `review` and replies `Template saved: review (in this project)`; saving under a name that already has a template in that place replaces it and replies `Template replaced: review (in this project)`, which cannot be undone. `/template use review file=src/api.ts` sends it with its blanks filled in.
 A missing template is refused with `No template <name>.` and the line that lists them.
 
 ### Sessions
@@ -1095,7 +1096,7 @@ A confirmation applies exactly what it showed. When `/startup transfer-import` o
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
 `/update` (actions `check`, `apply`, `rollback`, `daemon [--check]`, `review`, `save-review <file> [--replace]`, `read-review <file>`) checks for a newer release and, for binary installs, downloads, verifies and applies it or rolls back. Updates are described under "Updating" in the install part.
-`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Alt+A`).
+`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Alt+A`). The setting, `power.keepAwake`, is the daemon's: a change goes to the daemon, or with none running into the daemon's settings file it reads at start, so every app and the daemon read the one value and a change made while the daemon was down is kept.
 
 `/security` gathers what protects this machine. Bare in the terminal, it opens its list; from a model or a script it prints the short status (`✓ Nothing needs attention.`, or each thing that does with `Fix: <line>`): blocked or overdue paired-device tokens, policy lint findings and a failed preflight, MCP servers with held-back tools or allowed to run anything, risky MCP routes, held-back plugins, and an undecided folder. Its actions, by group:
 
@@ -1105,8 +1106,8 @@ An existing target is not overwritten without `--overwrite`.
 - Sandbox and sandbox sessions: see "The exec sandbox" in the permissions part.
 - Screens: `security-screen`, `policy-screen`, `sandbox-screen`.
 
-`/security trust-folder` prints `This folder is trusted: every tool may run here, subject to your permission settings.` and loads the folder's hooks and MCP servers.
-An untrusted folder does not load its hooks file or its project MCP servers.
+`/security trust-folder` prints `This folder is trusted: every tool may run here, subject to your permission settings. Its hooks file loads and the MCP servers its files name start now.` and loads the folder's hooks and MCP servers.
+An untrusted folder does not load its hooks file or its project MCP servers. Restricting a trusted folder stops its loaded hooks and its project MCP servers at once, in this app and in every other GoodVibes process working in that folder (the daemon included) the next time it reads the trust register: at its next permission question or hook.
 
 `/permissions` (`show`, `rules`, `revoke <rule>`, `never <command>`, `add <allow|deny|ask> <command|class|path|tool> <target>`), `/plan` (`status`, `on`, `off`), `/questions`, `/decisions`, `/held`, `/approval` (`kinds [<kind>]`: what each kind of approval asks about; `waiting`: opens the approvals waiting on you), `/security` belong to the permission system; they are described in full under "Permission modes", "Remembered rules", "Decisions Jev made: `/decisions`", "Calls held by `just-vibes`: `/held`", "The owner inbox: `/questions`", "Plan mode", "Workspace trust" and "Managed policy bundles" in the permissions part. In short:
 
@@ -1138,7 +1139,7 @@ A second `/test` while one runs, or while a stopped run is still printing its en
 
 `/tools` works with the model's tools: `list` (the report; a picker shows what each does), `contract <tool>`, `verify <tool>`, `verify-all` and `activity` (opens Your agents, where each agent's tool calls show). An unknown tool is refused with `No tool <name> is registered.`
 
-`/web-search [--limit <n>] <words>` runs a web search and prints ranked results with source labels. A failed search is refused with `Search failed: <detail>`.
+`/web-search [--limit <n>] <words>` runs a web search and prints ranked results with source labels. A failed search is refused with `Search failed: <detail>`. A search that names no provider (this command, and the `web_search` tool without `providerId`) uses the one set in `webSearch.defaultProvider`; its default, `auto`, uses the first configured of SearXNG, Brave, Exa, Firecrawl, Tavily and Perplexity, else DuckDuckGo, which needs no key. A provider named there that is not registered or has no key falls back to `auto`. `web_search.providers.list` returns `defaultProviderId`, the provider that would answer now.
 `/media` makes images and video with a configured media provider, the same in both programs. Bare, it opens its actions with "See the media providers" first (`providers`: each provider, what it makes and whether it is set up). `/media make [--as image|video] [--provider <id>] [--model <id>] [--out <file>] <description>` asks a provider to make it (it may charge, so it asks first), keeps it in the artifact store, writes it to `generated/<words>-<time>.<ext>` (or `--out`) and, in the terminal app, opens it where a desktop exists. A file already at the path is never replaced. A job the provider has not finished is reported with the line that collects it: `/media collect <provider> <job> [--out <file>] [key=value ...]` (it was paid for when it was accepted). With no provider that makes it set up, the refusal names the providers that could.
 
 `/eval` evaluates the product on real tasks:
@@ -1153,6 +1154,7 @@ A second `/test` while one runs, or while a stopped run is still printing its en
 A suite is a directory (default `.goodvibes/eval/tasks`) with one directory per task holding `task.json` (the instruction) and `verify.sh` (exits `0` on pass).
 The run works in a copy of the suite. Before a task's session starts, its `verify.sh` (or the script `task.json` names in `verify`) and any files listed in `task.json` `verifyFiles` are copied out of the task directory and checked against the suite's own files by sha256; a task whose files differ, or are missing, fails without running. The verdict comes from that copy, never from the task directory the session worked in, so a session that edits `verify.sh` cannot change its result. The script runs with the task directory as its working directory, read-only inside a bubblewrap boundary, the only sandbox the product has (Linux with bubblewrap and user namespaces); on macOS, native Windows or a Linux without bubblewrap there is none, so it runs on the host with the task directory writable and the task's output begins its note with `verification was NOT isolated`, and finds its listed files under `$GOODVIBES_EVAL_VERIFY_DIR`.
 `/eval compare` without a baseline prints `[eval] Baseline file not found: <file>` and `[eval] /eval gate [suite-dir] makes one.`
+`Esc` or `Ctrl-C` stops a running `/eval run` or `/eval gate` (the task's `goodvibes run` gets SIGTERM, no further task starts, and the scratch copy is removed); it prints `[eval] Stopped; no result.` and records nothing. Quitting the terminal stops it the same way. One eval runs at a time in a terminal; a second prints `[eval] An eval is already running in this terminal; press Esc to stop it, then run this again.`
 
 Failure reports are actions of `/health` (see above).
 
@@ -1285,7 +1287,7 @@ A headless `run` on a session another terminal has open is refused (see "Headles
 | Continue the last session of this project | `goodvibes --continue` |
 | Open a session by id | `goodvibes --resume user-0008b454` or `goodvibes -r user-0008b454` |
 | Open the last session | `goodvibes --resume` |
-| Fork the active session at start | `goodvibes --fork` |
+| Resume the last session, then fork it | `goodvibes --fork` |
 | Open a session, then fork it | `goodvibes --fork user-0008b454` |
 | Pick from a list inside the app | `/resume` |
 
@@ -2106,7 +2108,7 @@ export function init(api) {
 
 A plugin that declares a high-risk capability does not start below `trusted`.
 The tier is one decision per plugin for every GoodVibes program on the machine, kept in `~/.goodvibes/plugin-trust.json`.
-A tier is given to one copy of the plugin: the copy in the directory it was enabled from (or, when it was never enabled, the first one found), and that copy's manifest and entry file as they were then. A same-named copy in another directory (a repository's own `.goodvibes/plugins`), or the same copy after its code changed, starts `untrusted` until its trust is set again. The tier is not a sandbox: a plugin's code runs inside the program with its access.
+A tier is given to one copy of the plugin: the copy in the directory it was enabled from (or, when it was never enabled, the first one found), and that copy's manifest and entry file as they were then. A same-named copy in another directory (a repository's own `.goodvibes/plugins`), or the same copy after its code changed, starts `untrusted` until its trust is set again. `/plugin list`, `/plugin capabilities <plugin>`, the plugins screen and the refusal that stops such a plugin say so: its tier was set for files that have since changed (or for a copy in a different folder), so review the change, then set it again with `/plugin trust <plugin> <tier>`. The tier is not a sandbox: a plugin's code runs inside the program with its access.
 `trusted` is set by a verified signature against the publisher's Ed25519 key (saved once with `/plugin trust-key <name> <key.pem>`), or by the owner's confirmation when it does not verify.
 
 ### `/plugin`

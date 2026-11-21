@@ -225,10 +225,12 @@ export function isCalendarUnconfiguredError(error: unknown): boolean {
 }
 
 /**
- * True for the daemon's CALENDAR_AUTH_FAILED code, the configured CalDAV
- * endpoint rejected the stored credentials (401/403 from the CalDAV server
- * itself). Distinct from `isCalendarUnconfiguredError`: here the operator DID
- * configure a CalDAV endpoint, but the credentials it holds no longer work.
+ * True for the daemon's CALENDAR_AUTH_FAILED code (HTTP 424): the configured
+ * calendar (a CalDAV server answering 401/403, or a Google grant that is no
+ * longer valid) rejected the stored credentials. Distinct from
+ * `isCalendarUnconfiguredError`: here the operator DID configure a calendar, but
+ * the credentials it holds no longer work, and distinct from an expired sign-in
+ * to the daemon (401).
  */
 export function isCalendarAuthFailedError(error: unknown): boolean {
   return errorCode(error) === 'CALENDAR_AUTH_FAILED';
@@ -252,61 +254,37 @@ export function isMethodNotInvokableError(error: unknown): boolean {
 }
 
 /**
- * True for the daemon's honest refusals on the email surface, the operator has an
- * account to bring but has not brought it yet (no IMAP host / SMTP host / account
- * address / app password in daemon config and the daemon secret tier).
- *
- * GROUNDING NOTE, deliberately explicit because it differs from most helpers here:
- * the installed platform defines no EMAIL_, IMAP_ or SMTP_ prefixed error-code literals at
- * all (verified by sweeping @goodvibes/engine/platform/dist, only the three
- * EMAIL_..._SCHEMA shape names appear). The named codes below are ANTICIPATED, as
- * `isCalendarUnconfiguredError`'s CALENDAR_NOT_CONFIGURED is anticipated, that
- * literal is likewise absent from the platform. So correctness here does not rest on
- * guessing a string right: the structural backstop is HTTP 412, which is what a
- * precondition refusal ("configure the surface first") is by definition. Any 412 on
- * an email call reads as not-configured whether or not its code matches, so a daemon
- * that ships a code none of these names anticipates still gets the calm setup pointer
- * rather than a red failure. Tighten the literals once a real handler ships one.
+ * True for the daemon's refusals on the email surface that mean the mail account
+ * is not set up yet: `EMAIL_NOT_CONFIGURED` (a setting is invalid or the password
+ * cannot be read), `EMAIL_NOT_ENABLED` (no IMAP host, SMTP host or account yet) and
+ * `EMAIL_CREDENTIALS_MISSING` (the password secret is not stored). The view points
+ * at setup instead of rendering a failure.
  */
 export function isEmailUnconfiguredError(error: unknown): boolean {
   const code = errorCode(error);
-  if (
-    code === 'EMAIL_NOT_CONFIGURED'
-    || code === 'EMAIL_CREDENTIALS_MISSING'
-    || code === 'IMAP_NOT_CONFIGURED'
-    || code === 'SMTP_NOT_CONFIGURED'
-  ) {
-    return true;
-  }
-  const serialized = serializeError(error);
-  const transport = asRecord(serialized.transport);
-  const status = readNumber(serialized, 'status') ?? readNumber(transport, 'status');
-  return status === 412;
+  return code === 'EMAIL_NOT_CONFIGURED' || code === 'EMAIL_NOT_ENABLED' || code === 'EMAIL_CREDENTIALS_MISSING';
 }
 
 /**
- * True when the operator DID configure a mail account but the IMAP/SMTP server
- * rejected the stored credentials, the app password was revoked, or the account
- * moved. Distinct from `isEmailUnconfiguredError`: there is something to fix, not
- * something to set up. Same anticipated-literal caveat as above; here the structural
- * backstop is deliberately NOT a bare status check, because 401 on an email call is
- * ambiguous (it is also what an expired *daemon* session returns, which
- * `isAuthExpiredError` already owns and must keep owning).
+ * True for the daemon's `EMAIL_CREDENTIALS_REJECTED` (HTTP 424): the mail account
+ * is configured but the IMAP or SMTP server refused the stored password (an app
+ * password revoked, or the account moved). Distinct from `isEmailUnconfiguredError`:
+ * there is something to replace, not something to set up, and distinct from an
+ * expired sign-in to the daemon (401, `isAuthExpiredError`).
  */
 export function isEmailAuthFailedError(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === 'EMAIL_AUTH_FAILED' || code === 'IMAP_AUTH_FAILED' || code === 'SMTP_AUTH_FAILED';
+  return errorCode(error) === 'EMAIL_CREDENTIALS_REJECTED';
 }
 
 /**
  * True for the daemon's step-up refusal on a call that arrived over the relay: a 401 whose
- * body is `{ code: 'step-up-required', reason, action, error, next }` (the relay gate's
- * refusal shape). The passkey ceremony in relay-connection.ts has already run or could not
- * help (cancelled, another prompt open, `action: 'register-locally'`), so the call was not
- * sent: show the daemon's reason and next step, never "your session expired".
+ * body is `{ code: 'STEP_UP_REQUIRED', category: 'permission', reason, action, error, next }`
+ * (the relay gate's refusal shape). The passkey ceremony in relay-connection.ts has already run
+ * or could not help (cancelled, another prompt open, `action: 'register-locally'`), so the call
+ * was not sent: show the daemon's reason and next step, never "your session expired".
  */
 export function isStepUpRequiredError(error: unknown): boolean {
-  return errorCode(error) === 'step-up-required';
+  return errorCode(error) === 'STEP_UP_REQUIRED';
 }
 
 export function errorDebugValue(error: unknown): unknown {

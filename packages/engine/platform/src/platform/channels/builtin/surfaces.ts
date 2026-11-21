@@ -1,7 +1,7 @@
 import type { ProviderRuntimeStatus, ProviderRuntimeSurface } from '../provider-runtime.js';
 import type { ChannelSurface } from '../types.js';
 import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './shared.js';
-import { resolveSecretInput } from '../../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput } from '../../config/secret-refs.js';
 
 export function asProviderRuntimeSurface(surface: ChannelSurface): ProviderRuntimeSurface | null {
   return surface === 'slack' || surface === 'discord' || surface === 'ntfy' ? surface : null;
@@ -62,5 +62,6 @@ export async function resolveBuiltinConfigSecret(
   return resolveSecretInput(value, {
     resolveLocalSecret: (key) => deps.secretsManager.get(key),
     homeDirectory: deps.secretsManager.getGlobalHome?.() ?? undefined,
+    providers: readSecretProviderHostConfig(deps.configManager),
   }, 'dispatch');
 }

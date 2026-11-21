@@ -1,3 +1,5 @@
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
+
 /**
  * gateway-verb-error.ts
  *
@@ -20,10 +22,21 @@
  * the plain-REST session routes (`callOrSessionClosed`,
  * ../../../daemon-api/src/runtime-session-routes.ts), generalized to any
  * status/code pair instead of one hardcoded to 409/SESSION_CLOSED.
+ *
+ * It is a `RefusalError`: the one class every route refusal is, so a refusal
+ * can say what is true now (`state`) and what to do (`next`), and the
+ * dispatcher forwards both on the wire.
  */
-export class GatewayVerbError extends Error {
-  readonly code: string;
-  readonly status: number;
+export interface GatewayVerbRefusalDetail {
+  /** What is true now, in product terms. */
+  readonly state?: string | undefined;
+  /** Steps that would get past the refusal, most useful first. */
+  readonly next?: readonly string[] | undefined;
+}
+
+export class GatewayVerbError extends RefusalError {
+  declare readonly code: string;
+  declare readonly status: number;
   /**
    * Which input field the refusal is ABOUT, as a machine-readable name rather
    * than prose buried in `message`.
@@ -56,8 +69,15 @@ export class GatewayVerbError extends Error {
    */
   readonly field: string | undefined;
 
-  constructor(message: string, code: string, status: number, field?: string) {
-    super(message);
+  constructor(message: string, code: string, status: number, field?: string, detail: GatewayVerbRefusalDetail = {}) {
+    super(refusal({
+      code,
+      reason: message,
+      // An empty state takes the refusal's own default.
+      state: detail.state ?? '',
+      ...(detail.next !== undefined ? { next: detail.next } : {}),
+      status,
+    }));
     this.name = 'GatewayVerbError';
     this.code = code;
     this.status = status;
@@ -134,5 +154,6 @@ export function withholdCommittedResult(error: unknown, committed: string): neve
     error.code,
     error.status,
     error.field,
+    { state: committed, next: ['Read the current state before retrying.', ...error.refusal.next] },
   );
 }

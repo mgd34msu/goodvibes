@@ -5,7 +5,7 @@ import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint
 import { holdMintedTokenForReveal } from '../../views/modals/devices-modal.ts';
 import { revokeSharedTokenOnDaemon } from '../../runtime/client/shared-token-revocation.ts';
 import { getOperatorRpc } from './operator-rpc.ts';
-import { registerDevicesCommand, type DeviceTokens } from '@goodvibes/engine/terminal-shell/devices-command';
+import { registerDevicesCommand, type DeviceTokens, type PairRequest, type PairRequestsHost } from '@goodvibes/engine/terminal-shell/devices-command';
 import { CHANNELS_LIST } from '@goodvibes/engine/terminal-shell/channels-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
@@ -113,6 +113,32 @@ async function revokeShared(ctx: CommandContext): Promise<string> {
   return revocation.message;
 }
 
+/**
+ * The daemon's devices waiting to pair as nodes (`remote.pair.requests.*`). Kept
+ * by the daemon only, so without one answering the command is refused; a
+ * failure keeps the daemon's code on the refusal (REMOTE_PAIR_REPLACES_PEER).
+ */
+function pairRequestsOnDaemon(): PairRequestsHost<CommandContext> {
+  const call = async <T,>(ctx: CommandContext, what: string, method: string, input: Record<string, unknown>): Promise<T> => {
+    const rpc = getOperatorRpc(ctx);
+    if (!rpc.available) {
+      throw commandRefusal(`Devices waiting to pair are kept by the daemon, which could not be asked: ${rpc.reason}.`, 'Start the daemon (or check /settings daemon), then run the command again', 'DAEMON_UNAVAILABLE');
+    }
+    try {
+      return await (rpc.platformClient.operator.invoke(method as never, input as never) as Promise<T>);
+    } catch (error) {
+      if (error instanceof Error && 'refusal' in error) throw error;
+      const code = error && typeof error === 'object' ? (error as { readonly code?: unknown }).code : undefined;
+      throw commandRefusal(`${what} did not finish: ${describeOperatorRpcError(error)}`, '/devices requests shows the devices waiting to pair', typeof code === 'string' ? code : 'NOT_DONE');
+    }
+  };
+  return {
+    list: async (ctx) => (await call<{ readonly requests: readonly PairRequest[] }>(ctx, 'Reading the devices waiting to pair', 'remote.pair.requests.list', {})).requests,
+    approve: async (ctx, id, confirmReplace) => (await call<{ readonly request: PairRequest }>(ctx, `Approving request ${id}`, 'remote.pair.requests.approve', confirmReplace ? { requestId: id, confirmReplace: true } : { requestId: id })).request,
+    reject: async (ctx, id) => (await call<{ readonly request: PairRequest }>(ctx, `Rejecting request ${id}`, 'remote.pair.requests.reject', { requestId: id })).request,
+  };
+}
+
 /** How this terminal reaches its daemon: a device pairing, or this machine's operator token. Local inspection only. */
 function hostStatus(ctx: CommandContext): string {
   try {
@@ -164,5 +190,6 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     async pairChannel(ctx, channel) { await runChannelPairing(channel, ctx); },
     migrateShared,
     revokeShared,
+    pairRequests: pairRequestsOnDaemon(),
   }, CHANNELS_LIST);
 }

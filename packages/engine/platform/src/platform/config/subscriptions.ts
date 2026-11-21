@@ -466,7 +466,7 @@ export class SubscriptionManager {
       // The imported sign-ins' tokens go to the secret store first; the file gets the records that name them.
       const store = this.secrets ? await this.storeImportedTokens(record) : record.store;
       current();
-      writeJsonFileAtomic(this.path, store, { mode: 0o600, cleanupStaleTemps: false, assertCurrent: current });
+      writeJsonFileAtomic(this.path, store, { mode: 0o600, durable: true, cleanupStaleTemps: false, assertCurrent: current });
       completedPaths.push(this.path); record.observation = observeImportFile(this.path); record.phase = 'committed';
     } catch { record.phase = 'failed'; }
     finally { this.importGeneration++; }
@@ -663,7 +663,7 @@ export class SubscriptionManager {
     this.importGeneration++;
     try {
       if (Object.keys(store.subscriptions).length === 0 && Object.keys(store.pending).length === 0) rmSync(this.path, { force: true });
-      else writeJsonFileAtomic(this.path, store);
+      else writeJsonFileAtomic(this.path, store, { durable: true });
     } finally { this.importGeneration++; }
   }
 

@@ -5,9 +5,9 @@
  * THIS process was actually started, not on whether a `dist/` build happens to
  * sit next to the working directory. A compiled single-file binary must launch
  * itself as the binary with its real argv; a source/dev run (`bun run …cli.ts`)
- * must NOT be turned into a service at all, a unit that reconstructs
- * `<binary> run <workingDir>/src/daemon/cli.ts` for a compiled binary is a dev
- * command line that fails on the next boot.
+ * must NOT be turned into a service at all: a unit that reconstructs a source
+ * entry point (the daemon's is `products/daemon/src/cli/entrypoint.ts`) for a compiled
+ * binary is a dev command line that fails on the next boot.
  *
  * These helpers derive the invocation from injectable process signals so the
  * decision is pure and testable, with no reliance on the ambient process.

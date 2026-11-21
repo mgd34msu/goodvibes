@@ -5,7 +5,7 @@ import { createContractOperatorService } from '@goodvibes/engine/platform/platfo
 export type DaemonContractCompositionOptions = Omit<ContractRunnerCompositionOptions, 'fleetCapacity' | 'readAccessFilter'> & {
   readonly readAccessFilter: NonNullable<ContractRunnerCompositionOptions['readAccessFilter']>;
   /** Read by the native-work activation, which folds the hosted sessions into its manager's fleet ownership. */
-  readonly acpHost: { list(): readonly { readonly id: string }[] };
+  readonly acpHost: { fleetOwnership(): ReturnType<ContractRunnerCompositionOptions['agentManager']['fleetOwnership']> };
   /** Trusted sibling execution graphs, not observed external processes; folded into the manager's fleet ownership by the caller. */
   readonly additionalFleetOwnership?: (() => ReturnType<ContractRunnerCompositionOptions['agentManager']['fleetOwnership']>) | undefined;
 };

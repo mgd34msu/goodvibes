@@ -39,8 +39,11 @@ export interface HookConfigInspection {
   readonly patterns: readonly string[];
 }
 
+/** What the workbench drives on the dispatcher; `setLoadedHooksCheck` is absent on a dispatcher that cannot hold a check. */
+export type WorkbenchHookDispatcher = Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'> & Partial<Pick<HookDispatcher, 'setLoadedHooksCheck'>>;
+
 export interface HookWorkbenchOptions {
-  readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>;
+  readonly hookDispatcher: WorkbenchHookDispatcher;
   readonly configManager: Pick<ConfigManager, 'get' | 'getWorkingDirectory'>;
   readonly hooksFilePathResolver?: (() => string) | undefined;
 }
@@ -118,7 +121,7 @@ export class HookWorkbench {
   private awaitingTrust: string | null = null;
 
   constructor(
-    private readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>,
+    private readonly hookDispatcher: WorkbenchHookDispatcher,
     private readonly hooksFilePathResolver: () => string,
   ) {}
 
@@ -128,18 +131,39 @@ export class HookWorkbench {
 
   /**
    * Hold a hooks file the workspace's repository could have brought until the
-   * owner trusts the workspace, and load it the moment he does. Returns the
-   * unbinding.
+   * owner trusts the workspace, load it the moment he does, and stop its hooks
+   * the moment the workspace is restricted again (here or in another process).
+   * Returns the unbinding.
    */
   bindTrustGate(gate: HooksFileTrustGate): () => void {
     this.trustGate = gate;
-    const unsubscribe = gate.onTrusted(() => {
-      if (this.awaitingTrust === null) return;
+    const unsubscribe = gate.onLevelChanged((level) => {
+      const path = this.getHooksFilePath();
+      if (this.awaitingTrust === null) {
+        // Restricted: nothing from a file the decision now holds back runs from here on.
+        if (!existsSync(path) || !gate.holds(path)) return;
+        this.hookDispatcher.clearLoaded();
+        this.awaitingTrust = path;
+        this.recordAction({ kind: 'reload', target: path, timestamp: Date.now(), detail: 'workspace restricted; its hooks were stopped' });
+        return;
+      }
       void this.loadAndApplyManagedHooks().catch((error: unknown) => {
-        logger.warn('HookWorkbench: the hooks file was not loaded after the workspace was trusted', { error: summarizeError(error) });
+        if (error instanceof HooksFileAwaitingTrustError) return;
+        logger.warn('HookWorkbench: the hooks file was not applied after the workspace trust changed', { level, error: summarizeError(error) });
       });
     });
-    return () => { unsubscribe(); if (this.trustGate === gate) this.trustGate = null; };
+    // A process with no permission ask in flight (the daemon) still sees another
+    // process's restriction before a hook from the file runs: while hooks from a
+    // file are loaded, each dispatch costs one stat of the workspace register,
+    // and a changed level reaches the listener above before any hook runs.
+    this.hookDispatcher.setLoadedHooksCheck?.(() => gate.load());
+    return () => {
+      unsubscribe();
+      if (this.trustGate === gate) {
+        this.trustGate = null;
+        this.hookDispatcher.setLoadedHooksCheck?.(null);
+      }
+    };
   }
 
   /** The hooks file waiting on the owner's trust of the workspace, or null when none waits. */

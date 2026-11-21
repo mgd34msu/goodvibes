@@ -53,7 +53,6 @@ export { createLimitOffers, limitOfferKey } from './limit-offer.js';
 export type { LimitOfferInbox, LimitOfferSettings, LimitOffers, OfferableLimitSetting } from './limit-offer.js';
 
 export {
-  HandlerError,
   REQUIRE_CONFIRM,
   assertConfirmed,
   normalizeContext,

@@ -3,7 +3,8 @@ import type { ManagedAutomationJob } from '../../automation/jobs.js';
 import type { AutomationScheduleDefinition } from '../../automation/schedules.js';
 import { AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError } from '../../automation/job-mutations.js';
 import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js';
-import { HandlerError, registerCatalogHandler } from '../../control-plane/host-handlers.js';
+import { registerCatalogHandler } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { isDelegatedCaller, runNativeMutation, type NativeMutationHost } from '../../control-plane/native-mutation.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { normalizeAtSchedule, normalizeCronSchedule, normalizeEverySchedule } from '../../automation/schedules.js';
@@ -41,7 +42,7 @@ type ScheduleKind = 'cron' | 'every' | 'at';
  * value the normalizer refuses is a 400 naming that field, never a cron error
  * for an interval.
  */
-function readCreateSchedule(body: Record<string, unknown>): unknown {
+function readCreateSchedule(body: Record<string, unknown>, defaultZone: string): unknown {
   if (isRecord(body.schedule) && body.schedule.kind !== undefined) return body.schedule;
   const declared = body.kind, every = body.every, at = body.at, cron = body.cron, scheduleBody = body.schedule;
   const kind: ScheduleKind | undefined = declared === 'cron' || declared === 'every' || declared === 'at' ? declared
@@ -50,18 +51,18 @@ function readCreateSchedule(body: Record<string, unknown>): unknown {
     : at !== undefined ? 'at'
     : 'cron';
   if (kind === undefined) {
-    throw new HandlerError(`kind must be "cron", "every" or "at"; got ${JSON.stringify(declared)}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, 'kind');
+    throw new GatewayVerbError(`kind must be "cron", "every" or "at"; got ${JSON.stringify(declared)}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, 'kind');
   }
   const field = kind === 'cron' ? (typeof cron === 'string' || !isRecord(scheduleBody) ? 'cron' : 'schedule.expression') : kind;
   try {
     if (kind === 'every') return normalizeEverySchedule(typeof every === 'string' || typeof every === 'number' ? every : '');
     if (kind === 'at') return normalizeAtSchedule(typeof at === 'number' ? at : Date.parse(String(at)));
     const expression = typeof cron === 'string' ? cron : isRecord(scheduleBody) && typeof scheduleBody.expression === 'string' ? scheduleBody.expression : '';
-    return normalizeCronSchedule(expression, typeof body.timezone === 'string' ? body.timezone : undefined, body.staggerMs ?? body.stagger);
+    return normalizeCronSchedule(expression, typeof body.timezone === 'string' ? body.timezone : undefined, body.staggerMs ?? body.stagger, defaultZone);
   } catch (error) {
-    if (error instanceof HandlerError) throw error;
+    if (error instanceof GatewayVerbError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    throw new HandlerError(`${field} is not an accepted ${kind} schedule: ${reason}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, field);
+    throw new GatewayVerbError(`${field} is not an accepted ${kind} schedule: ${reason}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, field);
   }
 }
 
@@ -71,9 +72,9 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
   readonly host: NativeMutationHost;
 }): () => void {
   const disposals = [registerCatalogHandler<unknown, unknown>(catalog, 'automation.jobs.update', async ({ body, context }) => {
-    if (!isRecord(body) || typeof body.jobId !== 'string' || !body.jobId.trim()) throw new HandlerError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
-    if (body.expectedMutationRevision !== undefined && (typeof body.expectedMutationRevision !== 'string' || !body.expectedMutationRevision.trim())) throw new HandlerError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
-    if (isDelegatedCaller(context) && typeof body.expectedMutationRevision !== 'string') throw new HandlerError('An update the Agent makes on your behalf needs the selected job revision (expectedMutationRevision from automation.schedules.list).', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
+    if (!isRecord(body) || typeof body.jobId !== 'string' || !body.jobId.trim()) throw new GatewayVerbError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
+    if (body.expectedMutationRevision !== undefined && (typeof body.expectedMutationRevision !== 'string' || !body.expectedMutationRevision.trim())) throw new GatewayVerbError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
+    if (isDelegatedCaller(context) && typeof body.expectedMutationRevision !== 'string') throw new GatewayVerbError('An update the Agent makes on your behalf needs the selected job revision (expectedMutationRevision from automation.schedules.list).', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
     const jobId = body.jobId;
     const { manager, host } = input;
     const current = () => { context.signal?.throwIfAborted(); };
@@ -90,20 +91,20 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
         assertTargetCurrent: () => { current(); selected?.assertCurrent(); },
         mutate: (assertCurrent, _admission, withPublication) => manager.updateJob(jobId, patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),
       });
-      if (!updated) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
+      if (!updated) throw new GatewayVerbError('Automation job not found.', 'NOT_FOUND', 404);
       return updated;
     } catch (error) {
-      if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new HandlerError(error.message, error.code, error.status);
+      if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new GatewayVerbError(error.message, error.code, error.status);
       throw error;
     }
   })];
   for (const method of ['automation.jobs.create', 'automation.schedules.create']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
-      if (!isRecord(body) || typeof body.prompt !== 'string' || !body.prompt.trim()) throw new HandlerError('An automation prompt is required.', 'INVALID_ARGUMENT', 400);
+      if (!isRecord(body) || typeof body.prompt !== 'string' || !body.prompt.trim()) throw new GatewayVerbError('An automation prompt is required.', 'INVALID_ARGUMENT', 400);
       const { manager, host } = input;
       const current = () => { context.signal?.throwIfAborted(); };
       current();
-      const schedule = readCreateSchedule(body);
+      const schedule = readCreateSchedule(body, manager.defaultTimezone());
       const patch = parseCreateAutomationJobInput({ ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
       try {
         const created = await runNativeMutation({ host, method, body, context, target: { schedule: nativeScheduleMeaning(patch.schedule) }, scopes: ['write:automation'], confirmation: 'none', assertTargetCurrent: current,
@@ -111,7 +112,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
         });
         return Response.json(created, { status: 201 });
       } catch (error) {
-        if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new HandlerError(error.message, error.code, error.status);
+        if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new GatewayVerbError(error.message, error.code, error.status);
         throw error;
       }
     }));
@@ -119,31 +120,32 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
   // The web UI's schedule sheet: the blanks read into what would be kept, shown before it is kept. Nothing is written.
   disposals.push(registerCatalogHandler<unknown, unknown>(catalog, 'automation.schedules.preview', async ({ body, context }) => {
     const action = isRecord(body) ? body.action : undefined;
-    if (!isRecord(body) || (action !== 'add' && action !== 'change')) throw new HandlerError('action must be "add" or "change".', 'INVALID_ARGUMENT', 400, 'action');
+    if (!isRecord(body) || (action !== 'add' && action !== 'change')) throw new GatewayVerbError('action must be "add" or "change".', 'INVALID_ARGUMENT', 400, 'action');
     const values: Record<string, string> = {};
     for (const [key, value] of Object.entries(body)) {
-      if (typeof value !== 'string') throw new HandlerError(`${key} must be text.`, 'INVALID_ARGUMENT', 400, key);
+      if (typeof value !== 'string') throw new GatewayVerbError(`${key} must be text.`, 'INVALID_ARGUMENT', 400, key);
       values[key] = value;
     }
-    let zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // A time without a zone is read where the owner is, unless the caller says where it was typed.
+    let zone = input.manager.defaultTimezone();
     if (values.zone) {
       try { new Intl.DateTimeFormat('en-US', { timeZone: values.zone }); zone = values.zone; }
-      catch { throw new HandlerError(`zone "${values.zone}" is not a time zone.`, 'INVALID_ARGUMENT', 400, 'zone'); }
+      catch { throw new GatewayVerbError(`zone "${values.zone}" is not a time zone.`, 'INVALID_ARGUMENT', 400, 'zone'); }
     }
     try {
       return await previewScheduleAction(action, values, { zone, ...(context.signal ? { signal: context.signal } : {}) });
     } catch (error) {
-      if (error instanceof ScheduleValuesError) throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
+      if (error instanceof ScheduleValuesError) throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
       throw error;
     }
   }));
   for (const method of ['automation.jobs.enable', 'automation.jobs.disable', 'automation.jobs.delete', 'automation.schedules.resume', 'automation.schedules.pause', 'automation.schedules.delete']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       const key = method.startsWith('automation.jobs.') ? 'jobId' : 'scheduleId';
-      if (!isRecord(body) || typeof body[key] !== 'string' || !body[key].trim()) throw new HandlerError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
+      if (!isRecord(body) || typeof body[key] !== 'string' || !body[key].trim()) throw new GatewayVerbError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
       const jobId = body[key], revision = body.expectedMutationRevision;
-      if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) throw new HandlerError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
-      if (isDelegatedCaller(context) && typeof revision !== 'string') throw new HandlerError('A change the Agent makes on your behalf needs the selected job revision (expectedMutationRevision from automation.schedules.list).', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
+      if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) throw new GatewayVerbError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
+      if (isDelegatedCaller(context) && typeof revision !== 'string') throw new GatewayVerbError('A change the Agent makes on your behalf needs the selected job revision (expectedMutationRevision from automation.schedules.list).', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
       const { manager, host } = input;
       const current = () => { context.signal?.throwIfAborted(); };
       try {
@@ -156,17 +158,17 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
             const options = { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication };
             if (method.endsWith('.delete')) {
               const removed = await manager.removeJob(jobId, options);
-              if (!removed) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
+              if (!removed) throw new GatewayVerbError('Automation job not found.', 'NOT_FOUND', 404);
               return { id: jobId, removed };
             }
             const enabled = method.endsWith('.enable') || method.endsWith('.resume');
             const updated = await manager.setEnabled(jobId, enabled, options);
-            if (!updated) throw new HandlerError('Automation job not found.', 'NOT_FOUND', 404);
+            if (!updated) throw new GatewayVerbError('Automation job not found.', 'NOT_FOUND', 404);
             return { id: jobId, enabled };
           },
         });
       } catch (error) {
-        if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new HandlerError(error.message, error.code, error.status);
+        if (error instanceof AutomationJobMutationStaleError || error instanceof AutomationJobCommitIndeterminateError) throw new GatewayVerbError(error.message, error.code, error.status);
         throw error;
       }
     }));

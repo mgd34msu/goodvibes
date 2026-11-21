@@ -25,9 +25,9 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveServiceUnitHome } from '@goodvibes/engine/platform/platform/daemon/daemon-service-default';
 import { readDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
-import { serviceStateDirectory } from '@goodvibes/engine/platform/platform/daemon/service-manager';
+import { resolveServiceName, serviceStateDirectory } from '@goodvibes/engine/platform/platform/daemon/service-manager';
 import type { PlatformServiceManager } from '@goodvibes/engine/platform/platform/daemon';
-import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes/engine/terminal-shell/managed-daemon-service';
+import { buildManagedDaemonServiceManager, MANAGED_SERVICE_NAME } from '@goodvibes/engine/terminal-shell/managed-daemon-service';
 import type { ManagedServiceStatus } from '@goodvibes/engine/platform/platform/daemon';
 import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
@@ -315,7 +315,12 @@ export interface CliServiceNameSource {
 
 /** The daemon unit's name: the owner's `service.serviceName`, else the platform's one default. */
 export function resolveCliServiceName(configManager: CliServiceNameSource): string {
-  return resolveConfiguredServiceName(configManager as Parameters<typeof resolveConfiguredServiceName>[0]);
+  const describe = configManager.describeConfigKeySource?.bind(configManager);
+  return resolveServiceName({
+    get: (key) => configManager.get(key),
+    // A source that cannot say where the name came from is read by its value alone.
+    describeConfigKeySource: (key) => describe?.(key) ?? { tier: 'unknown' },
+  }, MANAGED_SERVICE_NAME);
 }
 
 function runStatusCommand(command: string, args: readonly string[], options: CliServicePostureOptions): CliServiceStatusCommandResult {
@@ -375,7 +380,10 @@ function reconcileSystemdServiceStatus(
  * so `service status` reports the unit the installer or the daemon wrote, and
  * `service install` never adds a second unit for the same port.
  */
-export function createPlatformServiceManager(runtime: CliServiceRuntime): PlatformServiceManager {
+export function createPlatformServiceManager(
+  runtime: CliServiceRuntime,
+  workingDirectory: string = resolveDaemonWorkingDirectory(runtime),
+): PlatformServiceManager {
   return buildManagedDaemonServiceManager({
     binaryPath: resolveGoodVibesDaemonExecutable().command,
     homeDir: runtime.homeDirectory,
@@ -383,15 +391,24 @@ export function createPlatformServiceManager(runtime: CliServiceRuntime): Platfo
     // service manager reads them, whatever tree home this app runs on.
     unitHomeDir: resolveServiceUnitHome(),
     daemonHomeDirectory: getServiceStateRoot(runtime),
-    // The daemon's own working directory, resolved as `goodvibes-daemon` resolves
-    // it (the variable, then its saved setting), so a definition written from
-    // here is the one the daemon's install-service writes. The home stands in
-    // for the daemon's start directory, which is the home when an installer runs it.
-    workingDirectory: (process.env.GOODVIBES_WORKING_DIR?.trim() ? resolve(process.env.GOODVIBES_WORKING_DIR.trim()) : undefined)
-      || readDaemonSetting(getServiceStateRoot(runtime), 'runtime.workingDir')
-      || runtime.homeDirectory,
+    workingDirectory,
     configManager: runtime.configManager,
   });
+}
+
+/**
+ * The daemon's own working directory, resolved as `goodvibes-daemon` resolves
+ * it (the variable, then its saved setting), so a definition written from
+ * here is the one the daemon's install-service writes. The home stands in
+ * for the daemon's start directory, which is the home when an installer runs it.
+ * Throws, naming the file, when the daemon's saved settings exist and cannot be
+ * read: the daemon refuses to start on that file, and a definition written
+ * with another directory would hide why.
+ */
+function resolveDaemonWorkingDirectory(runtime: CliServiceRuntime): string {
+  return (process.env.GOODVIBES_WORKING_DIR?.trim() ? resolve(process.env.GOODVIBES_WORKING_DIR.trim()) : undefined)
+    || readDaemonSetting(getServiceStateRoot(runtime), 'runtime.workingDir')
+    || runtime.homeDirectory;
 }
 
 export async function buildCliServicePosture(
@@ -410,7 +427,17 @@ export async function buildCliServicePosture(
     'Service posture input changed.',
   );
   assertCurrent();
-  const manager = options.manager ?? createPlatformServiceManager(runtime);
+  // An unreadable daemon settings file is shown as such; the service's status
+  // is still read, since asking the service manager does not use the directory.
+  let unreadableWorkingDirectory: string | undefined;
+  let workingDirectory: string;
+  try {
+    workingDirectory = resolveDaemonWorkingDirectory(runtime);
+  } catch (error) {
+    unreadableWorkingDirectory = error instanceof Error ? error.message : String(error);
+    workingDirectory = runtime.homeDirectory;
+  }
+  const manager = options.manager ?? createPlatformServiceManager(runtime, workingDirectory);
   const capturedStatus = captureStrictJudgmentJson(reconcileSystemdServiceStatus(runtime, manager.status(), options));
   const actionError =
     capturedStatus.actionError === undefined ? undefined : await redactText(capturedStatus.actionError, { ...options, assertCurrent });
@@ -449,6 +476,15 @@ export async function buildCliServicePosture(
       cause: 'The user service manager (systemd --user or launchd) did not answer from this session.',
       impact: 'Nothing can be said about the daemon service from here; the daemon itself may be running.',
       action: 'Run goodvibes doctor from a logged-in desktop or SSH session with a user manager. To keep this machine without a service: goodvibes-daemon config set service.enabled false',
+    });
+  }
+  if (unreadableWorkingDirectory !== undefined) {
+    findings.push({
+      id: 'daemon-working-directory-unreadable',
+      summary: `The daemon's working directory is unreadable: ${unreadableWorkingDirectory}.`,
+      cause: 'The daemon\'s saved settings file exists but could not be read or parsed.',
+      impact: 'The daemon refuses to start until the file is fixed or removed, or it is started with --working-dir.',
+      action: 'Fix or remove the file named above, or start the daemon with --working-dir.',
     });
   }
   findings.push(...serviceEndpointFindings(endpoints, options.probe));

@@ -40,7 +40,17 @@ export function createHeadlessRunExecutor(options: HeadlessRunExecutorOptions = 
   return (ctx) => new Promise((resolve) => {
     const timeoutMs = ctx.timeoutMs ?? options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     const args = [...lead, 'run', '--output', 'json', '--timeout', `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`, ctx.instruction];
-    const child = spawn(program!, args, { cwd: ctx.taskDir, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (ctx.signal?.aborted) {
+      resolve({ completed: false, summary: 'stopped by the owner' });
+      return;
+    }
+    // The owner stopping the suite ends the run with SIGTERM, which it answers by stopping its turn.
+    const child = spawn(program!, args, {
+      cwd: ctx.taskDir,
+      env: options.env ?? process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...(ctx.signal ? { signal: ctx.signal, killSignal: 'SIGTERM' as const } : {}),
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
@@ -48,11 +58,17 @@ export function createHeadlessRunExecutor(options: HeadlessRunExecutorOptions = 
     // The run stops itself at --timeout; this only ends a run that ignored it.
     const backstop = setTimeout(() => child.kill('SIGKILL'), timeoutMs + 30_000);
     child.on('error', (error) => {
+      // An abort reports here as well; the run's own end is awaited on 'close'.
+      if (ctx.signal?.aborted) return;
       clearTimeout(backstop);
       resolve({ completed: false, summary: `could not start ${program}: ${error.message}` });
     });
     child.on('close', (code, signal) => {
       clearTimeout(backstop);
+      if (ctx.signal?.aborted) {
+        resolve({ completed: false, summary: 'stopped by the owner' });
+        return;
+      }
       const result = lastJson(stdout);
       const reported = result?.['stopReason'];
       const stopReason = typeof reported === 'string' ? reported : undefined;

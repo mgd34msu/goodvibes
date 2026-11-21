@@ -424,6 +424,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       judgmentPort: judgment.port, decisionLog: judgment.decisionLog,
       permissionManager, hookDispatcher, featureFlags, toolDependencies: agentToolDependencies,
       additionalFleetOwnership: () => agentManager.fleetOwnership(), contractOperator,
+      // Native work shares the daemon's fleet: a slot it frees is reported to the
+      // daemon's manager, and its units refused for capacity wait on that manager's releases.
+      notifyFleetSlotReleased: () => agentManager.notifyFleetSlotReleased(),
+      onFleetSlotReleased: (listener) => agentManager.onFleetSlotReleased(listener),
     });
     ciNativeContinuationRevocation = async watch => (await nativeWork.acquire()).revokeCiWatch(watch);
     ciNativeContinuationOwner = async watch => (await nativeWork.acquire()).recoverCiWatchOwner(watch);

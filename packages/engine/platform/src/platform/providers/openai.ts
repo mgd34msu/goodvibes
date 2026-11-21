@@ -36,7 +36,7 @@ import {
   fromOpenAIToolCalls,
 } from './tool-formats.js';
 import type { OpenAIToolCall } from './tool-formats.js';
-import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
+import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, freshInputTokens, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
 import { withProviderStopReason } from './provider-stop-reason.js';
 import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import type { CacheHitTracker } from './cache-strategy.js';
@@ -804,7 +804,11 @@ export class OpenAIProvider implements LLMProvider {
       content: responseText,
       toolCalls: rawToolCalls.length > 0 ? fromOpenAIToolCalls(rawToolCalls) : [],
       usage: {
-        inputTokens: typeof usage['prompt_tokens'] === 'number' ? usage['prompt_tokens'] : 0,
+        // prompt_tokens includes the cached tokens; inputTokens is the fresh input only.
+        inputTokens: freshInputTokens(
+          typeof usage['prompt_tokens'] === 'number' ? usage['prompt_tokens'] : 0,
+          typeof promptDetails['cached_tokens'] === 'number' ? promptDetails['cached_tokens'] : 0,
+        ),
         outputTokens: typeof usage['completion_tokens'] === 'number' ? usage['completion_tokens'] : 0,
         ...(typeof promptDetails['cached_tokens'] === 'number' && promptDetails['cached_tokens'] > 0
           ? { cacheReadTokens: promptDetails['cached_tokens'] }

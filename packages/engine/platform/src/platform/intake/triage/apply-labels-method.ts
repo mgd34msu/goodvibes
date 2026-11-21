@@ -14,7 +14,8 @@
  * takes off); no model request for the built-in labels.
  */
 import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js';
-import { HandlerError, registerCatalogHandler, type Unregister } from '../../control-plane/host-handlers.js';
+import { registerCatalogHandler, type Unregister } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { OwnedInboxTagging, OwnedInboxTagResult } from './tagged-owned.js';
 
 export const INBOX_APPLY_LABELS_METHOD_ID = 'channels.inbox.applyLabels';
@@ -41,7 +42,7 @@ export interface InboxApplyLabelsOutput {
 function stringList(value: unknown, field: string, max: number): readonly string[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > max
     || value.some(entry => typeof entry !== 'string' || entry.trim().length === 0 || entry.length > 400)) {
-    throw new HandlerError(`${field} must be a list of 1 to ${String(max)} non-empty strings`, 'INBOX_LABELS_INVALID', 400, field);
+    throw new GatewayVerbError(`${field} must be a list of 1 to ${String(max)} non-empty strings`, 'INBOX_LABELS_INVALID', 400, field);
   }
   return [...new Set((value as string[]).map(entry => entry.trim()))];
 }

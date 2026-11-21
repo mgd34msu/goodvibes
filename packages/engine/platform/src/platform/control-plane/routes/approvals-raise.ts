@@ -59,6 +59,12 @@ import { readApproval } from '../approval-lifecycle.js';
 import { approvalViewerOfActor } from '../approval-actions.js';
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
+import {
+  PERMISSION_CATEGORIES,
+  PERMISSION_RISK_LEVELS,
+  isPermissionCategory,
+  isPermissionRiskLevel,
+} from '../../permissions/types.js';
 
 /** The broker surface this verb needs, nothing but raising and reading back. */
 export interface ApprovalRaiseService {
@@ -82,9 +88,6 @@ export const APPROVAL_RAISE_MAX_WAIT_MS = 60_000;
 
 /** Longest expiry a raised ask may carry, in ms. Twelve hours. */
 export const APPROVAL_RAISE_MAX_TIMEOUT_MS = 12 * 60 * 60 * 1_000;
-
-const PERMISSION_CATEGORIES = new Set(['read', 'write', 'execute', 'delegate']);
-const PERMISSION_RISK_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
 
 function invalid(message: string, field: string): GatewayVerbError {
   return new GatewayVerbError(message, 'INVALID_ARGUMENT', 400, field);
@@ -125,16 +128,16 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   const args = raw['args'];
   if (!isRecord(args)) throw invalid('Invalid request.args: expected an object of tool arguments', 'request.args');
   const category = raw['category'];
-  if (typeof category !== 'string' || !PERMISSION_CATEGORIES.has(category)) {
-    throw invalid(`Invalid request.category: expected one of ${[...PERMISSION_CATEGORIES].join(', ')}`, 'request.category');
+  if (!isPermissionCategory(category)) {
+    throw invalid(`Invalid request.category: expected one of ${PERMISSION_CATEGORIES.join(', ')}`, 'request.category');
   }
   const analysis = raw['analysis'];
   if (!isRecord(analysis)) {
     throw invalid('Invalid request.analysis: expected the analysis object a surface renders the prompt from', 'request.analysis');
   }
   const riskLevel = analysis['riskLevel'];
-  if (typeof riskLevel !== 'string' || !PERMISSION_RISK_LEVELS.has(riskLevel)) {
-    throw invalid(`Invalid request.analysis.riskLevel: expected one of ${[...PERMISSION_RISK_LEVELS].join(', ')}`, 'request.analysis.riskLevel');
+  if (!isPermissionRiskLevel(riskLevel)) {
+    throw invalid(`Invalid request.analysis.riskLevel: expected one of ${PERMISSION_RISK_LEVELS.join(', ')}`, 'request.analysis.riskLevel');
   }
   const reasons = analysis['reasons'];
   if (!Array.isArray(reasons) || !reasons.every((entry) => typeof entry === 'string')) {

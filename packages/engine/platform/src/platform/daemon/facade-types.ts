@@ -114,6 +114,8 @@ export interface DaemonFacadeCollaborators {
   readonly paymentReplies: import('../payments/reply-inbox.js').PaymentReplyInbox;
   /** Which surfaces are failing to process what arrives; the channel health watcher announces it. */
   readonly ingressAlarm: import('../channels/ingress-alarm.js').ChannelIngressAlarm;
+  /** Ends the warning logged each time `telemetry.includeRawPrompts` is turned on; the daemon calls it when it stops. */
+  readonly stopTelemetryOptInWarning: () => void;
 }
 
 type JsonBody = Record<string, unknown>;

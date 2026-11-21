@@ -143,7 +143,7 @@ export async function revokeRememberedRule(ctx: PermissionsCommandContext, ruleI
 
 const ADD_USAGE = [
   'Usage:',
-  '  /permissions add never <command>                    never run commands matching, e.g. never git push (every tool, every mode, every project)',
+  '  /permissions never <command>                        never run commands matching, e.g. /permissions never git push (every tool, every mode, every project)',
   '  /permissions add <allow|deny|ask> command <command>  this exact exec command, in this project',
   '  /permissions add <allow|deny|ask> class <word>       every exec command starting with <word>, in this project',
   '  /permissions add <allow|deny|ask> path <directory>   write and edit under a directory, in this project',
@@ -232,5 +232,5 @@ export function showPermissionSettings(ctx: PermissionsCommandContext): void {
   const ruleCount = ctx.ruleStore?.list().length ?? 0;
   ctx.print(ruleCount > 0
     ? `\n${ruleCount} permission rule${ruleCount === 1 ? '' : 's'} in effect. Use /permissions rules to review or revoke them, /permissions add to add one.`
-    : '\nNo permission rules. Use /permissions add to add one (for example: /permissions add never git push).');
+    : '\nNo permission rules. Use /permissions add to add one, or /permissions never to refuse a command everywhere (for example: /permissions never git push).');
 }

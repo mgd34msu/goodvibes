@@ -9,9 +9,12 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { ContainmentUnavailableError, runContained } from '../runtime/sandbox/contained-spawn.js';
+import { resolveCredentialEnvScrub, scrubCredentialEnv } from '../tools/exec/credential-env.js';
+import { configuredCredentialEnvScrub } from '../tools/exec/credential-env-config.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { declaredPackageManager, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../utils/project-test-runner.js';
@@ -51,6 +54,8 @@ export interface QualityGateResult {
   required?: boolean;
   reason?: string;
   completion?: GateCompletion;
+  /** Where the gate's command ran: inside the bubblewrap boundary, or on the host where this machine has none. Absent on records from before gates were contained. */
+  backend?: 'bubblewrap' | 'host';
   provenance?: {
     readonly sourceBefore: string;
     readonly sourceAfter: string;
@@ -68,6 +73,8 @@ interface GateCommandResult {
   readonly stdout: string;
   readonly exitCode: number | null;
   readonly kind: 'completed' | 'timeout' | 'tool-error';
+  /** Where the command ran; absent when it could not be started. */
+  readonly backend?: 'bubblewrap' | 'host' | undefined;
 }
 
 type GateInputIdentity = GateSourceInputIdentity & { readonly definition: string };
@@ -251,72 +258,80 @@ export function getSkippedGateReason(gateName: string, cwd: string, pkgScripts: 
   return null;
 }
 
-function killGateProcess(proc: ReturnType<typeof Bun.spawn>, reason: string): void {
-  try {
-    // The shell owns a fresh process group. Killing only the shell leaves its
-    // children running with our stdout/stderr pipes open, so the timeout would
-    // still wait for them and their side effects could continue afterward.
-    process.kill(-proc.pid, 'SIGKILL');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-    process.stderr.write(`[contract-gates] failed to kill gate process after ${reason}: ${summarizeError(error)}\n`);
-  }
+/**
+ * The directories on PATH that lie in the home directory (a toolchain the
+ * owner installed there, such as ~/.bun/bin), bound read-only into the
+ * boundary so the gate's own scripts find their programs; the rest of the home
+ * directory stays masked.
+ */
+function hostEnvironment(): Record<string, string> {
+  return Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
+function homeToolchainDirectories(): string[] {
+  const home = homedir();
+  const inHome = (path: string): boolean => path.startsWith(`${home}${sep}`);
+  return [...new Set((process.env.PATH ?? '').split(delimiter)
+    .filter((entry) => isAbsolute(entry) && inHome(resolve(entry)) && existsSync(entry))
+    .map((entry) => resolve(entry)))];
+}
+
+/** What a gate command runs with: its environment, and the paths it may write beyond its working directory. */
+export interface GateCommandOptions {
+  /** The scrubbed environment the command runs with (credential-bearing variables already withheld). */
+  readonly environment: Readonly<Record<string, string>>;
+  /** Absolute paths the command may write besides `cwd` (its report directory). */
+  readonly writable?: readonly string[] | undefined;
 }
 
 /**
- * Runs one gate command through `/bin/sh -c`. `cwd` is the unit's worktree in
- * worktree mode, so the gate sees the unit's isolated changes; omitted, the
- * command runs in the process cwd. A positive explicit `timeoutMs` is an optional
- * deadline; zero waits for completion or cancellation. An expired command is
- * killed and fails, with the timeout stated at the end of its output.
+ * Runs one gate command through `/bin/sh -c`, as a program the project chose:
+ * inside the bubblewrap boundary with the network on, `cwd` and `writable`
+ * writable and the home directory masked (its PATH toolchains read-only), or on
+ * the host where no boundary exists, which the result's `backend` states. `cwd`
+ * is the unit's worktree in worktree mode, so the gate sees the unit's
+ * isolated changes. A positive `timeoutMs` is the contract.gateTimeoutMs
+ * deadline; zero waits for completion or cancellation. An expired or cancelled
+ * command's whole process group is killed; an expired one fails, with the
+ * timeout stated at the end of its output.
  */
 export async function executeGateCommand(
   command: string,
-  cwd?: string,
+  cwd: string,
   timeoutMs: number = CONTRACT_CONFIG_DEFAULTS.gateTimeoutMs,
-  signal?: AbortSignal,
-  environment?: Readonly<Record<string, string>>,
+  signal: AbortSignal | undefined,
+  options: GateCommandOptions,
 ): Promise<GateCommandResult> {
   try {
     signal?.throwIfAborted();
-    const proc = Bun.spawn(['/bin/sh', '-c', command], { detached: true, stdout: 'pipe', stderr: 'pipe',
-      ...(environment ? { env: { ...process.env, ...environment } } : {}), ...(cwd ? { cwd } : {}) });
-    const cancel = () => killGateProcess(proc, 'cancellation');
-    signal?.addEventListener('abort', cancel, { once: true });
-    if (signal?.aborted) cancel();
-    let timedOut = false;
-    const timer = timeoutMs > 0 ? setTimeout(() => {
-      timedOut = true;
-      killGateProcess(proc, 'timeout');
-    }, timeoutMs) : undefined;
-    timer?.unref?.();
-    let exitCode: number;
-    let stdout: string;
-    let stderr: string;
-    try {
-      // Drain both streams while the command runs, and keep the deadline until
-      // they close too: a shell can exit before a child releases its pipes.
-      [exitCode, stdout, stderr] = await Promise.all([
-        proc.exited,
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-    } catch (error) {
-      killGateProcess(proc, 'exit-error');
-      throw error;
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', cancel);
-    }
+    const deadline = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+    const stop = deadline && signal ? AbortSignal.any([deadline, signal]) : deadline ?? signal;
+    const run = await runContained({
+      argv: ['/bin/sh', '-c', command],
+      cwd,
+      env: options.environment,
+      ...(stop ? { signal: stop } : {}),
+      origin: 'project',
+      containment: {
+        boundary: 'host-allowed',
+        network: 'on',
+        writable: [cwd, ...(options.writable ?? [])],
+        readOnly: homeToolchainDirectories(),
+        reason: 'a contract gate runs the project\'s own scripts',
+      },
+    });
     signal?.throwIfAborted();
-    const output = [stdout, stderr, timedOut ? `Gate timed out after ${timeoutMs} ms and was stopped.` : '']
+    const timedOut = deadline?.aborted === true && run.exitCode === null;
+    const output = [run.stdout, run.stderr, timedOut ? `Gate timed out after ${timeoutMs} ms and was stopped.` : '']
       .filter(Boolean)
       .join('\n')
       .trim();
-    return { passed: exitCode === 0 && !timedOut, output, stdout, exitCode, kind: timedOut ? 'timeout' : 'completed' };
+    return { passed: run.exitCode === 0 && !timedOut, output, stdout: run.stdout, exitCode: run.exitCode,
+      kind: timedOut ? 'timeout' : run.exitCode === null ? 'tool-error' : 'completed', backend: run.applied.backend };
   } catch (error) {
     signal?.throwIfAborted();
-    return { passed: false, output: summarizeError(error), stdout: '', exitCode: null, kind: 'tool-error' };
+    const output = error instanceof ContainmentUnavailableError ? `${error.reason} ${error.next}` : summarizeError(error);
+    return { passed: false, output, stdout: '', exitCode: null, kind: 'tool-error' };
   }
 }
 
@@ -378,9 +393,15 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
         const assertions = gate.verification === 'assertions' || gate.name === 'test';
         const instrumented = assertions ? bunTestCommand(gate.command, before.packageScripts, report) : undefined;
         const runId = randomUUID();
-        const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal,
-          { GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId });
+        // The daemon's own variables (provider keys, tokens) are withheld, as for every exec.
+        const scrubbed = await scrubCredentialEnv(hostEnvironment(), resolveCredentialEnvScrub(configuredCredentialEnvScrub(options.configManager)));
+        const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal, {
+          environment: { ...scrubbed.env, GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId },
+          writable: [directory],
+        });
         result.output = run.output;
+        if (run.backend !== undefined) result.backend = run.backend;
+        if (run.backend === 'host') result.output = `${result.output}\n(ran on the host: no sandbox boundary is available on this machine)`.trim();
         result.durationMs = Date.now() - startedAt;
         let counted: GateCompletion | undefined;
         if (run.kind === 'completed' && assertions) {

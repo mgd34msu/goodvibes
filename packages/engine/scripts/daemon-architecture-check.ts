@@ -219,7 +219,6 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   // Programs someone else chooses, started here today; each is to start through runContained.
   'platform/acp/connection.ts', // a configured ACP agent
   'platform/acp/host.ts', // a configured ACP agent
-  'platform/contract/gates.ts', // a contract's gate command
   'platform/hooks/runners/command.ts', // the owner's hook command
   'platform/mcp/client.ts', // a configured MCP server
   'platform/runtime/eval/headless-executor.ts', // the product binary for an eval task
@@ -236,7 +235,6 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   'platform/ci-watch/gh-source.ts',
   'platform/cloudflare/tunnel-connector.ts',
   'platform/config/process-start-time.ts',
-  'platform/config/secret-refs.ts',
   'platform/contract/completion.ts',
   'platform/contract/evidence.ts',
   'platform/contract/fix-planner-input.ts',

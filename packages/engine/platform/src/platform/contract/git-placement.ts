@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { productWorktreePath } from '../git/product-worktree-marker.js';
 import type { DurableContractExecution } from './durable-admission.js';
 
 const OUTPUT_LIMIT = 64 * 1024;
@@ -45,7 +45,7 @@ export async function resolveContractGitPlacement(
   const baseBranch = await resolveContractBase(projectRoot, signal);
   const short = contractId.slice('ctr-'.length);
   return { isolation: 'worktree', branch: `contract/${short}`,
-    worktreePath: join(projectRoot, '.goodvibes', '.worktrees', 'contract', short), baseBranch };
+    worktreePath: productWorktreePath(projectRoot, 'contract', short), baseBranch };
 }
 
 export async function resolveContractIsolation(setting: 'auto' | 'worktree' | 'shared', projectRoot: string,

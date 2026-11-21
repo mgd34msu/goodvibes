@@ -54,7 +54,7 @@ export interface GatedPollerControl {
  * `start()` runs, so composing a runtime in a test never joins a network.
  *
  * The version is THIS BINARY's version, not the platform package's, the same
- * distinction daemon/cli.ts already makes for the self-update artifact. It is
+ * distinction `goodvibes-daemon serve` makes for the self-update artifact. It is
  * the first ranking tier, so getting it wrong would let a stale build hold the
  * role through an update.
  */

@@ -1,5 +1,5 @@
 import { installedDataWriter } from '../runtime/native-data-writer.ts';
-import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
+import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes/engine/platform/platform/runtime/notification-privacy';
 import { AGENT_HOSTED_RESEARCH_SCREENING_KEY, AGENT_HOSTED_RESEARCH_SCREENING_SETTING } from '@goodvibes/engine/terminal-shell/agent-turn/research-source-screening';
 
@@ -22,9 +22,6 @@ export function readAgentHostSetting(config: Pick<ConfigManager, 'getHostBoolean
 /** Agent construction opts into the public instance-owned platform host schema. */
 export class AgentConfigManager extends ConfigManager {
   constructor(options: ConstructorParameters<typeof ConfigManager>[0]) {
-    // The daemon reads the store under its own resolved home, which GOODVIBES_DAEMON_HOME can move;
-    // a client left on the default path would save daemon-owned settings where the daemon never looks.
-    const daemonTierPath = options.daemonTierPath ?? (options.homeDir ? daemonConfigPathForHome(resolveGoodVibesDaemonHome(options.homeDir)) : undefined);
-    super({ ...options, daemonTierPath, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, AGENT_HOSTED_RESEARCH_SCREENING_SETTING] });
+    super({ ...options, nativeDataWriter: options.nativeDataWriter ?? installedDataWriter, hostSettings: [...(options.hostSettings ?? []), NOTIFICATIONS_METADATA_ONLY_SETTING, AGENT_HOSTED_RESEARCH_SCREENING_SETTING] });
   }
 }

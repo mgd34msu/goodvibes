@@ -117,7 +117,16 @@ export class WorkspaceSwapManager {
     private readonly deps: WorkspaceSwapDeps,
   ) {
     this.liveWorkingDir = initialWorkingDir;
-    const saved = readDaemonSetting(deps.daemonHomeDir, 'runtime.workingDir');
+    let saved: string | undefined;
+    try {
+      saved = readDaemonSetting(deps.daemonHomeDir, 'runtime.workingDir');
+    } catch (err: unknown) {
+      // An unreadable settings file is not "nothing saved": say which file, and show no pending move from it.
+      logger.warn('[WorkspaceSwap] the saved working directory could not be read', {
+        error: summarizeError(err),
+        daemonHomeDir: deps.daemonHomeDir,
+      });
+    }
     this.savedWorkingDir = typeof saved === 'string' && saved !== initialWorkingDir ? saved : null;
   }
 
@@ -190,10 +199,15 @@ export class WorkspaceSwapManager {
 
   /**
    * Said by the host rebuilt on its old root after a move to `to` failed:
-   * nothing moved, and the saved working directory is this root again.
+   * nothing moved. `savedRestored` says whether the saved working directory
+   * names this root again; when it does not, the reason says the next start
+   * goes to `to` and how to set it back.
    */
-  announceReturn(to: string, reason: string): void {
-    this._emit({ type: 'WORKSPACE_SWAP_FAILED', from: this.liveWorkingDir, to, code: 'REROOT_FAILED', reason });
+  announceReturn(to: string, reason: string, savedRestored: boolean): void {
+    const from = this.liveWorkingDir;
+    const stated = savedRestored ? reason
+      : `${reason}; the saved working directory still names '${to}', so the next start goes there; set runtime.workingDir to '${from}' again`;
+    this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'REROOT_FAILED', reason: stated });
   }
 
   /**

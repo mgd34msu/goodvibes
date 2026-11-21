@@ -9,7 +9,8 @@ import { dirname } from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { assertConfirmed, HandlerError, type HandlerContextEnvelope } from './host-handlers.js';
+import { assertConfirmed, type HandlerContextEnvelope } from './host-handlers.js';
+import { GatewayVerbError } from './routes/gateway-verb-error.js';
 import type { MutationPublication } from '../utils/file-mutation.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { RetainedAutomationJobTarget } from '../automation/job-mutations.js';
@@ -71,7 +72,7 @@ export function retainMutationStorage(path: string, workspace: string): () => vo
     const currentParent = lstatSync(realpathSync(ancestor), { bigint: true });
     if (realpathSync(workspace) !== root || currentRoot.dev !== rootStat.dev || currentRoot.ino !== rootStat.ino
       || realpathSync(ancestor) !== parent || currentParent.dev !== parentStat.dev || currentParent.ino !== parentStat.ino
-      || identity() !== before) throw new HandlerError('Native mutation target changed', 'NATIVE_MUTATION_STALE', 409);
+      || identity() !== before) throw new GatewayVerbError('Native mutation target changed', 'NATIVE_MUTATION_STALE', 409);
   };
 }
 
@@ -104,7 +105,7 @@ export async function runNativeMutation<T>(input: {
     || missingScopes(context.scopes, scopes).length > 0
     || missingScopes(expected.scopes, scopes).length > 0
     || context.isAuthorized?.(scopes) !== true) {
-    throw new HandlerError('Native mutation requires current paired owner access and native write scopes', 'NATIVE_MUTATION_FORBIDDEN', 403);
+    throw new GatewayVerbError('Native mutation requires current paired owner access and native write scopes', 'NATIVE_MUTATION_FORBIDDEN', 403);
   }
   // The body is read once, here; the judged request is this copy.
   const original = captureOwnedJson(body, nodeTypes.isProxy);
@@ -128,7 +129,7 @@ export async function runNativeMutation<T>(input: {
     const fresh = authority.current();
     if (!fresh || fresh.tokenId !== expected.tokenId || fresh.authorityRevision !== expected.authorityRevision
       || missingScopes(fresh.scopes, scopes).length > 0) {
-      throw new HandlerError('Native mutation paired owner changed', 'NATIVE_MUTATION_STALE', 409);
+      throw new GatewayVerbError('Native mutation paired owner changed', 'NATIVE_MUTATION_STALE', 409);
     }
   };
   const assertCurrent = () => {
@@ -146,7 +147,7 @@ export async function runNativeMutation<T>(input: {
         });
     try {
       if (!admission.result.approved) {
-        throw new HandlerError('Native mutation was not admitted', 'NATIVE_MUTATION_HELD', 422);
+        throw new GatewayVerbError('Native mutation was not admitted', 'NATIVE_MUTATION_HELD', 422);
       }
       admission.claim();
       let active = true;

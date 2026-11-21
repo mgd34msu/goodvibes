@@ -103,14 +103,6 @@ export function isChannelOwner(decision: { readonly policy: Pick<ChannelPolicyRe
   return userId !== undefined && decision.policy.ownerId !== undefined && decision.policy.ownerId === userId;
 }
 
-/**
- * The actor a sender on a channel is (actor.ts): the channel's owner, or a
- * guest. What either may cause is decided by the effect table
- * (`admitEffects`), never by testing the owner again at the call site. A
- * sender with no identity is admitted by the surface's own secret and acts as
- * the owner; a caller that needs to know who pressed or wrote refuses an
- * anonymous sender before it asks.
- */
 /** The reason a message in a chat set up for delegated review is admitted from someone other than the owner. */
 export const DELEGATED_REVIEW_REASON = 'delegated-review';
 
@@ -119,6 +111,16 @@ export interface ChannelDelegatedReviewSource {
   isDelegated(surface: ChannelSurface, channelId: string, threadId?: string): Promise<boolean>;
 }
 
+/**
+ * The actor a sender on a channel is (actor.ts): the channel's owner, or a
+ * guest. What either may cause is decided by the effect table
+ * (`admitEffects`), never by testing the owner again at the call site. A
+ * sender with no identity acts as the owner, which holds only for a surface
+ * whose secret the owner's own systems hold (the generic webhook, Home
+ * Assistant); a chat adapter always passes the sender it can identify (a
+ * Telegram channel post is its `sender_chat`). A caller that needs to know who
+ * pressed or wrote refuses an anonymous sender before it asks.
+ */
 export function channelSenderActor(decision: { readonly policy: Pick<ChannelPolicyRecord, 'ownerId'> }, surface: string, userId: string | undefined): Actor {
   return actorFromChannelSender({ surface, userId, isChannelOwner: isChannelOwner(decision, userId) });
 }

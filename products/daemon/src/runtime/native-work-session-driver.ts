@@ -27,6 +27,8 @@ export interface NativeSessionDriverOptions {
   readonly toolDependencies: ToolDependencies;
   /** The nonserialized native owner rechecks paired authority and workspace scope. */
   readonly assertCurrent: (contract: ContractView) => void;
+  /** Told when a turn's work ends and its owner stops holding a fleet slot. */
+  readonly onSlotReleased?: (() => void) | undefined;
   /** A failed turn is retried with doubling backoff; the seams exist so tests never wait on a real timer. */
   readonly retry?: {
     /** Retries after the first failed attempt. Default 3. */
@@ -276,6 +278,8 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     }).finally(() => {
       pending.delete(done);
       if (active?.done === done) active = undefined;
+      try { options.onSlotReleased?.(); }
+      catch (error) { logger.warn('Native session work: the fleet slot listener failed', { error: describeError(error) }); }
       if (!closed) {
         const after = options.runner.get(contract.id);
         const current = after?.units.find(item => item.id === unit.id);

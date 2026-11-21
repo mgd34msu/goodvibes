@@ -19,6 +19,11 @@
  */
 
 import type { Fence } from '@goodvibes/engine/platform/platform/utils/owner-fence';
+import {
+  getDeviceCapability,
+  isDeviceCapabilityId,
+  type DeviceCapabilityId,
+} from '@goodvibes/engine/platform/browser/device-capabilities';
 
 /** How long a browser may take to start a captured stream playing and paint its first frame. */
 const FRAME_DEADLINE_MS = 10_000;
@@ -54,18 +59,22 @@ function stopTracks(stream: MediaStream): void {
   }
 }
 
-/** Capability ids this binding implements, mirroring the platform contract's ids. */
-export type WebNodeCapabilityId =
-  | 'device.camera.rear.capture'
-  | 'device.camera.front.capture'
-  | 'device.screen.capture'
-  | 'device.location.coarse'
-  | 'device.location.precise'
-  | 'device.clipboard.read'
-  | 'device.clipboard.write'
-  | 'device.command.notify'
-  | 'device.command.open_url'
-  | 'device.command.vibrate';
+/**
+ * Capability ids this binding implements: every id of the platform contract.
+ * runWebNodeCapability switches over them exhaustively, so an id the contract
+ * adds does not compile here until this binding implements it.
+ */
+export type WebNodeCapabilityId = DeviceCapabilityId;
+
+/** A capability's name as the platform contract titles it, for every screen that names one; an id the contract does not know shows as itself. */
+export function capabilityTitle(id: string): string {
+  return getDeviceCapability(id)?.title ?? id;
+}
+
+/** Whether this browser's context allows a capability, read from the contract's secure-context rule. */
+function contextAllows(bindings: BrowserBindings, id: WebNodeCapabilityId): boolean {
+  return bindings.isSecureContext || getDeviceCapability(id)?.secureContextRequired !== true;
+}
 
 /** The node kind this web app announces itself as. */
 export const WEB_NODE_KIND = 'web-pwa';
@@ -117,29 +126,24 @@ export function readBrowserBindings(): BrowserBindings {
  * meets a control that cannot work.
  */
 export function announcedCapabilities(bindings: BrowserBindings): WebNodeCapabilityId[] {
-  const ids: WebNodeCapabilityId[] = [];
   // Probed by type, not by truthiness: reading the method off the object to
   // test it hands around an unbound reference, which is the same mistake as
   // calling it detached from navigator.mediaDevices.
-  const canCapture =
-    typeof bindings.mediaDevices?.getUserMedia === 'function' && bindings.isSecureContext;
-  if (canCapture) {
-    ids.push('device.camera.rear.capture', 'device.camera.front.capture');
-  }
-  if (typeof bindings.mediaDevices?.getDisplayMedia === 'function' && bindings.isSecureContext) {
-    ids.push('device.screen.capture');
-  }
-  if (bindings.geolocation && bindings.isSecureContext) {
-    ids.push('device.location.coarse', 'device.location.precise');
-  }
-  if (bindings.clipboard && bindings.isSecureContext) {
-    if (typeof bindings.clipboard.readText === 'function') ids.push('device.clipboard.read');
-    if (typeof bindings.clipboard.writeText === 'function') ids.push('device.clipboard.write');
-  }
-  if (bindings.canNotify && bindings.isSecureContext) ids.push('device.command.notify');
-  if (bindings.canOpenWindow) ids.push('device.command.open_url');
-  if (bindings.canVibrate) ids.push('device.command.vibrate');
-  return ids;
+  const canCapture = typeof bindings.mediaDevices?.getUserMedia === 'function';
+  const browserOffers: Record<WebNodeCapabilityId, boolean> = {
+    'device.camera.rear.capture': canCapture,
+    'device.camera.front.capture': canCapture,
+    'device.screen.capture': typeof bindings.mediaDevices?.getDisplayMedia === 'function',
+    'device.location.coarse': bindings.geolocation !== undefined,
+    'device.location.precise': bindings.geolocation !== undefined,
+    'device.clipboard.read': typeof bindings.clipboard?.readText === 'function',
+    'device.clipboard.write': typeof bindings.clipboard?.writeText === 'function',
+    'device.command.notify': bindings.canNotify,
+    'device.command.open_url': bindings.canOpenWindow,
+    'device.command.vibrate': bindings.canVibrate,
+  };
+  return (Object.keys(browserOffers) as WebNodeCapabilityId[])
+    .filter((id) => browserOffers[id] && contextAllows(bindings, id));
 }
 
 function readString(input: Record<string, unknown>, key: string): string {
@@ -259,6 +263,7 @@ export async function runWebNodeCapability(
   fence: Fence,
   bindings: BrowserBindings = readBrowserBindings(),
 ): Promise<CapabilityRunResult> {
+  if (!isDeviceCapabilityId(capabilityId)) return { ok: false, error: `${capabilityId} is not a capability this node implements.` };
   try {
     switch (capabilityId) {
       case 'device.camera.rear.capture':
@@ -314,8 +319,10 @@ export async function runWebNodeCapability(
         if (!navigator.vibrate(duration)) return { ok: false, error: 'The browser refused to vibrate; it allows vibration only after a tap on this page.' };
         return { ok: true, data: { vibratedMs: duration } };
       }
-      default:
-        return { ok: false, error: `${capabilityId} is not a capability this node implements.` };
+      default: {
+        const unimplemented: never = capabilityId;
+        return { ok: false, error: `${String(unimplemented)} is not a capability this node implements.` };
+      }
     }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

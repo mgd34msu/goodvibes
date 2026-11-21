@@ -196,7 +196,17 @@ export async function processTelegramUpdate(
   }
 
   const chat = readRecord(message.chat);
-  const from = readRecord(message.from);
+  // The sender, computed once: a message posted as a chat (a channel post, a
+  // message sent as a channel, an anonymous group admin) is identified by that
+  // chat, `sender_chat`; Telegram leaves `from` empty for a channel post and
+  // fills it with a placeholder user for the others. Any other message is its `from` user.
+  const senderChat = readRecord(message.sender_chat);
+  const from = senderChat ? undefined : readRecord(message.from);
+  const senderId = senderChat ? readNumberString(senderChat.id) : readNumberString(from?.id);
+  const senderUsername = senderChat ? readString(senderChat.username) : readString(from?.username);
+  const senderDisplayName = senderChat
+    ? readString(senderChat.username) ?? readString(senderChat.title)
+    : readString(from?.username) ?? readString(from?.first_name);
   const chatId = readNumberString(chat?.id);
   if (!chatId) {
     logger.info('handleTelegramSurfaceWebhook: update ignored', {
@@ -253,7 +263,7 @@ export async function processTelegramUpdate(
   const replied = readRecord(message.reply_to_message);
   const policy = await context.authorizeSurfaceIngress({
     surface: 'telegram',
-    userId: readNumberString(from?.id),
+    userId: senderId,
     channelId: chatId,
     groupId: chatId,
     threadId,
@@ -266,7 +276,7 @@ export async function processTelegramUpdate(
       updateId: readNumberString(payload.update_id),
       chatType: readString(chat?.type),
       chatTitle: readString(chat?.title),
-      fromUsername: readString(from?.username),
+      fromUsername: senderUsername,
       messageId: readNumberString(message.message_id),
       messageSentAtMs: typeof message.date === 'number' && Number.isSafeInteger(message.date) && message.date > 0 && message.date <= 8.64e12
         ? message.date * 1000 : undefined,
@@ -306,8 +316,8 @@ export async function processTelegramUpdate(
     title: readString(chat?.title) ?? readString(chat?.username) ?? chatId,
     metadata: {
       chatType: readString(chat?.type),
-      fromId: readNumberString(from?.id),
-      fromUsername: readString(from?.username),
+      fromId: senderId,
+      fromUsername: senderUsername,
       updateId: readNumberString(payload.update_id),
     },
   });
@@ -318,7 +328,7 @@ export async function processTelegramUpdate(
     const result = await context.delegatedTelegram!.accept({ binding, chatId, threadId,
       account: await deps.acquireSourceAccount?.() ?? null,
       edited: Boolean(payload.edited_message || payload.edited_channel_post),
-      senderId: readNumberString(from?.id), providerMessageId: readNumberString(message.message_id) ?? '',
+      senderId, providerMessageId: readNumberString(message.message_id) ?? '',
       readOriginal: () => typeof message.text === 'string' ? message.text : typeof message.caption === 'string' ? message.caption : '',
     });
     return Response.json({ ok: true, acknowledged: true, queued: false, ...result });
@@ -389,9 +399,9 @@ export async function processTelegramUpdate(
     // Telegram reads neither the webhook answer nor the poller's result as a reply.
     control: 'notice',
     ...(readNumberString(payload.update_id) ? { providerMessageId: readNumberString(payload.update_id) } : {}),
-    userId: readNumberString(from?.id),
+    userId: senderId,
     channelId: chatId,
-    displayName: readString(from?.username) ?? readString(from?.first_name),
+    displayName: senderDisplayName,
     title: binding.title ?? 'Telegram',
     metadata: {
       chatType: readString(chat?.type),

@@ -66,6 +66,7 @@ export interface DaemonRuntimeRouteContext extends Omit<
     setEnabled(jobId: string, enabled: boolean): Promise<AutomationJobLike | null>;
     runNow(jobId: string): Promise<{ id: string; agentId?: string; status: string }>;
     getSchedulerCapacity(): { slotsTotal: number; slotsInUse: number; queueDepth: number; oldestQueuedAgeMs: number | null };
+    defaultTimezone(): string;
   };
   readonly normalizeAtSchedule: (at: number) => AutomationScheduleDefinition;
   readonly normalizeEverySchedule: (interval: string | number, anchorAt?: number) => AutomationScheduleDefinition;

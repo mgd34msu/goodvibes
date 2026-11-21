@@ -92,8 +92,8 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
         ctx.renderRequest();
         return [
           level === 'trusted'
-            ? 'This folder is trusted: every tool may run here, subject to your permission settings.'
-            : 'This folder is restricted: tools that write, run commands or hand work to agents are refused here.',
+            ? 'This folder is trusted: every tool may run here, subject to your permission settings. Its hooks file loads and the MCP servers its files name start now.'
+            : 'This folder is restricted: tools that write, run commands or hand work to agents are refused here. Its hooks file and the MCP servers its files name are stopped now; your own hooks and MCP files are not affected.',
           ...(saved.saved ? [] : [`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`]),
         ].join('\n');
       },

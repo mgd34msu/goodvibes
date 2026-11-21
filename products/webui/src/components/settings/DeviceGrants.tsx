@@ -32,6 +32,7 @@ import { Disclosure } from '../data-view/DataView';
 import { Row, RowList } from '../ui/Row';
 import { SettingsBlock } from './dialog/parts';
 import { whenLabel } from '../../lib/when-label';
+import { capabilityTitle } from '../../lib/device-node/capability-bindings';
 import '../../styles/components/device.css';
 
 type GrantsResult = OperatorMethodOutput<'devices.grants.list'>;
@@ -134,7 +135,7 @@ export function DeviceGrants() {
   async function handleDeleteCapture(capture: { artifactId: string; capabilityId: string }): Promise<void> {
     const ok = await confirm.ask({
       title: 'Delete this capture?',
-      target: capture.capabilityId,
+      target: capabilityTitle(capture.capabilityId),
       description: 'The photo or screen capture is removed from the daemon host now and cannot be recovered.',
       confirmLabel: 'Delete',
       tone: 'danger',
@@ -274,7 +275,7 @@ export function DeviceGrants() {
           {(captures.data?.artifacts ?? []).map((capture) => (
             <Row
               key={capture.artifactId}
-              title={`${capture.capabilityId} · ${nodeLabels.get(capture.nodeId) ?? capture.nodeId}`}
+              title={`${capabilityTitle(capture.capabilityId)} · ${nodeLabels.get(capture.nodeId) ?? capture.nodeId}`}
               meta={[
                 `Taken ${formatWhen(capture.capturedAt)}`,
                 `deleted ${formatWhen(capture.expiresAt)}`,
@@ -304,7 +305,7 @@ export function DeviceGrants() {
             {audit.slice(-auditShown).reverse().map((entry) => (
               <Row
                 key={entry.id}
-                title={`${entry.action} · ${entry.capabilityId}`}
+                title={`${entry.action} · ${capabilityTitle(entry.capabilityId)}`}
                 meta={`${nodeLabels.get(entry.nodeId) ?? entry.nodeId}${entry.reason ? ` · ${entry.reason}` : ''}`}
                 trailing={<span className="device-panel__when">{whenLabel(entry.at)}</span>}
               />

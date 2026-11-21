@@ -35,10 +35,13 @@ export {
 export type {
   PluginTrustTier,
   PluginTrustRecord,
+  PluginTrustUnappliedReason,
+  PluginUnappliedTier,
   SignatureValidationResult,
 } from './trust.js';
 export {
   PluginTrustStore,
+  describeUnappliedTier,
   validatePluginSignature,
   pluginManifestSignaturePayload,
   filterCapabilitiesByTrust,

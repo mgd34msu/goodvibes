@@ -63,6 +63,11 @@ export interface BuildOperatorMcpToolsOptions {
   readonly includeCategories?: readonly string[] | undefined;
   /** Exclude methods in these categories (applied after includeCategories). */
   readonly excludeCategories?: readonly string[] | undefined;
+  /**
+   * Only include methods with these ids (default: all): the methods the daemon
+   * the tools call actually serves, so a client is never offered one it lacks.
+   */
+  readonly includeMethods?: ReadonlySet<string> | undefined;
   /** Only include methods with these access levels (default: all). */
   readonly includeAccess?: readonly OperatorMethodContract['access'][] | undefined;
   /** Include methods marked dangerous (default: true). */
@@ -125,6 +130,7 @@ function includeMethod(method: OperatorMethodContract, options: BuildOperatorMcp
   if (options.readOnly === true && !isReadOnly(method) && !isSessionLifecycleMethodId(method.id)) return false;
   if (options.includeCategories && !options.includeCategories.includes(method.category)) return false;
   if (options.excludeCategories?.includes(method.category)) return false;
+  if (options.includeMethods && !options.includeMethods.has(method.id)) return false;
   if (options.includeAccess && !options.includeAccess.includes(method.access)) return false;
   return true;
 }

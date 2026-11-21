@@ -217,7 +217,7 @@ test('a repository\'s hooks file and MCP file start nothing and replace nothing 
 
   const trust = new WorkspaceTrustManager({ shellPaths: createShellPathService({ workingDirectory: repo, homeDirectory: home }), surfaceRoot: 'agent' });
   // The gate the products bind; the reload a trust answer starts in the background is the explicit load below.
-  const gate = { ...repositoryFileGate(trust, home), onTrusted: () => () => undefined };
+  const gate = { ...repositoryFileGate(trust, home), onLevelChanged: () => () => undefined };
   const dispatcher = new HookDispatcher();
   const workbench = new HookWorkbench(dispatcher, () => join(repo, 'hooks.json'));
   workbench.bindTrustGate(gate);

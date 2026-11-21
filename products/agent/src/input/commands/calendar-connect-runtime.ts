@@ -12,6 +12,7 @@
  * The service is injectable so tests drive every path against fakes with no real
  * network, port, or browser.
  */
+import { openExternalUrl } from '@goodvibes/engine/platform/platform/utils';
 import { providerProfile, type CalendarProviderId, type DeviceCodeFlowStart, type EventWindow, type MergedCalendarEvent } from '@goodvibes/engine/platform/platform/calendar';
 import type { CalendarProvider } from '@goodvibes/engine/terminal-shell/calendar-command';
 import type { CommandContext } from '../command-registry.ts';
@@ -73,22 +74,6 @@ function authUrlMessage(label: string, url: string): string {
   ].join('\n');
 }
 
-/** Best-effort browser open; never throws, never blocks the flow. */
-function bestEffortOpenBrowser(url: string): void {
-  void (async () => {
-    try {
-      const { spawn } = await import('node:child_process');
-      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-      const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-      const child = spawn(opener, args, { stdio: 'ignore', detached: true });
-      child.on('error', () => {});
-      child.unref();
-    } catch {
-      // ignore, the URL was already printed for the user to open manually
-    }
-  })();
-}
-
 /** Sign a calendar account in: a browser here, a device code for another device, or the address the browser landed on. */
 export async function connectCalendar(
   ctx: CommandContext,
@@ -114,7 +99,8 @@ export async function connectCalendar(
     : await service.connectAuto(provider, {
         openUrl: (url) => {
           ctx.print(authUrlMessage(label, url));
-          bestEffortOpenBrowser(url);
+          // The URL is printed first; the platform opener never throws and the flow does not wait on it.
+          void openExternalUrl(url);
         },
         onDeviceCode: (s) => ctx.print(deviceCodeMessage(label, s)),
       });

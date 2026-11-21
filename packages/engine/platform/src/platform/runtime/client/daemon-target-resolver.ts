@@ -124,6 +124,16 @@ export function configuredDaemonOrigin(configManager: ConfigReader): DaemonOrigi
   return configuredOrigin(configManager).origin;
 }
 
+/**
+ * Whether the daemon the configuration names is this machine's: no usable
+ * address, or one that is this machine's (a declared public address of it
+ * included). False for a connected host on another machine. Settings only; no request.
+ */
+export function configuredDaemonIsThisMachine(configManager: ConfigReader): boolean {
+  const origin = configuredOrigin(configManager).origin;
+  return origin === null || classifyDaemonOrigin(origin, configManager) !== 'no';
+}
+
 function configuredOrigin(configManager: ConfigReader): { readonly origin: DaemonOrigin | null; readonly connected: boolean } {
   const connected = readConnectedDaemonOrigin((key) => configManager.get(key));
   if (connected) return { origin: connected, connected: true };
@@ -163,7 +173,7 @@ function resolve(input: ResolveDaemonTargetInput): Resolved {
   if (explicitUrl) {
     origin = parseDaemonOrigin(explicitUrl);
     if (!origin) {
-      return { resolution: refuse('VALIDATION_FAILED', `'${explicitUrl}' is not a daemon address`, ['name the daemon as scheme://host:port, for example https://10.0.0.7:3421']) };
+      return { resolution: refuse('INVALID_ARGUMENT', `'${explicitUrl}' is not a daemon address`, ['name the daemon as scheme://host:port, for example https://10.0.0.7:3421']) };
     }
     named = true;
   } else {
@@ -174,7 +184,7 @@ function resolve(input: ResolveDaemonTargetInput): Resolved {
     origin = configured.origin;
     named = configured.connected;
     if (!origin) {
-      return { resolution: refuse('SERVICE_UNAVAILABLE', 'no daemon address is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host and port)', ['set the daemon address in /setup, Network step']) };
+      return { resolution: refuse('SERVICE_UNAVAILABLE', 'no daemon address is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host and port)', ['set the daemon address with /setup connect-daemon']) };
     }
   }
   const place = classifyDaemonOrigin(origin, configManager);
@@ -206,8 +216,8 @@ function resolve(input: ResolveDaemonTargetInput): Resolved {
         resolution: refuse('CREDENTIAL_NOT_FOR_TARGET',
           `no credential is stored for ${origin.baseUrl}; this machine's daemon token is never sent to another daemon`,
           explicitUrl
-            ? ['pass --token <token>', 'store it from /setup, Network step', 'pair with it: goodvibes-agent setup pair']
-            : ['connect to it again from /setup, Network step, with its token', 'pair with it: goodvibes-agent setup pair']),
+            ? ['pass --token <token>', 'store it with /setup connect-daemon', 'pair with it: goodvibes-agent setup pair']
+            : ['connect to it again with /setup connect-daemon and its token', 'pair with it: goodvibes-agent setup pair']),
       };
     }
   }
@@ -298,7 +308,7 @@ export async function resolveDaemonTargetProven(input: ResolveDaemonTargetInput 
   if (!token || !await proveDaemonOrigin(origin, credential, token, input.fetch ?? fetch)) {
     return refuse('CREDENTIAL_NOT_FOR_TARGET',
       `${origin.baseUrl} did not prove it is the daemon on this machine, so this machine's daemon token was not sent to it`,
-      [`check that ${origin.baseUrl} reaches the daemon on this machine (controlPlane.publicBaseUrl, web.publicBaseUrl)`, 'or connect to it with its own token from /setup, Network step']);
+      [`check that ${origin.baseUrl} reaches the daemon on this machine (controlPlane.publicBaseUrl, web.publicBaseUrl)`, 'or connect to it with its own token with /setup connect-daemon']);
   }
   return resolve(input).resolution;
 }

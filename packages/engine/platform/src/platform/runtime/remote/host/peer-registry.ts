@@ -1,16 +1,11 @@
 import { HandlerSqliteStore } from '../../../state/daemon-handler-sqlite-store.js';
-import { isSecretRefInput } from '../../../config/secret-refs.js';
+import { isValidSecretReference } from '../../../config/secret-refs.js';
 
-// Remote backends resolve this scheme only. The general config classifier
-// checks a prefix, so keep the daemon's full parser check at this boundary.
-function isSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
-
+// Remote backends resolve this scheme only: a `goodvibes://` value that is not
+// a well-formed secret reference is refused at registration.
 function isMalformedGoodVibesSecretReferenceValue(value: string): boolean {
   const normalized = value.trim();
-  return normalized.startsWith('goodvibes://') && !isSecretReferenceValue(normalized);
+  return normalized.startsWith('goodvibes://') && !isValidSecretReference(normalized);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +125,7 @@ const BACKEND_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 function requireSecretRef(value: unknown, field: string): string {
   const ref = requireString(value, field);
-  if (!isSecretReferenceValue(ref)) {
+  if (!isValidSecretReference(ref)) {
     throw new PeerRegistryValidationError(
       `Field '${field}' must be a goodvibes://secrets/ reference, not a raw credential.`,
     );
@@ -149,7 +144,7 @@ function assertDockerHostSafe(value: string | undefined, field: string): void {
   if (value === undefined) return;
 
   // A valid secret ref is always allowed: docker.ts resolves it from the store.
-  if (isSecretReferenceValue(value)) return;
+  if (isValidSecretReference(value)) return;
 
   // A `goodvibes://` value that is NOT a well-formed secret ref would be handed
   // to credentials.resolveRef() and fail opaquely (REMOTE_BACKEND_CREDENTIAL_MISSING)

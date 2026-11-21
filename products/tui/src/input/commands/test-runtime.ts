@@ -7,11 +7,12 @@ import { doAction, textInput } from '@goodvibes/engine/terminal-shell/described-
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 /**
- * The one /test run of a terminal. Esc and Ctrl-C stop it (the terminal's
- * cancel path calls `cancel`), and closing the terminal kills it (`dispose`),
- * so a run never outlives the app that started it.
+ * The one run of a long command (/test, /eval) in a terminal: one instance per
+ * command. Esc and Ctrl-C stop it (the terminal's cancel path calls `cancel`),
+ * and closing the terminal stops it (`dispose`), so a run never outlives the
+ * app that started it.
  */
-export class TestRuns {
+export class CommandRunSlot {
   private active: AbortController | null = null;
   private disposed = false;
 

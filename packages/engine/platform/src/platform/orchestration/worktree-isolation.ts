@@ -45,11 +45,11 @@
  * like the launch-dirty snapshot.
  */
 import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, sep } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { WorktreeIdentityRegistry, type StoredWorktreeIdentity, type WorktreeIdentityKey } from './worktree-identities.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { GitService } from '../git/service.js';
+import { isProductWorktreeKind, PRODUCT_WORKTREE_KINDS, productWorktreePath, productWorktreeSegments } from '../git/product-worktree-marker.js';
 import { IsolatedWorktree, readIsolatedWorktreeCreation, type CommitWorkingTreeResult } from '../agents/worktree.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -126,8 +126,13 @@ export interface WorktreeIsolationManager {
   diffItem(item: WorkItem): Promise<{ files: string[]; unifiedDiff: string; stat: string } | null>;
 }
 
+/** An item's worktree sits at its branch's path under the product's worktree root; the branch's first segment is its kind. */
 function itemWorktreeDir(projectRoot: string, branch: string): string {
-  return join(projectRoot, '.goodvibes', '.worktrees', ...branch.split('/'));
+  const [kind, ...rest] = branch.split('/');
+  if (!isProductWorktreeKind(kind)) {
+    throw new Error(`Workstream branch '${branch}' does not start with a product worktree kind (${PRODUCT_WORKTREE_KINDS.join(', ')}), so its worktree would be neither swept nor owned; add the kind to PRODUCT_WORKTREE_KINDS.`);
+  }
+  return productWorktreePath(projectRoot, kind, ...rest);
 }
 
 interface KeptEntry {
@@ -598,11 +603,8 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     let registry: WorktreeIdentityRegistry, rows: readonly StoredWorktreeIdentity[];
     try { registry = identityRegistrySync(); rows = registry.forWorkstream(deps.stateNamespace ?? null, workstream.id); }
     catch (error) { logger.warn('worktree-isolation: private identity store unavailable; resources preserved', { error: summarizeError(error) }); return; }
-    const recordedBranchFromPath = (path: string): string | undefined => {
-      const part = relative(join(deps.projectRoot, '.goodvibes', '.worktrees'), path);
-      if (!part || part === '..' || part.startsWith(`..${sep}`) || isAbsolute(part)) return undefined;
-      return part.split(sep).join('/');
-    };
+    const recordedBranchFromPath = (path: string): string | undefined =>
+      productWorktreeSegments(deps.projectRoot, path)?.join('/');
     for (const { path, branch } of resources) {
       const recorded = workstream.items.filter(item =>
         (item.worktreePath === path && (item.worktreeBranch === branch || item.worktreeBranch === undefined && recordedBranchFromPath(path) === branch))

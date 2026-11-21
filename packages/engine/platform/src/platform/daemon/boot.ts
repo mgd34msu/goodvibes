@@ -15,6 +15,7 @@
  */
 
 import { ConfigManager } from '../config/manager.js';
+import { daemonConfigPathForHome } from '../config/daemon-config-tier.js';
 import type { ApprovalBroker } from '../control-plane/index.js';
 import { DaemonServer } from './facade.js';
 
@@ -91,9 +92,12 @@ export async function bootDaemon(options: BootDaemonOptions): Promise<BootedDaem
     workingDir: options.workingDir,
     homeDir: options.homeDirectory,
     surfaceRoot: 'goodvibes',
-    // This IS the daemon, so it owns ~/.goodvibes/daemon/settings.json and is
-    // the one runtime allowed to migrate it on disk. Clients read that file and
-    // must not rewrite it under a daemon that may be an older build.
+    // The daemon home passed in decides where its settings file is; without
+    // one the manager resolves it as the daemon does (GOODVIBES_DAEMON_HOME).
+    ...(options.daemonHomeDir !== undefined ? { daemonTierPath: daemonConfigPathForHome(options.daemonHomeDir) } : {}),
+    // This IS the daemon, so it owns its settings file and is the one runtime
+    // allowed to migrate it on disk. Clients read that file and must not
+    // rewrite it under a daemon that may be an older build.
     ownsDaemonTier: true,
   });
 

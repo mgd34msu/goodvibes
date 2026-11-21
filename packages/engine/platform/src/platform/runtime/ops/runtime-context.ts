@@ -13,6 +13,7 @@ import type { RuntimeStore } from '../store/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { SloCollector } from '../perf/slo-collector.js';
 import type { PluginStatus } from '../../plugins/manager.js';
+import { isOpenApprovalStatus } from '../../control-plane/approval-lifecycle.js';
 
 /** One measured latency: its p95 over the recent window and how many samples it rests on. */
 export interface OpsLatencyReading {
@@ -103,7 +104,7 @@ export function createOpsCheckContext(options: OpsCheckContextOptions): OpsCheck
     },
     ...(listApprovals ? {
       pendingApprovals: () => listApprovals(Number.MAX_SAFE_INTEGER)
-        .filter((approval) => approval.status === 'pending' || approval.status === 'claimed')
+        .filter((approval) => isOpenApprovalStatus(approval.status))
         .map((approval) => ({ id: approval.id, tool: approval.request.tool, createdAt: approval.createdAt }))
         .sort((a, b) => a.createdAt - b.createdAt),
     } : {}),

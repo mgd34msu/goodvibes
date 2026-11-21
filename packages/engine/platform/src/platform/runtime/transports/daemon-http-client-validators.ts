@@ -6,6 +6,7 @@ import type {
   SharedSessionRecord,
   SharedSessionSubmissionReceipt,
 } from '../../control-plane/index.js';
+import { SHARED_SESSION_KINDS } from '../../control-plane/session-types.js';
 import type { RuntimeTask } from '../store/domains/tasks.js';
 import type { ProviderRuntimeSnapshot, ProviderUsageSnapshot } from '../../providers/runtime-snapshot.js';
 import type { TelemetryListResponse, TelemetrySnapshot } from '../telemetry/api.js';
@@ -190,9 +191,7 @@ export function assertTelemetryMetricsSnapshot(value: unknown, endpoint: string)
 /** The session kinds this build knows. A response carrying anything else is
  * from a newer/older peer; we degrade honestly rather than surface an invalid
  * kind (mixed-version stance, docs/decisions/2026-07-05-session-wire-mixed-version.md). */
-const KNOWN_SESSION_KINDS = new Set<SharedSessionRecord['kind']>([
-  'tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted',
-]);
+const KNOWN_SESSION_KINDS = new Set<SharedSessionRecord['kind']>(SHARED_SESSION_KINDS);
 
 export function normalizeSharedSessionRecord(record: SharedSessionRecord | Record<string, unknown>): SharedSessionRecord {
   const candidate = record as SharedSessionRecord & {

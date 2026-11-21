@@ -3,7 +3,8 @@
  * short form: "Every day at 8:00" / "daily 8:00", "last ran today,
  * delivered" / "last: delivered", "Checks every 30 min" / "every 30 min".
  * The work board (work-board.ts) and every surface that lists schedules
- * read these. Pure and browser-safe; times are read in the local time zone.
+ * read these. Pure and browser-safe; times are read in the local time zone,
+ * and a cron kept in another zone is said with that zone's name.
  */
 
 /** When something runs: a fixed interval, a cron expression, or once. */
@@ -83,6 +84,11 @@ export function dayWords(at: number, now: number): string {
   return `on ${day.getDate()} ${day.toLocaleString('en-GB', { month: 'short' })}`;
 }
 
+/** The zone the reader's clock is in. */
+function viewerTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /** The time of day a moment falls at, "8:00". */
 function timeOfDay(at: number): string {
   const d = new Date(at);
@@ -93,7 +99,12 @@ function timeOfDay(at: number): string {
 export function describeSchedule(cadence: ScheduleCadence, form: WordForm, now: number = Date.now()): string {
   switch (cadence.kind) {
     case 'every': return form === 'full' ? `Every ${intervalWords(cadence.intervalMs)}` : `every ${intervalWords(cadence.intervalMs)}`;
-    case 'cron': return cronWords(cadence.expression, form);
+    case 'cron': {
+      // The clock is the cron's own zone: named when it is not the viewer's, so 8:00 is never read as the wrong 8:00.
+      const words = cronWords(cadence.expression, form);
+      const zone = cadence.timezone?.trim();
+      return zone && zone !== viewerTimezone() ? `${words} (${zone})` : words;
+    }
     case 'at': {
       const day = dayWords(cadence.at, now);
       const when = `${day === 'today' || day === 'tomorrow' || day === 'yesterday' ? day : day.replace(/^on /, '')} at ${timeOfDay(cadence.at)}`;

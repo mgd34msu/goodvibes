@@ -138,21 +138,28 @@ export type WorkspaceTrustLevel = 'trusted' | 'restricted';
 export interface RepositoryTrust {
   /** The workspace's real path. */
   readonly workspaceRoot: string;
-  /** Reads the saved decision once; later calls return at once. */
+  /**
+   * Reads the saved decision; later calls cost one stat of the register and
+   * read it again only when another process changed it.
+   */
   load(): Promise<void>;
   isTrusted(): boolean;
-  /** Called each time the owner trusts the workspace from this process. Returns the unsubscribe. */
-  onTrusted(listener: () => void): () => void;
+  /**
+   * Called each time the workspace's trust level changes: the owner decided in
+   * this process, or a read of the register found another process's decision.
+   * Returns the unsubscribe.
+   */
+  onLevelChanged(listener: (level: WorkspaceTrustLevel) => void): () => void;
 }
 
 /** The check a loader of repository files (the hooks file, project MCP files) holds them back with. */
 export interface RepositoryFileGate {
-  /** Reads the saved trust decision once; later calls return at once. */
+  /** Reads the saved trust decision; again only when another process changed it. */
   load(): Promise<void>;
   /** True when this file waits on the owner's trust of the workspace. */
   holds(path: string): boolean;
-  /** Called each time the owner trusts the workspace. Returns the unsubscribe. */
-  onTrusted(listener: () => void): () => void;
+  /** Called each time the workspace's trust level changes. Returns the unsubscribe. */
+  onLevelChanged(listener: (level: WorkspaceTrustLevel) => void): () => void;
 }
 
 /** The gate over `trust` for the files under its workspace; see {@link heldForRepositoryTrust}. */
@@ -160,7 +167,7 @@ export function repositoryFileGate(trust: RepositoryTrust, homeDirectory: string
   return {
     load: () => trust.load(),
     holds: (path) => heldForRepositoryTrust(trust, path, homeDirectory),
-    onTrusted: (listener) => trust.onTrusted(listener),
+    onLevelChanged: (listener) => trust.onLevelChanged(listener),
   };
 }
 
@@ -326,7 +333,7 @@ export class WorkspaceTrustManager {
   /** True when an earlier build's in-workspace trust.json was found and not honored. */
   private legacyIgnored = false;
   private question: WorkspaceTrustQuestion | null = null;
-  private readonly trustedListeners = new Set<() => void>();
+  private readonly levelListeners = new Set<(level: WorkspaceTrustLevel) => void>();
   /** The directory judged, as its real path: the key of the decision. */
   readonly workspaceRoot: string;
   private readonly legacyFile: string;
@@ -351,10 +358,18 @@ export class WorkspaceTrustManager {
    * directory with no decision stays undecided (the gate treats it as
    * restricted, and the first non-read tool request raises the trust
    * question); a `trust.json` inside the directory is noted, never honored.
+   *
+   * Once loaded, each call costs one stat of the register: when another
+   * process changed it (a restriction set in another app), it is read again and
+   * a changed level reaches every {@link onLevelChanged} listener.
    */
   async load(): Promise<void> {
-    if (this.loaded) return;
+    if (this.loaded) {
+      if (fileIdentity(this.registerPath) === this.registerIdentity) return;
+      this.loaded = false;
+    }
     const revision = this.revision;
+    const levelBefore = this.getLevel();
     const identity = fileIdentity(this.registerPath);
     let fault: string | null = null;
     const persisted = await this.store.trustDecision(this.workspaceRoot).catch((error: unknown) => {
@@ -383,6 +398,14 @@ export class WorkspaceTrustManager {
     }
     this.loaded = true;
     this.revision++;
+    if (this.getLevel() !== levelBefore) this.notifyLevelChanged();
+  }
+
+  private notifyLevelChanged(): void {
+    const level = this.getLevel();
+    for (const listener of [...this.levelListeners]) {
+      try { listener(level); } catch (error) { logger.warn('workspace trust: a listener for the trust level failed', { workspace: this.workspaceRoot, level, error: summarizeError(error) }); }
+    }
   }
 
   /**
@@ -417,11 +440,8 @@ export class WorkspaceTrustManager {
   async prepareAutonomousConstraint(category: PermissionCategory, signal?: AbortSignal): Promise<() => void> {
     if (this.pendingDecisions > 0) throw new Error('Workspace trust decision is pending');
     const decisionRevision = this.decisionRevision;
-    // Another process may have changed this workspace's decision (a downgrade in
-    // another app): one stat of the register, and it is read again when it moved.
-    if (this.loaded && this.registerIdentity !== null && fileIdentity(this.registerPath) !== this.registerIdentity) {
-      this.loaded = false;
-    }
+    // load() sees another process's decision (a downgrade in another app): one
+    // stat of the register, read again when it moved.
     await awaitPermission(() => this.load(), signal);
     if (this.decisionRevision !== decisionRevision) throw new Error('Workspace trust changed during autonomous preparation');
     // Dispatch reads the decision in effect now, not the one seen at preparation:
@@ -457,10 +477,14 @@ export class WorkspaceTrustManager {
     return this.level === 'trusted';
   }
 
-  /** Called each time the owner trusts this workspace from this process (RepositoryTrust). Returns the unsubscribe. */
-  onTrusted(listener: () => void): () => void {
-    this.trustedListeners.add(listener);
-    return () => { this.trustedListeners.delete(listener); };
+  /**
+   * Called each time this workspace's trust level changes (RepositoryTrust):
+   * the owner decided in this process, or {@link load} found another process's
+   * decision. Returns the unsubscribe.
+   */
+  onLevelChanged(listener: (level: WorkspaceTrustLevel) => void): () => void {
+    this.levelListeners.add(listener);
+    return () => { this.levelListeners.delete(listener); };
   }
 
   /**
@@ -471,7 +495,7 @@ export class WorkspaceTrustManager {
   async setLevel(level: WorkspaceTrustLevel): Promise<{ readonly saved: boolean; readonly fault?: string | undefined }> {
     ++this.decisionRevision;
     this.revision++;
-    const becameTrusted = level === 'trusted' && this.level !== 'trusted';
+    const changed = level !== this.getLevel();
     this.level = level;
     this.loaded = true;
     this.legacyIgnored = false;
@@ -486,12 +510,9 @@ export class WorkspaceTrustManager {
       return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };
     } finally {
       this.pendingDecisions--;
-      // The decision is in effect for this process either way; what waited on it starts now.
-      if (becameTrusted) {
-        for (const listener of [...this.trustedListeners]) {
-          try { listener(); } catch (error) { logger.warn('workspace trust: a listener for the trusted workspace failed', { workspace: this.workspaceRoot, error: summarizeError(error) }); }
-        }
-      }
+      // The decision is in effect for this process either way: what waited on
+      // trust starts now, and what a restriction holds back stops now.
+      if (changed) this.notifyLevelChanged();
     }
   }
 

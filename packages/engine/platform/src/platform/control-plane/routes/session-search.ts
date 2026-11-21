@@ -23,25 +23,19 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { SharedSessionBroker } from '../session-broker.js';
-import type { SharedSessionKind, SharedSessionRecord, SharedSessionStatus } from '../session-types.js';
+import {
+  SHARED_SESSION_KINDS,
+  SHARED_SESSION_STATUSES,
+  type SharedSessionKind,
+  type SharedSessionRecord,
+  type SharedSessionStatus,
+} from '../session-types.js';
 import type { SurfaceKind } from '../../../events/surfaces.js';
 import { SURFACE_KINDS } from '../../../events/surfaces.js';
 import { paginateItems } from '@goodvibes/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
-
-const SHARED_SESSION_KINDS: readonly SharedSessionKind[] = [
-  'tui',
-  'agent',
-  'webui',
-  'companion-task',
-  'companion-chat',
-  'automation',
-  'channel',
-  'acp',
-  'hosted',
-];
-const SHARED_SESSION_STATUSES: readonly SharedSessionStatus[] = ['active', 'closed'];
+import { mayReadSession } from './session-admission.js';
 
 const SESSIONS_SEARCH_DEFAULT_LIMIT = 50;
 const SESSIONS_SEARCH_MAX_LIMIT = 200;
@@ -96,7 +90,15 @@ function clampLimit(raw: unknown): number {
 /** Structural dep, only the read surface `sessions.search` needs. */
 export type SessionSearchBroker = Pick<SharedSessionBroker, 'listSessions'>;
 
-export function createSessionsSearchHandler(broker: SessionSearchBroker): GatewayMethodHandler {
+/**
+ * The owners of a hosted session (SessionLiveTurnControlsHolder.ownersOf): a
+ * hosted row is listed only to a caller that may read its transcript, as
+ * sessions.hosted.list does. Absent: hosted rows are listed to the owner and
+ * admins only.
+ */
+export type SessionOwnersLookup = (sessionId: string) => readonly string[];
+
+export function createSessionsSearchHandler(broker: SessionSearchBroker, ownersOf?: SessionOwnersLookup): GatewayMethodHandler {
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const textQuery = optionalString(params.query)?.toLowerCase();
@@ -122,6 +124,7 @@ export function createSessionsSearchHandler(broker: SessionSearchBroker): Gatewa
 
     const filtered = all.filter((session) => {
       if (!includeClosed && session.status === 'closed') return false;
+      if (session.kind === 'hosted' && !mayReadSession(invocation, ownersOf?.(session.id) ?? [])) return false;
       if (status !== undefined && session.status !== status) return false;
       if (surfaceKind !== undefined && !session.surfaceKinds.includes(surfaceKind)) return false;
       if (textQuery !== undefined) {
@@ -160,9 +163,9 @@ export function createSessionsSearchHandler(broker: SessionSearchBroker): Gatewa
  * descriptor is a silent no-op, see routes/fleet.ts's
  * `registerFleetGatewayMethods` for the same rationale.
  */
-export function registerSessionSearchGatewayMethod(catalog: GatewayMethodCatalog, broker: SessionSearchBroker): void {
+export function registerSessionSearchGatewayMethod(catalog: GatewayMethodCatalog, broker: SessionSearchBroker, ownersOf?: SessionOwnersLookup): void {
   const descriptor = catalog.get('sessions.search');
   if (descriptor) {
-    catalog.register(descriptor, createSessionsSearchHandler(broker), { replace: true });
+    catalog.register(descriptor, createSessionsSearchHandler(broker, ownersOf), { replace: true });
   }
 }

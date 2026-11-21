@@ -6,7 +6,7 @@ import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-
 import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
-import { ensurePublicBaseUrl, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
+import { pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
@@ -206,9 +206,9 @@ export function registerBuiltinModals(
 export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo {
   const ui = deps.uiServices;
   const configManager = deps.configManager;
-  // Freeze a stable web origin once (never clobbering a user-set value).
+  // Derived live from the settings (a user-set web.publicBaseUrl wins).
   // Null when no web UI is served: the offer is still minted, as the bare `#pair=` fragment.
-  const webOrigin = ensurePublicBaseUrl(configManager);
+  const webOrigin = resolvePairingWebOrigin(configManager);
   const url = webOrigin === null ? 'no web UI is served (goodvibes-daemon webui enable --bundle-dir <dir>)'
     : webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
   const held = request.held;

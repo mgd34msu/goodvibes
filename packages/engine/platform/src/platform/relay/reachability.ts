@@ -68,6 +68,9 @@ export interface RelayReachabilityOptions {
   readonly onStatusChange?: (status: RelayRegistrationStatus) => void;
 }
 
+/** What `relay.reachability.get` reports as the relay status. */
+export type RelayReachabilityStatus = RelayRegistrationStatus | 'disabled' | 'failed';
+
 /** The composed reachability controller. */
 export interface RelayReachability {
   /** Start the outbound registration if enabled; otherwise a no-op. */
@@ -88,11 +91,16 @@ export interface RelayReachability {
    * the daemon's relay identity key, or null when none is running.
    */
   readonly rendezvousId: string | null;
-  /** Current status, or `'disabled'` when the relay path is gated off. */
-  readonly status: RelayRegistrationStatus | 'disabled';
   /**
-   * Why the relay last refused the live registration (what is true, what to
-   * do, and whether the daemon keeps trying), or null when it has not.
+   * Current status: `'disabled'` when the relay path is gated off, `'failed'`
+   * when the last start failed before a registration existed (lastRefusal says
+   * why), else the registration's own status.
+   */
+  readonly status: RelayReachabilityStatus;
+  /**
+   * Why the relay last refused the live registration, or why the last start
+   * failed (what is true, what to do, and whether the daemon keeps trying), or
+   * null when neither happened.
    */
   readonly lastRefusal: RelayRegistrationRefusal | null;
   /** Mint a pairing payload carrying `code` (the device's relay code) that a surface can scan, or null when disabled. */
@@ -126,6 +134,19 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
   // reuses that load, so two key pairs are never generated and saved at once.
   // A failed load is forgotten so the next start tries again.
   let identityPromise: Promise<RelayKeyPair> | null = null;
+  // Why the last start failed before a registration existed; cleared by a
+  // start that succeeds and by a stop. The next reconcile starts again.
+  let startFailure: RelayRegistrationRefusal | null = null;
+
+  function startFailureOf(error: unknown): RelayRegistrationRefusal {
+    return {
+      code: 'relay-start-failed',
+      message: `The relay registration could not be started: ${error instanceof Error ? error.message : String(error)}`,
+      state: 'This daemon is not reachable through the relay; it is reachable on its own network only.',
+      next: ['Change relay.url, or turn relay.enabled off and on again, to start it again.', 'Or restart the daemon.'],
+      retryable: true,
+    };
+  }
 
   async function loadOrCreateIdentity(): Promise<RelayKeyPair> {
     const existing = await options.identityStore.load();
@@ -171,13 +192,20 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     registration?.stop();
     registration = null;
     registeredWith = null;
+    startFailure = null;
   }
 
   const controller: RelayReachability = {
     start(): Promise<void> {
       if (!isEnabled() || registration) return Promise.resolve();
       if (starting) return starting;
-      const attempt = startRegistration(generation).finally(() => {
+      const myGeneration = generation;
+      const attempt = startRegistration(myGeneration).then(() => {
+        if (myGeneration === generation) startFailure = null;
+      }, (error: unknown) => {
+        if (myGeneration === generation) startFailure = startFailureOf(error);
+        throw error;
+      }).finally(() => {
         if (starting === attempt) starting = null;
       });
       starting = attempt;
@@ -206,11 +234,14 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     get rendezvousId(): string | null {
       return registeredWith?.rid ?? null;
     },
-    get status(): RelayRegistrationStatus | 'disabled' {
-      return isEnabled() ? (registration?.status ?? 'idle') : 'disabled';
+    get status(): RelayReachabilityStatus {
+      if (!isEnabled()) return 'disabled';
+      if (registration) return registration.status;
+      return startFailure ? 'failed' : 'idle';
     },
     get lastRefusal(): RelayRegistrationRefusal | null {
-      return isEnabled() ? (registration?.lastRefusal ?? null) : null;
+      if (!isEnabled()) return null;
+      return registration ? registration.lastRefusal : startFailure;
     },
     async mintPairing(code: string): Promise<RelayPairingPayload | null> {
       if (!registration) return null;

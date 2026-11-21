@@ -41,6 +41,7 @@ import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { NOTIFY_AFTER_SECONDS_SETTING } from '../config/tui-extension-settings.ts';
 import {
   buildTurnNotification,
   readNotificationsMetadataOnly,
@@ -49,9 +50,6 @@ import {
   type TurnOutcome,
   type TurnNotificationFacts,
 } from '@goodvibes/engine/platform/platform/runtime/operations';
-
-/** Default threshold in seconds. Turns shorter than this do not notify. */
-export const NOTIFY_AFTER_SECONDS_DEFAULT = 60;
 
 /**
  * Sentinel value for the off-state. When behavior.notifyAfterSeconds is 0,
@@ -235,14 +233,12 @@ export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
 }
 
 /**
- * Read behavior.notifyAfterSeconds from a config manager.
- * Returns NOTIFY_AFTER_SECONDS_DEFAULT when the key is absent or invalid.
- * Returns NOTIFY_AFTER_SECONDS_OFF (0) when explicitly set to 0.
+ * behavior.notifyAfterSeconds as the config manager resolves it: the terminal
+ * app registers the setting (config/tui-extension-settings.ts), so a stored
+ * value of the wrong type or out of range already reads as its default there.
+ * NOTIFY_AFTER_SECONDS_OFF (0) is off.
  */
 export function readNotifyAfterSeconds(configGet: (key: string) => unknown): number {
-  const raw = configGet('behavior.notifyAfterSeconds');
-  if (raw === 0) return NOTIFY_AFTER_SECONDS_OFF;
-  const parsed = typeof raw === 'number' ? raw : Number(raw);
-  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
-  return NOTIFY_AFTER_SECONDS_DEFAULT;
+  const value = configGet(NOTIFY_AFTER_SECONDS_SETTING.key);
+  return typeof value === 'number' ? value : NOTIFY_AFTER_SECONDS_SETTING.default;
 }

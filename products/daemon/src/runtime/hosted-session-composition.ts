@@ -51,11 +51,15 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  *    running on the host is not a fallback available to it. The owner's
  *    terminal is denied outright, at the exec guard, regardless of boundary.
  *  - WORKSTREAM, a real work chain the owner authorized, which may genuinely
- *    need the machine itself, is a per-spawn grant this composition makes
- *    explicitly. There is no such spawn today, so the function below never
- *    returns it; when there is one, the grant is written HERE, in the daemon's
- *    own composition, where a reader can see which spawns hold it. Nothing on
- *    the wire and nothing in a tool argument can reach it.
+ *    need the machine itself (the boundary where available, the host where
+ *    not), is a grant a daemon composition makes explicitly. Hosted sessions
+ *    never hold it: they are always conversational, and the function below
+ *    never returns anything else. The one holder today is native work
+ *    execution's delegated agents: native-work-execution-activation.ts sets
+ *    `execContainment: WORKSTREAM_CONTAINMENT` on their tool dependencies, and
+ *    the operator method `workLedger.execution.start` (owner-authorized) is
+ *    what admits that work. Nothing on the wire and nothing in a tool argument
+ *    can reach the grant otherwise.
  */
 import { createClientRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/client-services';
 import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
@@ -102,10 +106,11 @@ function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
  *
  * Every session this daemon hosts is a conversation, so every one of them is
  * contained (see the module header). Stated on the floor rather than left to
- * the engine's default so that the day a workstream spawn exists, the grant is
- * a visible change to THIS function and not an option someone set elsewhere,
- * and it sits beside the trust gate, which is the other statement this daemon
- * makes about how much authority a hosted run carries.
+ * the engine's default, beside the trust gate, which is the other statement
+ * this daemon makes about how much authority a hosted run carries. The
+ * workstream grant is not made here: its one holder is native work
+ * execution's delegated agents (native-work-execution-activation.ts, the
+ * `execContainment` line), admitted by `workLedger.execution.start`.
  */
 function hostedExecPosture(): HostedSessionExecPosture {
   return 'conversational';

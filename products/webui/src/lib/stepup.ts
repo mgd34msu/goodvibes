@@ -4,7 +4,7 @@
  * The daemon gates mutating relay calls behind a WebAuthn step-up assertion (see the platform's
  * platform/relay/step-up-policy + daemon-wiring): a mutating call that arrives over the
  * relay without a fresh, valid assertion is answered 401 with `www-authenticate: WebAuthn`
- * and body `{ code: 'step-up-required', reason, action, error, next }`. This module is the operator's half of that
+ * and body `{ code: 'STEP_UP_REQUIRED', reason, action, error, next }`. This module is the operator's half of that
  * ceremony:
  *
  *   - registerPasskey()  → navigator.credentials.create (server accepts 'none' attestation),

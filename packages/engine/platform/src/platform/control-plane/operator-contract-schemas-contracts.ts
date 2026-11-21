@@ -140,6 +140,8 @@ const GATE_RESULT_SCHEMA = objectSchema({
   provenance: objectSchema({ sourceBefore: STRING_SCHEMA, sourceAfter: STRING_SCHEMA, definitionBefore: STRING_SCHEMA, definitionAfter: STRING_SCHEMA,
     root: STRING_SCHEMA, scope: STRING_LIST_SCHEMA },
     ['sourceBefore', 'sourceAfter', 'definitionBefore', 'definitionAfter']),
+  /** Where the gate's command ran: inside the bubblewrap boundary, or on the host where no boundary exists. */
+  backend: enumSchema(['bubblewrap', 'host']),
 }, ['gate', 'passed', 'output', 'durationMs']);
 
 const QUALITY_READING_SCHEMA = objectSchema({

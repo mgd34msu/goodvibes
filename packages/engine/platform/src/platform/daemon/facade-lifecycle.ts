@@ -22,7 +22,7 @@ import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { reserveLaunchdHandover } from './launchd-handover.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { daemonReceiptStoreAt, daemonReceiptsPath, formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
+import { daemonReceiptStoreAt, daemonReceiptsPath, formatReceiptTime, receiptTimeZone, type DaemonReceiptStore } from './receipts.js';
 import { writeFatalLine } from './fatal-boot-report.js';
 import { FeatureAnnouncementStore, collectStartupAnnouncements, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
 import {
@@ -322,10 +322,11 @@ export class DaemonLifecycleRuntime {
   /**
    * Undelivered receipts and announcements, left undelivered. A reader that
    * loses the response can ask again; it names what it showed through
-   * {@link acknowledgeReceipts}.
+   * {@link acknowledgeReceipts}. `owner`: the reader is owner-class, so owner
+   * alerts kept as receipts are included.
    */
-  peekReceipts(): readonly { id: string; text: string; at: number }[] {
-    const receipts = this.receiptStore().peekUndelivered().map(({ id, text, at }) => ({ id, text, at }));
+  peekReceipts(owner: boolean): readonly { id: string; text: string; at: number }[] {
+    const receipts = this.receiptStore().peekUndelivered(owner).map(({ id, text, at }) => ({ id, text, at }));
     this.writeAcknowledgedAnnouncements();
     const acknowledged = this.acknowledgedAnnouncements;
     const announcements = this.announcementStore().peekPending().filter(({ id }) => !acknowledged.has(id)).map(({ id, text, at }) => ({
@@ -337,14 +338,14 @@ export class DaemonLifecycleRuntime {
   }
 
   /** Marks the receipts and announcements a reader says it received (ids as {@link peekReceipts} returned them). */
-  acknowledgeReceipts(ids: readonly string[]): void {
+  acknowledgeReceipts(ids: readonly string[], owner: boolean): void {
     const receiptIds = new Set<string>();
     const announcementIds = new Set<string>();
     for (const id of ids) {
       if (id.startsWith('announcement-')) announcementIds.add(id.slice('announcement-'.length));
       else receiptIds.add(id);
     }
-    if (receiptIds.size > 0) this.receiptStore().markDelivered(receiptIds);
+    if (receiptIds.size > 0) this.receiptStore().markDelivered(receiptIds, owner);
     for (const id of announcementIds) this.acknowledgedAnnouncements.add(id);
     this.writeAcknowledgedAnnouncements();
   }
@@ -367,7 +368,8 @@ export class DaemonLifecycleRuntime {
    * why is exactly the line that gets discarded. stderr is synchronous and
    * lands wherever the daemon's output goes (the service journal, a terminal),
    * which is where an operator looks when a daemon keeps restarting. The same
-   * reasoning already governs the fatal-error path in daemon/cli.ts.
+   * reasoning governs the fatal-error path of the daemon entry point,
+   * products/daemon/src/cli/entrypoint.ts.
    */
   private announceOnStderr(line: string): void {
     try {
@@ -635,7 +637,7 @@ export class DaemonLifecycleRuntime {
     this.updateLoopOffReason = 'this process rolled back to the kept previous version and is handing over to it; updates resume in the restored daemon';
     const at = (this.options.now ?? Date.now)();
     try {
-      this.receiptStore().record(crashLoopRollbackReceipt({ failedStarts, restored: result.restored, at }));
+      this.receiptStore().record(crashLoopRollbackReceipt({ failedStarts, restored: result.restored, at, timeZone: receiptTimeZone(this.options.configManager) }));
     } catch (error) {
       logger.warn('DaemonServer: could not persist completed disk rollback receipt', { error: summarizeError(error) });
     }
@@ -831,9 +833,9 @@ export class DaemonLifecycleRuntime {
           ownerPid: startResult.foreignOwner.pid,
         });
       } else if (startResult.crashed && firstStartInThisProcess) {
-        this.receiptStore().record(`restarted after a crash at ${formatReceiptTime((this.options.now ?? Date.now)())}`);
+        this.receiptStore().record(`restarted after a crash at ${formatReceiptTime((this.options.now ?? Date.now)(), receiptTimeZone(this.options.configManager))}`);
       } else if (startResult.previousStopHadCleanupErrors && firstStartInThisProcess) {
-        this.receiptStore().record(`restarted after the previous daemon stopped with cleanup errors (it shut down in order, not by a crash) at ${formatReceiptTime((this.options.now ?? Date.now)())}`);
+        this.receiptStore().record(`restarted after the previous daemon stopped with cleanup errors (it shut down in order, not by a crash) at ${formatReceiptTime((this.options.now ?? Date.now)(), receiptTimeZone(this.options.configManager))}`);
       }
     } catch (error) {
       logger.warn('DaemonServer: could not record the lifecycle marker', { error: summarizeError(error) });
@@ -895,7 +897,15 @@ export class DaemonLifecycleRuntime {
     };
     this.autostartWatch = config.subscribe('service.autostart', () => apply('changed'));
     if (this.promotionTimer || this.promotionTask) return;
-    void manager.statusAsync().then((status) => { if (status.installed && !status.actionError) apply('at start'); }).catch(() => {});
+    // An installed service whose state cannot be read is said to the owner; an uninstalled or turned-off one stays quiet.
+    const unchecked = (reason: string): void => {
+      this.alertOwner(`service.autostart could not be checked at start: ${reason}; it is applied the next time the setting changes`);
+    };
+    void manager.statusAsync().then((status) => {
+      if (!status.installed) return;
+      if (status.actionError) unchecked(status.actionError);
+      else apply('at start');
+    }).catch((error: unknown) => { unchecked(summarizeError(error)); });
   }
 
   /** Fence handovers before the facade awaits any shutdown hooks. Never self-drains. */
@@ -1026,6 +1036,7 @@ export class DaemonLifecycleRuntime {
       ...(this.options.describeActiveWork ? { describeActiveWork: this.options.describeActiveWork } : {}),
       ...(this.options.workAdmission ? { workAdmission: this.options.workAdmission } : {}),
       receipts: this.receiptStore(),
+      receiptTimeZone: () => receiptTimeZone(this.options.configManager),
       serviceActions: this.buildServiceActions(),
       // Read from disk on every check, not captured once: the rejection this
       // has to honor was written by the boot BEFORE the one running now.

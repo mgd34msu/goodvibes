@@ -22,11 +22,11 @@ import { assertConfirmed } from '../../control-plane/host-handlers.js';
 import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
 import {
   registerCatalogHandlers,
-  HandlerError,
   type CatalogHandlerEntry,
   type TypedHandler,
   type Unregister,
 } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import {
   buildChannelId,
   parseChannelId,
@@ -134,14 +134,14 @@ const PROFILE_ROUTED_SURFACE_KINDS: readonly string[] = [...CHANNEL_SURFACE_KIND
 function assertAssignableChannel(channelId: string, surfaceKind: string | undefined, routeId: string | undefined): void {
   const parsed = parseChannelId(channelId);
   if (!KNOWN_SURFACE_KINDS.includes(parsed.surfaceKind)) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `Unknown surfaceKind '${parsed.surfaceKind}'; use one of: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}`,
       'ROUTING_INVALID_SURFACE_KIND',
       400,
     );
   }
   if (!PROFILE_ROUTED_SURFACE_KINDS.includes(parsed.surfaceKind)) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `Not assigned: ${parsed.surfaceKind} is the owner's own surface, where the model is chosen in the surface itself, so this assignment would never apply. `
         + `Profile assignments apply to: ${PROFILE_ROUTED_SURFACE_KINDS.join(', ')}.`,
       'ROUTING_SURFACE_NOT_ROUTED',
@@ -149,7 +149,7 @@ function assertAssignableChannel(channelId: string, surfaceKind: string | undefi
     );
   }
   if (surfaceKind !== undefined && surfaceKind !== parsed.surfaceKind) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `surfaceKind '${surfaceKind}' does not match channelId '${channelId}'; send one or the other`,
       'ROUTING_INVALID_CHANNEL_ID',
       400,
@@ -157,14 +157,14 @@ function assertAssignableChannel(channelId: string, surfaceKind: string | undefi
   }
   // A routeId beside a channelId that names none would otherwise be dropped, storing a broader assignment than asked for.
   if (routeId !== undefined && parsed.routeId !== routeId) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `routeId '${routeId}' does not match channelId '${channelId}'; send one or the other`,
       'ROUTING_INVALID_CHANNEL_ID',
       400,
     );
   }
   if (parsed.surfaceKind === WILDCARD_SURFACE && parsed.routeId !== undefined) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `'${WILDCARD_SURFACE}' assigns a profile to every surface and cannot be limited to a route; use a specific surfaceKind with the route, or '${WILDCARD_SURFACE}' alone`,
       'ROUTING_INVALID_CHANNEL_ID',
       400,
@@ -207,7 +207,7 @@ export interface RoutingRegistration {
 export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration {
   const descriptors = [LIST_METHOD, ASSIGN_METHOD, DELETE_METHOD].map((id) => {
     const descriptor = ctx.catalog.get(id);
-    if (!descriptor) throw new HandlerError(`Unknown gateway method: ${id}`, 'METHOD_NOT_FOUND', 404);
+    if (!descriptor) throw new GatewayVerbError(`Unknown gateway method: ${id}`, 'METHOD_NOT_FOUND', 404);
     return descriptor;
   });
   const store = new RouteStore({ workingDirectory: ctx.workingDirectory });
@@ -216,7 +216,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   let closing: Promise<void> | undefined;
   const active = new Set<Promise<unknown>>();
   let mutationTail: Promise<unknown> = Promise.resolve();
-  const closedError = (): HandlerError => new HandlerError('Routing surface is closed', 'ROUTING_SURFACE_CLOSED', 409);
+  const closedError = (): GatewayVerbError => new GatewayVerbError('Routing surface is closed', 'ROUTING_SURFACE_CLOSED', 409);
   const own = <T>(operation: () => Promise<T>, mutation = false): Promise<T> => {
     if (closed) return Promise.reject(closedError());
     const work = (mutation ? mutationTail : Promise.resolve()).then(operation);
@@ -269,7 +269,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     await ensureInit();
     const profileId = optionalString(body.profileId);
     if (profileId === undefined) {
-      throw new HandlerError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
+      throw new GatewayVerbError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
     }
     // The platform contract accepts either a composite `channelId` or the
     // `surfaceKind` (+ optional `routeId`) parts. Prefer an explicit
@@ -281,7 +281,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
       surfaceKind !== undefined ? buildChannelId(surfaceKind, routeId) : undefined
     );
     if (channelId === undefined) {
-      throw new HandlerError('surfaceKind (or channelId) is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
+      throw new GatewayVerbError('surfaceKind (or channelId) is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
     }
     assertAssignableChannel(channelId, surfaceKind, routeId);
     const label = optionalString(body.label);
@@ -331,7 +331,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     await ensureInit();
     const assignmentId = optionalString(body.assignmentId);
     if (assignmentId === undefined) {
-      throw new HandlerError('assignmentId is required; list the routes to find it.', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
+      throw new GatewayVerbError('assignmentId is required; list the routes to find it.', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
     }
     const selected = autonomous ? store.selectRow('assignment', assignmentId) : undefined;
     const deleted = await runNativeMutation({ host: ctx.nativeMutationHost, method: DELETE_METHOD, body, context,

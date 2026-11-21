@@ -11,54 +11,36 @@ import {
 import type { DaemonRuntimeRouteContext, DaemonRuntimeRouteHandlerMap } from './runtime-route-types.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
+import { ROUTE_SURFACE_KINDS } from '../../../events/routes.js';
+import {
+  AUTOMATION_DELIVERY_MODES,
+  AUTOMATION_EXECUTION_TARGET_KINDS,
+  AUTOMATION_EXTERNAL_CONTENT_SOURCE_KINDS,
+  AUTOMATION_FAILURE_ACTIONS,
+  AUTOMATION_PROVIDER_FAILURE_POLICIES,
+  AUTOMATION_PROVIDER_SELECTIONS,
+  AUTOMATION_RETRY_STRATEGIES,
+  AUTOMATION_WAKE_MODES,
+} from '../../control-plane/operator-contract-schemas-admin.js';
 
 export type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
 
 type RuntimeRouteSpawnAgentInput = Parameters<PlatformDaemonRuntimeRouteContext['trySpawnAgent']>[0];
 type PlatformSpawnAgentInput = Parameters<DaemonRuntimeRouteContext['trySpawnAgent']>[0];
 
-const providerSelections = new Set(['inherit-current', 'concrete', 'synthetic']);
-const providerFailurePolicies = new Set(['ordered-fallbacks', 'fail']);
-const executionTargetKinds = new Set(['isolated', 'current', 'pinned', 'background', 'main', 'session', 'route']);
-const surfaceKinds = new Set([
-  'tui',
-  'web',
-  'slack',
-  'discord',
-  'ntfy',
-  'webhook',
-  'homeassistant',
-  'telegram',
-  'google-chat',
-  'signal',
-  'whatsapp',
-  'imessage',
-  'msteams',
-  'bluebubbles',
-  'mattermost',
-  'matrix',
-  'service',
-]);
+// Every set below is built from the tuple the published operator schema is
+// built from, so the route admits exactly what the contract advertises.
+const providerSelections = new Set<string>(AUTOMATION_PROVIDER_SELECTIONS);
+const providerFailurePolicies = new Set<string>(AUTOMATION_PROVIDER_FAILURE_POLICIES);
+const executionTargetKinds = new Set<string>(AUTOMATION_EXECUTION_TARGET_KINDS);
+const surfaceKinds = new Set<string>(ROUTE_SURFACE_KINDS);
 // Full severity ladder, not a fixed 4-value list, see providers/reasoning-effort.ts.
 const reasoningEfforts = new Set(REASONING_EFFORT_SEVERITY);
-const wakeModes = new Set(['next-heartbeat', 'now']);
-const externalContentKinds = new Set([
-  'gmail',
-  'email',
-  'webhook',
-  'api',
-  'browser',
-  'channel_metadata',
-  'web_search',
-  'web_fetch',
-  'slack',
-  'discord',
-  'ntfy',
-  'unknown',
-]);
-const deliveryModes = new Set(['none', 'webhook', 'surface', 'integration', 'link']);
-const failureActions = new Set(['retry', 'cooldown', 'disable', 'dead_letter']);
-const retryStrategies = new Set(['fixed', 'linear', 'exponential']);
+const wakeModes = new Set<string>(AUTOMATION_WAKE_MODES);
+const externalContentKinds = new Set<string>(AUTOMATION_EXTERNAL_CONTENT_SOURCE_KINDS);
+const deliveryModes = new Set<string>(AUTOMATION_DELIVERY_MODES);
+const failureActions = new Set<string>(AUTOMATION_FAILURE_ACTIONS);
+const retryStrategies = new Set<string>(AUTOMATION_RETRY_STRATEGIES);
 const executionProtocols = new Set(['direct', 'gather-plan-apply']);
 const reviewModes = new Set(['none', 'contract']);
 const communicationLanes = new Set(['parent-only', 'parent-and-children', 'cohort', 'direct']);

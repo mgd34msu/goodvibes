@@ -28,6 +28,7 @@ import { bootDaemon, type BootDaemonOptions, type BootedDaemon } from '../daemon
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { ApprovalBroker, SharedSessionBroker } from '../control-plane/index.js';
 import type { SharedApprovalRecord } from '../control-plane/approval-broker.js';
+import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
 import type { SharedSessionSubmission } from '../control-plane/session-types.js';
 import type { AutomationSurfaceKind } from '../automation/types.js';
 import type { PermissionRequestHandler } from '../permissions/prompt.js';
@@ -531,7 +532,7 @@ function bridgeApprovals(daemon: SharedDaemon, server: AgentOwnershipSource, app
           // The request a callback answered never changes; a claim or note made meanwhile moved only the
           // revision. An ask still open is answered at its current revision; a settled one stays settled.
           if (!outcome.applied && outcome.refusal.code === 'APPROVAL_CHANGED' && outcome.record
-            && (outcome.record.status === 'pending' || outcome.record.status === 'claimed')) await answer(outcome.record.revision);
+            && isOpenApprovalStatus(outcome.record.status)) await answer(outcome.record.revision);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           logger.warn('createEmbeddedSession: the embedder\'s decision was refused; denying the approval', { approvalId: approval.id, error: message });

@@ -41,14 +41,23 @@ const MAX_KEPT_BODY_BYTES = 256 * 1024;
 export const IDEMPOTENCY_KEY_REPLAY: ContractReplayKey = Object.freeze({
   in: 'header',
   name: 'Idempotency-Key',
-  behavior: `Send a key (${OPERATION_KEY_RULE}) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as \`idempotencyKey\` beside \`body\`.`,
+  behavior: `Send a key (${OPERATION_KEY_RULE}) chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as \`idempotencyKey\` beside \`body\`.`,
 });
 
 /** One request's answer, as the transport sends it. */
 export interface ReplayableAnswer {
   readonly status: number;
   readonly body: unknown;
+  /** The route's answer headers a caller acts on ({@link KEPT_ANSWER_HEADERS}), kept and replayed with the answer. */
+  readonly headers?: Readonly<Record<string, string>> | undefined;
 }
+
+/** The answer headers kept with a keyed answer and sent again on its replay: the wait a route states, and where a created thing is. */
+export const KEPT_ANSWER_HEADERS = ['Retry-After', 'Location'] as const;
+
+/** The wait an IDEMPOTENCY_KEY_IN_FLIGHT answer states, in the header and in the body's `retryAfterMs`. */
+const IN_FLIGHT_RETRY_AFTER_MS = 1000;
+const IN_FLIGHT_HEADERS = Object.freeze({ 'Retry-After': String(Math.ceil(IN_FLIGHT_RETRY_AFTER_MS / 1000)) });
 
 export interface IdempotentReplayRequest {
   readonly principalId: string;
@@ -65,6 +74,8 @@ interface KeptEntry {
   readonly status?: number;
   readonly body?: unknown;
   readonly bodyWithheld?: true;
+  /** The kept answer headers; absent in entries written before they were kept, which replay without them. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 function refusal(status: number, code: string, error: string, extra: Record<string, unknown> = {}): ReplayableAnswer {
@@ -120,16 +131,16 @@ export class IdempotentReplayStore {
       }
       if (kept.state === 'running') {
         return this.inFlight.has(id)
-          ? { ...refusal(409, 'IDEMPOTENCY_KEY_IN_FLIGHT', 'The first request under this Idempotency-Key is still running. Nothing was done twice; send it again in a moment for its answer.', { recoverable: true, retryAfterMs: 1000 }), replayed: false }
+          ? { ...refusal(409, 'IDEMPOTENCY_KEY_IN_FLIGHT', 'The first request under this Idempotency-Key is still running. Nothing was done twice; send it again in a moment for its answer.', { recoverable: true, retryAfterMs: IN_FLIGHT_RETRY_AFTER_MS }), headers: IN_FLIGHT_HEADERS, replayed: false }
           : { ...refusal(409, 'IDEMPOTENCY_OUTCOME_UNKNOWN', 'The first request under this Idempotency-Key was taken, but the daemon stopped before it answered, so whether it acted is unknown. Nothing was done again; check the state before sending a new request.', { recoverable: false }), replayed: false };
       }
       if (kept.bodyWithheld) {
         return { ...refusal(409, 'IDEMPOTENCY_ANSWER_NOT_KEPT', `The first request under this Idempotency-Key was done (HTTP ${String(kept.status ?? 200)}), but its answer was too large to keep. Nothing was done again; read the result instead.`), replayed: true };
       }
-      return { status: kept.status ?? 200, body: kept.body ?? null, replayed: true };
+      return { status: kept.status ?? 200, body: kept.body ?? null, ...(kept.headers ? { headers: kept.headers } : {}), replayed: true };
     }
     if (this.inFlight.has(id)) {
-      return { ...refusal(409, 'IDEMPOTENCY_KEY_IN_FLIGHT', 'The first request under this Idempotency-Key is still running; send it again in a moment for its answer.', { recoverable: true, retryAfterMs: 1000 }), replayed: false };
+      return { ...refusal(409, 'IDEMPOTENCY_KEY_IN_FLIGHT', 'The first request under this Idempotency-Key is still running; send it again in a moment for its answer.', { recoverable: true, retryAfterMs: IN_FLIGHT_RETRY_AFTER_MS }), headers: IN_FLIGHT_HEADERS, replayed: false };
     }
     this.inFlight.add(id);
     try {
@@ -152,9 +163,10 @@ export class IdempotentReplayStore {
         this.remove(file);
       } else {
         const serialized = JSON.stringify(answer.body ?? null);
+        const headers = answer.headers && Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {};
         this.write(file, Buffer.byteLength(serialized) > MAX_KEPT_BODY_BYTES
-          ? { fingerprint, state: 'done', at: this.now(), status: answer.status, bodyWithheld: true }
-          : { fingerprint, state: 'done', at: this.now(), status: answer.status, body: answer.body });
+          ? { fingerprint, state: 'done', at: this.now(), status: answer.status, bodyWithheld: true, ...headers }
+          : { fingerprint, state: 'done', at: this.now(), status: answer.status, body: answer.body, ...headers });
       }
       return { ...answer, replayed: false };
     } finally {
@@ -284,11 +296,16 @@ export async function replayKeyedRequest(
       const text = await response.text();
       let body: unknown = text;
       try { body = text ? JSON.parse(text) : null; } catch { /* a non-JSON answer is kept as text */ }
-      return { status: response.status, body };
+      const headers: Record<string, string> = {};
+      for (const name of KEPT_ANSWER_HEADERS) {
+        const value = response.headers.get(name);
+        if (value !== null) headers[name] = value;
+      }
+      return { status: response.status, body, ...(Object.keys(headers).length > 0 ? { headers } : {}) };
     });
     return Response.json(answer.body, {
       status: answer.status,
-      headers: answer.replayed ? { 'Idempotent-Replayed': 'true' } : {},
+      headers: { ...answer.headers, ...(answer.replayed ? { 'Idempotent-Replayed': 'true' } : {}) },
     });
   };
   if (!input.req.body || !isArtifactUploadRequest(input.req)) {

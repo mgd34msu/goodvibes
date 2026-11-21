@@ -14,7 +14,7 @@
  * side). This file is browser-safe: no `node:` import, so the web UI and the
  * browser SDK entry use the same check.
  */
-import { RefusalError, refusal } from '@goodvibes/engine/errors';
+import { ConfigurationError, RefusalError, refusal } from '@goodvibes/engine/errors';
 import { parseDaemonOrigin, type DaemonOrigin } from '../../config/control-plane-base-url.js';
 import { sha256Base64Url } from '../../utils/sha256.js';
 
@@ -86,7 +86,7 @@ export class CredentialOriginError extends RefusalError {
       code: 'CREDENTIAL_NOT_FOR_TARGET',
       state: 'nothing was sent',
       reason: `the credential for the daemon at ${credentialOrigin} is never sent to ${requestOrigin ?? 'an address that is not a daemon origin'}`,
-      next: [`connect to ${requestOrigin ?? 'that daemon'} with its own token (--token, /setup Network step, or goodvibes-agent setup pair)`],
+      next: [`connect to ${requestOrigin ?? 'that daemon'} with its own token (--token, /setup connect-daemon, or goodvibes-agent setup pair)`],
       retryable: false,
     }), { category: 'authorization', source: 'transport' });
     this.name = 'CredentialOriginError';
@@ -128,4 +128,27 @@ export function daemonAuthHeaders(target: DaemonTarget, url: string | URL): Reco
     return {};
   }
   return { Authorization: `Bearer ${bearerFor(target.credential, url)}` };
+}
+
+/** A WebSocket constructor that takes upgrade headers (Bun, Node's undici, React Native). */
+type HeaderWebSocket = new (url: string, init: { readonly headers: Record<string, string> }) => WebSocket;
+
+/**
+ * Opens each realtime socket with the bearer on the upgrade request, built by
+ * {@link daemonAuthHeaders} for the daemon at `baseUrl`'s origin: the daemon
+ * refuses an upgrade without a credential before any in-band auth frame, and a
+ * socket URL on another origin throws instead of carrying the token there. The
+ * token is the one resolved for each connect, so a refreshed one is used on a
+ * reconnect.
+ */
+export function authenticatedSocketFactory(baseUrl: string, WebSocketImpl: typeof WebSocket): (url: string, token: string | null) => WebSocket {
+  let origin: DaemonOrigin | null = null;
+  try { origin = parseDaemonOrigin(new URL(baseUrl).origin); } catch { origin = null; }
+  return (url, token) => {
+    if (!origin) throw new ConfigurationError(`'${baseUrl}' is not a daemon address (scheme://host:port).`);
+    const target = daemonTarget(origin, token ? bindCredential(origin, token, 'explicit') : null, false);
+    const headers = daemonAuthHeaders(target, url);
+    if (Object.keys(headers).length === 0) return new WebSocketImpl(url);
+    return new (WebSocketImpl as unknown as HeaderWebSocket)(url, { headers });
+  };
 }

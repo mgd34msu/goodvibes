@@ -1,5 +1,5 @@
 import { revealOrNull, type Secret } from '../security/secret.js';
-import { resolveSecretInput } from '../config/secret-refs.js';
+import { resolveSecretInput, type SecretProviderHostConfig } from '../config/secret-refs.js';
 import {
   CLOUDFLARE_API_TOKEN_KEY,
   CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY,
@@ -19,10 +19,12 @@ import { clean } from './utils.js';
 // ---------------------------------------------------------------------------
 
 export interface TokenResolverContext {
-  readonly secretsManager?: Pick<{
+  readonly secretsManager?: {
     get(key: string): Promise<Secret | null>;
     getGlobalHome(): string | undefined;
-  }, 'get' | 'getGlobalHome'> | null | undefined;
+    /** The owner's password-manager settings a reference resolves with; the providers' defaults when absent. */
+    getSecretProviderHostConfig?(): SecretProviderHostConfig | undefined;
+  } | null | undefined;
   readonly authToken?: (() => string | null) | undefined;
   readonly readConfig: () => CloudflareControlPlaneConfig;
 }
@@ -119,6 +121,7 @@ export async function resolveSecretRef(
     const value = await resolveSecretInput(ref, {
       resolveLocalSecret: async (key) => await ctx.secretsManager?.get(key) ?? null,
       homeDirectory: ctx.secretsManager?.getGlobalHome(),
+      providers: ctx.secretsManager?.getSecretProviderHostConfig?.(),
     }, 'dispatch');
     return value ? { value, source: 'config-ref' } : { value: null, source: 'missing' };
   } catch (err) {

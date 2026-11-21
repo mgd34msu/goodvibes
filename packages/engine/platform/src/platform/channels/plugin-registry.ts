@@ -176,6 +176,18 @@ export class ChannelPluginRegistry {
     return plugin && this.isPluginEnabled(plugin) ? plugin : null;
   }
 
+  /**
+   * Whether a surface named by a caller (any string) has a registered plugin
+   * and whether it is enabled, with the surfaces that are enabled, so a caller
+   * can name the surface instead of reading an empty answer as "nothing there".
+   */
+  describeSurface(surface: string): { readonly state: 'enabled' | 'disabled' | 'unknown'; readonly enabled: readonly ChannelSurface[] } {
+    const plugin = this.pluginsBySurface.get(surface as ChannelSurface);
+    const enabled = this.list().map((entry) => entry.surface);
+    if (!plugin) return { state: 'unknown', enabled };
+    return { state: this.isPluginEnabled(plugin) ? 'enabled' : 'disabled', enabled };
+  }
+
   get(pluginId: string): ChannelPlugin | null {
     const plugin = this.plugins.get(pluginId);
     return plugin && this.isPluginEnabled(plugin) ? plugin : null;

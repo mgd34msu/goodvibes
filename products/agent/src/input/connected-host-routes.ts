@@ -139,8 +139,9 @@ export function formatConnectedHostRouteFailure(
  * does not.
  */
 export function invokeConnectedHostMethod<M extends OperatorMethodId>(context: CommandContext, method: M, input: OperatorMethodInput<M>): Promise<OperatorMethodOutput<M>> {
+  // The host's own code is kept on the refusal, so a caller can tell one refusal from another.
   const refusalOf = (error: unknown): Error => isHostFailure(error)
-    ? commandRefusal(formatHostFailure(error))
+    ? commandRefusal(formatHostFailure(error), undefined, error.refusal.code)
     : commandRefusal(`The call to the connected host was not sent: ${error instanceof Error ? error.message : String(error)}`, 'Check the connected-host settings with /settings, then try again');
   // Not awaited here: awaiting the output of a generic method id makes the
   // compiler expand every method's output at once.

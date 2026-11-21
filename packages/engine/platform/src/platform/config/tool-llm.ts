@@ -36,7 +36,7 @@ export interface ResolvedToolLLM {
 
 export interface ToolLLMDeps {
   readonly configManager: Pick<ConfigManager, 'get'>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing' | 'cacheRatios'
     | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>;
   /**
    * Runtime bus for usage events. When present, every tool-internal LLM call
@@ -182,7 +182,8 @@ export class ToolLLM {
           cacheWriteTokens: response.usage?.cacheWriteTokens ?? 0,
         };
         const resolvedPricing = this.deps.providerRegistry.resolveModelPricing(modelId, provider.name);
-        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, provider.name);
+        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, provider.name,
+          this.deps.providerRegistry.cacheRatios(provider.name));
         emitLlmResponseReceived(this.deps.runtimeBus, {
           sessionId: this.deps.sessionId?.() ?? '',
           source: 'tool-llm',

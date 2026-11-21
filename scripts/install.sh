@@ -60,6 +60,9 @@ WEBUI_ROOT="$INSTALL_DIR/webui"
 # receipt, never rebuilt here.
 WEBUI_INSTALLED=0
 WEBUI_URL=""
+# Set when the owner had turned the web UI off: the new bundle is put in place
+# and serving is left off.
+WEBUI_LEFT_OFF=0
 
 # Set where a step after the programs were replaced printed a NOTE that the daemon or the web UI is not
 # running as asked; the closing lines repeat each one and the run exits 4 (installed, with problems).
@@ -186,8 +189,22 @@ read_daemon_service() {
   DAEMON_SERVICE_INSTALLED=0
   DAEMON_PRODUCT_SERVICES=""
   [ -x "$INSTALL_DIR/goodvibes-daemon" ] || return 1
-  # Exits 0, 3 and 4 all print the document; 1 (manager unreachable) prints none.
+  # Exits 0, 3 and 4 all print the service-status document (schema
+  # goodvibes.daemon.service-status, version 1); 1 (manager unreachable) prints
+  # the {ok:false, code, error, fix} failure document.
   _rds_json=$(daemon_service_command service-status --json 2>/dev/null) || :
+  [ -n "$_rds_json" ] || return 1
+  _rds_schema=$(daemon_service_string schema "$_rds_json")
+  _rds_version=$(printf '%s\n' "$_rds_json" | sed -n 's/^ *"schemaVersion": *\([0-9]*\),\{0,1\}$/\1/p' | head -n 1)
+  if [ "$_rds_schema" != goodvibes.daemon.service-status ] || [ "$_rds_version" != 1 ]; then
+    _rds_error=$(daemon_service_string error "$_rds_json")
+    if [ -n "$_rds_error" ]; then
+      say "NOTE: goodvibes-daemon could not report its service ($_rds_error), so the service was not refreshed, restarted or removed." >&2
+    else
+      say "NOTE: goodvibes-daemon answered service-status --json in a form this installer does not read, so the service was not refreshed, restarted or removed." >&2
+    fi
+    return 1
+  fi
   _rds_name=$(daemon_service_string serviceName "$_rds_json")
   _rds_path=$(daemon_service_string path "$_rds_json")
   _rds_platform=$(daemon_service_string platform "$_rds_json")
@@ -2421,28 +2438,50 @@ install_webui() {
 configure_webui() {
   [ "$WITH_WEBUI" = "1" ] || return 0
 
-  # Point the daemon at it. The binary owns the settings; this reads its receipt
-  # and prints it, so the install's own output states the URL and the posture.
+  # The owner's choice is kept: with a bundle directory already configured and
+  # serving off (`webui disable`), only the directory moves to this version's
+  # bundle, so a later `goodvibes-daemon webui enable` serves the current one.
+  # `webui status --json` is one line (schema goodvibes.daemon.webui-binding).
+  webui_state=$("$INSTALL_DIR/goodvibes-daemon" webui status --json 2>/dev/null) || webui_state=''
+  webui_serve=$(printf '%s\n' "$webui_state" | sed -n 's/.*"serve":\(true\).*/\1/p; s/.*"serve":\(false\).*/\1/p' | head -n 1)
+  webui_bundle=$(printf '%s\n' "$webui_state" | sed -n 's/.*"bundleDir":"\([^"]*\)".*/\1/p' | head -n 1)
+  if [ -n "$webui_bundle" ] && [ "$webui_serve" = false ]; then
+    if "$INSTALL_DIR/goodvibes-daemon" config set controlPlane.webui.bundleDir "$webui_target" >/dev/null 2>&1; then
+      WEBUI_LEFT_OFF=1
+      say "  Web UI: left off (you turned it off). Turn it on: goodvibes-daemon webui enable"
+    else
+      WEBUI_NOT_CONFIGURED=1
+      say "  NOTE: the web UI is off and its bundle directory could not be moved to $webui_target. Run:"
+      say "    goodvibes-daemon config set controlPlane.webui.bundleDir $webui_target"
+    fi
+    return 0
+  fi
+
+  # Point the daemon at it. The binary owns the settings; this reads its
+  # receipt (`webui enable --json`, schema goodvibes.daemon.webui-enable: one key
+  # and one `lines` entry per line) and prints its lines, so the install's own
+  # output states the URL and the posture.
   # Not fatal: an unconfigured bundle on disk is a working install of everything
   # else plus one command to run, whereas an aborted install is neither.
-  webui_output=$("$INSTALL_DIR/goodvibes-daemon" webui enable --bundle-dir "$webui_target" 2>&1) && webui_ok=1 || webui_ok=0
-  if [ -n "$webui_output" ]; then
-    printf '%s\n' "$webui_output" | while IFS= read -r webui_line; do
-      say "  $webui_line"
-    done
-  fi
+  webui_output=$("$INSTALL_DIR/goodvibes-daemon" webui enable --bundle-dir "$webui_target" --json 2>&1) && webui_ok=1 || webui_ok=0
+  printf '%s\n' "$webui_output" | awk '
+    /^  "lines": \[\]/ { exit }
+    /^  "lines": \[/ { inside = 1; next }
+    inside && /^  \]/ { exit }
+    inside { sub(/^    "/, ""); sub(/",?$/, ""); gsub(/\\"/, "\""); gsub(/\\\\/, "\\"); print "  " $0 }'
   if [ "$webui_ok" != "1" ]; then
     WEBUI_NOT_CONFIGURED=1
+    webui_error=$(printf '%s\n' "$webui_output" | sed -n 's/^ *"error": *"\(.*\)",\{0,1\}$/\1/p' | head -n 1)
+    [ -z "$webui_error" ] || say "  $webui_error"
     say "  NOTE: the bundle is on disk but the daemon was not configured to serve it. Run:"
     say "    goodvibes-daemon webui enable --bundle-dir $webui_target"
     return 0
   fi
 
-  # The URL the daemon reported, lifted out of its own receipt rather than
-  # rebuilt here from config: the command that wrote the settings is the one
-  # that knows which listener serves the bundle and on what port, and a second
-  # derivation in shell is how a printed URL starts disagreeing with the daemon.
-  WEBUI_URL=$(printf '%s\n' "$webui_output" | awk '/^[[:space:]]*https?:\/\//{print $1; exit}')
+  # The URL the daemon reported, read from its own receipt rather than rebuilt
+  # here from config: the command that wrote the settings is the one that knows
+  # which listener serves the bundle and on what port.
+  WEBUI_URL=$(printf '%s\n' "$webui_output" | sed -n 's/^  "url": *"\(.*\)",\{0,1\}$/\1/p' | head -n 1)
 
   WEBUI_INSTALLED=1
 }
@@ -3882,6 +3921,10 @@ main() {
     # Who can reach it, and the command that changes that, is in the daemon's
     # own lines printed when the web UI was configured.
     say "Web UI:           $WEBUI_URL"
+    say "Sign in:          run goodvibes pair (or goodvibes-daemon pair) and open the link it prints, or scan its QR"
+  fi
+  if [ "$WEBUI_LEFT_OFF" = "1" ]; then
+    say "Web UI:           left off (you turned it off); the new bundle is in place. Turn it on: $INSTALL_DIR/goodvibes-daemon webui enable"
   fi
   if [ "$WEBUI_NOT_CONFIGURED" = "1" ]; then
     say "Web UI:           NOT configured (the daemon refused); serve it with: $INSTALL_DIR/goodvibes-daemon webui enable --bundle-dir $webui_target"

@@ -88,7 +88,6 @@ import {
   getCacheHitTracker,
   getIdempotencyStore,
   getSessionLineageTracker,
-  normalizeUsage,
   requireConfigManager,
   requireProviderRegistry,
   type OrchestratorCoreServices,
@@ -1332,7 +1331,6 @@ export class Orchestrator {
       emitterContext: (id) => createEmitterContext(this.currentSessionId, id),
       executeToolCalls: (id, calls, sourceOf) => this.executeToolCalls(id, calls, sourceOf ?? (() => ({ goal: text, criteria: [] }))),
       checkContextWindowPreflight: (id, model) => this.checkContextWindowPreflight(id, model),
-      normalizeUsage,
       estimateFreshTurnInputTokens: (currentEstimatedTokens, nextText, nextContent) =>
         estimateFreshTurnInputTokens(this.lastInputTokens, currentEstimatedTokens, nextText, nextContent),
       getMessageQueueLength: () => this.messageQueue.length,

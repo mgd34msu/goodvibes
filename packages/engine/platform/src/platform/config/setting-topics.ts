@@ -99,7 +99,7 @@ export const SETTING_TOPICS: readonly SettingTopic[] = [
         id: 'models',
         label: 'Model',
         description: 'The model new chats use, and the providers that serve it.',
-        namespaces: ['provider', 'judgment', 'pricing', 'cache'],
+        namespaces: ['provider', 'judgment', 'pricing', 'cache', 'webSearch'],
       },
       {
         id: 'credentials',

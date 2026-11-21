@@ -21,14 +21,14 @@ import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channe
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/events/index.js';
 import { emitCompanionMessageReceived } from '../runtime/emitters/index.js';
-import { NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/ntfy.js';
+import { NtfyIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../integrations/ntfy.js';
 import {
   postHomeAssistantSurfaceChatMessage,
   type HomeAssistantSurfaceChatInput,
   type HomeAssistantSurfaceChatResult,
 } from './surface-homeassistant-reply.js';
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
-import { resolveSecretInput } from '../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { holdCompanionTurn, type HeldCompanionTurn } from './held-companion-turn.js';
 import { agentRetrySpawnInput } from '@goodvibes/engine/daemon-api/tasks';
@@ -245,7 +245,9 @@ export class DaemonSurfaceActionHelper {
         const decision = await this.authorizeSurfaceIngress(input);
         if (decision.allowed) {
           // A sender with no identity is admitted by its surface secret, which only an
-          // empty allowlist allows; an identified sender is the operator only as the owner.
+          // empty allowlist allows, and only the generic webhook and Home Assistant send
+          // one (their secret is held by the owner's own systems); every chat adapter
+          // passes its sender. An identified sender is the operator only as the owner.
           // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to him.
           const actor = channelSenderActor(decision, input.surface, input.userId);
           const operator = admitEffects(actor, ['turn.start']).kind === 'allowed';
@@ -375,6 +377,17 @@ export class DaemonSurfaceActionHelper {
         resumed += 1;
       } catch (error) {
         logger.error('Agreed work saved before a restart could not be started', { proposalId: proposal.id, error: summarizeError(error) });
+        // Settled, never silently dropped: the owner is told and its held input
+        // is closed, then the record is no longer owed work.
+        try {
+          const deps = this.conversationGateDeps();
+          const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
+          await deliverProposalNotice(deps, binding, `Could not start: ${proposal.summary}. Send the message again.`);
+          await settleUnstartedWork(deps, proposal, 'The agreed work could not be started. Send the message again.');
+          store.markStarted(proposal.id);
+        } catch (settleError) {
+          logger.error('Agreed work that could not be started could not be settled', { proposalId: proposal.id, error: summarizeError(settleError) });
+        }
       }
     }
     return resumed;
@@ -411,7 +424,8 @@ export class DaemonSurfaceActionHelper {
   /**
    * Whether a sender on a channel is someone it admits who is not its owner,
    * the same rule ingress applies (`channelSenderActor`): a sender with no id is
-   * admitted by the surface's secret and is not a guest.
+   * admitted by the surface's secret and is not a guest, which only the generic
+   * webhook and Home Assistant send; a chat adapter always passes its sender.
    */
   senderIsGuest(surface: string, userId: string | undefined): boolean {
     if (userId === undefined || !isChannelSurfaceKind(surface)) return false;
@@ -1116,7 +1130,7 @@ export class DaemonSurfaceActionHelper {
   private async publishNtfyReply(topic: string, message: string, title: string, announces: string): Promise<void> {
     if (!topic || !message.trim()) return;
     const ntfy = new NtfyIntegration(
-      String(this.context.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh'),
+      ntfyBaseUrl(this.context.configManager),
       await this.resolveNtfyToken() ?? undefined,
     );
     const priority = resolveNtfyDefaultPriority(this.context.configManager.get('surfaces.ntfy.defaultPriority'));
@@ -1133,6 +1147,7 @@ export class DaemonSurfaceActionHelper {
       || await resolveSecretInput(this.context.configManager.get('surfaces.ntfy.token'), {
         resolveLocalSecret: (key) => this.context.secretsManager.get(key),
         homeDirectory: this.context.secretsManager.getGlobalHome?.() ?? undefined,
+        providers: readSecretProviderHostConfig(this.context.configManager),
       }, 'dispatch')
       || process.env.NTFY_ACCESS_TOKEN
       || null;

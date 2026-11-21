@@ -59,14 +59,15 @@ export function clampAttachmentLease(requestedMs: number | undefined, fallbackMs
  * it with (`sessions.hosted.share`). Attaching never makes a principal an
  * owner: who may attach is decided from the owners (the `session.attach`
  * effect), so attaching cannot be the way in. An owner stays one when its
- * client detaches, its lease runs out or the session ends. The engine
- * persists the owners with the session, so a restart keeps them.
+ * client detaches, its lease runs out or the session ends, until an owner
+ * removes it (`sessions.hosted.unshare`). The engine persists the owners with
+ * the session, so a restart keeps them.
  */
 export class HostedSessionAttachments {
   private readonly leases = new Map<string, number>();
   /** The principal that first attached each client id, when the caller was identified. */
   private readonly owners = new Map<string, string>();
-  /** The session's owners: its creator and every principal it was shared with; never shrinks. */
+  /** The session's owners: its creator and every principal it was shared with, less any an owner removed (unshare). */
   private readonly principals: Set<string>;
 
   constructor(principals: Iterable<string> = []) {
@@ -86,6 +87,23 @@ export class HostedSessionAttachments {
     if (this.principals.has(principalId)) return false;
     this.principals.add(principalId);
     return true;
+  }
+
+  /**
+   * Remove an owner and end that principal's attachments. Returns whether it
+   * was an owner and the client ids whose attachments were ended. Refusing to
+   * remove the last owner is the caller's (HostedSessionManager.unshare).
+   */
+  unshare(principalId: string): { readonly removed: boolean; readonly detachedClients: readonly string[] } {
+    const removed = this.principals.delete(principalId);
+    const detachedClients: string[] = [];
+    for (const [clientId, owner] of [...this.owners.entries()]) {
+      if (owner !== principalId) continue;
+      this.owners.delete(clientId);
+      this.leases.delete(clientId);
+      detachedClients.push(clientId);
+    }
+    return { removed, detachedClients };
   }
 
   /** The session's identified owners, as persisted with it. */

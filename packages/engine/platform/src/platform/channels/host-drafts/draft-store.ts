@@ -3,7 +3,7 @@ import { logger } from '../../utils/logger.js';
 import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
 import type { MutationPublication } from '../../utils/file-mutation.js';
-import { HandlerError } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { channelDraftWireReference, createChannelDraftWireReference, isHistoricalDraftWireReference } from './wire-reference.js';
 
 // ---------------------------------------------------------------------------
@@ -328,31 +328,31 @@ export class DraftSyncStore {
     const wireReference = existing?.wireReference ?? input.wireReference ?? createChannelDraftWireReference(id);
     channelDraftWireReference(id, wireReference);
     const conflict = this.store.get<{ id: string }>('SELECT id FROM drafts WHERE id <> ? AND (wireReference = ? OR id = ? OR wireReference = ?)', [id, wireReference, wireReference, id]);
-    if (conflict) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+    if (conflict) throw new GatewayVerbError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     if (input.wireReference !== undefined && input.wireReference !== wireReference
       && this.store.get('SELECT id FROM drafts WHERE id <> ? AND (wireReference = ? OR id = ?)', [id, input.wireReference, input.wireReference])) {
-      throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+      throw new GatewayVerbError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     }
     // Only an actual incoming historical-shaped selector requests this old
     // compatibility lookup. A new row must not shadow another row's old handle.
     for (const reference of new Set([id, wireReference, input.wireReference])) {
       if (reference === undefined || !isHistoricalDraftWireReference(reference)) continue;
       const owner = this.resolveReferenceId(reference);
-      if (owner !== undefined && owner !== id) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+      if (owner !== undefined && owner !== id) throw new GatewayVerbError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     }
     const timestamp = this.now();
     const createdAt = existing?.createdAt ?? input.createdAt ?? timestamp;
     const updatedAt = input.updatedAt ?? timestamp;
     const status = normalizeStatus(input.status);
     if (existing && input.updatedAt !== undefined && Date.parse(existing.updatedAt) > Date.parse(input.updatedAt)) {
-      throw new HandlerError(
+      throw new GatewayVerbError(
         `Draft was changed on another surface at ${existing.updatedAt}; this save is from ${input.updatedAt} and was not applied. Reload the draft and apply the edit again.`,
         'DRAFT_STALE',
         409,
       );
     }
     if (existing?.status === 'sent' && status !== 'sent') {
-      throw new HandlerError(
+      throw new GatewayVerbError(
         'Draft was already sent and cannot be saved as unsent; save a new draft to send it again.',
         'DRAFT_ALREADY_SENT',
         409,
@@ -449,7 +449,7 @@ export class DraftSyncStore {
     for (const { id, wireReference } of this.store.all<{ id: string; wireReference: string | null }>('SELECT id, wireReference FROM drafts')) {
       if (id === reference || wireReference === reference) matching.push(id);
     }
-    if (matching.length > 1) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
+    if (matching.length > 1) throw new GatewayVerbError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     return matching[0];
   }
 
@@ -563,7 +563,7 @@ function assertRowUnchanged(target: Pick<HandlerSqliteStore, 'get'>, id: string,
   const row = target.get<{ updatedAt: string }>('SELECT updatedAt FROM drafts WHERE id = ?', [id]);
   const now = row?.updatedAt ?? null;
   if (now === expectedUpdatedAt) return;
-  throw new HandlerError(
+  throw new GatewayVerbError(
     now === null
       ? `Draft ${id} was deleted after this request read it; nothing was written. Read the drafts again and retry.`
       : expectedUpdatedAt === null

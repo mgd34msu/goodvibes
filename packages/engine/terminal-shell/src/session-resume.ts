@@ -63,7 +63,12 @@ export interface SessionResumeRuntime {
   provider: string;
 }
 export interface SessionResumeDeps {
-  readonly sessionManager: Pick<SessionManager, 'load' | 'save'>;
+  /**
+   * The session store. The resume opens the session for writing before it
+   * reads it, so a session another terminal has open is refused here, with
+   * what to do, and not at this terminal's first save.
+   */
+  readonly sessionManager: Pick<SessionManager, 'load' | 'save' | 'openForWriting' | 'closeForWriting'>;
   readonly conversation: ConversationManager;
   readonly runtime: SessionResumeRuntime;
   /**
@@ -133,15 +138,36 @@ export interface SessionResumeOutcome {
  */
 export async function resumeSessionCore(sessionId: string, deps: SessionResumeDeps): Promise<SessionResumeOutcome> {
   if (deps.canResume?.() === false) throw new Error('A turn is still running. Wait before resuming a session.');
+  // Opened for writing before anything is read: a session another terminal
+  // has open is refused here (SessionOpenElsewhereError, saying what to do),
+  // with nothing loaded and the live session left as it was.
+  const previousSessionId = deps.runtime.sessionId;
+  deps.sessionManager.openForWriting(sessionId);
   const handleCrash = crashSnapshotHandlerFor(deps.conversation);
   // Looked for only when the app has someone to tell: one `stat` when the session left no snapshot.
   const crash = handleCrash && deps.surface ? findSessionCrashSnapshot(deps.surface, sessionId) : null;
-  if (crash && handleCrash && !crash.hasSavedCopy) return openCrashSnapshotOnly(sessionId, crash, handleCrash, deps);
-  const { meta, messages, branches, agentRecords } = deps.sessionManager.load(sessionId);
-  // Nothing below yields until the transcript and its identity are committed,
-  // so no turn or other resume can slip in between the check and the commit.
-  deps.beforeRestore?.();
-  const leftOut = restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
+  if (crash && handleCrash && !crash.hasSavedCopy) {
+    return openCrashSnapshotOnly(sessionId, crash, handleCrash, deps).catch((error: unknown) => {
+      if (deps.runtime.sessionId !== sessionId) reopenPreviousSession(previousSessionId, sessionId, deps);
+      throw error;
+    });
+  }
+  let loaded: ReturnType<SessionManager['load']>;
+  let leftOut: ReturnType<typeof restoreSessionConversation>;
+  try {
+    loaded = deps.sessionManager.load(sessionId);
+    // Nothing below yields until the transcript and its identity are committed,
+    // so no turn or other resume can slip in between the check and the commit.
+    deps.beforeRestore?.();
+    leftOut = restoreSessionConversation(sessionId, {
+      meta: loaded.meta, messages: loaded.messages, ...(loaded.branches ? { branches: loaded.branches } : {}),
+    }, deps.conversation, deps.runtime, deps.surface);
+  } catch (error) {
+    // Not opened: this terminal goes back to holding the session it still shows.
+    if (deps.runtime.sessionId !== sessionId) reopenPreviousSession(previousSessionId, sessionId, deps);
+    throw error;
+  }
+  const { meta, messages, agentRecords } = loaded;
   // Without a provider registry to select through (a harness), the saved model
   // and provider move with the committed transcript. With one, the runtime
   // names the saved model only once the registry has selected it below, since
@@ -213,6 +239,26 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     notices: describeLeftOutBranches(leftOut),
     ...(crashSnapshot !== undefined ? { crashSnapshot } : {}),
   };
+}
+
+/**
+ * A resume that opened `sessionId` for writing and then did not open it: the
+ * terminal holds the session it still shows again, and lets go of the one it
+ * did not open. When another terminal took the previous one meanwhile, this
+ * terminal holds neither, and its next save of the previous one is refused
+ * with what to do.
+ */
+function reopenPreviousSession(previousSessionId: string, sessionId: string, deps: SessionResumeDeps): void {
+  if (previousSessionId === sessionId) return;
+  try {
+    if (previousSessionId) {
+      deps.sessionManager.openForWriting(previousSessionId);
+      return;
+    }
+  } catch (error) {
+    logger.warn('session resume: the session this terminal shows could not be held again', { sessionId: previousSessionId, error: summarizeError(error) });
+  }
+  deps.sessionManager.closeForWriting();
 }
 
 /** What waited for this session while it was closed goes into its conversation now, before the next request; a failure leaves it waiting for the next open. */
@@ -461,7 +507,7 @@ export interface LoadSavedSessionOptions {
  */
 export async function loadSavedSessionIntoLive(
   deps: LoadSavedSessionDeps,
-  sessionManager: Pick<SessionManager, 'load' | 'save'>,
+  sessionManager: SessionResumeDeps['sessionManager'],
   name: string,
   options: LoadSavedSessionOptions = {},
 ): Promise<LoadedSavedSession> {

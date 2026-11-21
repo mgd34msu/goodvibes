@@ -50,14 +50,30 @@ export function admitInstalledClientDataWriter(options: InstalledClientDataOptio
   }));
 }
 
-/** Metadata-only CLI; invoke before configuration/provider/runtime setup. */
+/** The fixed part of the receipt a successful check prints; install.sh compares the whole line byte for byte. */
+export const INSTALL_READER_CHECK_RESULT = Object.freeze({ schema: 'goodvibes.install.reader-check', schemaVersion: 1 } as const);
+
+/** Thrown for a malformed check-install-reader command line; its message is the usage line. */
+export class InstallReaderUsageError extends Error {
+  constructor() {
+    super('Usage: check-install-reader <installed-executable> | --describe');
+    this.name = 'InstallReaderUsageError';
+  }
+}
+
+/**
+ * Metadata-only CLI shared by every product; invoke before configuration,
+ * provider or runtime setup. Answers undefined for any other command; throws
+ * InstallReaderUsageError for a bad argument and NativeDataCompatibilityError
+ * when the installed executable's data cannot be read by this build.
+ */
 export function installedReaderCommand(argv: readonly string[], compiledVersion: string): string | undefined {
   if (argv[0] !== 'check-install-reader') return undefined;
-  if (argv.length !== 2) throw new Error('Usage: check-install-reader --describe|<installed-executable>');
-  const readers = nativeReaderCapabilities(compiledVersion);
-  if (argv[1] === '--describe') return JSON.stringify(readers);
   const selected = argv[1];
-  if (!selected) throw new Error('Installed executable is required');
+  if (argv.length !== 2 || selected === undefined || selected.length === 0) throw new InstallReaderUsageError();
+  const readers = nativeReaderCapabilities(compiledVersion);
+  if (selected === '--describe') return JSON.stringify(readers);
+  if (selected.startsWith('-')) throw new InstallReaderUsageError();
   assertNativeReaderCompatible(selected, compiledVersion, captureUpdateFileIo(realUpdateFileIo), readers);
-  return JSON.stringify({ schema: 'goodvibes.install.reader-check', schemaVersion: 1, readerVersion: compiledVersion });
+  return JSON.stringify({ ...INSTALL_READER_CHECK_RESULT, readerVersion: compiledVersion });
 }

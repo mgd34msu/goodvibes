@@ -733,7 +733,7 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
   if (body instanceof Response) return body;
   const url = typeof body.url === 'string' ? body.url.trim() : '';
   if (!url) return jsonErrorResponse({ error: 'Missing url' }, { status: 400 });
-  if (!isAbsoluteUrl(url)) return jsonErrorResponse({ error: `url is not a valid absolute URL: ${url}`, code: 'INVALID_REQUEST' }, { status: 400 });
+  if (!isAbsoluteUrl(url)) return jsonErrorResponse({ error: `url is not a valid absolute URL: ${url}`, code: 'INVALID_ARGUMENT' }, { status: 400 });
   const privateHostFetchOptions = buildKnowledgePrivateHostFetchOptions(context, body.allowPrivateHosts);
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
   const tags = readStringArrayField(body, 'tags', MAX_KNOWLEDGE_INGEST_TAGS);

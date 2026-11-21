@@ -16,6 +16,8 @@ export interface WebSearchServiceStatus {
   readonly enabled: boolean;
   readonly providerCount: number;
   readonly providers: ReturnType<WebSearchProviderRegistry['list']>;
+  /** The provider a search that names none uses now (`webSearch.defaultProvider`, else the auto rule); null when none is registered. */
+  readonly defaultProviderId: string | null;
   readonly note: string;
 }
 
@@ -72,7 +74,8 @@ export class WebSearchService {
       enabled: providers.length > 0,
       providerCount: providers.length,
       providers,
-      note: 'Web search uses provider-backed discovery and normalizes results before they reach the model.',
+      defaultProviderId: this.registry.defaultProviderId(),
+      note: 'Web search uses provider-backed discovery and normalizes results before they reach the model. A search that names no provider uses defaultProviderId (webSearch.defaultProvider).',
     };
   }
 

@@ -35,7 +35,8 @@ import type { TurnCancellationResult } from '../../core/turn-cancellation.js';
  * runtime/context-usage.ts helper the in-process read model also uses.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
+import { admitOnSession } from './session-admission.js';
 import type { PermissionMode } from '../../config/schema-types.js';
 import { effectivePermissionMode, GATE_PRESETS, isSettableGatePresetName, normalizePermissionMode, type GatePresetName, type SettableGatePresetName } from '../../gate/presets.js';
 import { deriveContextUsage } from '../../runtime/context-usage.js';
@@ -149,6 +150,19 @@ export class SessionLiveTurnControlsHolder {
   hasSession(sessionId: string): boolean {
     return this.bySession.has(sessionId);
   }
+
+  /** Who owns a session bound by id (the hosted-session engine's owners); null when the source does not know it. */
+  private ownersSource: ((sessionId: string) => readonly string[] | null) | null = null;
+
+  /** Install the owners of the sessions bound by id (set by the engine that binds them). Null removes it. */
+  setSessionOwners(source: ((sessionId: string) => readonly string[] | null) | null): void {
+    this.ownersSource = source;
+  }
+
+  /** The owners of a session bound by id, or an empty list when none are known (then only the owner and an admin act on it). */
+  ownersOf(sessionId: string): readonly string[] {
+    return this.ownersSource?.(sessionId) ?? [];
+  }
 }
 
 /**
@@ -159,6 +173,12 @@ export class SessionLiveTurnControlsHolder {
  */
 export interface SessionRuntimeControls {
   isLocalSession(sessionId: string): boolean;
+  /**
+   * The session's owners, the subject of the live-turn verbs: a hosted
+   * session's creator and whoever it was shared with. The local runtime and a
+   * channel session have none, so only the owner and an admin act on them.
+   */
+  ownersOf(sessionId: string): readonly string[];
   getPermissionMode(sessionId?: string): PermissionMode;
   /**
    * The mode the session chose (or the saved one) beside the mode in force,
@@ -259,8 +279,14 @@ export function createSessionPermissionModeSetHandler(
   };
 }
 
-/** Resolve the bound live-turn controls or refuse honestly (no fabricated success). */
-function requireLiveTurnControls(controls: SessionRuntimeControls, sessionId: string): SessionLiveTurnControls {
+/**
+ * Admit the call on the session (its owners are the subject, so below admin
+ * only an owner acts on it), then resolve the bound live-turn controls or
+ * refuse honestly (no fabricated success).
+ */
+function requireLiveTurnControls(controls: SessionRuntimeControls, sessionId: string,
+  invocation: GatewayMethodInvocation, effect: 'session.steer' | 'session.transcript.read'): SessionLiveTurnControls {
+  admitOnSession(invocation, [effect], controls.ownersOf(sessionId));
   const live = controls.getLiveTurnControls(sessionId);
   if (!live) {
     throw new GatewayVerbError(
@@ -276,7 +302,7 @@ export function createSessionTurnCancelHandler(controls: SessionRuntimeControls)
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
-    const live = requireLiveTurnControls(controls, sessionId);
+    const live = requireLiveTurnControls(controls, sessionId, invocation, 'session.steer');
     const expectedTurnId = typeof params.expectedTurnId === 'string' ? params.expectedTurnId.trim() : '';
     if (!expectedTurnId) throw new GatewayVerbError('expectedTurnId is required', 'INVALID_ARGUMENT', 400, 'expectedTurnId');
     if (!live.cancelTurn) throw new GatewayVerbError('Turn cancellation is unavailable for this runtime.', 'LIVE_TURN_CONTROLS_UNAVAILABLE', 404);
@@ -288,7 +314,7 @@ export function createSessionToolCallCancelHandler(controls: SessionRuntimeContr
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
-    const live = requireLiveTurnControls(controls, sessionId);
+    const live = requireLiveTurnControls(controls, sessionId, invocation, 'session.steer');
     const callId = typeof params.callId === 'string' ? params.callId.trim() : '';
     if (!callId) {
       throw new GatewayVerbError('callId is required', 'INVALID_ARGUMENT', 400, 'callId');
@@ -307,7 +333,7 @@ export function createSessionToolCallCancelHandler(controls: SessionRuntimeContr
 export function createSessionQueuedMessagesListHandler(controls: SessionRuntimeControls): GatewayMethodHandler {
   return (invocation) => {
     const sessionId = requireLocalSessionId(controls, readInvocationParams(invocation));
-    const live = requireLiveTurnControls(controls, sessionId);
+    const live = requireLiveTurnControls(controls, sessionId, invocation, 'session.transcript.read');
     return { sessionId, messages: live.listQueuedMessages() };
   };
 }
@@ -316,7 +342,7 @@ export function createSessionQueuedMessageEditHandler(controls: SessionRuntimeCo
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
-    const live = requireLiveTurnControls(controls, sessionId);
+    const live = requireLiveTurnControls(controls, sessionId, invocation, 'session.steer');
     const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
     const text = typeof params.text === 'string' ? params.text : '';
     if (!messageId) {
@@ -340,7 +366,7 @@ export function createSessionQueuedMessageDeleteHandler(controls: SessionRuntime
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireLocalSessionId(controls, params);
-    const live = requireLiveTurnControls(controls, sessionId);
+    const live = requireLiveTurnControls(controls, sessionId, invocation, 'session.steer');
     const messageId = typeof params.messageId === 'string' ? params.messageId.trim() : '';
     if (!messageId) {
       throw new GatewayVerbError('messageId is required', 'INVALID_ARGUMENT', 400, 'messageId');
@@ -427,6 +453,9 @@ export function createSessionRuntimeControls(deps: {
   };
   const LOCAL_RUNTIME_ALIAS = 'runtime';
   return {
+    ownersOf(sessionId: string): readonly string[] {
+      return deps.liveTurnHolder?.hasSession(sessionId) === true ? deps.liveTurnHolder.ownersOf(sessionId) : [];
+    },
     isLocalSession(sessionId: string): boolean {
       // A session this process HOSTS is local by the only definition that
       // matters here: this daemon owns its loop and can answer for it. Without

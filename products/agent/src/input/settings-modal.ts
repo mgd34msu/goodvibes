@@ -25,7 +25,7 @@ import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
-import { captureConnectedHostTarget, routeSettingWriteToConnectedHost, type ConnectedHostTarget } from './settings-modal-daemon-writes.ts';
+import { captureConnectedHostTarget, RESET_TO_DEFAULT, routeSettingWriteToConnectedHost, type ConnectedHostTarget } from './settings-modal-daemon-writes.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes/engine/terminal-shell/settings-behavior';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
@@ -829,9 +829,12 @@ export class SettingsModal extends TerminalSettingsModalState<
       this._writeSecretSetting(key, String(entry.setting.default ?? ''));
       return null; // Accepted asynchronously, not yet a completed reset.
     }
+    // The stored value is removed, so the key reads as this product's default and is not an
+    // explicit choice; permissions.mode keeps the write, which also clears the legacy auto-approve.
+    const value = this.configManager.defaultOf(key);
     // A refused write must not be copied into the live session (provider.model, reasoningEffort).
-    const applied = this._setValue(key, entry.setting.default);
-    return applied ? { key, value: entry.setting.default } : null;
+    const applied = this._setValue(key, key === 'permissions.mode' ? value : RESET_TO_DEFAULT);
+    return applied ? { key, value } : null;
   }
 
   /** Handle a keystroke in edit mode: regular chars appended, Backspace removes last char. */
@@ -1131,8 +1134,9 @@ export class SettingsModal extends TerminalSettingsModalState<
       try {
         const handle = this.configManager.getHostBooleanSetting(key);
         // _canEditSettings read policy for this action; the setter refuses a locked setting itself.
-        if (typeof value !== 'boolean') throw new Error(`${key} requires a literal boolean.`);
-        handle.set(value);
+        if (value === RESET_TO_DEFAULT) handle.reset();
+        else if (typeof value !== 'boolean') throw new Error(`${key} requires a literal boolean.`);
+        else handle.set(value);
         this.lastSettingEffectMessage = null;
         this._refreshAllEntries();
         return true;
@@ -1179,18 +1183,20 @@ export class SettingsModal extends TerminalSettingsModalState<
     }
     if (this._routeHostWrite(key, value, this.secretWriteSession)) return true;
     try {
-      this.configManager.setDynamic(key, value);
+      if (value === RESET_TO_DEFAULT) this.configManager.reset(key);
+      else this.configManager.setDynamic(key, value);
+      const current = this.configManager.get(key);
       for (const entries of this.groups.values()) {
         const entry = entries.find((candidate) => candidate.setting.key === key);
         if (entry) {
-          entry.currentValue = this.configManager.get(key);
+          entry.currentValue = current;
           entry.metadataUnavailable = undefined;
-          entry.isDefault = entry.currentValue === entry.setting.default;
+          entry.isDefault = isDeepStrictEqual(current, this.configManager.defaultOf(key));
           this._refreshHostEntry(entry);
         }
       }
-      if (previousValue !== value && this.onSettingApplied) {
-        const result = this.onSettingApplied({ key, previousValue, value });
+      if (!isDeepStrictEqual(previousValue, current) && this.onSettingApplied) {
+        const result = this.onSettingApplied({ key, previousValue, value: current });
         this.lastSettingEffectMessage = result?.message ?? null;
         this._refreshAllEntries();
       }

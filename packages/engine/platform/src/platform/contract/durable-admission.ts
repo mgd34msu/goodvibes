@@ -4,6 +4,7 @@ import { closeSync, constants, fstatSync, fsyncSync, linkSync, lstatSync, openSy
 import { dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
+import { productWorktreePath } from '../git/product-worktree-marker.js';
 import type { JevDecisionBinding } from '@goodvibes/judgment/decisions';
 import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
@@ -249,7 +250,7 @@ export function parseDurableAdmission(value: unknown, original?: DurableContract
     if (!record(item) || (item['isolation'] !== 'worktree' && item['isolation'] !== 'shared')
       || Object.keys(item).length !== (item['isolation'] === 'worktree' ? 4 : 1)) throw new DurableContractAdmissionError('invalid');
     if (item['isolation'] === 'worktree' && (item['branch'] !== `contract/${value['contractId'].slice(4)}`
-      || item['worktreePath'] !== join(request.input.projectRoot, '.goodvibes', '.worktrees', 'contract', value['contractId'].slice(4))
+      || item['worktreePath'] !== productWorktreePath(request.input.projectRoot, 'contract', value['contractId'].slice(4))
       || typeof item['baseBranch'] !== 'string' || item['baseBranch'].length === 0)) throw new DurableContractAdmissionError('invalid');
     if (request.input.isolation !== undefined && request.input.isolation !== 'auto' && item['isolation'] !== request.input.isolation)
       throw new DurableContractAdmissionError('invalid');

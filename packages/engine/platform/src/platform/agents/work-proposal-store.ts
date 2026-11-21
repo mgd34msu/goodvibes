@@ -518,7 +518,10 @@ export class WorkProposalStore {
     return resolved;
   }
 
-  /** Record that an accepted proposal's work was started (one write). */
+  /**
+   * Record that an accepted proposal's work was started, or was settled as not
+   * started with the owner told (one write); either way it is no longer owed.
+   */
   markStarted(id: string): void {
     const record = this.proposals.get(id);
     if (!record || record.status !== 'accepted' || record.started) return;
@@ -542,6 +545,9 @@ export class WorkProposalStore {
     let resolved = 0;
     for (const [id, record] of this.proposals) {
       if (record.status !== 'pending') {
+        // An accepted proposal whose work never started is owed work, not a
+        // reply tombstone: it stays until start-up starts or settles it.
+        if (record.status === 'accepted' && record.started !== true) continue;
         // Resolved records are kept only long enough to answer a duplicate
         // reply arriving right behind the first one.
         if (now - record.createdAt > record.expiresAt - record.createdAt) {

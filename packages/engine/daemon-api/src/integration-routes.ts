@@ -1,7 +1,7 @@
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes/engine/errors';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
-import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput } from './integration-route-types.js';
+import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput, SessionReadPolicy } from './integration-route-types.js';
 import { principalHasScope } from './http-policy.js';
 import {
   createRouteBodySchema,
@@ -88,7 +88,7 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
       if (entries.length === 0) {
         return jsonErrorResponse({
           error: `roles must be an array of 1 to ${MAX_LOCAL_AUTH_ROLES} non-empty role names. Omit roles to create an admin user.`,
-          code: 'INVALID_REQUEST',
+          code: 'INVALID_ARGUMENT',
         }, { status: 400 });
       }
       roles = entries;
@@ -196,7 +196,7 @@ export function createDaemonIntegrationRouteHandlers(
     getIntegrationSession: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSessionSnapshot())),
     getIntegrationTasks: (limit?: number, req?: Request) => withHelpers(context.integrationHelpers, (helpers) => Response.json(taskSnapshotFor(context, req, helpers.getTaskSnapshot(limit)))),
     getIntegrationAutomation: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getAutomationSnapshot())),
-    getIntegrationSessions: (url?: URL) => handleGetIntegrationSessions(context.integrationHelpers, url),
+    getIntegrationSessions: (url?: URL, req?: Request) => handleGetIntegrationSessions(context.integrationHelpers, url, req, context.mayReadSession),
     getDeliveries: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getDeliverySnapshot())),
     getDelivery: (deliveryId) => {
       const runtimeStore = context.integrationHelpers?.getRuntimeStore() ?? null;
@@ -550,9 +550,14 @@ function withHelpers<T>(
 function handleGetIntegrationSessions(
   helpers: IntegrationHelperServiceLike | null | undefined,
   _url: URL | undefined,
+  req: Request | undefined,
+  mayReadSession: SessionReadPolicy | undefined,
 ): Response {
   if (!helpers) {
     return jsonErrorResponse({ error: 'Integration helper service unavailable' }, { status: 503 });
   }
-  return Response.json(helpers.getSessionBrokerSnapshot());
+  // Only the sessions the caller may read: a hosted session is listed to its owners and admins.
+  return Response.json(helpers.getSessionBrokerSnapshot(
+    mayReadSession && req ? (session) => mayReadSession(req, session) : undefined,
+  ));
 }

@@ -42,6 +42,7 @@ import { REMEMBER_TIER_VALUES, type RememberTier } from '../permissions/approval
 import type { ApprovalActionInput, ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
+  approvalAdministerRefusal,
   approvalRefusal,
   formatApprovalRef,
   isOpenApprovalStatus,
@@ -78,6 +79,8 @@ export interface RelayPrincipal {
   readonly kind: string;
   readonly scopes: readonly string[];
   readonly mayAnswer: boolean;
+  /** May claim and cancel (`approvals.administer`); absent from a node of 3.3.4 or earlier, whose own gate already required it. */
+  readonly mayAdminister?: boolean | undefined;
 }
 
 export type RelayedAction = Exclude<ApprovalAction, never>;
@@ -215,7 +218,7 @@ export class ApprovalRelay {
    */
   async forward(node: string, id: string, input: RelayedDecisionInput, viewer: ApprovalViewer): Promise<RelayedOutcome> {
     const requestId = randomUUID();
-    const principal: RelayPrincipal = { node: this.#host.selfNode, id: viewer.id ?? 'owner', kind: viewer.kind, scopes: viewer.scopes, mayAnswer: viewer.mayAnswer };
+    const principal: RelayPrincipal = { node: this.#host.selfNode, id: viewer.id ?? 'owner', kind: viewer.kind, scopes: viewer.scopes, mayAnswer: viewer.mayAnswer, mayAdminister: viewer.mayAdminister };
     const body = { requestId, id, principal, ...input, ...(input.selectedHunks ? { selectedHunks: [...input.selectedHunks] } : {}) };
     const answered = new Promise<Record<string, unknown>>((resolve) => { this.#waiting.set(requestId, resolve); });
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -356,6 +359,20 @@ export class ApprovalRelay {
     if (answering && principal.mayAnswer !== true) {
       return { applied: false, record, refusal: refusal({ code: 'OWNER_ONLY', state: record.status, status: 403,
         reason: 'Answering an approval is the owner\'s own act; the person this decision was relayed for may not answer it.', next: ['The owner answers it.'] }) };
+    }
+    if (action === 'claim' || action === 'cancel') {
+      // The same claim and cancel rule a local action is held to (approval-actions.ts), for the person the
+      // relaying node vouches for: an agent never claims, and cancels only what it raised on this node.
+      const viewer: ApprovalViewer = {
+        kind: principal.kind === 'agent' ? 'agent' : 'remote-node',
+        id: `${principal.id}`,
+        scopes: principal.scopes ?? [],
+        node: from,
+        mayAnswer: principal.mayAnswer === true,
+        mayAdminister: principal.mayAdminister !== false,
+      };
+      const refused = approvalAdministerRefusal(record, viewer, action);
+      if (refused) return { applied: false, record, refusal: refused };
     }
     const rememberTier = body['rememberTier'];
     if (rememberTier !== undefined && !(typeof rememberTier === 'string' && (REMEMBER_TIER_VALUES as readonly string[]).includes(rememberTier))) {

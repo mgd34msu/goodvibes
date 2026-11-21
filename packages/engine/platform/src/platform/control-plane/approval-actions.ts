@@ -24,6 +24,7 @@ import { admitEffects } from '../security/effect-authority.js';
 import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
+  approvalAdministerRefusal,
   approvalRefusal,
   isOpenApprovalStatus,
   parseApprovalRef,
@@ -139,6 +140,19 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
     const parsed = parse(ref);
     return parsed.node === broker.homeNode ? parsed.id : null;
   };
+  /**
+   * The reading's own claim and cancel rule, enforced here where every route
+   * passes, locally and before anything is relayed: refused with the current
+   * reading when the viewer may not, else null. A record this node cannot read
+   * goes on to the broker or the relay, which answer for it.
+   */
+  const administerRefusal = (ref: string, viewer: ApprovalViewer, action: 'claim' | 'cancel'): ApprovalActionResult | null => {
+    const parsed = parse(ref);
+    const record = parsed.node === broker.homeNode ? broker.getApproval(parsed.id) : broker.relay?.get(parsed.node, parsed.id) ?? null;
+    if (!record) return null;
+    const refusal = approvalAdministerRefusal(record, viewer, action);
+    return refusal ? { applied: false, record, refusal, reading: readApproval(record, viewer, now()) } : null;
+  };
   return {
     get homeNode() { return broker.homeNode; },
     viewerOf: (actor) => approvalViewerOfActor(actor, broker.homeNode),
@@ -172,6 +186,8 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       return relay && record ? remoteRow(record, viewer, relay) : null;
     },
     claim: async (ref, input, viewer) => {
+      const refused = administerRefusal(ref, viewer, 'claim');
+      if (refused) return refused;
       const id = local(ref);
       return id === null ? relayed(ref, input, 'claim', viewer) : withReading(await broker.claimApproval(id, input), viewer);
     },
@@ -186,6 +202,8 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       return relayed(ref, input, input.approved ? 'approve' : input.disposition === 'amended' ? 'amend' : 'deny', viewer);
     },
     cancel: async (ref, input, viewer) => {
+      const refused = administerRefusal(ref, viewer, 'cancel');
+      if (refused) return refused;
       const id = local(ref);
       return id === null ? relayed(ref, input, 'cancel', viewer) : withReading(await broker.cancelApproval(id, input), viewer);
     },

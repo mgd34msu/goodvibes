@@ -189,6 +189,10 @@ export async function restoreHeadlessSession(
   } catch (error) {
     // The claimed session goes back unless the run moved into it.
     if (ports.runtime.sessionId !== target) closeSessionHere(ports.surface, target);
+    // The session store refused to open it for writing: another copy has it open. The run says so in its refusal.
+    if (!(error instanceof RefusalError) && error instanceof Error && (error as { readonly code?: unknown }).code === SESSION_OPEN_ELSEWHERE) {
+      throw sessionOpenElsewhere(target);
+    }
     // A session whose only copy was the snapshot fails to open when the snapshot does not apply; say why.
     const report = recovery.report;
     if (report && !report.applied && error instanceof Error) error.message = `${error.message} ${report.lost.join(' ')}`;

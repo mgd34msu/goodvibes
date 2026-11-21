@@ -10,6 +10,7 @@ import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import { deliverOwnerAlert, isOwnerConversation, orderOwnerAlertRoutes } from './owner-alert.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { approvalGuestChannel } from '../control-plane/approval-broker-raise.js';
+import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { BOOT_RECONCILE_CANCEL_REASON } from '../control-plane/session-broker-state.js';
@@ -21,7 +22,7 @@ import type { PendingSurfaceReply, SurfaceNoticeDelivery, SurfaceNoticeRefusal }
 import { summarizeError } from '../utils/error-display.js';
 import { renderNoticeForSurface } from '../email/inbound-notice-channels.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
-import { resolveSecretInput } from '../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput } from '../config/secret-refs.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import { renderAgentCompletionAnswer } from '../agents/completion-answer.js';
 import {
@@ -900,7 +901,7 @@ export class DaemonSurfaceDeliveryHelper {
     const outcome = guestChannel === undefined
       ? await this.deliverApprovalToItsRoute(approval)
       : await this.deliverApprovalToOwner(approval, guestChannel);
-    if (outcome.delivered || (approval.status !== 'pending' && approval.status !== 'claimed')) return;
+    if (outcome.delivered || !isOpenApprovalStatus(approval.status)) return;
     if (guestChannel === undefined && !this.approvalNeedsOwnerAlert(approval)) return;
     // Marked already: the record update that said so is itself published here.
     const marked = approval.metadata['promptDelivery'];
@@ -1142,6 +1143,7 @@ export class DaemonSurfaceDeliveryHelper {
     return resolveSecretInput(value, {
       resolveLocalSecret: (key) => this.context.secretsManager.get(key),
       homeDirectory: this.context.secretsManager.getGlobalHome?.() ?? undefined,
+      providers: readSecretProviderHostConfig(this.context.configManager),
     }, 'dispatch');
   }
 

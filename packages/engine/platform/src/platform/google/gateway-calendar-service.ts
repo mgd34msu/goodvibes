@@ -130,13 +130,13 @@ function validateEventTimes(start: string, end: string): void {
  * exist"; collapsing all three into 500 would throw that away.
  */
 function statusFor(failure: GoogleApiFailure): number {
-  // A dead grant carries no HTTP status of its own (the refusal came from the
-  // token refresh, not the calendar call), so the status is stated here: 401,
-  // the same status the CalDAV service reports CALENDAR_AUTH_FAILED under.
-  if (failure.reason === 'grant-invalid') return 401;
+  // A dead grant, or Google refusing the access token, is the Google credential
+  // the daemon holds failing, not the caller's sign-in: 424, the status the
+  // CalDAV service reports CALENDAR_AUTH_FAILED under, so no client takes it
+  // for an expired session (401).
+  if (failure.reason === 'grant-invalid' || failure.status === 401) return 424;
   // A usage limit Google reports as a 403 is still a limit: wait and retry.
   if (failure.reason === 'rate-limited') return 429;
-  if (failure.status === 401) return 401;
   if (failure.status === 403) return 403;
   if (failure.status === 404) return 404;
   if (failure.status === 429) return 429;
@@ -150,12 +150,11 @@ function codeFor(failure: GoogleApiFailure): string {
   // An expired or revoked refresh token is an authentication failure a person
   // must act on, and the webui renders CALENDAR_AUTH_FAILED as a re-authorize
   // prompt. Mapped by the structured verdict, never by sniffing problem text.
-  if (failure.reason === 'grant-invalid') return 'CALENDAR_AUTH_FAILED';
+  if (failure.reason === 'grant-invalid' || failure.status === 401) return 'CALENDAR_AUTH_FAILED';
   if (failure.reason === 'rate-limited') return 'RATE_LIMITED';
   if (failure.status === 403) return 'PERMISSION_DENIED';
   if (failure.status === 404) return 'NOT_FOUND';
   if (failure.status === 429) return 'RATE_LIMITED';
-  if (failure.status === 401) return 'UNAUTHENTICATED';
   return 'CALENDAR_REQUEST_FAILED';
 }
 

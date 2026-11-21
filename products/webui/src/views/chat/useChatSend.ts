@@ -2,7 +2,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from 'react'
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
 import type { ChatSelection, ChatSelectionTracker } from '../../lib/chat-selection';
 import { useMutation } from '@tanstack/react-query';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import { bestId } from '../../lib/object';
 import {
   companionSessionFromDetail,
@@ -264,6 +264,8 @@ export function useChatSend({
   const inFlightRef = useRef<{ lease: SelectionLease; controller: AbortController } | null>(null);
   /** The held entry of each send, by its controller, so a send given up early drops the entry its text left with. */
   const heldIdsRef = useRef(new WeakMap<AbortController, string>());
+  // The operation key of the next "start a new chat": kept while its outcome is unknown.
+  const newChatKeyRef = useRef(new IntentKey());
   const abandonIfStale = () => {
     const inFlight = inFlightRef.current;
     if (inFlight && !inFlight.controller.signal.aborted && !isCurrent(inFlight.lease)) {
@@ -319,14 +321,20 @@ export function useChatSend({
         const createdAt = Date.now();
         const title = body.slice(0, 72) || files[0]?.name?.slice(0, 72) || 'Attachment chat';
         let created: unknown;
+        // One key per new chat asked for: a send pressed again after a lost answer
+        // gets the chat the first one made instead of a second, empty one.
+        const newChat = newChatKeyRef.current;
         try {
-          created = await untilAborted(platformClient.chat.sessions.create({ title }, signal), signal);
+          created = await untilAborted(platformClient.chat.sessions.create({ title }, signal, newChat.keyFor(title)), signal);
+          newChat.settle();
         } catch (error) {
           if (signal.aborted) throw error;
+          newChat.settle(error);
           // No chat, so no bubble: the text and files go back to the composer.
           held.accepted(heldId);
-          if (mounted.current) onSendRefused?.({ body, files, reason: formatError(error) });
-          throw new ChatNotCreatedError(formatError(error), { cause: error });
+          const reason = isPressRefused(error) ? formatError(error) : `${formatError(error)}. ${MAY_HAVE_BEEN_DONE}`;
+          if (mounted.current) onSendRefused?.({ body, files, reason });
+          throw new ChatNotCreatedError(reason, { cause: error });
         }
         ensureCurrent();
         sessionId = extractSessionId(created);
@@ -405,12 +413,14 @@ export function useChatSend({
           const file = fileFor(attachment.name);
           if (!file) throw new Error(`The file ${local.filename} of this message is no longer available. Attach it again and send a new message.`);
           const dataBase64 = await untilAborted(fileToBase64(file), signal);
+          // Keyed by the held message and the file's place in it: a resend after a lost
+          // answer stores the file once (the key lives as long as the held entry).
           const uploaded = await untilAborted(platformClient.artifacts.create({
             filename: file.name,
             mimeType: file.type || 'application/octet-stream',
             dataBase64,
             metadata: { surface: 'webui' },
-          }), signal);
+          }, `upload.${heldId}.${index}`), signal);
           const artifactId = uploadedArtifactId(uploaded);
           if (!artifactId) throw new Error(`Artifact upload for ${file.name} did not return an artifact id.`);
           held.attachmentUploaded(heldId, attachment.name, artifactId);

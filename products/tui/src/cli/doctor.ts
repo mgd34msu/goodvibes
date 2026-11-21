@@ -242,6 +242,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
       disposal: scope.registry,
     });
     const ruleStore = createUserPermissionRuleStore(config);
+    scope.registry.add('user permission rule watch', () => ruleStore.close());
     let rules: typeof ruleStore | null = ruleStore;
     try { await ruleStore.awaitReady(); }
     catch (error) {

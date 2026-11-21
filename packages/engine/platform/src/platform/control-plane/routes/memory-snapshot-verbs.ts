@@ -12,7 +12,8 @@
  * verbs; a missing descriptor is a silent no-op, as for those.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import { HandlerError, registerCatalogHandler } from '../host-handlers.js';
+import { registerCatalogHandler } from '../host-handlers.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
 import type { MemoryRegistry } from '../../state/memory-registry.js';
 
 /** What the two verbs read from the memory owner. */
@@ -26,7 +27,7 @@ export function registerMemorySnapshotGatewayMethods(catalog: GatewayMethodCatal
     registerCatalogHandler<{ readonly snapshot?: unknown }, unknown>(catalog, 'memory.snapshots.restore', async ({ body, context }) => {
       const snapshot = typeof body?.snapshot === 'string' ? body.snapshot.trim() : '';
       if (!snapshot) {
-        throw new HandlerError('Name the copy to restore (`snapshot`: a name from memory.snapshots.list, or latest); nothing was changed.', 'INVALID_ARGUMENT', 400, 'snapshot');
+        throw new GatewayVerbError('Name the copy to restore (`snapshot`: a name from memory.snapshots.list, or latest); nothing was changed.', 'INVALID_ARGUMENT', 400, 'snapshot');
       }
       return source.restoreSnapshot(snapshot, context.signal ? { signal: context.signal } : undefined);
     }, { confirm: true });

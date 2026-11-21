@@ -61,6 +61,8 @@ export interface TaskExecutionContext {
   /** The instruction from the task definition. */
   readonly instruction: string;
   readonly timeoutMs?: number | undefined;
+  /** Fires when the owner stops the suite; the executor ends the session and reports it not completed. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** The outcome the session executor reports (whether the session ran to completion). */
@@ -81,6 +83,8 @@ export interface TaskVerifyContext {
   /** The snapshot directory: the script and its `verifyFiles` at their task-relative paths (GOODVIBES_EVAL_VERIFY_DIR for the default verifier). */
   readonly verifyDir: string;
   readonly timeoutMs?: number | undefined;
+  /** Fires when the owner stops the suite; the verifier stops its script. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** The verifier's verdict. */
@@ -123,6 +127,11 @@ export interface RunTaskSuiteOptions {
    * session runs, and a task whose files differ fails without running.
    */
   readonly sourceDir?: string;
+  /**
+   * Stops the suite: the running session and verifier are stopped and no
+   * further task starts. The result then holds only the tasks that ran.
+   */
+  readonly signal?: AbortSignal | undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -230,7 +239,8 @@ export const defaultShellVerifier: TaskVerifier = async (ctx) => {
     const value = process.env[name];
     if (value !== undefined) env[name] = value;
   }
-  const signal = AbortSignal.timeout(timeoutMs);
+  const limit = AbortSignal.timeout(timeoutMs);
+  const signal = ctx.signal ? AbortSignal.any([limit, ctx.signal]) : limit;
   try {
     const result = await runContained({
       argv: ['bash', ctx.verifyScript],
@@ -253,10 +263,12 @@ export const defaultShellVerifier: TaskVerifier = async (ctx) => {
       ? `verification was NOT isolated: it ran on the host with the task directory writable, because no sandbox boundary exists here (${hostSandboxAvailability().reason})`
       : '';
     if (result.exitCode === 0) return { passed: true, output: [output, host].filter(Boolean).join('\n') };
-    const fault = result.exitCode === null ? `verification script was stopped after ${timeoutMs} ms` : '';
+    const stopped = ctx.signal?.aborted ? 'verification script was stopped by the owner' : `verification script was stopped after ${timeoutMs} ms`;
+    const fault = result.exitCode === null ? stopped : '';
     return { passed: false, output: [output, fault, host].filter(Boolean).join('\n') };
   } catch (error) {
-    if (signal.aborted) return { passed: false, output: `verification script was stopped after ${timeoutMs} ms` };
+    if (ctx.signal?.aborted) return { passed: false, output: 'verification script was stopped by the owner' };
+    if (limit.aborted) return { passed: false, output: `verification script was stopped after ${timeoutMs} ms` };
     const reason = error instanceof ContainmentUnavailableError ? `${error.reason} ${error.next}` : error instanceof Error ? error.message : String(error);
     return { passed: false, output: `verification script could not run: ${reason}` };
   }
@@ -275,6 +287,8 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
   const results: TaskResult[] = [];
 
   for (const { definition: task, taskDir } of tasks) {
+    // Stopped by the owner: no further task starts.
+    if (options.signal?.aborted) break;
     const startedAt = Date.now();
 
     // The verifier is taken out of the task directory before the session can change it.
@@ -295,6 +309,7 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
         taskDir,
         instruction: task.instruction,
         timeoutMs: task.timeoutMs,
+        signal: options.signal,
       });
       sessionCompleted = outcome.completed;
       sessionSummary = outcome.summary ?? '';
@@ -313,6 +328,7 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
           verifyScript: join(verifyDir, normalize(task.verify)),
           verifyDir,
           timeoutMs: task.timeoutMs,
+          signal: options.signal,
         });
         verifierPassed = verdict.passed;
         verifierOutput = verdict.output;

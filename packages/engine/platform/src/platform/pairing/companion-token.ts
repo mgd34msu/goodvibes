@@ -128,23 +128,58 @@ export function getOrCreateCompanionToken(
   second?: CompanionTokenOptions,
 ): CompanionPairingResult {
   const options = normalizeCompanionTokenOptions(first, second);
-  const tokenPath = operatorTokenPath(options.daemonHomeDir);
+  const stored = loadOrMintTokenRecord(operatorTokenPath(options.daemonHomeDir), OPERATOR_TOKEN_STORE, options);
+  return {
+    token: stored.record.token,
+    peerId: stored.record.peerId,
+    createdAt: stored.record.createdAt,
+    ...(stored.quarantined === undefined ? {} : { quarantined: stored.quarantined }),
+  };
+}
 
+/** What a token store is called in its quarantine report, and what replacing its token costs. */
+interface TokenStoreWording {
+  readonly name: string;
+  readonly consequence: string;
+}
+
+const OPERATOR_TOKEN_STORE: TokenStoreWording = {
+  name: 'operator token store',
+  consequence: 'every paired client must pair again',
+};
+
+const HTTP_LISTENER_TOKEN_STORE: TokenStoreWording = {
+  name: 'webhook listener token store',
+  consequence: 'every webhook sender must be given the new token',
+};
+
+interface StoredTokenRecord {
+  readonly record: CompanionTokenRecord;
+  /** True when this call minted the record and published it (it was not there before). */
+  readonly created: boolean;
+  readonly quarantined?: CompanionTokenQuarantine | undefined;
+}
+
+/**
+ * The one store routine for a daemon-home token file: load the record, or mint
+ * one and publish it at mode 0600 (moving an unreadable file aside first).
+ */
+function loadOrMintTokenRecord(
+  tokenPath: string,
+  wording: TokenStoreWording,
+  options: Pick<CompanionTokenOptions, 'regenerate' | 'receipts'>,
+): StoredTokenRecord {
   let quarantined: CompanionTokenQuarantine | undefined;
   if (!options.regenerate && existsSync(tokenPath)) {
     const loaded = readTokenRecord(tokenPath);
-    if (loaded.record) {
-      return { token: loaded.record.token, peerId: loaded.record.peerId, createdAt: loaded.record.createdAt };
-    }
+    if (loaded.record) return { record: loaded.record, created: false };
     // A file another process removed between the check and the read is simply absent.
     if (loaded.reason !== ABSENT) {
       // Another process may have published a valid token since the read above; moving that
       // aside would rotate the token it just handed out. Judge the file as it is now.
       const current = readTokenRecord(tokenPath);
-      if (current.record) {
-        return { token: current.record.token, peerId: current.record.peerId, createdAt: current.record.createdAt };
-      }
-      if (current.reason !== ABSENT) quarantined = quarantineTokenStore(tokenPath, current.reason, options.receipts);
+      if (current.record) return { record: current.record, created: false };
+      if (current.reason !== ABSENT) quarantined = quarantineTokenStore(tokenPath, current.reason, wording, options.receipts);
     }
   }
 
@@ -161,16 +196,46 @@ export function getOrCreateCompanionToken(
     // The loser adopts the winner's token instead of overwriting it with one
     // that no client was given.
     const winner = publishNewTokenRecord(tokenPath, record);
-    if (winner) return { token: winner.token, peerId: winner.peerId, createdAt: winner.createdAt };
+    if (winner) return { record: winner, created: false };
   } else {
     writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false, durable: true });
   }
 
+  return { record, created: true, ...(quarantined === undefined ? {} : { quarantined }) };
+}
+
+/**
+ * The webhook listener's own token file of a daemon home:
+ * `<daemonHomeDir>/http-listener-token.json`. The listener serves only sign-in,
+ * sign-out, webhooks and health, and the control plane never accepts this value.
+ */
+export function httpListenerTokenPath(daemonHomeDir: string): string {
+  return join(daemonHomeDir, 'http-listener-token.json');
+}
+
+export interface HttpListenerTokenResult {
+  readonly token: string;
+  readonly path: string;
+  /** True only on the start that created the file; the owner is shown the token then. */
+  readonly created: boolean;
+  readonly quarantined?: CompanionTokenQuarantine | undefined;
+}
+
+/**
+ * Load the webhook listener's token, or create and persist one at mode 0600.
+ * It is a separate secret from the operator token, so a webhook sender never
+ * holds a credential the control plane accepts.
+ */
+export function getOrCreateHttpListenerToken(
+  options: Pick<CompanionTokenOptions, 'daemonHomeDir' | 'receipts'>,
+): HttpListenerTokenResult {
+  const path = httpListenerTokenPath(options.daemonHomeDir);
+  const stored = loadOrMintTokenRecord(path, HTTP_LISTENER_TOKEN_STORE, options);
   return {
-    token: record.token,
-    peerId: record.peerId,
-    createdAt: record.createdAt,
-    ...(quarantined === undefined ? {} : { quarantined }),
+    token: stored.record.token,
+    path,
+    created: stored.created,
+    ...(stored.quarantined === undefined ? {} : { quarantined: stored.quarantined }),
   };
 }
 
@@ -250,6 +315,7 @@ function readTokenRecord(tokenPath: string): { record: CompanionTokenRecord | nu
 function quarantineTokenStore(
   tokenPath: string,
   reason: string,
+  wording: TokenStoreWording,
   receipts?: { record(text: string): unknown } | undefined,
 ): CompanionTokenQuarantine {
   let destination = '';
@@ -260,25 +326,25 @@ function quarantineTokenStore(
     destination = '';
     // Another process already moved it aside; nothing is about to be overwritten.
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger.error('The unreadable operator token store could not be moved aside; it is about to be overwritten', {
+      logger.error(`The unreadable ${wording.name} could not be moved aside; it is about to be overwritten`, {
         path: tokenPath,
         reason,
         error: String(error),
       });
     }
   }
-  logger.error('The operator token store was unreadable, a new token was issued and every paired client must pair again', {
+  logger.error(`The ${wording.name} was unreadable, a new token was issued and ${wording.consequence}`, {
     path: tokenPath,
     reason,
     ...(destination ? { movedTo: destination } : {}),
   });
   try {
     receipts?.record(
-      `the operator token store was unreadable (${reason}), a new token was issued, so every paired client must pair again`
+      `the ${wording.name} was unreadable (${reason}), a new token was issued, so ${wording.consequence}`
       + (destination ? `; the old file is at ${destination}` : ''),
     );
   } catch (error) {
-    logger.error('The operator token quarantine could not be recorded as a receipt', {
+    logger.error(`The ${wording.name} quarantine could not be recorded as a receipt`, {
       path: tokenPath,
       error: String(error),
     });

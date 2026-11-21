@@ -161,7 +161,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'artifacts.create',
-    repeat: 'unsafe',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Artifact',
     description: 'Store a file or attachment artifact for later delivery, analysis, or knowledge ingest. JSON supports small inline bodies and daemon-local path/URI references; HTTP callers can also send multipart/form-data or a raw binary body for large uploads.',
     category: 'artifacts',

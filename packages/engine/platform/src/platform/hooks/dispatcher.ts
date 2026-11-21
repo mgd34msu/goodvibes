@@ -130,6 +130,10 @@ export class HookDispatcher {
   /** Hooks and chains that came from a hooks file, so a reload replaces only those. */
   private readonly loadedHooks = new WeakSet<HookDefinition>();
   private readonly loadedChains = new WeakSet<HookChain>();
+  /** True while hooks or chains loaded from a hooks file are registered. */
+  private holdsFileHooks = false;
+  /** Run before a dispatch while hooks from a file are registered; see {@link setLoadedHooksCheck}. */
+  private loadedHooksCheck: (() => Promise<void>) | null = null;
   private readonly chainEngine: ChainEngine;
   private hookActions: HookActionManagerLike | null = null;
   private hooksBaseDirectory: string | null = null;
@@ -200,6 +204,15 @@ export class HookDispatcher {
     };
   }
 
+  /**
+   * A check every dispatch awaits first while hooks loaded from a file are
+   * registered, so the hooks file's owner can withdraw them before they run
+   * (a workspace restricted from another process). Null removes it.
+   */
+  setLoadedHooksCheck(check: (() => Promise<void>) | null): void {
+    this.loadedHooksCheck = check;
+  }
+
   /** Load hooks from hooks.json file */
   loadFromFile(filePath: string): void {
     this.hooksBaseDirectory = dirname(filePath);
@@ -239,6 +252,7 @@ export class HookDispatcher {
               const loaded = def as HookDefinition;
               this.register(pattern, loaded);
               this.loadedHooks.add(loaded);
+              this.holdsFileHooks = true;
             }
           }
         }
@@ -256,7 +270,10 @@ export class HookDispatcher {
               continue;
             }
             const loaded = chain as HookChain;
-            if (this.registerChain(loaded)) this.loadedChains.add(loaded);
+            if (this.registerChain(loaded)) {
+              this.loadedChains.add(loaded);
+              this.holdsFileHooks = true;
+            }
           }
         }
       }
@@ -341,6 +358,14 @@ export class HookDispatcher {
   }
 
   private async fireInScope(event: HookEvent, owner?: TurnHookOwner, admitHook?: HookWorkAdmission): Promise<HookResult> {
+    if (this.holdsFileHooks && this.loadedHooksCheck) {
+      try {
+        await this.loadedHooksCheck();
+      } catch (error) {
+        logger.warn('HookDispatcher: the check on hooks loaded from a file failed; they were withdrawn', { error: summarizeError(error) });
+        this.clearLoaded();
+      }
+    }
     const contract = getHookPointContract(event.path);
     const matchingEntries: Array<{ pattern: string; hook: HookDefinition }> = [];
 
@@ -556,6 +581,7 @@ export class HookDispatcher {
    * A reload calls this before loading the file again.
    */
   clearLoaded(): void {
+    this.holdsFileHooks = false;
     for (const [pattern, defs] of [...this.hooks.entries()]) {
       const kept = defs.filter((hook) => !this.loadedHooks.has(hook));
       if (kept.length === 0) this.hooks.delete(pattern);

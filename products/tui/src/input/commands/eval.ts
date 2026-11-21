@@ -59,15 +59,30 @@ function locateSuite(named: string | undefined, context: CommandContext): TaskSu
   return { dir, name: inProject && !inProject.startsWith('..') && !isAbsolute(inProject) ? inProject : dir };
 }
 
-/** Runs the suite in a scratch copy and prints each task's outcome; null when it could not run. */
-async function runSuite(location: TaskSuiteLocation, context: CommandContext): Promise<EvalSuiteResult | null> {
+/**
+ * Runs the suite in a scratch copy and prints each task's outcome; null when it
+ * could not run, 'stopped' when the owner stopped it. The run holds the
+ * terminal's /eval slot: Esc and Ctrl-C stop it, closing the terminal stops it,
+ * and a second /eval while one runs is refused.
+ */
+async function runSuite(location: TaskSuiteLocation, context: CommandContext): Promise<EvalSuiteResult | null | 'stopped'> {
+  const slot = context.evalRuns;
+  const signal = slot ? slot.begin() : undefined;
+  if (signal === null) {
+    context.print('[eval] An eval is already running in this terminal; press Esc to stop it, then run this again.');
+    return null;
+  }
   const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-eval-tasks-'));
   try {
     const copy = join(scratch, 'suite');
     cpSync(location.dir, copy, { recursive: true });
-    context.print(`[eval] Running the task suite ${location.dir}: one goodvibes run per task, then its verify.sh...`);
+    context.print(`[eval] Running the task suite ${location.dir}: one goodvibes run per task, then its verify.sh... (Esc stops it)`);
     const startedAt = Date.now();
-    const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor(), sourceDir: location.dir });
+    const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor(), sourceDir: location.dir, signal });
+    if (signal?.aborted) {
+      context.print('[eval] Stopped; no result.');
+      return 'stopped';
+    }
     context.print([
       formatTaskSuiteResult({ ...result, suiteDir: location.dir }),
       result.total === 0
@@ -76,10 +91,15 @@ async function runSuite(location: TaskSuiteLocation, context: CommandContext): P
     ].join('\n'));
     return taskSuiteAsEvalSuite(location.name, result, startedAt);
   } catch (error) {
+    if (signal?.aborted) {
+      context.print('[eval] Stopped; no result.');
+      return 'stopped';
+    }
     context.print(`[eval] The task suite did not run: ${summarizeError(error)}`);
     return null;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+    if (signal) slot?.finish(signal);
   }
 }
 
@@ -133,7 +153,7 @@ async function handleRun(suite: string, context: CommandContext): Promise<void> 
   const registry = getRegistry(context);
   await withEvalRunning(registry, async () => {
     const fresh = await runSuite(location, context);
-    if (fresh) registry?.push(fresh);
+    if (fresh && fresh !== 'stopped') registry?.push(fresh);
   });
 }
 
@@ -174,9 +194,10 @@ async function handleGate(suite: string, baselinePath: string, saveFlag: boolean
   context.print(`[eval] Gate: running the task suite ${location.name}...`);
   const fresh = await withEvalRunning(registry, async () => {
     const result = await runSuite(location, context);
-    if (result) registry?.push(result);
+    if (result && result !== 'stopped') registry?.push(result);
     return result;
   });
+  if (fresh === 'stopped') return;
   if (!fresh) {
     context.print('[eval] Gate FAILED: the task suite did not run.');
     return;

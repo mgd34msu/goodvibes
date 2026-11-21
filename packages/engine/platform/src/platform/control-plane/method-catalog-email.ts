@@ -1,4 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   STRING_SCHEMA,
   BOOLEAN_SCHEMA,
@@ -54,6 +55,12 @@ const EMAIL_MESSAGE_DETAIL_SCHEMA = objectSchema({
   attachments: arraySchema(EMAIL_ATTACHMENT_SCHEMA),
   /** The mailbox generation the UID was read under; email.inbox.update needs it. */
   uidValidity: NUMBER_SCHEMA,
+  /**
+   * Body sections the message declares that could not be fetched, each with
+   * why. Present only when one failed: the body fields are then empty for them
+   * because they were not read, not because the message has no text.
+   */
+  bodyUnavailable: arraySchema(objectSchema({ section: STRING_SCHEMA, reason: STRING_SCHEMA }, ['section', 'reason'])),
 }, ['uid', 'from', 'subject', 'date', 'messageId', 'bodyText']);
 
 const EMAIL_DRAFT_SUMMARY_SCHEMA = objectSchema({
@@ -328,7 +335,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.draft.create',
-    repeat: 'unsafe',
+    replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Email Draft',
     description:
       'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.',

@@ -8,7 +8,10 @@ import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes
 import { resolveHostBinding } from '@goodvibes/engine/platform/platform/daemon';
 import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
 import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
-import { getOrCreateCompanionToken, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
+import {
+  controlPlaneOriginUsesStableHost, explicitPublicBaseUrl, getOrCreateCompanionToken, getOrCreateHttpListenerToken,
+  pairingOriginUsesStableHost, refreshStableHostInputs,
+} from '@goodvibes/engine/platform/platform/pairing';
 import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes/engine/platform/platform/runtime/state';
 import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
@@ -21,13 +24,24 @@ import type { RuntimeServicesOptions } from '../runtime/services.js';
 import { runDaemonProcess, type DaemonProcessHandle, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 import type { DaemonCliFlags } from './types.js';
-import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, sweepDaemonWorktrees } from './startup-maintenance.js';
+import { clearDerivedPublicBaseUrl, pruneDaemonStartupTokens, sweepDaemonWorktrees } from './startup-maintenance.js';
 import { renderDaemonStartupPairing } from './startup-pairing.js';
+import { readEnvDaemonToken, readEnvHttpListenerToken } from './daemon-tokens.js';
 
 /** How long a working-directory move waits for the answer to the request that asked for it to reach the caller. */
 const MOVE_ANSWER_GRACE_MS = 100;
 /** How often a move that found a turn running (or could not tell) looks again before it stops the host. */
 const MOVE_IDLE_POLL_MS = 1_000;
+
+/** Wait `ms`, or until `signal` aborts (at once when it already has), so a stop never waits out a move's pause. */
+function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) { resolve(); return; }
+    const timer = setTimeout(done, ms);
+    function done(): void { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
 
 /** The launcher supplies real inbox composition and explicitly chooses host-only capabilities. */
 export type DaemonCliRuntime = Pick<RuntimeServicesOptions,
@@ -99,11 +113,29 @@ export function runConfiguredDaemonCli(
     let moving: Promise<void> | undefined;
     let pairingShown = false;
 
+    /**
+     * The webhook listener's token: GOODVIBES_HTTP_TOKEN, else the listener's
+     * own token file in the daemon home, created on first use. A new token is
+     * shown once on an interactive terminal; afterwards it is read from its file.
+     */
+    const resolveListenerToken = (daemonHomeDirectory: string): string => {
+      const fromEnv = readEnvHttpListenerToken(env);
+      if (fromEnv !== undefined) return fromEnv;
+      const stored = getOrCreateHttpListenerToken({ daemonHomeDir: daemonHomeDirectory });
+      if (stored.quarantined) {
+        stderr(`[goodvibes-daemon] the webhook listener token file was unreadable (${stored.quarantined.reason}); a new token was created, so every webhook sender must be given it.`);
+      }
+      if (stored.created) {
+        pairingOutput?.(`Webhook listener token (the bearer token webhook senders use; it is kept in ${stored.path}): ${stored.token}`);
+      }
+      return stored.token;
+    };
+
     const moveWorkspace = (workingDirectory: string): void => {
       moveTarget = workingDirectory;
       // Begins once the request that asked has been answered: stopping the
       // listener closes its open connections, the asking one included.
-      moving ??= new Promise<void>((resolve) => { setTimeout(resolve, MOVE_ANSWER_GRACE_MS); })
+      moving ??= waitOrAbort(MOVE_ANSWER_GRACE_MS, maintenance.signal)
         .then(runMoves)
         .catch((error: unknown) => { stderr(`[goodvibes-daemon] the working-directory move stopped: ${summarizeError(error)}`); void processHandle.shutdown(true); })
         .finally(() => { moving = undefined; });
@@ -141,7 +173,7 @@ export function runConfiguredDaemonCli(
         const swap = host?.services?.workspaceSwap;
         for (let busy = swap?.busySessions(); busy !== undefined && (busy.kind !== 'present' || busy.value > 0); busy = swap?.busySessions()) {
           if (closed) return;
-          await new Promise<void>((resolveWait) => { setTimeout(resolveWait, MOVE_IDLE_POLL_MS); });
+          await waitOrAbort(MOVE_IDLE_POLL_MS, maintenance.signal);
         }
         if (closed) return;
         // A newer move asked while this one waited replaces it.
@@ -167,15 +199,19 @@ export function runConfiguredDaemonCli(
         stderr(`[goodvibes-daemon] the daemon could not start in ${target}: ${failure}. Starting again in ${from.workingDirectory}.`);
         await retireHost().catch(() => undefined);
         if (closed) return;
+        let savedRestored = true;
         try { writeDaemonSetting(from.daemonHomeDirectory, 'runtime.workingDir', from.workingDirectory); }
-        catch { stderr(`[goodvibes-daemon] warning: the saved working directory could not be put back to ${from.workingDirectory}; the next start uses ${target}.`); }
+        catch {
+          savedRestored = false;
+          stderr(`[goodvibes-daemon] warning: the saved working directory could not be put back to ${from.workingDirectory}; the next start uses ${target}.`);
+        }
         const back = configureAt!(from.workingDirectory);
         const settled = await serveAt(back);
         if (closed) return;
         if (settled === handedOver) { void processHandle.shutdown(); return; }
         if (!settled || (settled.state !== 'ready' && settled.state !== 'degraded')) throw new Error(`the daemon could not start again in ${from.workingDirectory}`);
         active = back;
-        host?.services?.workspaceSwap?.announceReturn(target, failure);
+        host?.services?.workspaceSwap?.announceReturn(target, failure, savedRestored);
       }
     }
 
@@ -197,14 +233,17 @@ export function runConfiguredDaemonCli(
       if (pruneDaemonStartupTokens(selected) > 0) {
         stderr('[goodvibes-daemon] warning: some stale workspace operator-token files could not be pruned.');
       }
-      // A set-but-empty override (an env template left blank) is not a token.
-      const token = env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : companion.token;
+      const token = readEnvDaemonToken(env) ?? companion.token;
+      // The webhook listener has its own secret: a webhook sender never holds the operator token.
+      const listenerToken = config.get('danger.httpListener') ? resolveListenerToken(daemonHomeDirectory) : undefined;
       // The Tailscale and `.local` rungs of the pairing origin are slow facts
       // gathered asynchronously. Start them now, overlapping host startup, so
-      // the saved public URL, the boot banner and every pairing link this
-      // daemon builds offer the stable name from the first one. Bounded and
-      // never rejects; the cache then refreshes itself in the background.
-      const stableHostFacts = pairingOriginUsesStableHost(config) ? refreshStableHostInputs() : undefined;
+      // the boot banner and every pairing link this daemon builds offer the
+      // stable name from the first one, and a saved web.publicBaseUrl can be
+      // compared with the origin this daemon derives. Bounded and never
+      // rejects; the cache then refreshes itself in the background.
+      const stableHostFacts = pairingOriginUsesStableHost(config)
+        || (explicitPublicBaseUrl(config) !== '' && controlPlaneOriginUsesStableHost(config)) ? refreshStableHostInputs() : undefined;
       host = createHost({
         runtime: {
           ...runtime, configManager: config, homeDirectory, daemonHomeDirectory, workingDir: workingDirectory,
@@ -216,7 +255,7 @@ export function runConfiguredDaemonCli(
         hasOverriddenHome: isOverridden,
         ...(workingDirectoryOverride ? { workingDirectoryOverride } : {}),
         ...(updateArtifact ? { updateArtifact } : {}),
-        ...(config.get('danger.httpListener') ? { httpListener: { token: env.GOODVIBES_HTTP_TOKEN?.trim() ? env.GOODVIBES_HTTP_TOKEN : token } } : {}),
+        ...(listenerToken !== undefined ? { httpListener: { token: listenerToken } } : {}),
         // A handover that stopped the runtime and then could not complete
         // leaves nothing serving: end the process with status 1 so a
         // supervisor starts whatever is installed.
@@ -240,8 +279,12 @@ export function runConfiguredDaemonCli(
         if (closed) return undefined;
         requireRunning();
       }
-      try { persistDaemonStartupPublicUrl(selected, actual); }
-      catch { stderr('[goodvibes-daemon] warning: the startup public URL could not be persisted.'); }
+      try {
+        const cleared = clearDerivedPublicBaseUrl(selected, actual);
+        if (cleared !== null) stdout(`[goodvibes-daemon] web.publicBaseUrl held ${cleared}, an address this daemon derives itself; it is cleared so links follow the daemon's current address.`);
+      } catch (error) {
+        stderr(`[goodvibes-daemon] warning: web.publicBaseUrl could not be checked at start (${summarizeError(error)}).`);
+      }
       stdout(renderDaemonBoundEndpoint(version, actual));
       published = publishDaemonRuntimeRecord(daemonHomeDirectory, { ...actual, command: 'goodvibes-daemon serve' });
       // Background: the sweep reads git for every leftover worktree and must not delay the endpoint line.

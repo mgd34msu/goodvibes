@@ -24,6 +24,8 @@ export interface RuntimePowerWiringInput {
   readonly writeConfig: (key: string, value: boolean) => void;
   /** Live config subscription (ConfigManager.subscribe shape) so power.keepAwake changes apply live. */
   readonly subscribeConfig?: ((key: string, cb: (newValue: unknown) => void) => () => void) | undefined;
+  /** See PowerManagerOptions.holdsKeepAwake: false while this process's daemon is on another machine. */
+  readonly holdsKeepAwake?: (() => boolean) | undefined;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
   /** Checkpoint hook for PrepareForSleep(true), checkpoint what's checkpointable. */
   readonly sleepCheckpoint?: (() => void | Promise<void>) | undefined;
@@ -43,8 +45,10 @@ export interface RuntimePowerWiringInput {
  * non-spawning unavailable seam unless their caller sets `powerSeam` (test
  * determinism); the standalone daemon and both terminal products set it. A
  * surface and a daemon on one host therefore each run a PowerManager over the
- * same `power.keepAwake` key; the surface forwards its toggle to an adopted
- * daemon (see keep-awake-remote.ts) so the daemon's hold outlives the surface.
+ * same `power.keepAwake` key, which the daemon owns: a surface's write goes to
+ * the daemon (or, with none running, into the daemon's settings file it reads
+ * at start), so the daemon's hold outlives the surface and the owner's last
+ * choice is stored once.
  */
 export function createHostPowerSeam(platform: NodeJS.Platform = osPlatform()): PowerPlatformSeam {
   if (platform === 'linux') return createLinuxLogindSeam();
@@ -60,6 +64,7 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
     readConfig: input.readConfig,
     writeConfig: input.writeConfig,
     subscribeConfig: input.subscribeConfig,
+    holdsKeepAwake: input.holdsKeepAwake,
     // Bound for the manager's life so stop() also stops work events reaching it.
     ...(input.runtimeBus ? { workSignalBus: input.runtimeBus as unknown as PowerWorkSignalBus } : {}),
     onStateChanged: input.runtimeBus

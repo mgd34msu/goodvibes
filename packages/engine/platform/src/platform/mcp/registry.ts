@@ -343,15 +343,16 @@ export class McpRegistry {
   /**
    * Start no server a project file names, and let none of them stand in for an
    * owner's server of the same name, until the owner trusts the workspace; start
-   * them the moment he does. Returns the unbinding.
+   * them the moment he does, and stop them the moment the workspace is
+   * restricted again (here or in another process). Returns the unbinding.
    */
   bindRepositoryTrust(gate: RepositoryFileGate): () => void {
     this.repositoryGate = gate;
-    const unsubscribe = gate.onTrusted(() => {
+    const unsubscribe = gate.onLevelChanged((level) => {
       const roots = this.startedRoots;
       if (roots === null || this.permissionHost?.signal.aborted === true) return;
       this.reload(roots).catch((error: unknown) => {
-        logger.warn('McpRegistry: the workspace\'s MCP servers did not start after it was trusted', { error: summarizeError(error) });
+        logger.warn('McpRegistry: the workspace\'s MCP servers were not brought in line with its trust after it changed', { level, error: summarizeError(error) });
       });
     });
     return () => { unsubscribe(); if (this.repositoryGate === gate) this.repositoryGate = null; };
@@ -1027,6 +1028,8 @@ export class McpRegistry {
       next = `reconnect attempt ${reconnect.attempt} of ${reconnect.maxAttempts} starts in ${seconds} s; call the tool again after that`;
     } else if (phase === 'restart-wait' || phase === 'starting' || phase === 'negotiating') {
       next = 'it is being restarted; retry in a few seconds';
+    } else if (this.#lifecycle.getState(name) === 'auth_required') {
+      next = 'the server refused its credentials, so it is not retried; set its credentials (the auth header or token in its mcp.json entry, or the secret it names), then run /mcp reload to reconnect it';
     } else {
       next = `${reconnect?.stoppedReason ? `${reconnect.stoppedReason}; ` : ''}fix the server or its entry in mcp.json, then run /mcp reload (or reload the MCP configuration) to reconnect it`;
     }
@@ -1535,8 +1538,9 @@ export class McpRegistry {
       this.hookDispatcher.fire(connectedEvent).catch((err: unknown) => { logger.warn('Lifecycle:mcp:connected hook error', { error: summarizeError(err) }); });
     } catch (err) {
       // Kill any half-started process so a failed handshake does not leak an
-      // orphan server. intentionalClose (set inside disconnect) suppresses the
-      // client's auto-restart, so this teardown does not resurrect the process.
+      // orphan server. intentionalClose (set inside disconnect) keeps the
+      // client from reporting this exit as unexpected, so the lifecycle owner
+      // does not schedule a reconnect for it.
       await client.disconnect().catch((e: unknown) => {
         pending.cleanupErrors.push(e);
         logger.warn('McpRegistry: failed to clean up half-connected client', { name, err: summarizeError(e) });
@@ -1550,11 +1554,10 @@ export class McpRegistry {
         this.freshness.markFailed(name, summarizeError(err));
         this.connectFailures.set(name, summarizeError(err));
         if (stillWanted()) {
-          this.#lifecycle.failed(name, summarizeError(err));
+          // A credential refusal is not retried: the same connect would be refused again.
           const auth = mcpAuthRefusal(err);
-          if (auth && this.runtimeBus) {
-            emitMcpAuthRequired(this.runtimeBus, { sessionId: 'mcp-registry', traceId: `mcp-registry:${name}:mcp_auth_required`, source: 'mcp-registry' }, { serverId: name, authType: auth.authType });
-          }
+          if (auth) this.#lifecycle.authRequired(name, summarizeError(err), auth.authType);
+          else this.#lifecycle.failed(name, summarizeError(err));
         }
       }
       logger.error('McpRegistry: failed to connect server', { name, err: summarizeError(err) });
@@ -1601,6 +1604,7 @@ export class McpRegistry {
       case 'MCP_CONNECTED': emitMcpConnected(bus, ctx, { serverId: event.serverId, toolCount: event.toolCount, resourceCount: event.resourceCount }); return;
       case 'MCP_DEGRADED': emitMcpDegraded(bus, ctx, { serverId: event.serverId, reason: event.reason, availableTools: event.availableTools }); return;
       case 'MCP_RECONNECTING': emitMcpReconnecting(bus, ctx, { serverId: event.serverId, attempt: event.attempt, maxAttempts: event.maxAttempts }); return;
+      case 'MCP_AUTH_REQUIRED': emitMcpAuthRequired(bus, ctx, { serverId: event.serverId, authType: event.authType }); return;
       case 'MCP_DISCONNECTED':
         emitMcpDisconnected(bus, ctx, { serverId: event.serverId, willRetry: event.willRetry, ...(event.reason !== undefined ? { reason: event.reason } : {}) });
         return;

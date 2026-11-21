@@ -432,7 +432,10 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
                   Run <code>goodvibes pair</code> on your computer. It shows the code, and a QR
                   code that signs you in when you scan it.
                 </li>
-                <li>The GoodVibes service prints a code when it starts.</li>
+                <li>
+                  On the computer running GoodVibes, <code>goodvibes-daemon pair</code> prints
+                  the link and QR again.
+                </li>
               </ul>
             </Disclosure>
           </div>

@@ -29,6 +29,7 @@ import type {
   ListSharedSessionsOptions,
   ParticipantRouteAttachInput,
   RegisterSharedSessionInput,
+  SharedSessionExternalFactsProvider,
   SharedSessionMessage,
   SharedSessionRecord,
   SharedSessionRegisterResult,
@@ -227,7 +228,7 @@ export class SharedSessionBroker {
   private readonly capacityWaiting = new Map<string, string>();
   private capacityDrain: Promise<void> | null = null;
   private capacityDrainAgain = false;
-  /** Drains scheduled (their timer has not fired or their run has not ended); `idle()` waits on them. */
+  /** Drains started whose run has not ended; `idle()` waits on them. */
   private readonly capacityDrainsPending = new Set<Promise<void>>();
   /** Tail of the work queued per route or session key; see `serialized`. */
   private readonly serialChains = new Map<string, Promise<void>>();
@@ -276,6 +277,34 @@ export class SharedSessionBroker {
 
   setExternalLivenessProbe(probe: ((session: SharedSessionRecord) => boolean) | null): void {
     this.externalLivenessProbe = probe;
+  }
+
+  /** Reads title and message facts of a companion chat or hosted session from the manager that owns it, by session kind. */
+  private readonly externalFacts = new Map<'companion-chat' | 'hosted', SharedSessionExternalFactsProvider>();
+
+  /**
+   * Install the owner of the title, message count and times of the sessions of
+   * one kind this broker only mirrors (companion chats, hosted sessions). Every
+   * read (listSessions, getSession, findPreferredSession, and the search built
+   * on listSessions) shows the owner's facts; the stored record keeps the title
+   * it was registered with for a reader without the owner. Null removes it.
+   */
+  setExternalFacts(kind: 'companion-chat' | 'hosted', provider: SharedSessionExternalFactsProvider | null): void {
+    if (provider === null) this.externalFacts.delete(kind);
+    else this.externalFacts.set(kind, provider);
+  }
+
+  private withExternalFacts(session: SharedSessionRecord): SharedSessionRecord {
+    if (session.kind !== 'companion-chat' && session.kind !== 'hosted') return session;
+    const facts = this.externalFacts.get(session.kind)?.(session) ?? null;
+    if (facts === null) return session;
+    return {
+      ...session,
+      title: facts.title.length > 0 ? facts.title : session.title,
+      messageCount: facts.messageCount,
+      lastMessageAt: facts.lastMessageAt ?? session.lastMessageAt,
+      updatedAt: Math.max(session.updatedAt, facts.updatedAt),
+    };
   }
 
   /** Turns running outside this broker's records (hosted sessions), counted by their owner. */
@@ -338,7 +367,6 @@ export class SharedSessionBroker {
       bus,
       sessionResolver,
       (sessionId, agentId, body, metadata) => this.completeAgent(sessionId, agentId, body, metadata),
-      () => this.scheduleCapacityDrain(),
     );
   }
 
@@ -379,21 +407,20 @@ export class SharedSessionBroker {
     return 'held';
   }
 
-  /** Start the messages that wait to start (a refused update handover reopened the daemon's admission). */
+  /**
+   * Start the messages that wait to start: a fleet slot was freed (the agent
+   * manager's onFleetSlotReleased), or a refused update handover reopened the
+   * daemon's admission.
+   */
   startWaitingMessages(): void {
     this.scheduleCapacityDrain();
   }
 
-  /** An agent ended: start waiting messages once the manager has released its slot. */
+  /** Start waiting messages now; `idle()` waits for the pass. */
   private scheduleCapacityDrain(): void {
     if (this.capacityWaiting.size === 0) return;
-    const pending = new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        void this.drainCapacityWaiting().catch((error: unknown) => {
-          logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
-        }).finally(resolve);
-      }, 0);
-      (timer as unknown as { unref?: () => void }).unref?.();
+    const pending = this.drainCapacityWaiting().catch((error: unknown) => {
+      logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
     });
     this.capacityDrainsPending.add(pending);
     void pending.finally(() => this.capacityDrainsPending.delete(pending));
@@ -646,7 +673,7 @@ export class SharedSessionBroker {
   }
 
   listSessions(limit = 100, options: ListSharedSessionsOptions = {}): SharedSessionRecord[] {
-    const sorted = sortSessions(this.sessions.values());
+    const sorted = sortSessions([...this.sessions.values()].map((session) => this.withExternalFacts(session)));
     const filtered = sorted.filter((session) => {
       if (options.project !== undefined && session.project !== options.project) return false;
       if (options.kind !== undefined && session.kind !== options.kind) return false;
@@ -657,7 +684,8 @@ export class SharedSessionBroker {
   }
 
   getSession(sessionId: string): SharedSessionRecord | null {
-    return this.sessions.get(sessionId) ?? null;
+    const session = this.sessions.get(sessionId);
+    return session === undefined ? null : this.withExternalFacts(session);
   }
 
   async findPreferredSession(options: FindSharedSessionOptions = {}): Promise<SharedSessionRecord | null> {

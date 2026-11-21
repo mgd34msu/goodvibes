@@ -16,6 +16,7 @@ import {
   normalizeCronSchedule,
   normalizeEverySchedule,
 } from '../../automation/index.js';
+import { ownerTimezone } from '../../automation/schedules.js';
 import { inspectKnowledgeGraphqlAccess } from '../../knowledge/index.js';
 import { buildKnowledgeRouteContext } from './router-route-contexts.js';
 
@@ -60,7 +61,8 @@ export function buildRouterKnowledgeContext(
       inspectGraphqlAccess: inspectKnowledgeGraphqlAccess,
       normalizeAtSchedule,
       normalizeEverySchedule,
-      normalizeCronSchedule,
+      // A knowledge schedule written without a zone runs where the owner is.
+      normalizeCronSchedule: (expression, timezone, staggerMs) => normalizeCronSchedule(expression, timezone, staggerMs, ownerTimezone(context.configManager)),
       parseJsonBody: parsers.parseJsonBody,
       parseOptionalJsonBody: parsers.parseOptionalJsonBody,
       parseJsonText: parsers.parseJsonText,

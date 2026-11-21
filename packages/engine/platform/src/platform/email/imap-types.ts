@@ -116,6 +116,21 @@ export interface ImapMessageDetail extends ImapEnvelope {
   readonly bodyHtml: string;
   /** What is attached, described. Never the attached bytes, see `fetchMessage`. */
   readonly attachments: readonly ImapAttachmentInfo[];
+  /**
+   * The body sections the message declares that could not be fetched, each
+   * with why. Present only when one failed: the headers are real, and
+   * `bodyText`/`bodyHtml` are empty for these sections because they were not
+   * read, not because the message has no text.
+   */
+  readonly bodyUnavailable?: readonly ImapBodySectionFailure[];
+}
+
+/** One body section a read could not fetch. */
+export interface ImapBodySectionFailure {
+  /** The IMAP section number, as BODYSTRUCTURE gave it (`1`, `1.2`). */
+  readonly section: string;
+  /** Why it did not come back, in the server's or the connection's words. */
+  readonly reason: string;
 }
 
 /**

@@ -5,6 +5,10 @@ import type { CallOptions } from '@goodvibes/judgment/decisions';
 import type { WalkDirectoryCandidate } from './directory-reading.js';
 import { logger } from './logger.js';
 import { summarizeError } from './error-display.js';
+import { PRODUCT_WORKTREE_DIR_SEGMENTS } from '../git/product-worktree-marker.js';
+
+/** The two segments that name the product's worktree directory under any project root (git/product-worktree-marker.ts). */
+const [PRODUCT_SEGMENT, WORKTREES_SEGMENT] = PRODUCT_WORKTREE_DIR_SEGMENTS;
 
 /** Conventional generated/dependency directories excluded from recursive discovery. An explicit directory selection may include them. */
 export const WALK_SKIP_DIRS = new Set([
@@ -25,7 +29,7 @@ export const WALK_SKIP_DIRS = new Set([
 export function isInsideProductWorktrees(path: string): boolean {
   const parts = resolve(path).split(sep);
   for (let index = 1; index < parts.length; index++) {
-    if (parts[index] === '.worktrees' && parts[index - 1] === '.goodvibes') return true;
+    if (parts[index] === WORKTREES_SEGMENT && parts[index - 1] === PRODUCT_SEGMENT) return true;
   }
   return false;
 }
@@ -33,7 +37,7 @@ export function isInsideProductWorktrees(path: string): boolean {
 /** The product worktree directory itself, not something inside it. */
 function isProductWorktreesDirectory(path: string): boolean {
   const parts = resolve(path).split(sep);
-  return parts.length >= 2 && parts[parts.length - 1] === '.worktrees' && parts[parts.length - 2] === '.goodvibes';
+  return parts.length >= 2 && parts[parts.length - 1] === WORKTREES_SEGMENT && parts[parts.length - 2] === PRODUCT_SEGMENT;
 }
 
 /** @deprecated Optional legacy byte budget. Traversal no longer silently excludes large files. */

@@ -32,13 +32,13 @@ export function createDaemonRuntimeAutomationRouteHandlers(
 
 /**
  * `defaultTimezone` is the zone a cron schedule created without one is stored
- * in (this process's zone, as the schedule store pins it), so a client can
+ * in (the owner's zone, `daemon.timezone`, else the host's), so a client can
  * tell whether a listed schedule is the one its zone-less create would make.
  */
 function handleGetSchedules(context: DaemonRuntimeRouteContext): Response {
   const jobs = context.automationManager.listJobs();
   const runs = context.automationManager.listRuns().slice(0, 50);
-  const defaultTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const defaultTimezone = context.automationManager.defaultTimezone();
   return Response.json({ jobs, runs, ...(defaultTimezone ? { defaultTimezone } : {}) });
 }
 

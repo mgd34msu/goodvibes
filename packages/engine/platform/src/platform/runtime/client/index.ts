@@ -113,6 +113,7 @@ export {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   describeDaemonAutostart,
+  waitForStartingDaemon,
 } from './daemon-autostart.js';
 export type {
   DaemonAutostartInactionReason,
@@ -123,6 +124,7 @@ export type {
   DaemonServiceControlOptions,
   DaemonServiceSnapshot,
   DaemonServiceStartResult,
+  WaitForStartingDaemonOptions,
 } from './daemon-autostart.js';
 
 export {

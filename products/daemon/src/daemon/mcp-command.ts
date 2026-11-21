@@ -29,6 +29,7 @@ import { callDaemonRoute, resolveRemoteDaemonTarget } from '@goodvibes/engine/te
 import { createHttpJsonTransport, createOperatorRemoteClient } from '@goodvibes/engine/platform/platform/runtime/transport';
 import {
   AGENT_MCP_TOOL_CATEGORIES,
+  buildOperatorMcpTools,
   createOperatorMcpServer,
   createStreamTransport,
   serveOperatorMcp,
@@ -115,17 +116,29 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
   if (unknown.length > 0) {
     return refuse(`no operator family named ${unknown.join(', ')}`, `use one of ${[...known].sort().join(', ')}, or all`);
   }
-  const toolOptions = {
-    ...(everyFamily ? {} : { includeCategories: requested.length > 0 ? requested : AGENT_MCP_TOOL_CATEGORIES }),
-    readOnly: input.flags.allowWrite !== true,
-    includeDangerous: input.flags.allowDestructive === true,
-  };
   const transport = createHttpJsonTransport({
     baseUrl: target.baseUrl,
     authToken: target.token,
     fetchImpl,
   });
   const client = createOperatorRemoteClient(transport, contract);
+  // Offer only the methods the target daemon serves: one catalog read at start.
+  // A daemon on another release may lack some of this binary's methods; those
+  // tools are left out rather than failing with METHOD_NOT_FOUND when called.
+  let servedIds: ReadonlySet<string>;
+  try {
+    const catalog = await client.invoke('control.methods.list', {}) as { readonly methods?: readonly { readonly id?: unknown }[] };
+    servedIds = new Set((catalog.methods ?? []).map((method) => method.id).filter((id): id is string => typeof id === 'string'));
+  } catch (error) {
+    return refuse(`the daemon at ${target.baseUrl} did not list its methods (${error instanceof Error ? error.message : String(error)})`,
+      'check that it is running this release or a recent one: goodvibes-daemon status');
+  }
+  const toolOptions = {
+    ...(everyFamily ? {} : { includeCategories: requested.length > 0 ? requested : AGENT_MCP_TOOL_CATEGORIES }),
+    readOnly: input.flags.allowWrite !== true,
+    includeDangerous: input.flags.allowDestructive === true,
+  };
+  const dropped = buildOperatorMcpTools(contract, toolOptions).tools.filter((tool) => !servedIds.has(tool.operatorMethodId)).length;
   const restBound = new Set(contract.operator.methods.filter((method) => method.http).map((method) => method.id));
   const server = createOperatorMcpServer({
     contract,
@@ -138,14 +151,15 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
       : transport.requestJson(`/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
         method: 'POST', body: { body: params }, methodId, signal,
       }),
-    tools: toolOptions,
+    tools: { ...toolOptions, includeMethods: servedIds },
     serverInfo: { name: 'goodvibes-operator', version: VERSION },
   });
   const served = server.listTools().length;
   const scope = everyFamily ? 'every family' : (requested.length > 0 ? requested : AGENT_MCP_TOOL_CATEGORIES).join(', ');
   const access = input.flags.allowWrite === true ? 'reads and writes' : 'reads and the session lifecycle';
   const widen = input.flags.allowWrite === true ? '' : '; --allow-write and --categories serve more';
-  input.stderr(`goodvibes-daemon mcp serve: serving ${served} tools (${scope}; ${access}${input.flags.allowDestructive === true ? ', destructive included' : ''})${widen}`);
+  const absent = dropped > 0 ? `; ${dropped} left out because that daemon does not serve them` : '';
+  input.stderr(`goodvibes-daemon mcp serve: serving ${served} tools (${scope}; ${access}${input.flags.allowDestructive === true ? ', destructive included' : ''})${absent}${widen}`);
   await serveOperatorMcp(server, createStreamTransport(input.input, input.output));
   return 0;
 }

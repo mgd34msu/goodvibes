@@ -18,8 +18,9 @@ machine must be stated with its scheme, `https://` or `http://`: when
 refuses and sends nothing, because the migration request and the minted
 credential would otherwise cross the network unencrypted on a guess. This
 machine's daemon token is never sent to another machine, by preview, by
-`--apply` or by the repeat of an unresolved attempt; the credential sent there
-is `GOODVIBES_CONNECTED_HOST_TOKEN` (or `GOODVIBES_DAEMON_TOKEN`).
+`--apply` or by the repeat of an unresolved attempt, and that includes
+`GOODVIBES_DAEMON_TOKEN`; the environment credential sent there is
+`GOODVIBES_CONNECTED_HOST_TOKEN`.
 
 `goodvibes-agent setup pair` previews migration of the selected host's existing
 legacy shared operator credential into a named per-device Agent credential.
@@ -130,7 +131,8 @@ is reported as stored but unverified and never causes another mint.
 
 Agent's outgoing host connections resolve credentials in this order:
 1. `GOODVIBES_CONNECTED_HOST_TOKEN`
-2. `GOODVIBES_DAEMON_TOKEN`
+2. `GOODVIBES_DAEMON_TOKEN`, only when the selected host address is this
+   machine (it is this machine's daemon token and is never sent elsewhere)
 3. Agent-owned pairing for the exact selected origin
 4. Existing daemon-global shared-token file, only when no host pairing exists
    and the selected host address is this machine (loopback or one of its own
@@ -169,8 +171,8 @@ too.
 
 Setup status is a read-only observation, never an authority grant. Agent uses the
 same selected-host resolver and effective token precedence as native intake:
-`GOODVIBES_CONNECTED_HOST_TOKEN`, `GOODVIBES_DAEMON_TOKEN`, the Agent-owned
-pairing for the exact selected origin, then the existing daemon operator token
+`GOODVIBES_CONNECTED_HOST_TOKEN`, `GOODVIBES_DAEMON_TOKEN` (for this machine's
+daemon only), the Agent-owned pairing for the exact selected origin, then the existing daemon operator token
 file (only when no host pairing exists). A fresh `control.auth.current` response must report an
 authenticated admin whose `credential` is `local` (the operator token on the
 daemon's own machine) or `device-token` (a paired device), with

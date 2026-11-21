@@ -65,6 +65,11 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   config: [queryKeys.config, queryKeys.featureRestartStatus],
   [SESSION_UPDATE_WIRE_EVENT]: [queryKeys.sessions],
   [HOSTED_SESSION_UPDATE_WIRE_EVENT]: [queryKeys.hostedSessionsAll],
+  // A device asked to pair as a node, or a request was answered from another surface:
+  // Settings, Devices re-reads its "Waiting to pair" list.
+  'remote-pair-requested': [queryKeys.remotePairRequests],
+  'remote-pair-approved': [queryKeys.remotePairRequests],
+  'remote-pair-rejected': [queryKeys.remotePairRequests],
 };
 
 const FALLBACK_REFRESH_MS = 15_000;

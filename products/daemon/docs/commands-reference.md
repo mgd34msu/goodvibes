@@ -33,7 +33,16 @@ The same numbers mean different things in the other programs; see [Exit codes](.
 | `0` | the command did what it says |
 | `1` | it ran and failed, the reason is printed |
 | `2` | the command line was wrong: an unknown command, an unknown flag, a flag this command does not take, or a missing value |
-| `3` | service commands: installed, but not running (`service-status`, `install-service`) |
+
+With `--json`, every failure (a parse error, a refusal, a command that throws, a
+failed or refused service verb) is one `{"ok": false, "code", "error", "fix"}` document
+on stdout instead of prose, with the same exit code. Codes: `PARSE_ERROR`,
+`COMMAND_REFUSED`, `COMMAND_FAILED`; for the service verbs `SERVICE_ACTION_FAILED`,
+`SERVICE_NOT_RUNNING`, `SERVICE_NOT_INSTALLED`, `SERVICE_DEFINITION_NOT_OURS`; for `webui`
+`WEBUI_REFUSED` and `WEBUI_FAILED`. Every `--json` document is indented by two spaces,
+one key per line, except the single-line `webui status --json`, `--help --json` and
+`check-install-reader`.
+| `3` | service commands: installed, but not running (`service-status`; `install-service`, `start-service`, `restart-service` when the service is not running afterwards) |
 | `4` | service commands: not installed (`service-status`, `uninstall-service`, `start-service`, `stop-service`, `restart-service`) |
 | `5` | `install-service`, `refresh-service`, `uninstall-service`: the service definition at that path was not written by GoodVibes, so nothing was changed |
 
@@ -150,9 +159,12 @@ goodvibes-daemon uninstall-service
 Stop and unregister the service (`systemctl --user disable --now`,
 `launchctl bootout gui/<uid>/<label>`, or ending and deleting the Scheduled Task), then delete its definition file. A service
 that is already stopped is uninstalled the same way. A definition GoodVibes did not write
-is left in place. Exits `0` when removed, `4` when nothing was installed, `5` when the
-definition there was not written by GoodVibes, and `1` when removal failed or the service
-is still running.
+is left in place. The choice is saved first (`service.enabled` and `service.autostart`
+`false`), so a daemon started by hand later does not install the service again; when it
+cannot be saved (a managed-policy lock, a settings file that cannot be written) nothing is
+removed and the receipt names why. Exits `0` when removed, `4` when nothing was installed,
+`5` when the definition there was not written by GoodVibes, and `1` when the choice could
+not be saved, removal failed or the service is still running.
 
 ### `service-status`
 
@@ -164,7 +176,10 @@ Report the platform, the service name, the definition path, who wrote the defini
 (`definitionOwner` in `--json`: `product`, `other`, `absent` or `unreadable`), and whether
 the service is installed and currently running (queried live, not inferred from a pid file). Exit
 codes: `0` installed and running, `3` installed but not running, `4` not installed,
-`1` the platform refused the query (the error is printed).
+`1` the platform refused the query (the error is printed; with `--json`, the
+`{ok:false, code, error, fix}` document). The `--json` document carries
+`"schema": "goodvibes.daemon.service-status"` and `"schemaVersion": 1` at its top level,
+with the fields under `data`; the release installer checks both before it reads it.
 
 ### `start-service` / `stop-service` / `restart-service`
 
@@ -176,7 +191,9 @@ goodvibes-daemon restart-service
 
 Start, stop, or restart the service this binary manages, reporting what the platform
 did. A verb aimed at a service that is not installed reports that (exit 4) rather than
-dispatching a call that was always going to fail. `restart-service` is the usual way to
+dispatching a call that was always going to fail. A start or restart that leaves the
+service not running exits `3`, the same "installed, not running" answer `service-status`
+gives; a stop that leaves it running exits `1`. `restart-service` is the usual way to
 pick up a settings change that only applies at boot (an endpoint binding, for example).
 
 ### `status`
@@ -210,7 +227,8 @@ goodvibes-daemon pair [--json] [--host <http(s)://name>] [--port <n>] [--token <
 
 `qr` and `qrcode` are accepted spellings of the same command. Two forms.
 
-With no `--host`, or one naming this machine, `pair` runs locally: it prints the same
+With no `--host`, or one naming this machine (`127.0.0.1`, `localhost:3421`, `[::1]`,
+`http://127.0.0.1:3421`: the same rule every daemon command uses), `pair` runs locally: it prints the same
 pairing block a daemon prints once at startup, reusing the existing shared token (never
 minting a new one), so a link printed here and one printed at boot are identical. It
 asks the running daemon first whether it accepts that token and which address and scheme
@@ -416,10 +434,11 @@ Talks to a running daemon over the same `--host`/`--port`/`--token` convention
 ### `webui`
 
 ```
-goodvibes-daemon webui enable|disable|status [--bundle-dir <dir>] [--lan|--loopback]
+goodvibes-daemon webui enable|disable|status [--bundle-dir <dir>] [--lan|--loopback] [--json]
 ```
 
 `--bundle-dir`, `--lan` and `--loopback` apply to `enable` only; `disable` and `status` refuse them.
+`--json` applies to `status` and `enable`.
 
 The web UI is a built bundle of static files served by the daemon's own control-plane
 listener, on the same origin as the API. The URL to open is the control-plane
@@ -427,10 +446,15 @@ origin, not the declared `web.port`.
 
 | Subcommand | Effect |
 | --- | --- |
-| `enable [--bundle-dir <dir>]` | serve the bundle at that directory |
+| `enable [--bundle-dir <dir>]` | serve the bundle at that directory. `web.publicBaseUrl` is never written: a stored copy of this daemon's own address (or the old placeholder) is cleared so links follow the settings, and an address you set is kept and named in the receipt |
+| `enable --json` | the same, with the receipt as one document: `schema` `goodvibes.daemon.webui-enable`, `schemaVersion` 1, `url`, `alternateUrl` (when `url` uses a name) and `lines` |
 | `disable` | stop serving it; the bundle stays on disk |
 | `status` | configured serving path and exposure, not a live listener probe |
-| `status --json` | read-only versioned configured `web.*` binding for development clients; not the daemon listener or proof it is running |
+| `status --json` | read-only versioned configured `web.*` binding for development clients, with `serve` (`controlPlane.webui.serve`) and `bundleDir` (`controlPlane.webui.bundleDir`); not the daemon listener or proof it is running |
+
+The release installer reads `status --json` first: when a bundle directory is configured
+and serving is off, it only points `controlPlane.webui.bundleDir` at the new release's bundle
+and says the web UI was left off; otherwise it runs `enable --json`.
 
 `enable` changes no network exposure on its own. A daemon bound to loopback keeps
 serving to this machine only. `--lan` binds every interface and turns

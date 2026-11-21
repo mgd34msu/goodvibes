@@ -89,17 +89,29 @@ export function finalizeOpenAIToolCalls(acc: Map<number, OpenAIToolCallSlot>): O
  * Apply token counts from a streaming chunk's usage field.
  * Absent fields keep the value from current (so initial 0 stays 0
  * if the provider never sends those fields).
+ *
+ * `prompt_tokens` counts the cached prompt tokens too; the returned
+ * `inputTokens` is the fresh input only (`prompt_tokens` minus
+ * `cached_tokens`), the meaning `ChatResponse.usage.inputTokens` has for
+ * every provider.
  */
 export function applyOpenAIChunkUsage(
   usage: OpenAIChunkUsage | null | undefined,
   current: { inputTokens: number; outputTokens: number; cacheReadTokens: number },
 ): { inputTokens: number; outputTokens: number; cacheReadTokens: number } {
   if (!usage) return current;
+  const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens ?? current.cacheReadTokens;
+  const promptTokens = usage.prompt_tokens ?? current.inputTokens + current.cacheReadTokens;
   return {
-    inputTokens: usage.prompt_tokens ?? current.inputTokens,
+    inputTokens: freshInputTokens(promptTokens, cacheReadTokens),
     outputTokens: usage.completion_tokens ?? current.outputTokens,
-    cacheReadTokens: usage.prompt_tokens_details?.cached_tokens ?? current.cacheReadTokens,
+    cacheReadTokens,
   };
+}
+
+/** The fresh input in a prompt count that includes its cached tokens. */
+export function freshInputTokens(promptTokens: number, cachedTokens: number | undefined): number {
+  return Math.max(0, promptTokens - (cachedTokens ?? 0));
 }
 
 /**

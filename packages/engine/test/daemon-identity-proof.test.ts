@@ -68,8 +68,7 @@ async function startApp(port: number) {
   // Start-up reads only these two services, and only when it builds an HTTP listener, which this app does not.
   const services = { localUserAuthManager: undefined, configManager } as unknown as RuntimeServices;
   const handle = await startHostServices(configManager, new HookDispatcher(), services, {
-    daemonTarget: { scheme: 'http', host: '127.0.0.1', port },
-    sharedDaemonToken: TOKEN,
+    daemon: resolveDaemonTarget({ configManager, homeDirectory: dir, explicit: { url: `http://127.0.0.1:${port}`, token: TOKEN } }),
     localDaemonVersion: '1.0.0',
   });
   await handle.stop();

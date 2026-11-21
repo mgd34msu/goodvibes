@@ -24,7 +24,7 @@ import { defineCommand, type DescribedCommand } from './command-actions/define.j
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 
-type SecretsStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed' | 'inspect'> & Partial<Pick<SecretsManager, 'confirmProjectSecret'>>;
+type SecretsStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed' | 'inspect'> & Partial<Pick<SecretsManager, 'confirmProjectSecret' | 'getSecretProviderHostConfig'>>;
 
 export interface SecretsCommandContext extends CommandActionContext {
   readonly platform: { readonly secretsManager?: SecretsStore | null | undefined };
@@ -209,7 +209,7 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
           const reference = values.reference!;
           if (!isGoodVibesSecretRefInput(reference)) throw commandRefusal(`${reference} is not a secret reference.`, '"See where secrets can come from" shows the reference forms.');
           try {
-            const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => storeOf(ctx).get(key) });
+            const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => storeOf(ctx).get(key), providers: storeOf(ctx).getSecretProviderHostConfig?.() });
             return `${describeSecretRef(reference)}: ${result.value !== null && !result.value.empty ? 'gives a value (not shown)' : 'gives nothing'}.`;
           } catch (error) {
             throw commandRefusal(`${describeSecretRef(reference)} could not be read: ${summarizeError(error)}`);

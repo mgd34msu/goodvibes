@@ -135,7 +135,7 @@ export interface AgentOrchestratorRunContext {
   readonly hookDispatcher?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | null | undefined;
   readonly getFullRegistry: () => ToolRegistry;
   readonly buildScopedRegistry: (allowedNames: string[], fullRegistry: ToolRegistry, captureAuthority?: import('../personal-capture/index.js').CaptureAuthorityDecision | undefined) => ToolRegistry;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getContextWindowForModel' | 'getKnownContextWindowForModel' | 'recordContextWindowRejection' | 'resolveModelPricing'>
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getContextWindowForModel' | 'getKnownContextWindowForModel' | 'recordContextWindowRejection' | 'resolveModelPricing' | 'cacheRatios'>
     & Partial<Pick<ProviderRegistry, 'ready'>>;
   readonly providerOptimizer?: Pick<ProviderOptimizer, 'recordFallbackTransition'> | undefined;
   readonly resolveProviderForRecord: (

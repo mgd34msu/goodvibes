@@ -4,12 +4,14 @@
  * is the one pairing action; it asks what to pair (a phone or other device by
  * QR code, this terminal with its daemon, a device through the relay, or a
  * chat channel). The rest lists and revokes what was paired: device tokens,
- * relay codes, the phones paired as device nodes with their always-allow
- * grants and the captures the daemon keeps. Each app says how it reaches the
+ * relay codes, the devices waiting to pair as nodes (approved or rejected
+ * here), the phones paired as device nodes with their always-allow grants and
+ * the captures the daemon keeps. Each app says how it reaches the
  * daemon; an action only one app can do is refused in the other with why.
  */
 import type { DevicesClient } from '@goodvibes/engine/platform/platform/runtime/client';
 import { formatDeviceLine, resolveTokenByIdPrefix, type PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
+import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
@@ -27,6 +29,31 @@ export interface DeviceTokens {
 
 export interface RelayCode { readonly id: string; readonly name: string; readonly createdAt: number; readonly lastSeenAt?: number | undefined }
 export interface HostPairingRequest { readonly name: string; readonly bootstrapShared: boolean; readonly apply: boolean }
+
+/** A device asking to pair as a node (a browser's Phone node, a peer daemon), as `remote.pair.requests.list` reports it. */
+export interface PairRequest {
+  readonly id: string;
+  readonly label: string;
+  /** The node id the device asks to pair as; an existing peer with it is replaced when the device verifies. */
+  readonly requestedId: string;
+  readonly status: string;
+  readonly platform?: string | undefined;
+  readonly deviceFamily?: string | undefined;
+  readonly capabilities: readonly string[];
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
+/**
+ * The daemon's pair requests, through `remote.pair.requests.*`. A refusal keeps
+ * the daemon's code (`readRefusal(error).code`), so a request that would replace
+ * a paired device (`REMOTE_PAIR_REPLACES_PEER`) is told apart from any other.
+ */
+export interface PairRequestsHost<Ctx> {
+  readonly list: (ctx: Ctx) => Promise<readonly PairRequest[]>;
+  readonly approve: (ctx: Ctx, id: string, confirmReplace: boolean) => Promise<PairRequest>;
+  readonly reject: (ctx: Ctx, id: string) => Promise<PairRequest>;
+}
 
 /** How one app reaches what is paired. A missing reader refuses its action with the reason for that app. */
 export interface DevicesHost<Ctx> {
@@ -46,6 +73,7 @@ export interface DevicesHost<Ctx> {
   readonly pairChannel?: ((ctx: Ctx, channel: string) => Promise<string | void>) | undefined;
   readonly migrateShared?: ((ctx: Ctx, name: string) => Promise<string>) | undefined;
   readonly revokeShared?: ((ctx: Ctx) => Promise<string>) | undefined;
+  readonly pairRequests: PairRequestsHost<Ctx>;
 }
 
 const TERMINAL_ONLY = 'the terminal app holds this (its own host credential, the relay and channel setup); run it in goodvibes';
@@ -67,6 +95,18 @@ function requireDevices(ctx: unknown): DevicesClient {
 
 const when = (at: number): string => new Date(at).toISOString().slice(0, 16).replace('T', ' ');
 
+/** "Linux, phone · offers camera, location · pairs as node-1 · asked 2026-11-20 09:15". */
+function pairRequestDetail(request: PairRequest): string {
+  return [
+    [request.platform, request.deviceFamily].filter(Boolean).join(', '),
+    request.capabilities.length > 0 ? `offers ${request.capabilities.join(', ')}` : 'offers nothing yet',
+    `pairs as ${request.requestedId}`,
+    `asked ${when(request.createdAt)}`,
+  ].filter(Boolean).join(' · ');
+}
+
+const PAIR_REQUEST_REPLACES_PEER = 'REMOTE_PAIR_REPLACES_PEER';
+
 const TOKENS = defineList<unknown>({
   name: 'devices.tokens',
   async read(ctx) {
@@ -81,6 +121,15 @@ const RELAY_CODES = defineList<unknown>({
     return codes ? (await codes(ctx)).map((code): ListRow => ({ value: code.id, label: code.name, detail: code.lastSeenAt ? `last used ${when(code.lastSeenAt)}` : 'not used yet' })) : [];
   },
   operator: { method: 'relay.codes.list', input: {}, rows: { from: 'codes', value: 'id', label: 'name' } },
+});
+const PAIR_REQUESTS = defineList<unknown>({
+  name: 'devices.pair-requests',
+  async read(ctx) {
+    return (await host().pairRequests.list(ctx)).filter((request) => request.status === 'pending').map((request): ListRow => ({
+      value: request.id, label: request.label, detail: pairRequestDetail(request),
+    }));
+  },
+  operator: { method: 'remote.pair.requests.list', input: {}, rows: { from: 'requests', value: 'id', label: 'label', detail: 'requestedId' } },
 });
 const GRANTS = defineList<unknown>({
   name: 'devices.grants',
@@ -263,6 +312,55 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
       async run(values, ctx) { return h.revokeRelayCode ? await h.revokeRelayCode(ctx, values.code!) : missing('Revoking a relay code', TERMINAL_ONLY); },
     },
     readAction<Ctx>({
+      id: 'requests', label: 'See devices waiting to pair', word: 'requests',
+      sentence: 'Lists each device that asked to pair as a node (a browser\'s Phone node, a peer daemon) and waits for your approval, with what it offers and the node id it pairs as.',
+      operator: { method: 'remote.pair.requests.list', fields: {} },
+      async run(_values, ctx) {
+        const pending = (await h.pairRequests.list(ctx)).filter((request) => request.status === 'pending');
+        if (pending.length === 0) return 'No device is waiting to pair. A device asks from its own screen (the web UI\'s phone node page: Pair this phone).';
+        return [`Waiting to pair (${pending.length}); approve one only if you recognise it, then press Finish pairing on it:`,
+          ...pending.map((request) => `  ${request.id}  ${request.label}  ${pairRequestDetail(request)}  expires ${when(request.expiresAt)}`)].join('\n');
+      },
+    }),
+    {
+      id: 'approve', label: 'Approve a device waiting to pair', word: 'approve',
+      inputs: [
+        listInput({ id: 'request', label: 'Request', help: 'The devices waiting to pair', list: PAIR_REQUESTS }),
+        { id: 'replace', label: 'Replace', help: 'The request names a device already paired: approve it as that same device pairing again, which ends the old pairing', kind: 'choice',
+          choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes, it is the same device pairing again' }],
+          required: { default: 'no', defaultMeans: 'no' }, typed: { flag: '--replace', switchOn: 'yes' } },
+      ],
+      sentence: 'The device that sent {request} may finish pairing and then reach the daemon as a node, until you revoke it.', done: '',
+      touches: 'credential', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'approving gives a device access to the daemon', instead: '/devices requests shows the devices waiting to pair' },
+      operator: { method: 'remote.pair.requests.approve', fields: { requestId: 'request' } },
+      example: { request: 'pair-1' },
+      async run(values, ctx) {
+        const id = values.request!;
+        try {
+          const approved = await h.pairRequests.approve(ctx, id, values.replace === 'yes');
+          return `Approved "${approved.label}". Press Finish pairing on that device to complete it.`;
+        } catch (error) {
+          if (readRefusal(error)?.code !== PAIR_REQUEST_REPLACES_PEER) throw error;
+          throw commandRefusal(`Request ${id} names a device that is already paired; approving it replaces that device's pairing. Nothing was approved.`,
+            `/devices approve ${id} --replace, only if it is that same device pairing again`, PAIR_REQUEST_REPLACES_PEER);
+        }
+      },
+    },
+    {
+      id: 'reject', label: 'Reject a device waiting to pair', word: 'reject',
+      inputs: [listInput({ id: 'request', label: 'Request', help: 'The devices waiting to pair', list: PAIR_REQUESTS })],
+      sentence: 'The device that sent {request} is not paired and has to ask again.', done: '',
+      touches: 'another-machine', lasts: 'kept', risk: 'none',
+      ownerOnly: { reason: 'answering a pairing request is the owner\'s own act', instead: '/devices requests shows the devices waiting to pair' },
+      operator: { method: 'remote.pair.requests.reject', fields: { requestId: 'request' } },
+      example: { request: 'pair-1' },
+      async run(values, ctx) {
+        const rejected = await h.pairRequests.reject(ctx, values.request!);
+        return `Rejected "${rejected.label}"; it has to ask again to pair.`;
+      },
+    },
+    readAction<Ctx>({
       id: 'nodes', label: 'See phones paired as device nodes', word: 'nodes',
       sentence: 'Lists each phone paired as a device node and what it can serve.',
       operator: { method: 'devices.nodes.list', fields: {} },
@@ -307,7 +405,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
     report: 'list',
     firstScreenRows: [
       'list', 'pair', 'rename', 'revoke',
-      { label: 'Phones as device nodes…', actions: ['nodes', 'grants', 'revoke-grant', 'captures', 'delete-capture'] },
+      { label: 'Phones as device nodes…', actions: ['requests', 'approve', 'reject', 'nodes', 'grants', 'revoke-grant', 'captures', 'delete-capture'] },
       { label: 'The relay…', actions: ['relay-status', 'relay-codes', 'relay-revoke'] },
       { label: 'This terminal and the shared token…', actions: ['host-status', 'unpair-host', 'migrate-shared', 'revoke-shared'] },
     ],

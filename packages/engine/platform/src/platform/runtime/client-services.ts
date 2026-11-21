@@ -577,7 +577,12 @@ function composeClientRuntimeServices(
   // A host that already owns the rule file lends its store, so one instance is
   // the only writer of that file; a floor with a store of its own would persist
   // its own snapshot over the host's and bring back a rule the operator deleted.
-  const userPermissionRuleStore = options.userPermissionRuleStore ?? createUserPermissionRuleStore(configManager);
+  const userPermissionRuleStore = options.userPermissionRuleStore ?? (() => {
+    // A store made here is this composition's: its directory watch ends with it. A lent one stays its host's.
+    const own = createUserPermissionRuleStore(configManager);
+    disposalScope.registry.add('user permission rule watch', () => own.close());
+    return own;
+  })();
   const permissionManager = createBrokeredPermissionManager({
     workspaceTrust,
     requestApproval: options.requestApproval,
@@ -603,7 +608,9 @@ function composeClientRuntimeServices(
   });
 
   const artifactStore = new ArtifactStore({ configManager });
-  const webSearchProviders = new WebSearchProviderRegistry({ env: process.env, serviceRegistry });
+  const webSearchProviders = new WebSearchProviderRegistry({ env: process.env, serviceRegistry }, {
+    defaultProvider: () => configManager.get('webSearch.defaultProvider'),
+  });
   const webSearchService = new WebSearchService(webSearchProviders, createConfiguredFetchDeps({
     serviceRegistry, featureFlags, configManager, localhostFetchApproval: approvalHandlers.localhostFetchApproval,
   }));

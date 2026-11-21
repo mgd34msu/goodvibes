@@ -333,7 +333,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     storePath: resolveStatePath('watchers.json'),
     featureFlags,
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')),
-    resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }, 'dispatch'),
+    resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome(), providers: secretsManager.getSecretProviderHostConfig() }, 'dispatch'),
     privateDeliveryHosts,
     workAdmitted,
   });
@@ -343,7 +343,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The agent graph in its one working order. ACP sessions this graph hosts and
   // whatever the product owns beyond its agent runs count against the same ceiling.
   let acpHostRef: AcpHostService | undefined;
-  const acpFleetOwnership = (): { id: string; active: boolean }[] => (acpHostRef?.list() ?? []).map(session => ({ id: `acp:${session.id}`, active: true }));
+  const acpFleetOwnership = (): readonly { readonly id: string; readonly active: boolean }[] => acpHostRef?.fleetOwnership() ?? [];
   const { agentMessageBus, archetypeLoader, agentOrchestrator, agentManager, contextAccountingHolder } = createAgentExecutionGraph({
     capturedBunRuntimeExecutable: seams.capturedBunRuntimeExecutable,
     runtimeBus,
@@ -509,7 +509,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
   // Metered voice spend goes to attribution; local engines emit nothing.
   const voiceService = new VoiceService(voiceProviders, (usage) => emitProviderVoiceUsage(runtimeBus, { sessionId: 'system', traceId: `voice:${Date.now()}`, source: 'voice-service' }, { provider: usage.providerId, modelId: usage.modelId, kind: usage.kind, billableUnits: usage.billableUnits, unit: usage.unit }));
-  const webSearchProviders = new WebSearchProviderRegistry({ env: process.env, serviceRegistry });
+  const webSearchProviders = new WebSearchProviderRegistry({ env: process.env, serviceRegistry }, {
+    defaultProvider: () => configManager.get('webSearch.defaultProvider'),
+  });
   // The approval handlers are built further down; a loopback search evidence fetch reads them when it happens.
   let localhostFetchApprovalForSearch: LocalhostFetchApproval | undefined;
   const webSearchService = new WebSearchService(webSearchProviders, createConfiguredFetchDeps({
@@ -558,7 +560,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     workingDirectory,
     homeDirectory,
     credentials: {
-      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }, 'dispatch'),
+      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome(), providers: secretsManager.getSecretProviderHostConfig() }, 'dispatch'),
     },
     logger,
     isPairedPeer: (peerId) => distributedRuntime.getPeer(peerId) !== null,
@@ -664,6 +666,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // An answer that asks to be remembered saves its rule before the answer is recorded, on every surface that answers.
   approvalBroker.keepRememberedRulesIn(userPermissionRuleStore);
   scope.ownUntilRegistered('config file watch', stopConfigWatch);
+  scope.ownUntilRegistered('user permission rule watch', () => userPermissionRuleStore.close());
   scope.ownUntilRegistered('store snapshot scheduler', () => storeSnapshotScheduler.stop());
   scope.ownUntilRegistered('append-only retention scheduler', () => appendOnlyRetentionScheduler.stop());
   scope.ownUntilRegistered('durability housekeeping', stopDurabilityHousekeeping);
@@ -755,6 +758,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       .catch(() => { /* best-effort; the fleet row is authoritative */ }),
     // The same count spawning reads: native agents, what the product owns beyond them, and hosted sessions.
     admitSession: () => fleetCeilingRefusal((key) => configManager.get(key as never), agentManager),
+    // A hosted session that ended frees a slot of the same fleet.
+    onSlotReleased: () => agentManager.notifyFleetSlotReleased(),
   });
   acpHostRef = acpHost;
   let acpClosing: Promise<void> | undefined;
@@ -1008,6 +1013,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     processRegistry, memoryGovernor: { stop: stopRequests.memoryGovernor }, triggerManager, agentOrchestrator, cancelHostedAgentRuns,
   });
   scope.registry.add('durability housekeeping', stopDurabilityHousekeeping);
+  scope.registry.add('user permission rule watch', () => userPermissionRuleStore.close());
   scope.registry.add('wake-word housekeeping', stopWakeHousekeeping);
   // Drain plugin work before releasing the graph it can call into.
   scope.registry.add('plugins', () => pluginManager.close());

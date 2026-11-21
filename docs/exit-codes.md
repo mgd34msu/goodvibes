@@ -8,9 +8,9 @@ and never branch on a code without knowing which program produced it.
 | Code | `goodvibes run`, `goodvibes-agent run` | `goodvibes-contract` | `goodvibes-daemon` | `install.sh` (the release installer) |
 | --- | --- | --- | --- | --- |
 | `0` | Completed, or admitted work was recorded. | The contract passed, or the command did what it says. `reply` follows the contract it answered, so its code is the contract's; `reply --no-follow` exits `0` once the reply is read. | The command did what it says. | Installed, and the daemon and web UI run as asked (`Done.`). |
-| `1` | Failed: model or provider error, empty response, `--max-turns` reached, a turn refused before it started (a failed preflight check, or a conversation too large for the model's context window), or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed. | Failed or refused with an `INSTALL_E<n>` code; the previous programs were put back when any had been replaced. |
-| `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. | not used |
-| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running. | Installed, but another copy earlier on `PATH` still answers a command name. |
+| `1` | Failed: model or provider error, empty response, `--max-turns` reached, a turn refused before it started (a failed preflight check, or a conversation too large for the model's context window), or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed, or with `--json` one `{ok:false, code, error, fix}` document is printed on stdout. | Failed or refused with an `INSTALL_E<n>` code; the previous programs were put back when any had been replaced. |
+| `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. With `--json`, a `{ok:false, code, error, fix}` document (`code` `PARSE_ERROR` or `COMMAND_REFUSED`) on stdout instead of the help page. | not used |
+| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running (`service-status`; `install-service`, `start-service` and `restart-service` when the service is not running afterwards). | Installed, but another copy earlier on `PATH` still answers a command name. |
 | `4` | not used | not used | Service commands: not installed. | Installed, but the daemon or the web UI is not running as asked (a service not set up or not running, a failed restart, an unconfigured web UI, an unsaved `--no-service`); `Installed, with the problems above.` |
 | `5` | not used | not used | `install-service`, `refresh-service`, `uninstall-service`: the definition at the service's path was not written by GoodVibes; nothing was changed. | not used |
 | `64` | not used | Usage error. | not used | not used |
@@ -22,7 +22,7 @@ The same number, different meaning:
 - `2` is a usage error for `run` and the daemon, but "the owner has to answer"
   for `goodvibes-contract`, which reports usage as `64`.
 - `3` is "the outcome is unknown" for `run`, "not running" for
-  `goodvibes-daemon service-status`, and "installed but shadowed on `PATH`" for `install.sh`.
+  `goodvibes-daemon service-status`, `install-service`, `start-service` and `restart-service`, and "installed but shadowed on `PATH`" for `install.sh`.
 - `4` is "not installed" for `goodvibes-daemon service-status` and "installed,
   with problems" for `install.sh`.
 - `1` always means the command ran and did not succeed. For `run` it also

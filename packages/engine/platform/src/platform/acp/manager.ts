@@ -81,6 +81,7 @@ export class AcpManager {
   private readonly permissionHost: ExternalPermissionHost | undefined;
   private readonly runtimeBus: RuntimeEventBus | null;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
+  private closed = false;
 
   constructor(options: {
     readonly permissionHost?: ExternalPermissionHost;
@@ -100,6 +101,7 @@ export class AcpManager {
    * Returns the subagent ID immediately; the task runs in the background.
    */
   async spawn(task: SubagentTask, operation: ExternalOperationSource | undefined = currentExternalOperationSource()): Promise<string> {
+    if (this.closed) throw new Error('No subagent was started: this program is shutting down, and its subagents have been stopped.');
     operation?.signal?.throwIfAborted(); operation?.assertCurrent();
     const source = operation ? captureAutonomousSource(operation.sourceOf()) : undefined;
     const sourceIsCurrent = source ? retainAutonomousSource(source) : undefined;
@@ -161,6 +163,16 @@ export class AcpManager {
     await Promise.allSettled(
       Array.from(this.connections.keys()).map((id) => this.cancel(id)),
     );
+  }
+
+  /**
+   * Stop every subagent this manager started and refuse new ones: each live
+   * connection is cancelled (SIGTERM, a grace, SIGKILL) and its exit observed
+   * before this resolves. The owning surface calls it at exit.
+   */
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.cancelAll();
   }
 
   /**

@@ -229,7 +229,7 @@ async function fetchAddress(url: string, init: RequestInit, host: string, addres
 
 // ── Purposes and their rules ───────────────────────────────────────────────
 
-export type DestinationPurpose = 'fetch-tool' | 'browser-page' | 'voice-audio' | 'owner-webhook' | 'image-render';
+export type DestinationPurpose = 'fetch-tool' | 'browser-page' | 'voice-audio' | 'owner-webhook' | 'image-render' | 'artifact-fetch';
 
 export interface DestinationRule {
   readonly schemes: readonly ('https:' | 'http:')[];
@@ -251,6 +251,8 @@ export const DESTINATION_RULES: { readonly [P in DestinationPurpose]: Destinatio
   'voice-audio': { schemes: ['https:'], privateNetwork: 'refuse', loopback: 'refuse', redirects: 'refuse' },
   'owner-webhook': { schemes: ['https:', 'http:'], privateNetwork: 'approved-hosts', approvedHostsSetting: PRIVATE_DELIVERY_HOSTS_SETTING, loopback: 'approved-written-host', redirects: 'refuse' },
   'image-render': { schemes: ['https:'], privateNetwork: 'refuse', loopback: 'refuse', redirects: 'refuse' },
+  // A remote artifact or knowledge source in public-only mode: public addresses only, each redirect hop checked again.
+  'artifact-fetch': { schemes: ['https:', 'http:'], privateNetwork: 'refuse', loopback: 'refuse', redirects: 'recheck-each-hop' },
 });
 
 /** Ranges an approved private host may resolve to; a cloud metadata, unspecified, multicast or reserved address never is reachable. */

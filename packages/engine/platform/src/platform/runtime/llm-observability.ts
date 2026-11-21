@@ -1,10 +1,7 @@
 /**
- * LLM observability utilities.
- *
- * Provides:
- * - Prompt/response content summarization for redaction-by-default telemetry
- * - instrumentedLlmCall() wrapper that emits LLM_REQUEST_STARTED + enriched LLM_RESPONSE_RECEIVED
- * - includeRawPrompts config awareness
+ * LLM observability: the instrumentedLlmCall() wrapper that records the
+ * request-started, request, duration and token metrics and the provider-call
+ * span for each model request.
  */
 import {
   llmRequestsTotal,
@@ -19,30 +16,6 @@ import { SpanKind } from './telemetry/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { recordProviderCallOutcome } from '../providers/provider-health.js';
-
-/** Structured prompt summary emitted in telemetry events (default: redacted). */
-export interface PromptSummary {
-  /** Byte length of the raw content. */
-  length: number;
-  /** First 100 chars of the raw content (safe preview). */
-  first100chars: string;
-}
-
-/**
- * Summarize prompt/response content for telemetry emission.
- * When includeRawPrompts is true, returns the raw string.
- * Default (false): returns a PromptSummary with length and first100chars.
- */
-export function summarizePromptContent(
-  content: string,
-  includeRaw: boolean,
-): PromptSummary | string {
-  if (includeRaw) return content;
-  return {
-    length: content.length,
-    first100chars: content.slice(0, 100),
-  };
-}
 
 /**
  * Result from an instrumented LLM call.

@@ -18,7 +18,7 @@ import type { ProviderRegistry } from '../providers/registry.js';
 import { computeUsageCostUsd } from '../providers/model-pricing.js';
 
 /** Where a restored transcript's responses are priced: the registry the live turns price with. */
-export type TranscriptPricing = Pick<ProviderRegistry, 'listModels' | 'resolveModelPricing'>;
+export type TranscriptPricing = Pick<ProviderRegistry, 'listModels' | 'resolveModelPricing' | 'cacheRatios'>;
 
 /**
  * The USD cost of one restored response at its own model's price, the same
@@ -37,7 +37,8 @@ function transcriptPriceOf(pricing: TranscriptPricing): (usage: TokenUsage, mode
       }
     }
     const modelId = ids.get(`${provider ?? ''}\u0000${model}`) ?? model;
-    return computeUsageCostUsd(pricing.resolveModelPricing(modelId, provider), usage, provider);
+    return computeUsageCostUsd(pricing.resolveModelPricing(modelId, provider), usage, provider,
+      provider ? pricing.cacheRatios(provider) : undefined);
   };
 }
 

@@ -74,7 +74,7 @@ export type StepUpDecision =
   | { readonly allow: true }
   | {
     readonly allow: false;
-    readonly code: 'step-up-required';
+    readonly code: 'STEP_UP_REQUIRED';
     readonly reason: StepUpRefusalReason;
     readonly action: StepUpNextAction;
     /** Why the call was refused, in product terms. */
@@ -179,5 +179,5 @@ export function evaluateStepUp(input: StepUpEvaluationInput): StepUpDecision {
   if (!input.viaRelay || !input.mutating || !input.requireStepUp) return { allow: true };
   if (input.verification.ok) return { allow: true };
   const reason = input.verification.reason;
-  return { allow: false, code: 'step-up-required', reason, ...describeStepUpRefusal(reason) };
+  return { allow: false, code: 'STEP_UP_REQUIRED', reason, ...describeStepUpRefusal(reason) };
 }

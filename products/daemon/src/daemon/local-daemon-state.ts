@@ -67,16 +67,23 @@ export function localDaemonStatePaths(controlPlaneConfigDir: string): LocalDaemo
   };
 }
 
+/** One file read: its text, that it is not there, or why it could not be read. */
+export type LocalStateRead =
+  | { readonly text: string }
+  | { readonly missing: true }
+  | { readonly error: string };
+
 export interface LocalStateIo {
-  read(path: string): string | null;
+  read(path: string): LocalStateRead;
 }
 
 export const realLocalStateIo: LocalStateIo = {
-  read(path: string): string | null {
+  read(path: string): LocalStateRead {
     try {
-      return existsSync(path) ? readFileSync(path, 'utf-8') : null;
-    } catch {
-      return null;
+      return { text: readFileSync(path, 'utf-8') };
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { missing: true };
+      return { error: error instanceof Error ? error.message : String(error) };
     }
   },
 };
@@ -85,25 +92,42 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-/** The marker as it stands, or null when there is none or it does not validate. */
+/** The marker, or null when there is none; `unreadable` says why a marker that is there could not be read. */
+export interface LifecycleMarkerRead {
+  readonly marker: DaemonLifecycleMarker | null;
+  readonly unreadable?: string | undefined;
+}
+
+/** The marker as it stands: absent, read, or present but unreadable (with why). */
 export function readDaemonLifecycleMarker(
   markerPath: string,
   io: LocalStateIo = realLocalStateIo,
-): DaemonLifecycleMarker | null {
+): LifecycleMarkerRead {
+  const raw = io.read(markerPath);
+  if ('missing' in raw) return { marker: null };
+  if ('error' in raw) return { marker: null, unreadable: raw.error };
   const marker = readLifecycleMarker(markerPath, {
-    read: (path) => io.read(path),
+    read: () => raw.text,
     write: () => { throw new Error('the lifecycle marker is read-only here'); },
   });
-  if (marker === null) return null;
+  if (marker === null) return { marker: null, unreadable: `${markerPath} is not a lifecycle marker this version can read` };
   return {
-    state: marker.state,
-    at: marker.at,
-    pid: marker.pid,
-    failedStarts: marker.failedStarts,
-    version: marker.version,
-    rejectedVersion: marker.rejectedVersion,
-    autoRollbackAt: marker.autoRollbackAt,
+    marker: {
+      state: marker.state,
+      at: marker.at,
+      pid: marker.pid,
+      failedStarts: marker.failedStarts,
+      version: marker.version,
+      rejectedVersion: marker.rejectedVersion,
+      autoRollbackAt: marker.autoRollbackAt,
+    },
   };
+}
+
+/** The receipts read; `unreadable` says why a receipts file that is there could not be read. */
+export interface DaemonReceiptsRead {
+  readonly receipts: readonly DaemonReceipt[];
+  readonly unreadable?: string | undefined;
 }
 
 /**
@@ -115,14 +139,15 @@ export function readDaemonLifecycleMarker(
 export function readDaemonReceipts(
   receiptsPath: string,
   io: LocalStateIo = realLocalStateIo,
-): readonly DaemonReceipt[] {
+): DaemonReceiptsRead {
   const raw = io.read(receiptsPath);
-  if (raw === null) return [];
+  if ('missing' in raw) return { receipts: [] };
+  if ('error' in raw) return { receipts: [], unreadable: raw.error };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
+    parsed = JSON.parse(raw.text);
+  } catch (error) {
+    return { receipts: [], unreadable: `${receiptsPath} is not valid JSON (${error instanceof Error ? error.message : String(error)})` };
   }
   // The store persists either a bare array or `{ receipts: [...] }` depending
   // on its version; both are read rather than one being assumed.
@@ -130,7 +155,8 @@ export function readDaemonReceipts(
     ? parsed
     : parsed && typeof parsed === 'object' && Array.isArray((parsed as { receipts?: unknown }).receipts)
       ? (parsed as { receipts: unknown[] }).receipts
-      : [];
+      : null;
+  if (list === null) return { receipts: [], unreadable: `${receiptsPath} does not hold a list of receipts` };
   const receipts: DaemonReceipt[] = [];
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue;

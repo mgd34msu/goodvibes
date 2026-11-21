@@ -8,7 +8,8 @@
  * Consumers that display the binding anchor to this resolver instead of
  * re-deriving their own defensive copies of the raw stored values.
  */
-import { isLoopbackHost, isWildcardHost } from '../utils/reachable-base-url.js';
+import { isWildcardHost } from '../config/control-plane-base-url.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 
 export interface ResolvedHostBinding {
   readonly host: string;

@@ -915,7 +915,11 @@ holds the session. It only accepts chat sessions that Home Assistant
 conversations created; any other session id is a `404`. The answer is
 `{"ok": true, "status": "cancelled"}` once the turn has stopped, or
 `{"ok": true, "status": "stopping"}` when the stop was accepted but a tool call
-is still ending; the turn then finishes as cancelled on its own.
+is still ending; the turn then finishes as cancelled on its own. When nothing
+of it was running, nothing is cancelled and the answer says what is true: a
+known `messageId` answers with what that message came to (`completed` with
+its `assistant` reply, `cancelled`, or `failed` with its `error`), and a
+`sessionId` alone answers `{"ok": true, "status": "not-running"}`.
 
 ### Home Assistant to GoodVibes webhook
 

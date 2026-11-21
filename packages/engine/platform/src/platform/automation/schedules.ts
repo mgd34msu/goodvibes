@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
-import { computeNextCronRun, parseCron, validateTimezone } from './cron.js';
+import { computeNextCronRun, hostTimezone, parseCron, validateTimezone } from './cron.js';
+import { readConsumerSetting, type ConsumerConfigReader } from '../config/profile-fallback.js';
 
 export interface AutomationAtSchedule {
   readonly kind: 'at';
@@ -118,10 +119,20 @@ export function resolveAutomationCronStaggerMs(schedule: AutomationCronSchedule)
   return resolveDefaultCronStaggerMs(schedule.expression) ?? 0;
 }
 
-/** A cron schedule written without a zone is pinned to the zone of the process that stored it, so moving the host does not shift its wall-clock time. */
-export function withCronTimezone(schedule: AutomationScheduleDefinition): AutomationScheduleDefinition {
+/**
+ * Where the owner is: `daemon.timezone` (filled from the owner's profile when
+ * unset), else the host's zone. The zone a schedule created without one is
+ * stored in, and the one `automation.schedules.list` reports as `defaultTimezone`.
+ */
+export function ownerTimezone(config: ConsumerConfigReader): string {
+  const value = readConsumerSetting(config, 'daemon.timezone');
+  return typeof value === 'string' && value.trim() ? value.trim() : hostTimezone();
+}
+
+/** A cron schedule written without a zone is pinned to `defaultZone` (the owner's zone), so moving the host does not shift its wall-clock time. */
+export function withCronTimezone(schedule: AutomationScheduleDefinition, defaultZone: string): AutomationScheduleDefinition {
   if (!schedule || typeof schedule !== 'object' || schedule.kind !== 'cron' || schedule.timezone) return schedule;
-  return { ...schedule, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  return { ...schedule, timezone: defaultZone };
 }
 
 /** Assign once before persistence. A changed cron expression/window can retain the same phase. */
@@ -202,14 +213,19 @@ export function normalizeEverySchedule(interval: string | number, anchorAt?: num
   return schedule;
 }
 
-export function normalizeCronSchedule(expression: string, timezone?: string, staggerMs?: unknown): AutomationCronSchedule {
+/**
+ * A cron schedule in `timezone`, or in `defaultZone` when none was given: the
+ * daemon passes the owner's zone ({@link ownerTimezone}); the host's zone is
+ * used only where nothing says where the owner is.
+ */
+export function normalizeCronSchedule(expression: string, timezone?: string, staggerMs?: unknown, defaultZone: string = hostTimezone()): AutomationCronSchedule {
   const normalizedStaggerMs = normalizeCronStaggerMs(staggerMs);
   const effectiveStaggerMs = normalizedStaggerMs ?? resolveDefaultCronStaggerMs(expression);
   const schedule: AutomationCronSchedule = {
     kind: 'cron',
     expression,
     // Stored with the zone it was written in, so moving the host does not shift a job's wall-clock time.
-    timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezone: timezone || defaultZone,
     ...(effectiveStaggerMs !== undefined ? { staggerMs: effectiveStaggerMs } : {}),
   };
   validateSchedule(schedule);

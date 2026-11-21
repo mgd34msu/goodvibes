@@ -104,6 +104,13 @@ export interface PowerManagerOptions {
    * settings edit, applies LIVE, not just at start().
    */
   readonly subscribeConfig?: ((key: string, cb: (newValue: unknown) => void) => () => void) | undefined;
+  /**
+   * Whether this process holds the keep-awake inhibitor for the owner's toggle.
+   * False in a client whose daemon is on another machine: `power.keepAwake` is
+   * then that machine's choice, written to its daemon, and this machine's
+   * inhibitor does not follow it. Default: always.
+   */
+  readonly holdsKeepAwake?: (() => boolean) | undefined;
   /** Emits the state-change event surfaces subscribe the chip to. */
   readonly onStateChanged?: ((state: PowerState) => void) | undefined;
   /**
@@ -299,14 +306,14 @@ export class PowerManager {
         },
       );
     }
-    if (this.readBool('power.keepAwake', false)) {
+    if (this.readBool('power.keepAwake', false) && this.holdsKeepAwakeHere()) {
       await this.setKeepAwake(true, { persist: false });
     }
     if (this.stopped) return;
     // Live-apply: a persist-only settings write (or an external file edit
     // applied by the config watcher) flips the real inhibitor, not just disk.
     this.unsubscribeKeepAwakeConfig ??= this.options.subscribeConfig?.('power.keepAwake', (newValue) => {
-      const enabled = newValue === true;
+      const enabled = newValue === true && this.holdsKeepAwakeHere();
       if (enabled === this.keepAwakeEnabled) return;
       void this.setKeepAwake(enabled, { persist: false }).catch((error) => {
         logger.warn('[power] live keep-awake apply failed', { error: summarizeError(error) });
@@ -396,7 +403,8 @@ export class PowerManager {
       const state = this.getState();
       return { ...state, keepAwake: { ...state.keepAwake, note: KEEP_AWAKE_REQUEST_NOT_APPLIED } };
     }
-    this.keepAwakeEnabled = enabled;
+    // The choice is persisted either way; the inhibitor here follows it only when this process holds keep-awake.
+    this.keepAwakeEnabled = enabled && this.holdsKeepAwakeHere();
     if (options.persist !== false) {
       try {
         this.options.writeConfig?.('power.keepAwake', enabled);
@@ -407,7 +415,7 @@ export class PowerManager {
       }
     }
     await this.enqueue(async () => {
-      if (enabled) await this.acquireKeepAwake();
+      if (this.keepAwakeEnabled) await this.acquireKeepAwake();
       else if (this.keepAwakeHandle) {
         await this.keepAwakeHandle.release();
         this.keepAwakeHandle = null;
@@ -415,6 +423,10 @@ export class PowerManager {
     });
     this.emitState();
     return this.getState();
+  }
+
+  private holdsKeepAwakeHere(): boolean {
+    return this.options.holdsKeepAwake?.() ?? true;
   }
 
   /** Acquire the keep-awake inhibitor when the toggle wants one and none is held (also the retry). */

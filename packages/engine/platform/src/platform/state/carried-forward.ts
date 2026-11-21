@@ -37,6 +37,17 @@ function schedule(): void {
   timer.unref?.();
 }
 
+/**
+ * Say what is gathered now instead of when the gather ends: the daemon calls
+ * this first thing as it stops, while its receipt store still takes the line,
+ * so a process that ends within the gather window still says it. Nothing
+ * happens with no notes or no sink.
+ */
+export function sayCarriedForwardNow(): void {
+  if (timer !== null) clearTimeout(timer);
+  flush();
+}
+
 function flush(): void {
   timer = null;
   if (sink === null || counts.size === 0) return;

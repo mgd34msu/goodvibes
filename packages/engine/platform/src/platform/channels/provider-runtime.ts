@@ -17,6 +17,7 @@ import {
   type NtfyMessage,
   type SlackSocketModeEnvelope,
   ensureNtfyTopics,
+  ntfyBaseUrl,
   resolveGoodVibesNtfyTopics,
 } from '../integrations/index.js';
 import {
@@ -220,7 +221,7 @@ export class ChannelProviderRuntimeManager {
    * must never stand down for a node reading ntfy.sh.
    */
   ntfyBaseUrl(): string {
-    return String(this.deps.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh');
+    return ntfyBaseUrl(this.deps.configManager);
   }
 
   /** Every ntfy topic this node is configured to read (each name read from the secret store its setting names). */
@@ -679,7 +680,7 @@ export class ChannelProviderRuntimeManager {
       chatTopic: names.chatTopic,
       agentTopic: names.agentTopic,
       remoteTopic: names.remoteTopic,
-      baseUrl: String(config.get('surfaces.ntfy.baseUrl') || ''),
+      baseUrl: this.ntfyBaseUrl(),
     });
     for (const refused of topics.refused) this.failNtfyTopic(refused.topic, refused.reason);
     return [...topics.all];

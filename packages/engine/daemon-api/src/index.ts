@@ -100,6 +100,8 @@ export type {
   MemoryRecordUpdateInput,
   ProviderRuntimeSnapshotServiceLike,
   RuntimeEventDomain as DaemonRuntimeEventDomain,
+  SessionReadPolicy,
+  SessionReadSubject,
   UserAuthManagerLike,
 } from './integration-route-types.js';
 export { APPROVAL_REMEMBER_TIERS } from './system-route-types.js';

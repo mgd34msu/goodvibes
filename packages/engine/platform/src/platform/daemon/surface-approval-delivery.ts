@@ -17,13 +17,15 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
-import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
+import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
+import { SlackIntegration, DiscordIntegration, NtfyIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../runtime/network/destination.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import type { SurfaceNoticeDelivery } from './types.js';
+import { approvalReplyHint } from './approval-reply.js';
 
 type RouteBinding = import('../automation/routes.js').AutomationRouteBinding;
 
@@ -48,18 +50,13 @@ function failed(error: unknown): SurfaceNoticeDelivery {
   return { delivered: false, reason: 'delivery-failed', error: summarizeError(error) };
 }
 
-/** 'pending' and 'claimed' both still want the approve/deny affordance. */
-function isPendingApproval(approval: SharedApprovalRecord): boolean {
-  return approval.status === 'pending' || approval.status === 'claimed';
-}
-
 export async function deliverSlackApprovalUpdate(
   deps: SurfaceApprovalDeliveryDeps,
   approval: SharedApprovalRecord,
   binding: RouteBinding,
 ): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-  const isPending = isPendingApproval(approval);
+  const isPending = isOpenApprovalStatus(approval.status);
   const summary = approval.request.analysis.summary;
   const webhookUrl = await deps.resolveSlackWebhookUrl();
   const botToken = await deps.resolveSlackBotToken();
@@ -114,7 +111,7 @@ export async function deliverDiscordApprovalUpdate(
   binding: RouteBinding,
 ): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-  const isPending = isPendingApproval(approval);
+  const isPending = isOpenApprovalStatus(approval.status);
   const summary = approval.request.analysis.summary;
   const webhookUrl = await resolveSurfaceSecret(deps, 'discord', 'webhookUrl');
   const botToken = deps.resolveDiscordBotToken
@@ -122,7 +119,7 @@ export async function deliverDiscordApprovalUpdate(
     : await resolveSurfaceSecret(deps, 'discord', 'primary') ?? undefined;
   const discord = new DiscordIntegration(webhookUrl ?? undefined, botToken ?? undefined);
   const content = isPending
-    ? `Approval required for \`${approval.request.tool}\`: ${summary}${webUrl ? `\n${webUrl}` : ''}`
+    ? `Approval required for \`${approval.request.tool}\`: ${summary}\n${approvalReplyHint(approval)}${webUrl ? `\n${webUrl}` : ''}`
     : `Approval ${approval.status} for \`${approval.request.tool}\`: ${summary}${webUrl ? `\n${webUrl}` : ''}`;
   const applicationId = typeof binding.metadata.applicationId === 'string' ? binding.metadata.applicationId : undefined;
   const interactionToken = typeof binding.metadata.interactionToken === 'string' ? binding.metadata.interactionToken : undefined;
@@ -161,10 +158,10 @@ export async function deliverNtfyApprovalUpdate(
   const topic = binding.channelId ?? binding.externalId;
   if (!topic) return { delivered: false, reason: 'no-deliverable-target' };
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-  const isPending = isPendingApproval(approval);
+  const isPending = isOpenApprovalStatus(approval.status);
   const summary = approval.request.analysis.summary;
   const ntfy = new NtfyIntegration(
-    String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
+    ntfyBaseUrl(deps.configManager),
     deps.resolveNtfyToken
       ? await deps.resolveNtfyToken() ?? undefined
       : await resolveSurfaceSecret(deps, 'ntfy', 'primary') ?? undefined,
@@ -173,7 +170,7 @@ export async function deliverNtfyApprovalUpdate(
   try {
     // Suppressed only as a repeat of this approval at this status: two
     // approvals with the same tool and summary are two notifications.
-    const outcome = await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
+    const outcome = await ntfy.publish(topic, isPending ? `Approval required: ${summary}\n${approvalReplyHint(approval)}` : `Approval ${approval.status}: ${summary}`, {
       title: approval.request.tool,
       ...(priority === undefined ? {} : { priority }),
       ...(webUrl ? { click: webUrl } : {}),

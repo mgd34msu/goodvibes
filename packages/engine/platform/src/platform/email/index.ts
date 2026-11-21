@@ -123,6 +123,7 @@ export type {
   ImapAttachmentInfo,
   ImapBodyProbe,
   ImapBodyUnreadableEvidence,
+  ImapBodySectionFailure,
   ImapClientOptions,
   ImapConnectionReport,
   ImapEnvelope,

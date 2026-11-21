@@ -1,4 +1,4 @@
-import { resolveWebUiListener } from '../../pairing/web-origin.js';
+import { resolvePairingWebOrigin, resolveWebUiListener } from '../../pairing/web-origin.js';
 import { unobservableRuntime } from '../health.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
 import type {
@@ -61,7 +61,8 @@ export async function buildBuiltinAccount(
         selfContained: true,
         secrets: [],
         metadata: {
-          baseUrl: context.deps.configManager.get('web.publicBaseUrl'),
+          // A user-set web.publicBaseUrl, else the origin derived live from the settings; '' when no web UI is served.
+          baseUrl: resolvePairingWebOrigin(context.deps.configManager)?.origin ?? '',
           // The port the web UI is served on, from the one owner of that address; absent when none is served.
           ...(() => { const port = resolveWebUiListener(context.deps.configManager)?.port; return port === undefined ? {} : { port }; })(),
         },

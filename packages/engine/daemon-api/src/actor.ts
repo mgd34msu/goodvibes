@@ -116,7 +116,10 @@ export function actorFromPrincipal(principal: ActorPrincipal, owner: OwnerIdenti
 /**
  * The actor a chat sender is: the channel's owner (the identity its policy
  * names) is the owner; anyone else the channel admits is a guest. A sender
- * with no id is admitted by the surface's own secret and is the owner.
+ * with no id is the owner: that holds only for a surface whose secret the
+ * owner's own systems hold (the generic webhook, Home Assistant). Every chat
+ * adapter must pass the sender it can identify (Telegram: the `sender_chat` of
+ * a message posted as a chat, else `from`), never leave it out.
  */
 export function actorFromChannelSender(input: { readonly surface: string; readonly userId?: string | undefined; readonly isChannelOwner: boolean }): Actor {
   const owner = input.isChannelOwner || input.userId === undefined;

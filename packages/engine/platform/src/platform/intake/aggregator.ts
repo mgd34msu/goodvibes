@@ -40,7 +40,7 @@
 import { publishedSequenceBound, type InboxCursorStore, type InboxPosition } from './cursor-store.js';
 import type { InboundPoller, ProviderStatus } from './poller.js';
 import type { InboundChannelItem, MailboxHistoryStatus, SkippedMailMessage } from './provider-adapter.js';
-import { GatewayVerbError as HandlerError } from '../control-plane/routes/gateway-verb-error.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { EMAIL_OWNER_PROVIDER_ID, emailItemId } from './email-item-id.js';
 
 export const DEFAULT_LIMIT = 50;
@@ -173,8 +173,8 @@ export function decodePageCursor(raw: string): InboxPosition {
   return { receivedAt: Math.floor(receivedAt), id };
 }
 
-function invalidCursor(): HandlerError {
-  return new HandlerError(
+function invalidCursor(): GatewayVerbError {
+  return new GatewayVerbError(
     'cursor is not a cursor this method issued; pass back a nextCursor value verbatim, or omit it to start from the newest item',
     'INVALID_ARGUMENT',
     400,
@@ -223,7 +223,7 @@ export function normalizeInboxQuery(
 function readUids(raw: unknown): number[] | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw) || raw.length > MAX_LIMIT || !raw.every((uid) => Number.isSafeInteger(uid) && (uid as number) > 0)) {
-    throw new HandlerError(`uids must be a list of at most ${MAX_LIMIT} positive integer UIDs; omit it to read the feed`, 'INVALID_ARGUMENT', 400);
+    throw new GatewayVerbError(`uids must be a list of at most ${MAX_LIMIT} positive integer UIDs; omit it to read the feed`, 'INVALID_ARGUMENT', 400);
   }
   return raw as number[];
 }
@@ -262,8 +262,8 @@ function firstNumber(field: string, ...candidates: (string | number | undefined)
   return undefined;
 }
 
-function invalidNumber(field: string): HandlerError {
-  return new HandlerError(
+function invalidNumber(field: string): GatewayVerbError {
+  return new GatewayVerbError(
     `${field} must be a ${field === 'since' ? 'non-negative ' : ''}number; omit it to use the default`,
     'INVALID_ARGUMENT',
     400,

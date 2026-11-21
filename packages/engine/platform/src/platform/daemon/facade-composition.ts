@@ -19,12 +19,12 @@ import { logger } from '../utils/logger.js';
 import { existsSync } from 'node:fs';
 import { readHeldCompanionTurn } from './held-companion-turn.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
-import { startOwedGitHubEvents, type GitHubReplyOperation } from '../adapters/github/index.js';
+import { resolveGitHubToken, startOwedGitHubEvents, type GitHubReplyOperation } from '../adapters/github/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom } from '../runtime/events/index.js';
 import { createRuntimeStore } from '../runtime/store/index.js';
-import { setTelemetryIncludeRawPrompts } from '../runtime/telemetry/redaction-config.js';
+import { warnTelemetryRawPromptsEnabled } from '../runtime/telemetry/redaction-config.js';
 import {
   ChannelReplyPipeline,
   ChannelProviderRuntimeManager,
@@ -374,6 +374,8 @@ export function resolveDaemonFacadeRuntime(
   runtimeServices.knowledgeService.attachRuntimeBus(runtimeBus);
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   runtimeServices.sessionBroker.attachRuntimeBus(runtimeBus, (agentId) => runtimeServices.sessionBroker.findSessionForAgent(agentId));
+  // A message waiting for a free agent starts when a fleet slot is actually free, not when an agent's end event fires.
+  (config.agentManager ?? runtimeServices.agentManager).onFleetSlotReleased(() => runtimeServices.sessionBroker.startWaitingMessages());
   // Stamp automatic workspace checkpoints with the owning session id, resolved
   // the same way agent terminal events reconcile to a session (the broker's
   // activeAgentId map). Returns undefined when the triggering agent maps to no
@@ -453,6 +455,11 @@ export function resolveDaemonFacadeRuntime(
     },
     runtimeBus,
     artifactStore: runtimeServices.artifactStore,
+  });
+  // A companion chat's title and message count are the chat manager's; the broker's session list reads them from it.
+  runtimeServices.sessionBroker.setExternalFacts('companion-chat', (session) => {
+    const chat = companionChatManager.getSession(session.id);
+    return chat === null ? null : { title: chat.title, messageCount: chat.messageCount, updatedAt: chat.updatedAt };
   });
   runtimeServices.approvalBroker.setPublisher(controlPlaneGateway);
   runtimeServices.sessionBroker.setEventPublisher((event, payload) => {
@@ -616,11 +623,13 @@ export function createDaemonFacadeCollaborators(
 ): DaemonFacadeCollaborators {
   const { runtime } = options;
 
-  // Report the startup opt-in. TelemetryApiService reads this daemon's live
-  // config separately; safe views redact and HTTP raw reads also require scope.
-  setTelemetryIncludeRawPrompts(
-    runtime.configManager.get('telemetry.includeRawPrompts') === true,
-  );
+  // Warn when the raw-prompt opt-in is on at start and each time it is turned
+  // on while the daemon runs. TelemetryApiService reads this daemon's live
+  // config itself; safe views redact and HTTP raw reads also require scope.
+  if (runtime.configManager.get('telemetry.includeRawPrompts') === true) warnTelemetryRawPromptsEnabled();
+  const stopTelemetryOptInWarning = runtime.configManager.subscribe('telemetry.includeRawPrompts', (value) => {
+    if (value === true) warnTelemetryRawPromptsEnabled();
+  });
 
   const channelReplyPipeline = new ChannelReplyPipeline({
     channelPlugins: runtime.channelPlugins,
@@ -799,7 +808,7 @@ export function createDaemonFacadeCollaborators(
         operations: daemonOperationLog<GitHubReplyOperation>(runtime.configManager),
         trySpawnAgent: (input, logLabel, sessionId) => options.trySpawnAgent(input, logLabel, sessionId),
         awaitAgent: async (agentId) => { await runtime.agentManager.join(agentId); return runtime.agentManager.getStatus(agentId); },
-        resolveToken: async () => (await runtime.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null,
+        resolveToken: () => resolveGitHubToken(runtime.serviceRegistry),
       }).catch((error: unknown) => {
         logger.warn('GitHub events held for a restart could not be started after admission reopened', { error: summarizeError(error) });
       });
@@ -808,6 +817,8 @@ export function createDaemonFacadeCollaborators(
   const httpRouter = new DaemonHttpRouter({
     workAdmission,
     idempotentReplay,
+    // A hosted session's owners: the session routes show it only to them and to admins.
+    sessionOwners: (sessionId) => runtime.runtimeServices.sessionLiveTurnControls.ownersOf(sessionId),
     listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
     servingListener: options.servingListener,
     // The 401 names a refused credential the daemon knows: a device token over its
@@ -918,6 +929,7 @@ export function createDaemonFacadeCollaborators(
     workProposals,
     paymentReplies: surfaceActionHelper.paymentReplies,
     ingressAlarm,
+    stopTelemetryOptInWarning,
   };
 }
 

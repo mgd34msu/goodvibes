@@ -120,7 +120,7 @@ export function createAgentReminderScheduleTool(
           },
           timezone: {
             type: 'string',
-            description: 'Optional IANA timezone for cron schedules only.',
+            description: 'Optional IANA timezone for cron schedules only. Without one the reminder is kept in daemon.timezone (where the owner is), or the daemon host\'s zone when that is unset; give one only when the owner names a different zone.',
           },
           name: {
             type: 'string',

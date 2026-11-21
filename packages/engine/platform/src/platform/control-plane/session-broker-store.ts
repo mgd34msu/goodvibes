@@ -45,6 +45,7 @@ import {
 } from './session-broker-state.js';
 import { withSessionCloseReason } from './session-broker-sessions.js';
 import { countOwedChannelReplies } from './session-broker-inputs.js';
+import { noteCarriedForward } from '../state/carried-forward.js';
 
 export type { SetAsideSessionEntry } from './session-broker-state.js';
 
@@ -118,6 +119,8 @@ function indexedFields(record: SharedSessionRecord, owed: number): string {
 
 /** The index entry's count of channel answers a non-active session still owes a send; not part of the session record. */
 const OWED_REPLY_COUNT_KEY = 'owedReplyCount';
+/** Set on an index that states every session's owed count; an index without it (3.3.4) is counted from the logs once. */
+const OWED_COUNTED_KEY = 'owedReplyCounted';
 
 /** The owed count an index entry states; 0 for an entry without one (every index 3.3.4 wrote). */
 function indexedOwedReplyCount(raw: unknown): number {
@@ -297,7 +300,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
         deferred.add(record.id);
         continue;
       }
-      if (waits && !owedCounted) carriedOwed += 1;
+      if (waits && !owedCounted) carriedOwed += owedOnLog;
       if (history.messages.length > 0) messages.set(record.id, history.messages);
       if (history.inputs.length > 0) inputs.set(record.id, history.inputs);
       sessions.set(record.id, withLoggedFacts(record, history.messages, history.inputs));
@@ -305,7 +308,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     this.#unreadableRecords = unreadable;
     this.#recoverUnlistedLogs(sessions, messages, inputs);
     if (this.#indexDirty) this.#writeIndex(sessions);
-    noteCarriedForward('closed session owing a channel reply', carriedOwed);
+    noteCarriedForward('unsent channel answer', carriedOwed);
     return { sessions, messages, inputs, deferred, setAside: this.#setAside };
   }
 

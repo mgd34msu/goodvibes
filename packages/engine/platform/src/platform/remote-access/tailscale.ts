@@ -247,7 +247,7 @@ function serveReceipt(port: number, httpsUrl: string, result: TailscaleCommandRe
     ...base,
     ok: true,
     url: httpsUrl,
-    detail: `tailscale serve is fronting port ${port} at ${httpsUrl}. tailscale keeps it on, also after the daemon stops or restarts, until it is stopped with tailscale.serve.stop`,
+    detail: `tailscale serve is fronting port ${port} at ${httpsUrl}. tailscale keeps it on, also after the daemon stops or restarts, until you stop serving it (Stop serving in the pairing screen or the web UI Tailscale settings)`,
   };
 }
 
@@ -341,7 +341,7 @@ export class TailscaleServeReceiptStore {
   list(): TailscaleServeReceipt[] {
     this.receipts ??= readDocument(this.filePath, {
       label: 'tailscale/serve-receipts',
-      recovery: 'The tailscale serve receipt history starts empty; a serve that is still on can be stopped with tailscale.serve.stop.',
+      recovery: 'The tailscale serve receipt history starts empty; a serve that is still on can be stopped with Stop serving in the pairing screen or the web UI Tailscale settings.',
       validate: (parsed) => {
         const receipts = (parsed as { receipts?: unknown } | null)?.receipts;
         if (!Array.isArray(receipts)) throw new Error('receipts is not a list');

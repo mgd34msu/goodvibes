@@ -26,13 +26,21 @@
  */
 import net from 'node:net';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
-import { ConfigManager, resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import {
+  ConfigManager,
+  DEFAULT_CONTROL_PLANE_PORT,
+  deriveControlPlaneBaseUrl,
+  parseDaemonOrigin,
+  readControlPlaneBinding,
+  resolveDaemonEnabled,
+} from '@goodvibes/engine/platform/platform/config';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  waitForStartingDaemon,
+  type DaemonAutostartOutcome,
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
-import { connectedHostPort, dialHostForConfiguredHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import {
   createDaemonCliRunner,
   installDaemonService,
@@ -50,8 +58,16 @@ export const DAEMON_START_COMMAND = 'goodvibes-daemon start-service';
  * The config surface this module needs: read the adopt flag, write it back, and
  * resolve the address the daemon is expected to answer on.
  */
+export type DaemonRepairConfigKey =
+  | 'daemon.enabled'
+  | 'controlPlane.hostMode'
+  | 'controlPlane.host'
+  | 'controlPlane.port'
+  | 'controlPlane.tls.mode'
+  | 'controlPlane.publicBaseUrl';
+
 export interface DaemonRepairConfig {
-  get(key: 'daemon.enabled' | 'controlPlane.host' | 'controlPlane.port'): boolean | string | number | undefined;
+  get(key: DaemonRepairConfigKey): boolean | string | number | undefined;
   set(key: 'daemon.enabled', value: boolean): void;
 }
 
@@ -108,12 +124,14 @@ export function createStandaloneDaemonHost(options: {
   readonly waitTimeoutMs?: number;
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Ends the wait for a daemon still starting (the process is exiting). */
+  readonly signal?: AbortSignal;
 }): DaemonHost {
   const isReachable = options.isReachable ?? tcpReachability(options.config);
   return {
     serviceState: () => readDaemonServiceState(options.control),
     bringUp: async () => {
-      const outcome = await autostartInstalledDaemon({
+      let outcome: DaemonAutostartOutcome = await autostartInstalledDaemon({
         // The caller established that nothing answers; the autostart acts only then.
         daemonMode: 'unavailable',
         control: options.control,
@@ -122,7 +140,30 @@ export function createStandaloneDaemonHost(options: {
         pollIntervalMs: options.pollIntervalMs,
         sleep: options.sleep,
       });
+      if (outcome.action === 'starting') {
+        // An explicit repair waits for a unit that is still starting rather than reporting a failure.
+        const serviceName = outcome.serviceName;
+        const waited = await waitForStartingDaemon({
+          control: options.control,
+          isReachable,
+          serviceName,
+          signal: options.signal ?? new AbortController().signal,
+          pollIntervalMs: options.pollIntervalMs,
+          sleep: options.sleep,
+        });
+        outcome = waited === 'online'
+          ? { action: 'came-online', serviceName }
+          : {
+            action: 'start-failed',
+            serviceName,
+            reason: waited === 'stopped'
+              ? `service "${serviceName}" stopped before the daemon answered (the service manager no longer reports it running), check its logs`
+              : `stopped waiting for service "${serviceName}" to answer`,
+          };
+      }
       switch (outcome.action) {
+        case 'starting':
+          return { answered: false, detail: `the daemon service "${outcome.serviceName}" is starting and has not answered yet` };
         case 'started':
           return { answered: true, detail: `started the daemon service "${outcome.serviceName}" and it answers on its configured address` };
         case 'came-online':
@@ -153,10 +194,17 @@ function defaultDaemonHost(config: DaemonRepairConfig): DaemonHost | null {
   });
 }
 
-/** A read-only TCP connect to the address the daemon is configured to bind. */
+/**
+ * A read-only TCP connect to the address this machine's daemon answers on,
+ * derived from its bind by the rule every other client dial uses.
+ */
 function tcpReachability(config: DaemonRepairConfig): () => Promise<boolean> {
-  const host = dialHostForConfiguredHost(config.get('controlPlane.host'));
-  const port = connectedHostPort(config.get('controlPlane.port'));
+  const origin = parseDaemonOrigin(deriveControlPlaneBaseUrl(
+    readControlPlaneBinding((key) => config.get(key as DaemonRepairConfigKey)),
+    'loopback',
+  ));
+  const host = origin?.host ?? '127.0.0.1';
+  const port = origin?.port ?? DEFAULT_CONTROL_PLANE_PORT;
   return () => new Promise<boolean>((resolve) => {
     const socket = net.createConnection({ host, port });
     const finish = (value: boolean): void => {

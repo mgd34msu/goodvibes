@@ -1025,7 +1025,6 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   HOSTED_SESSION_TERMINATED: 'The session exists and has ended for good (the message gives the recorded reason); nothing sent to it can run, so start a new session',
   HOSTED_SESSION_UNAVAILABLE: 'The session exists but its loop could not be composed or was shut down mid-delivery; it may still be live, so do not create a second one for the same conversation',
   HOST_REQUEST_HANDLER_FAILED: 'The daemon\'s request handler failed unexpectedly; the message says why',
-  INVALID_INPUT: 'The method input does not match its schema; the message names the field',
   INVALID_PATH_ENCODING: 'The request path has a percent-encoding that does not decode',
   KNOWLEDGE_REFINEMENT_TASK_REFUSED: 'The knowledge refinement task is unknown or already decided, so it was not changed',
   MEDIA_OUTPUT_UNAVAILABLE: 'No configured media provider makes the requested output, or the named one does not; nothing was sent',

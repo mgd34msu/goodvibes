@@ -54,6 +54,7 @@ interface FullMessage {
   readonly date: string;
   readonly bodyText?: string;
   readonly attachments?: ReadonlyArray<{ readonly filename: string; readonly sizeBytes: number }>;
+  readonly bodyUnavailable?: ReadonlyArray<{ readonly section: string; readonly reason: string }>;
 }
 
 function truncate(value: string, width: number): string {
@@ -109,7 +110,9 @@ export function renderMessage(message: FullMessage): string {
   }
   lines.push('', message.bodyText && message.bodyText.trim().length > 0
     ? message.bodyText.trimEnd()
-    : '(no plain-text body)');
+    : message.bodyUnavailable && message.bodyUnavailable.length > 0
+      ? `The body could not be fetched: ${message.bodyUnavailable.map((entry) => entry.reason).join('; ')}; read it again with /mail read ${message.uid}.`
+      : '(no plain-text body)');
   return lines.join('\n');
 }
 

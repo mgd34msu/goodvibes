@@ -69,6 +69,12 @@ export interface DaemonConfigClient {
   /** Whether the daemon can take a write now (no request is made). */
   reachable(): boolean;
   /**
+   * Whether that daemon runs on this machine, so its settings file is this
+   * machine's file (no request is made). False for a connected host on another
+   * machine: its settings are never written or read here.
+   */
+  thisMachine(): boolean;
+  /**
    * Write a daemon-owned key. Rejects (never falls back to a local write) when
    * no daemon is reachable, a write that configures nothing must not report
    * success.
@@ -148,6 +154,7 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
     ...(preparedSettings ? { preparedSettings } : {}),
     ownsKey: (key) => isDaemonOwnedConfigKey(key),
     reachable: () => verbs.probe().available,
+    thisMachine: () => verbs.probe().thisMachine !== false,
 
     set: async (key, value) => {
       const probe = verbs.probe();

@@ -99,6 +99,7 @@ export {
   fragmentTunnelFrame,
   tunnelFrameLimit,
   RELAY_FRAME_OVERHEAD_BYTES,
+  RELAY_VIA_HEADER,
   TunnelFragmentJoiner,
   type TunnelFragmentResult,
   type TunnelFragmentHeader,

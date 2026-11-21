@@ -388,6 +388,21 @@ export class UserPermissionRuleStore {
     return new Promise<void>((resolve) => { this.#heardWaiters.push(resolve); });
   }
 
+  /**
+   * Release the directory watch. It is not opened again: after close every
+   * read stats the file, as where the directory cannot be watched, and a
+   * caller waiting to hear a change is answered at once.
+   */
+  close(): void {
+    const watcher = this.#diskWatcher;
+    this.#diskWatcher = null;
+    if (watcher) {
+      try { watcher.close(); } catch { /* already closed */ }
+    }
+    this.#diskDirty = true;
+    this.#wakeHeard();
+  }
+
   /** Monotonic committed-publication identity, including same-value replacements. */
   getPublicationRevision(): number { return this.publicationRevision; }
 

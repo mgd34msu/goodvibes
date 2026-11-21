@@ -10,7 +10,7 @@
  * at, answer success and switch the surface on; ten hand-written lookup chains
  * each restated (and in places skipped) where the token was.
  */
-import { resolveSecretInput } from '../../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput } from '../../config/secret-refs.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema.js';
 import type { SecretScope, SecretsManager } from '../../config/secrets.js';
@@ -108,6 +108,7 @@ export async function readSurfaceSecret(
       diagnosticMode: 'structural',
       ...(secrets ? { resolveLocalSecret: (name: string) => secrets.get(name) } : {}),
       homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
+      providers: readSecretProviderHostConfig(deps.configManager),
       configKey: key,
     }, 'dispatch'), secrets);
     if (resolved && resolved.trim()) return { value: resolved.trim(), declared: true, source: 'config', configKey: key };

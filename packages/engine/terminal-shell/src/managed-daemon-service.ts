@@ -103,26 +103,6 @@ export function readDefinitionWorkingDirectory(path: string): string | undefined
   return value !== undefined && isAbsolute(value) ? value : undefined;
 }
 
-/**
- * Resolve the unit name the platform's `PlatformServiceManager` would actually
- * manage, from config alone. Mirrors the platform's own internal `resolveServiceName()` precedence exactly:
- * the product default replaces only the shared schema's pure default origin;
- * configured names and overlays remain first, with the product fallback when
- * unset or blank. Takes a minimal accessor/provenance shape rather than the full ConfigManager class so
- * snapshot code and tests can pass whatever config accessor they already
- * hold.
- */
-export function resolveConfiguredServiceName(config: {
-  get(key: string): unknown;
-  describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string };
-}, defaultServiceName: string = MANAGED_SERVICE_NAME): string {
-  const source = config.describeConfigKeySource?.('service.serviceName');
-  if (source?.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return defaultServiceName;
-  const raw = config.get('service.serviceName');
-  const configured = raw === undefined || raw === null ? '' : String(raw).trim();
-  return configured || defaultServiceName;
-}
-
 export interface BuildManagedDaemonServiceManagerParams {
   readonly binaryPath: string;
   /**

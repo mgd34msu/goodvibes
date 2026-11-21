@@ -1,6 +1,6 @@
 import type { ChatRequest, ChatResponse, LLMProvider } from '../../providers/interface.js';
 import { snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
-import { computeUsageCostUsdCents, usageCostSource, type ResolvedModelPricing } from '../../providers/model-pricing.js';
+import { computeUsageCostUsdCents, usageCostSource, type CacheRatio, type ResolvedModelPricing } from '../../providers/model-pricing.js';
 import { emitLlmResponseReceived, type EmitterContext } from '../../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { VerificationWriter } from './types.js';
@@ -77,11 +77,13 @@ export function reportVerificationUsage(options: {
   readonly model: string;
   /** The model's resolved price; absent when the caller cannot resolve one. */
   readonly pricing: ResolvedModelPricing | undefined;
+  /** The provider's published cache ratios (`ProviderRegistry.cacheRatios`), for a price with no cache rates of its own. */
+  readonly cacheRatio: Partial<CacheRatio> | undefined;
   readonly response: ChatResponse;
   readonly durationMs: number;
 }): number | null {
   const { pricing, response } = options;
-  const costUsdCents = pricing ? computeUsageCostUsdCents(pricing, response.usage, options.provider) : null;
+  const costUsdCents = pricing ? computeUsageCostUsdCents(pricing, response.usage, options.provider, options.cacheRatio) : null;
   if (options.runtimeBus) {
     emitLlmResponseReceived(options.runtimeBus, options.emitterContext, {
       turnId: options.turnId, provider: options.provider, model: options.model, contentSummary: '<private evidence verification>', toolCallCount: 0,

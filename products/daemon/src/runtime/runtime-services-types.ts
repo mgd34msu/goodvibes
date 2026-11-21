@@ -126,7 +126,7 @@ export interface RuntimeServicesOptions {
   readonly currentSessionId?: (() => string | null) | undefined;
   /**
    * Wake-word boot provisioning opt-in. Same shape as `powerSeam`: the real
-   * entrypoint (`daemon/cli.ts`) asks for it, the one-shot CLI commands do
+   * entrypoint (`goodvibes-daemon serve`) asks for it, the one-shot CLI commands do
    * not, and a test composing this graph gets neither a network fetch nor an
    * hourly sweep it did not ask for.
    */

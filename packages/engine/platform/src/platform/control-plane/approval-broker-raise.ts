@@ -47,7 +47,7 @@ import type {
   SharedApprovalAuditRecord,
   SharedApprovalRecord,
 } from './approval-broker.js';
-import type { ApprovalRequester } from './approval-lifecycle.js';
+import { isOpenApprovalStatus, type ApprovalRequester } from './approval-lifecycle.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
 import { currentGuestChannel } from '../security/turn-boundary.js';
@@ -182,7 +182,7 @@ function raiseKey(metadata: Readonly<Record<string, unknown>> | undefined, coale
 function joinable(input: RequestSharedApprovalInput, key: string, deps: RaiseApprovalDeps): { record: SharedApprovalRecord; pending: PendingApprovalEntry } | null {
   if (input.requireOwnerDecision) return null;
   for (const existing of deps.approvals.values()) {
-    if (existing.requiresOwnerDecision || (existing.status !== 'pending' && existing.status !== 'claimed')) continue;
+    if (existing.requiresOwnerDecision || !isOpenApprovalStatus(existing.status)) continue;
     if (raiseKey(existing.metadata, deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args)) !== key) continue;
     const pending = deps.pendingResolvers.get(existing.id);
     if (pending && !pending.retired) return { record: existing, pending };

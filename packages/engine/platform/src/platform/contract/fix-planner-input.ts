@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { IsolatedWorktree } from '../agents/worktree.js';
+import { productWorktreePath } from '../git/product-worktree-marker.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { assertContractExecutionView, assertContractInputObjects, captureContractInput, materializeContractInput, prepareContractInputParent } from './input-snapshot.js';
@@ -77,7 +78,7 @@ export async function prepareFixPlannerInput(run: ContractRun): Promise<FixPlann
   const current = await captureContractInput(source, { signal });
   // Named after the contract as well as the view, so a leftover after a crash is attributed to its contract by the retention sweep.
   const name = `${contract.id}-${current.id}`;
-  const workingDirectory = join(original.sourceRoot, '.goodvibes', '.worktrees', 'contract-planner', name);
+  const workingDirectory = productWorktreePath(original.sourceRoot, 'contract-planner', name);
   const branch = `contract-planner/${name}`;
   const receiptPath = join(original.sourceRoot, '.goodvibes', 'contracts', 'planner-input', `${name}.json`);
   await prepareContractInputParent(original, workingDirectory);

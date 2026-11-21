@@ -88,6 +88,7 @@ export const DEFAULT_CONFIG = {
   helper: coreConfigDefaults.helper,
   notifications: coreConfigDefaults.notifications,
   fetch: featureConfigDefaults.fetch,
+  webSearch: featureConfigDefaults.webSearch,
   security: featureConfigDefaults.security,
   integrations: featureConfigDefaults.integrations,
   policy: featureConfigDefaults.policy,

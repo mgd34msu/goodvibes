@@ -23,7 +23,7 @@ import type { ConfigManager } from '../config/manager.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentManager } from '../tools/agent/index.js';
-import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
+import { SlackIntegration, DiscordIntegration, NtfyIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { readNtfyTopics, resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
@@ -108,10 +108,7 @@ export async function deliverSurfaceProgress(
   if (pending.surfaceKind === 'ntfy') {
     const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
     if (!topic) return;
-    const ntfy = new NtfyIntegration(
-      String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
-      await ntfyToken(deps),
-    );
+    const ntfy = new NtfyIntegration(ntfyBaseUrl(deps.configManager), await ntfyToken(deps));
     await ntfy.publish(topic, progress.slice(0, 300), {
       title: `Agent ${pending.agentId}`,
       ...ntfyPriority(deps),
@@ -194,10 +191,7 @@ export async function deliverNtfyAgentReply(
 ): Promise<void> {
   const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
   if (!topic) return;
-  const ntfy = new NtfyIntegration(
-    String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
-    await ntfyToken(deps),
-  );
+  const ntfy = new NtfyIntegration(ntfyBaseUrl(deps.configManager), await ntfyToken(deps));
   // undefined = nothing configured resolves to an address a phone could
   // reach; publish without a click target rather than with a dead one. The
   // tap opens the web app on this session (web-app-link.ts).

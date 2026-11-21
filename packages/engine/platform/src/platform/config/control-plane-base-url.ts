@@ -114,9 +114,13 @@ function loopbackHostFor(binding: ControlPlaneBinding): string {
   return binding.host.trim();
 }
 
-function isWildcardHost(host: string): boolean {
-  const trimmed = host.trim();
-  return trimmed === '0.0.0.0' || trimmed === '::' || trimmed === '[::]' || trimmed === '*';
+/** The bind hosts that mean "every interface": an address to listen on, never one to dial. */
+export const WILDCARD_HOSTS: ReadonlySet<string> = new Set(['0.0.0.0', '::', '[::]', '0:0:0:0:0:0:0:0', '[0:0:0:0:0:0:0:0]', '*']);
+
+/** A wildcard bind host, or no host at all (which binds every interface too). */
+export function isWildcardHost(host: string | undefined): boolean {
+  if (!host?.trim()) return true;
+  return WILDCARD_HOSTS.has(host.trim().toLowerCase());
 }
 
 /** `https` whenever TLS is on; the scheme follows the bind, never a stored string. */

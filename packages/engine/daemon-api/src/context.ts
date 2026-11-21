@@ -57,8 +57,11 @@ export interface DaemonSessionRouteHandlers
 
 /** Route handler for the integration sessions listing endpoint. */
 export interface DaemonSessionOverviewRouteHandlers {
-  /** @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned. */
-  getIntegrationSessions(url?: URL): MaybeResponse;
+  /**
+   * @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned.
+   * @param req - Names the caller: a hosted session is listed only to its owners and admins.
+   */
+  getIntegrationSessions(url?: URL, req?: Request): MaybeResponse;
 }
 
 /** Route handlers for the task surface, overview and runtime task management. */
@@ -161,8 +164,8 @@ export interface DaemonIntegrationOverviewRouteHandlers {
   /** `req` names the caller, whose grant decides whether task text is shown. */
   getIntegrationTasks(limit?: number, req?: Request): MaybeResponse;
   getIntegrationAutomation(): MaybeResponse;
-  /** @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned. */
-  getIntegrationSessions(url?: URL): MaybeResponse;
+  /** `req` names the caller: a hosted session is listed only to its owners and admins. */
+  getIntegrationSessions(url?: URL, req?: Request): MaybeResponse;
 }
 
 /** Route handler for the route-snapshot diagnostic endpoint. */
@@ -390,13 +393,15 @@ export interface DaemonMultimodalRouteHandlers {
 export interface DaemonRuntimeSessionRouteHandlers {
   createSharedSession(req: Request): MaybeResponse;
   registerSharedSession(req: Request): MaybeResponse;
-  getSharedSession(sessionId: string): MaybeResponse;
+  /** `req` names the caller: a hosted session is read only by its owners and admins. */
+  getSharedSession(sessionId: string, req?: Request): MaybeResponse;
   closeSharedSession(sessionId: string, req: Request): MaybeResponse;
   reopenSharedSession(sessionId: string, req: Request): MaybeResponse;
   detachSharedSession(sessionId: string, req: Request): MaybeResponse;
   /** Hard-delete a shared session (see CHANGELOG 1.0.0). Distinct from close: the record is gone, not preserved. */
   deleteSharedSession(sessionId: string, req: Request): MaybeResponse;
-  getSharedSessionMessages(sessionId: string, url: URL): MaybeResponse;
+  /** `req` names the caller: a hosted session's messages are read only by its owners and admins. */
+  getSharedSessionMessages(sessionId: string, url: URL, req?: Request): MaybeResponse;
   getSharedSessionInputs(sessionId: string, url: URL): MaybeResponse;
   postSharedSessionMessage(sessionId: string, req: Request): MaybeResponse;
   postSharedSessionSteer(sessionId: string, req: Request): MaybeResponse;

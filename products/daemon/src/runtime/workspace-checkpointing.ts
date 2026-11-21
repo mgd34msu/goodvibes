@@ -281,9 +281,16 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
         async forCheckpoint(id) {
           const holds = async (checkpointing: WorkspaceCheckpointing): Promise<boolean> =>
             (await checkpointing.manager.list()).some((checkpoint) => checkpoint.id === id);
+          // Every hosted store that could not answer, open or unopened, is named
+          // in the refusal below rather than read as "not there".
+          const unreadable: string[] = [];
           // In-memory manifests of the open stores first: a lookup, not a store read.
           for (const [hostedRoot, hosted] of workspaces) {
-            if (await holds(hosted).catch(() => false)) return gatewayOf(hosted, hostedRoot);
+            try {
+              if (await holds(hosted)) return gatewayOf(hosted, hostedRoot);
+            } catch (error) {
+              unreadable.push(`${hostedRoot} (${error instanceof Error ? error.message : String(error)})`);
+            }
           }
           if (await holds(daemon).catch(() => false)) return undefined;
           // Not in an open store: the workspaces of recorded hosted sessions not
@@ -291,7 +298,6 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
           // directly (one small read, no git, no bus subscription), and only the
           // store that lists the id is opened, so a mistyped or stale id opens
           // nothing.
-          const unreadable: string[] = [];
           for (const recorded of sources?.hostedWorkspaces() ?? []) {
             if (!isAbsolute(recorded)) continue;
             const hostedRoot = resolve(recorded);

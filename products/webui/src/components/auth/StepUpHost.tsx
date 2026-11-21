@@ -3,7 +3,7 @@
  * demands it.
  *
  * The transport layer (routedFetch) does not open modals; when a mutating relay call comes
- * back `401 step-up-required`, it calls the prompter this component registers. The prompter
+ * back `401 STEP_UP_REQUIRED`, it calls the prompter this component registers. The prompter
  * opens a modal, runs the passkey ceremony (mint a server challenge, navigator.credentials.get,
  * encode the assertion header), and resolves the header value the transport then retries with.
  * Cancelling, or any ceremony failure, resolves null, so the original 401 surfaces honestly

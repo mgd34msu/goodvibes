@@ -7,7 +7,9 @@
  * persisted until a surface shows it: a /status read with `?receipts=peek`
  * receives the undelivered receipts without marking them, and the reader
  * names the ones it put on screen with `?receipts=ack`. A response lost in
- * transit leaves them with the daemon for the next reader. A plain /status
+ * transit leaves them with the daemon for the next reader. An owner alert no
+ * channel took is kept for the owner alone (`audience: 'owner'`): only an
+ * owner-class reader sees it or marks it delivered. A plain /status
  * read (identity probe, keepalive, version poll) neither receives nor marks
  * receipts.
  */
@@ -16,12 +18,22 @@ import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
+import { readConsumerSetting, type ConsumerConfigReader } from '../config/profile-fallback.js';
+
+/**
+ * Who a receipt is for. `owner`: an owner alert no channel took, shown to and
+ * taken by an owner-class reader only. `everyone`: any authenticated reader.
+ * A receipt saved without the field (every file 3.3.4 wrote) is `everyone`.
+ */
+export type DaemonReceiptAudience = 'owner' | 'everyone';
 
 export interface DaemonReceipt {
   readonly id: string;
   readonly text: string;
   readonly at: number;
   readonly deliveredAt?: number | undefined;
+  /** Absent means `everyone`. */
+  readonly audience?: 'owner' | undefined;
 }
 
 export interface ReceiptStoreIo {
@@ -81,14 +93,37 @@ function parseReceipts(raw: string | null): ParsedReceiptFile {
 }
 
 /**
- * Formats a timestamp as the local date and wall-clock time for receipt text
- * ("2026-11-15 03:12"). A receipt can wait up to two weeks for a surface, so
- * the time of day alone would not say which day it was.
+ * The zone receipt times are stated in: the owner's `daemon.timezone` (or the
+ * owner profile's zone when the setting is unset), else UTC.
  */
-export function formatReceiptTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+export function receiptTimeZone(config: ConsumerConfigReader): string {
+  const value = readConsumerSetting(config, 'daemon.timezone');
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : 'UTC';
+}
+
+/**
+ * Formats a timestamp as the date and wall-clock time in `timeZone`, with the
+ * zone named, for receipt text ("2026-11-15 03:12 Europe/Berlin"). A receipt
+ * can wait up to two weeks for a surface, so the time of day alone would not
+ * say which day it was. A zone the runtime does not know is stated in UTC.
+ */
+export function formatReceiptTime(timestamp: number, timeZone: string): string {
+  let format: Intl.DateTimeFormat;
+  let zone = timeZone;
+  try {
+    format = receiptTimeFormat(timeZone);
+  } catch {
+    zone = 'UTC';
+    format = receiptTimeFormat(zone);
+  }
+  const parts = Object.fromEntries(format.formatToParts(new Date(timestamp)).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${zone}`;
+}
+
+function receiptTimeFormat(timeZone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
 }
 
 /** Where a daemon keeps its receipts. */
@@ -176,17 +211,30 @@ export class DaemonReceiptStore {
     return { receipts: fresh.slice(-MAX_KEPT_RECEIPTS), expired };
   }
 
-  /** Record a receipt: logged immediately, persisted for the next surface. */
-  record(text: string): DaemonReceipt {
+  /**
+   * Record a receipt: logged immediately, persisted for the next surface.
+   * `audience: 'owner'` keeps it for an owner-class reader only.
+   */
+  record(text: string, options: { readonly audience?: DaemonReceiptAudience | undefined } = {}): DaemonReceipt {
+    const ownerOnly = options.audience === 'owner';
     // One event is often both recorded and raised as an owner alert, and an
     // alert no channel took is kept here too: the same line still waiting for
-    // the next surface is that receipt, not a second one.
+    // the next surface is that receipt, not a second one. Once the line is an
+    // owner alert, the waiting receipt is kept for the owner alone, so no other
+    // reader can take it before he sees it.
     const waiting = this.receipts.find((kept) => kept.deliveredAt === undefined && kept.text === text);
-    if (waiting) return waiting;
+    if (waiting) {
+      if (!ownerOnly || waiting.audience === 'owner') return waiting;
+      const restricted: DaemonReceipt = { ...waiting, audience: 'owner' };
+      this.receipts = this.receipts.map((kept) => (kept === waiting ? restricted : kept));
+      this.persistOrLog();
+      return restricted;
+    }
     const receipt: DaemonReceipt = {
       id: `receipt-${this.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,
       at: this.now(),
+      ...(ownerOnly ? { audience: 'owner' as const } : {}),
     };
     const bounded = this.applyBounds([...this.receipts, receipt]);
     this.receipts = bounded.receipts;
@@ -207,17 +255,26 @@ export class DaemonReceiptStore {
     return this.receipts;
   }
 
-  /** Undelivered receipts, left undelivered until {@link markDelivered} names them. */
-  peekUndelivered(): readonly DaemonReceipt[] {
-    return this.receipts.filter((receipt) => receipt.deliveredAt === undefined);
+  /**
+   * Undelivered receipts the reader may see, left undelivered until
+   * {@link markDelivered} names them. `owner`: the reader is owner-class;
+   * owner-only receipts are left out for anyone else.
+   */
+  peekUndelivered(owner: boolean): readonly DaemonReceipt[] {
+    return this.receipts.filter((receipt) => receipt.deliveredAt === undefined && (owner || receipt.audience !== 'owner'));
   }
 
-  /** Marks the named receipts delivered; ids that are unknown or already delivered are ignored. */
-  markDelivered(ids: ReadonlySet<string>): void {
+  /**
+   * Marks the named receipts delivered; ids that are unknown or already
+   * delivered are ignored, and so is a non-owner's acknowledgement of an
+   * owner-only receipt.
+   */
+  markDelivered(ids: ReadonlySet<string>, owner: boolean): void {
     const deliveredAt = this.now();
     let changed = false;
     this.receipts = this.receipts.map((receipt) => {
       if (receipt.deliveredAt !== undefined || !ids.has(receipt.id)) return receipt;
+      if (!owner && receipt.audience === 'owner') return receipt;
       changed = true;
       return { ...receipt, deliveredAt };
     });

@@ -25,7 +25,8 @@ import {
   type CatalogModel, type CatalogModelPricing, type CatalogProvider, type MinimalModelDefinition, type PricingCatalog,
 } from './model-catalog.js';
 import {
-  buildRegistryModelPricingDeps, resolveModelPricing as resolveModelPricingFromDeps, type ResolvedModelPricing,
+  buildRegistryModelPricingDeps, cacheRatiosFromCatalog, resolveModelPricing as resolveModelPricingFromDeps,
+  type CacheRatio, type ResolvedModelPricing,
 } from './model-pricing.js';
 import { GatewayPricingService } from './gateway-pricing.js';
 import { registerBuiltinProviders, CATALOG_PROVIDER_NAME_ALIASES, CLOUDFLARE_GATEWAY_SETTING_KEYS } from './builtin-registry.js';
@@ -860,6 +861,26 @@ export class ProviderRegistry {
       providerAliases: CATALOG_PROVIDER_NAME_ALIASES,
       isKnownProviderId: (id) => this.providers.has(id) || index.catalogProviderIds.has(id),
     }), modelRef, providerId);
+  }
+
+  private _cacheRatios: { readonly catalog: readonly CatalogModel[]; readonly ratios: (provider: string) => Partial<CacheRatio> | undefined } | null = null;
+
+  /**
+   * A provider's published cache-read and cache-write rates as multiples of
+   * its input rate, from this registry's own catalog (the table is built once
+   * per catalog); undefined when the provider publishes none. Every cost
+   * computation passes it for the provider that billed the usage, so a price
+   * with no cache rates of its own prices cache tokens the same way on every
+   * surface.
+   */
+  cacheRatios(provider: string): Partial<CacheRatio> | undefined {
+    const catalog = this.catalogModels;
+    let entry = this._cacheRatios;
+    if (!entry || entry.catalog !== catalog) {
+      entry = { catalog, ratios: cacheRatiosFromCatalog(catalog) };
+      this._cacheRatios = entry;
+    }
+    return entry.ratios(provider);
   }
 
   /**

@@ -174,6 +174,8 @@ export interface DaemonAutoUpdaterOptions {
   readonly describeActiveWork?: (() => readonly string[]) | undefined;
   readonly serviceActions: AutoUpdateServiceActions;
   readonly receipts: DaemonReceiptStore;
+  /** The zone receipt times are stated in, read when a receipt is written (`receiptTimeZone`); UTC when absent. */
+  readonly receiptTimeZone?: (() => string) | undefined;
   readonly fetchImpl?: UpdateFetchLike | undefined;
   readonly io?: UpdateFileIo | undefined;
   /**
@@ -831,7 +833,7 @@ export class DaemonAutoUpdater {
     // shared-session work (control-plane/client-compatibility.ts) rather than
     // only being asked to restart.
     this.recordReceipt(
-      `updated from ${from} to ${to} at ${formatReceiptTime(now())}`
+      `updated from ${from} to ${to} at ${formatReceiptTime(now(), this.options.receiptTimeZone?.() ?? 'UTC')}`
       + (suiteResult ? `; installed suite: ${suiteResult.programs.join(', ')}, browser/WebUI directories: ${suiteResult.directoryPaths.join(', ')};` + (suiteResult.preservedPaths.length ? ` retained earlier backups: ${suiteResult.preservedPaths.join(', ')};` : '') : '')
       + ` on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted;`
       + ` once the new daemon answers, any client older than ${clientCompatibilityFloorFor(to)} stops taking shared-session work until it is restarted`,

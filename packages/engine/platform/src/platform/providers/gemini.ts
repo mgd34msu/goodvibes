@@ -418,7 +418,8 @@ export class GeminiProvider implements LLMProvider {
 
       // Accumulate state from streaming chunks
       const allParts: GeminiPart[] = [];
-      let inputTokens = 0;
+      // promptTokenCount includes the cached tokens; inputTokens below is the fresh input only.
+      let promptTokens = 0;
       let outputTokens = 0;
       let cacheReadTokens = 0;
       let lastFinishReason = '';
@@ -482,7 +483,7 @@ export class GeminiProvider implements LLMProvider {
         }
 
         if (chunk.usageMetadata) {
-          inputTokens = chunk.usageMetadata.promptTokenCount ?? inputTokens;
+          promptTokens = chunk.usageMetadata.promptTokenCount ?? promptTokens;
           outputTokens = chunk.usageMetadata.candidatesTokenCount ?? outputTokens;
           cacheReadTokens = chunk.usageMetadata.cachedContentTokenCount ?? cacheReadTokens;
         }
@@ -548,6 +549,7 @@ export class GeminiProvider implements LLMProvider {
         ? 'tool_call'
         : mapGeminiStopReason(lastFinishReason);
 
+      const inputTokens = Math.max(0, promptTokens - cacheReadTokens);
       this.cacheHitTracker.recordTurn({
         inputTokens,
         cacheReadTokens,

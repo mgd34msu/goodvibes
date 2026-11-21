@@ -135,6 +135,9 @@ export const queryKeys = {
   // same standing gap fleet.*/checkpoints.*/memory.*/ci.* document above.
   pairingTokens: ['pairing', 'tokens'] as const,
   relayCodes: ['relay', 'codes'] as const,
+  // remote.pair.requests.list: devices waiting to pair as a node. Re-read on the
+  // remote-pair-requested/-approved/-rejected events (useRealtimeInvalidation).
+  remotePairRequests: ['remote', 'pair', 'requests'] as const,
   // pairing.posture.get (platform 1.8.0's LAN-http posture work), the honest TLS/capability
   // posture of THIS surface's own origin. An origin's posture never changes within a
   // session (see useOriginPosture), so this is fetched once and never invalidated.

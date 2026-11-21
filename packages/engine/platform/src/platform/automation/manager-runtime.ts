@@ -10,6 +10,7 @@ import type { AgentManager } from '../tools/agent/index.js';
 import { AgentMessageBus } from '../agents/message-bus.js';
 import { computeSchedulerCapacity, scheduleCapacityWaitKey, type AutomationCapacityWait, type SchedulerCapacityReport } from './scheduler-capacity.js';
 import { AutomationJobStore } from './store/jobs.js';
+import { ownerTimezone } from './schedules.js';
 import { AutomationRunStore } from './store/runs.js';
 import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationCheckinJobOwnedError, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, CHECKIN_JOB_OWNER, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
 import { AutomationDeliveryManager } from './delivery-manager.js';
@@ -681,6 +682,11 @@ export class AutomationManager {
         runtimeBus: config.runtimeBus,
       });
     }
+  }
+
+  /** The zone a cron schedule created without one is stored in: where the owner is (`daemon.timezone`), else the host's zone. */
+  defaultTimezone(): string {
+    return ownerTimezone(this.configManager);
   }
 
   listJobs(): ManagedAutomationJob[] {

@@ -22,7 +22,7 @@
  * STEP-UP ON STATE-CHANGING RELAY CALLS: the daemon gates state-changing relay calls behind
  * a WebAuthn step-up assertion, deciding from the called method's catalog scopes (not the HTTP
  * verb, so the browser does not guess). A gated call with no usable assertion is answered
- * `401` with `www-authenticate: WebAuthn` and body `{ code: 'step-up-required', reason,
+ * `401` with `www-authenticate: WebAuthn` and body `{ code: 'STEP_UP_REQUIRED', reason,
  * action, error, next }`. `routedFetch` intercepts that response for any verb, asks the
  * registered UI prompter to run the passkey ceremony (stepup-prompter.ts), and retries the
  * original call ONCE with the assertion header attached. When the daemon's `action` is
@@ -230,7 +230,7 @@ async function isStepUpSatisfiable(response: Response): Promise<boolean> {
   if (!/WebAuthn/i.test(response.headers.get('www-authenticate') ?? '')) return false;
   try {
     const body = (await response.clone().json()) as { code?: string; action?: string };
-    return body?.code === 'step-up-required' && body.action !== 'register-locally';
+    return body?.code === 'STEP_UP_REQUIRED' && body.action !== 'register-locally';
   } catch {
     return false;
   }
@@ -258,7 +258,7 @@ function withAssertion(
 
 /**
  * Dispatch one relay fetch, transparently satisfying a step-up challenge. The daemon decides
- * which calls are gated, so any verb may come back `401 step-up-required`; then the UI
+ * which calls are gated, so any verb may come back `401 STEP_UP_REQUIRED`; then the UI
  * ceremony runs and the call is retried ONCE with the assertion header. Every other response
  * (including a refusal no ceremony can fix, or a cancelled ceremony) is returned unchanged so
  * the caller sees the honest outcome.

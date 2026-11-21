@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { PluginManager } from '@goodvibes/engine/platform/platform/plugins';
+import { describeUnappliedTier, type PluginManager, type PluginTrustUnappliedReason } from '@goodvibes/engine/platform/platform/plugins';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { commandRefusal, type CommandConfirmation } from './command-confirmation.js';
@@ -21,6 +21,13 @@ export const PLUGIN_TIER_EFFECT: Readonly<Record<PluginTrustTierName, string>> =
   untrusted: 'panels, commands and reading files only; its tool, provider, event-hook, gateway-method, channel and delivery registrations are refused',
   limited: 'the tools, providers and event hooks its manifest declares, plus gateway methods, channels and delivery strategies; high-risk capabilities stay withheld',
   trusted: 'everything its manifest declares, including shell, file-write and network capabilities',
+};
+
+/** Why a set tier is not applied, as a short phrase for a list row's state. */
+const UNAPPLIED_WHY: Readonly<Record<PluginTrustUnappliedReason, string>> = {
+  'files-changed': 'its files changed since',
+  moved: 'for another folder',
+  unbound: 'by an earlier version',
 };
 
 export const PLUGIN_TRUST_USAGE = 'trust <name> <untrusted|limited|trusted> [note] | trust-key <name> <key.pem> | verify <name> | capabilities <name>';
@@ -96,8 +103,9 @@ export function pluginCapabilitiesText(manager: PluginTrustControls, name: strin
   const info = manager.capabilities(name);
   if (!info) throw commandRefusal(`Plugin '${name}' not found.`, `/${command} list shows the installed plugins.`);
   const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`];
-  if (info.earlierTier !== undefined) {
-    lines.push(`Its tier '${info.earlierTier}' was set by an earlier version, before a tier was bound to a plugin's files, so it is not applied. /${command} trust ${name} ${info.earlierTier} sets it again for the files there now.`);
+  if (info.unappliedTier !== undefined) {
+    const sentence = describeUnappliedTier(name, info.unappliedTier, command);
+    lines.push(`${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`);
   }
   lines.push('', `Declared capabilities (${info.requested.length}):`);
   if (info.requested.length === 0) {
@@ -205,7 +213,7 @@ const PLUGINS = defineList<{ readonly extensions?: { readonly pluginManager?: Pl
     return (ctx.extensions?.pluginManager?.list() ?? []).map((plugin): ListRow => ({
       value: plugin.name, label: plugin.name,
       detail: plugin.description,
-      state: `${plugin.quarantined ? 'quarantined' : plugin.active ? 'active' : plugin.enabled ? 'enabled' : 'disabled'}, ${plugin.trustTier}`,
+      state: `${plugin.quarantined ? 'quarantined' : plugin.active ? 'active' : plugin.enabled ? 'enabled' : 'disabled'}, ${plugin.trustTier}${plugin.unappliedTier ? ` (${plugin.unappliedTier.tier} set, ${UNAPPLIED_WHY[plugin.unappliedTier.why]})` : ''}`,
     }));
   },
   operator: { terminalOnly: 'Plugins run inside each terminal app.' },
@@ -229,7 +237,10 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
         if (listed.length === 0) return 'No plugins installed. Place a plugin folder with manifest.json in ~/.goodvibes/plugins or <project>/.goodvibes/plugins.';
         return [
           'Plugins:',
-          ...listed.map((plugin) => `  ${(plugin.active ? '[active]' : plugin.enabled ? '[enabled]' : '[disabled]').padEnd(11)} ${plugin.name.padEnd(24)} v${plugin.version}  tier ${plugin.trustTier}${plugin.quarantined ? '  QUARANTINED' : ''}`),
+          ...listed.flatMap((plugin) => [
+            `  ${(plugin.active ? '[active]' : plugin.enabled ? '[enabled]' : '[disabled]').padEnd(11)} ${plugin.name.padEnd(24)} v${plugin.version}  tier ${plugin.trustTier}${plugin.quarantined ? '  QUARANTINED' : ''}`,
+            ...(plugin.unappliedTier ? [`    ${describeUnappliedTier(plugin.name, plugin.unappliedTier, command)}`] : []),
+          ]),
           '',
           `A plugin runs only once switched on: /${command} enable <plugin> starts it, /${command} disable <plugin> stops it.`,
           `A tier decides what a plugin may register: /${command} capabilities <plugin> shows it, /${command} trust <plugin> <tier> changes it.`,

@@ -1,10 +1,10 @@
 /** Credential-bearing local pairing output, separate from startup diagnostics. */
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
+import { availablePairingOffers, explicitPublicBaseUrl, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import { localOnlyNotice } from '../daemon/pair-command.js';
-import { SHIPPED_PUBLIC_BASE_URL, hasReadableWebuiBundle } from '../config/webui-bundle.js';
+import { hasReadableWebuiBundle } from '../config/webui-bundle.js';
 
 export function renderDaemonStartupPairing(
   config: Pick<ConfigManager, 'get'>,
@@ -12,9 +12,7 @@ export function renderDaemonStartupPairing(
   token: string,
   version: string,
 ): string {
-  const publicUrl = String(config.get('web.publicBaseUrl') ?? '').trim().replace(/\/+$/, '');
-  const explicitOrigin = publicUrl !== '' && publicUrl !== SHIPPED_PUBLIC_BASE_URL;
-  if (!explicitOrigin) {
+  if (explicitPublicBaseUrl(config) === '') {
     if (config.get('controlPlane.webui.serve') !== true) {
       return 'Device pairing link unavailable: enable a WebUI bundle or configure its public URL.';
     }

@@ -46,9 +46,9 @@ export function writeFatalLine(line: string): void {
 }
 
 /**
- * The stdout twin, for output that must survive an exit that follows it,
- * `--install-service` prints the unit path and the follow-up commands and then
- * exits immediately, which is the same race.
+ * The stdout twin, for output that must survive an exit that follows it:
+ * a command such as `goodvibes-daemon install-service` prints its result and
+ * then exits immediately, which is the same race.
  */
 export function writeExitingStdoutLine(line: string): void {
   writeLineToFd(STDOUT_FD, line);

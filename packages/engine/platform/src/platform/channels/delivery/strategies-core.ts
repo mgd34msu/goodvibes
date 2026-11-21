@@ -5,9 +5,9 @@ import { ConfigManager } from '../../config/manager.js';
 import { DEFAULT_CONFIG } from '../../config/schema.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
-import { resolveSecretInput } from '../../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput } from '../../config/secret-refs.js';
 import { ControlPlaneGateway } from '../../control-plane/gateway.js';
-import { DeliveryError, DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
+import { DeliveryError, DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../../integrations/index.js';
 import { ownerDeliveryTargetProblem, postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import type { HostResolver } from '../../runtime/network/destination.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
@@ -108,6 +108,7 @@ export function createWebhookDeliveryStrategy(
           diagnosticMode: 'structural',
           resolveLocalSecret: (key) => secretsManager.get(key),
           homeDirectory: secretsManager.getGlobalHome?.() ?? undefined,
+          providers: readSecretProviderHostConfig(configManager),
         }, 'dispatch')
         ?? '';
       if (!address) throw new Error('Missing webhook delivery target');
@@ -326,7 +327,7 @@ export function createNtfyDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
-      const baseUrl = String(configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh');
+      const baseUrl = ntfyBaseUrl(configManager);
       const token = await requireSurfaceSecret({ configManager, serviceRegistry, secretsManager }, 'ntfy', 'primary') ?? undefined;
       const topic = firstNonEmpty(
         request.target.address,

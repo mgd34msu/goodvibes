@@ -62,13 +62,32 @@ export function readConnectedHostPairing(homeDirectory: string, hostUrl: string)
 }
 const tokenFileReads = new Map<string, { readonly stamp: string; readonly token: string | null; readonly error?: string }>();
 
-/** An environment token, which outranks every stored credential; null when none is set. */
-function environmentCredential(): ConnectedHostOperatorToken | null {
-  const connectedHostEnvToken = process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim();
-  if (connectedHostEnvToken) return { path: 'env:GOODVIBES_CONNECTED_HOST_TOKEN', source: 'environment', present: true, token: connectedHostEnvToken };
-  const legacyEnvToken = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
-  if (legacyEnvToken) return { path: 'env:GOODVIBES_DAEMON_TOKEN', source: 'environment', present: true, token: legacyEnvToken };
-  return null;
+/** A token from the environment and the variable it was read from. */
+export interface EnvironmentConnectedHostToken {
+  readonly variable: 'GOODVIBES_CONNECTED_HOST_TOKEN' | 'GOODVIBES_DAEMON_TOKEN';
+  readonly token: string;
+}
+
+/**
+ * The environment token for `hostUrl`, which outranks every stored credential:
+ * GOODVIBES_CONNECTED_HOST_TOKEN for any host, and GOODVIBES_DAEMON_TOKEN (this
+ * machine's daemon token) only when `hostUrl` is unset or names this machine,
+ * so it is never sent to another machine. Null when neither applies. Every
+ * reader of a connected-host credential starts here.
+ */
+export function environmentConnectedHostToken(hostUrl: string | undefined, env: NodeJS.ProcessEnv = process.env): EnvironmentConnectedHostToken | null {
+  const connected = env['GOODVIBES_CONNECTED_HOST_TOKEN']?.trim();
+  if (connected) return { variable: 'GOODVIBES_CONNECTED_HOST_TOKEN', token: connected };
+  const daemon = env['GOODVIBES_DAEMON_TOKEN']?.trim();
+  if (!daemon) return null;
+  if (hostUrl !== undefined && !isThisMachineHost(parseDaemonOrigin(hostUrl)?.host ?? '')) return null;
+  return { variable: 'GOODVIBES_DAEMON_TOKEN', token: daemon };
+}
+
+/** The environment token for `hostUrl` as a credential; null when none applies. */
+function environmentCredential(hostUrl: string | undefined): ConnectedHostOperatorToken | null {
+  const found = environmentConnectedHostToken(hostUrl);
+  return found ? { path: `env:${found.variable}`, source: 'environment', present: true, token: found.token } : null;
 }
 
 /**
@@ -108,7 +127,7 @@ function operatorFileCredential(homeDirectory: string, hostUrl: string | undefin
  * this machine. Null token, with the reason, for another machine.
  */
 export function readConnectedHostBootstrapToken(homeDirectory: string, hostUrl: string): ConnectedHostOperatorToken {
-  return environmentCredential() ?? operatorFileCredential(homeDirectory, hostUrl);
+  return environmentCredential(hostUrl) ?? operatorFileCredential(homeDirectory, hostUrl);
 }
 
 export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl: string | undefined,
@@ -122,7 +141,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
       resolve(homeDirectory), value, pairing ?? null,
     ], sourceOwner) }
     : value;
-  const environment = environmentCredential();
+  const environment = environmentCredential(hostUrl);
   if (environment) return selected(environment);
   if (hostUrl !== undefined) {
     const pairing = readPairing(homeDirectory, hostUrl);

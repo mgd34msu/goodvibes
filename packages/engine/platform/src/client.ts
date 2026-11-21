@@ -37,8 +37,7 @@ import {
   createAutoRefreshMiddleware,
 } from './client-auth/index.js';
 import type { PlatformObserver } from './observer/index.js';
-import { parseDaemonOrigin } from './platform/config/control-plane-base-url.js';
-import { bindCredential, daemonAuthHeaders, daemonTarget } from './platform/runtime/client/daemon-target.js';
+import { authenticatedSocketFactory } from './platform/runtime/client/daemon-target.js';
 
 /**
  * Discriminated union of all runtime events emitted by the GoodVibes daemon.
@@ -354,27 +353,6 @@ function requireWebSocketImplementation(webSocketImpl?: typeof WebSocket): typeo
     );
   }
   return resolved;
-}
-
-/** A WebSocket constructor that takes upgrade headers (Bun, Node's undici, React Native). */
-type HeaderWebSocket = new (url: string, init: { readonly headers: Record<string, string> }) => WebSocket;
-
-/**
- * Opens each realtime socket with the bearer on the upgrade request, built by
- * the one header builder for the daemon at `baseUrl`'s origin: the daemon
- * refuses an upgrade without a credential before any in-band auth frame, and a
- * socket URL on another origin throws instead of carrying the token there.
- */
-function authenticatedSocketFactory(baseUrl: string, WebSocketImpl: typeof WebSocket): (url: string, token: string | null) => WebSocket {
-  let origin: ReturnType<typeof parseDaemonOrigin> = null;
-  try { origin = parseDaemonOrigin(new URL(baseUrl).origin); } catch { origin = null; }
-  return (url, token) => {
-    if (!origin) throw new ConfigurationError(`'${baseUrl}' is not a daemon address (scheme://host:port).`);
-    const target = daemonTarget(origin, token ? bindCredential(origin, token, 'explicit') : null, false);
-    const headers = daemonAuthHeaders(target, url);
-    if (Object.keys(headers).length === 0) return new WebSocketImpl(url);
-    return new (WebSocketImpl as unknown as HeaderWebSocket)(url, { headers });
-  };
 }
 
 function createClientOptions<T extends OperatorApiClientOptions | PeerApiClientOptions>(

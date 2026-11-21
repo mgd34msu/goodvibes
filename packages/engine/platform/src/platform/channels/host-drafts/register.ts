@@ -24,7 +24,7 @@
  */
 import type { DraftHostContext as HandlerContext } from './types.js';
 import { createAtRestCipher } from '../../config/daemon-credential-store.js';
-import { HandlerError } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
 import { assertConfirmed } from '../../control-plane/host-handlers.js';
 import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
@@ -44,7 +44,7 @@ import type {
   DraftStatus,
 } from './draft-store.js';
 
-const BAD_INPUT = 'INVALID_INPUT';
+const BAD_INPUT = 'INVALID_ARGUMENT';
 
 const LIST_ID = 'channels.drafts.list';
 const GET_ID = 'channels.drafts.get';
@@ -58,7 +58,7 @@ const allStatusSet = new Set<string>(ALL_DRAFT_STATUSES);
 
 function asRecord(body: unknown): Record<string, unknown> {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    throw new HandlerError('Request body must be an object.', BAD_INPUT, 400);
+    throw new GatewayVerbError('Request body must be an object.', BAD_INPUT, 400);
   }
   return body as Record<string, unknown>;
 }
@@ -66,7 +66,7 @@ function asRecord(body: unknown): Record<string, unknown> {
 function optionalString(value: unknown, field: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string') {
-    throw new HandlerError(`Field '${field}' must be a string.`, BAD_INPUT, 400);
+    throw new GatewayVerbError(`Field '${field}' must be a string.`, BAD_INPUT, 400);
   }
   return value;
 }
@@ -74,7 +74,7 @@ function optionalString(value: unknown, field: string): string | undefined {
 function requiredString(value: unknown, field: string): string {
   const str = optionalString(value, field);
   if (str === undefined || str.length === 0) {
-    throw new HandlerError(`Field '${field}' is required.`, BAD_INPUT, 400);
+    throw new GatewayVerbError(`Field '${field}' is required.`, BAD_INPUT, 400);
   }
   return str;
 }
@@ -82,12 +82,12 @@ function requiredString(value: unknown, field: string): string {
 function optionalTags(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new HandlerError("Field 'tags' must be an array of strings.", BAD_INPUT, 400);
+    throw new GatewayVerbError("Field 'tags' must be an array of strings.", BAD_INPUT, 400);
   }
   const tags: string[] = [];
   for (const entry of value) {
     if (typeof entry !== 'string') {
-      throw new HandlerError("Field 'tags' must contain only strings.", BAD_INPUT, 400);
+      throw new GatewayVerbError("Field 'tags' must contain only strings.", BAD_INPUT, 400);
     }
     tags.push(entry);
   }
@@ -97,10 +97,10 @@ function optionalTags(value: unknown): string[] | undefined {
 function optionalLimit(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new HandlerError("Field 'limit' must be an integer.", BAD_INPUT, 400);
+    throw new GatewayVerbError("Field 'limit' must be an integer.", BAD_INPUT, 400);
   }
   if (value < 1 || value > MAX_DRAFT_LIST_LIMIT) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `Field 'limit' must be between 1 and ${MAX_DRAFT_LIST_LIMIT}.`,
       BAD_INPUT,
       400,
@@ -112,7 +112,7 @@ function optionalLimit(value: unknown): number | undefined {
 function optionalVersion(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw new HandlerError("Field 'version' must be a positive integer.", BAD_INPUT, 400);
+    throw new GatewayVerbError("Field 'version' must be a positive integer.", BAD_INPUT, 400);
   }
   return value;
 }
@@ -127,7 +127,7 @@ function optionalIso8601(value: unknown, field: string): string | undefined {
   if (str === undefined) return undefined;
   const time = ISO_8601_DATE_TIME.test(str) ? Date.parse(str) : Number.NaN;
   if (Number.isNaN(time)) {
-    throw new HandlerError(`Field '${field}' must be an ISO-8601 timestamp.`, BAD_INPUT, 400);
+    throw new GatewayVerbError(`Field '${field}' must be an ISO-8601 timestamp.`, BAD_INPUT, 400);
   }
   return new Date(time).toISOString();
 }
@@ -144,7 +144,7 @@ function validateWebhook(value: string | undefined): string | undefined {
   if (value === '' || value === '[redacted]') return value;
   if (value.startsWith('goodvibes://secrets/')) return value;
   if (value.includes('://')) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       "Field 'webhook' must be redacted before transmission: pass '[redacted]' "
         + 'or a goodvibes://secrets/ reference, never a raw webhook URL.',
       'WEBHOOK_REDACTION_REQUIRED',
@@ -158,7 +158,7 @@ function parseListStatus(value: unknown): DraftStatus | undefined {
   const str = optionalString(value, 'status');
   if (str === undefined) return undefined;
   if (!allStatusSet.has(str)) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `Field 'status' must be one of: ${ALL_DRAFT_STATUSES.join(', ')}.`,
       BAD_INPUT,
       400,
@@ -171,7 +171,7 @@ function parseSaveStatus(value: unknown): DraftStatus | undefined {
   const str = optionalString(value, 'status');
   if (str === undefined) return undefined;
   if (!writableStatusSet.has(str)) {
-    throw new HandlerError(
+    throw new GatewayVerbError(
       `Field 'status' must be one of: ${WRITABLE_DRAFT_STATUSES.join(', ')}.`,
       BAD_INPUT,
       400,
@@ -284,7 +284,7 @@ export function registerDraftMethods(
   // descriptors so an awaited teardown leaves the same catalog reusable.
   const descriptors = [LIST_ID, GET_ID, SAVE_ID, DELETE_ID].map((id) => {
     const descriptor = ctx.catalog.get(id);
-    if (!descriptor) throw new HandlerError(`Unknown gateway method: ${id}`, 'METHOD_NOT_FOUND', 404);
+    if (!descriptor) throw new GatewayVerbError(`Unknown gateway method: ${id}`, 'METHOD_NOT_FOUND', 404);
     return descriptor;
   });
   const store =
@@ -310,7 +310,7 @@ export function registerDraftMethods(
   let closing: Promise<void> | undefined;
   let mutationTail: Promise<unknown> = Promise.resolve();
   const active = new Set<Promise<unknown>>();
-  const closedError = () => new HandlerError('The draft service is shutting down; nothing was changed. Retry once the daemon is back.', 'DRAFT_SURFACE_CLOSED', 409);
+  const closedError = () => new GatewayVerbError('The draft service is shutting down; nothing was changed. Retry once the daemon is back.', 'DRAFT_SURFACE_CLOSED', 409);
   const admit = (handler: TypedHandler<unknown, unknown>, mutation = false): TypedHandler<unknown, unknown> => (input) => {
     if (closed) return Promise.reject(closedError());
     // Track before a store/cipher callback can reenter teardown. Writes are
@@ -353,7 +353,7 @@ export function registerDraftMethods(
     if (!isNativeDraftWireReference(requested)) return requested;
     const selected = store.resolveReferenceId(requested);
     if (selected === undefined) {
-      throw new HandlerError(`No draft is stored under the reference ${requested}; list the drafts to find it.`, 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
+      throw new GatewayVerbError(`No draft is stored under the reference ${requested}; list the drafts to find it.`, 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 404);
     }
     return selected;
   };

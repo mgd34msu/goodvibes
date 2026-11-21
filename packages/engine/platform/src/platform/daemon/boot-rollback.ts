@@ -74,6 +74,8 @@ export interface CrashLoopReceiptInput {
   readonly failedStarts: number;
   readonly restored: readonly { readonly label: string }[];
   readonly at: number;
+  /** The zone `at` is stated in: the owner's `daemon.timezone` (`receiptTimeZone`). */
+  readonly timeZone: string;
 }
 
 /**
@@ -84,7 +86,7 @@ export interface CrashLoopReceiptInput {
 export function crashLoopRollbackReceipt(input: CrashLoopReceiptInput): string {
   const files = input.restored.map((target) => target.label).join(', ');
   return (
-    `rolled back to the previously installed version at ${formatReceiptTime(input.at)}`
+    `rolled back to the previously installed version at ${formatReceiptTime(input.at, input.timeZone)}`
     + `, the last update failed to start ${input.failedStarts} times in a row (${files} restored from the kept previous copy);`
     + ` the version that failed is now the kept previous copy, so /update rollback rolls forward onto it again`
   );

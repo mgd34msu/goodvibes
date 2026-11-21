@@ -121,7 +121,7 @@ export function wrapDispatchWithStepUp(
     if (!viaRelay) return dispatch(req);
     if (!gate.relayEnabled()) {
       return jsonResponse(refusalErrorBody(refusal({
-        code: 'relay-disabled',
+        code: 'RELAY_DISABLED',
         state: 'relay access is turned off on this daemon',
         reason: 'This call arrived over the relay, and relay access is turned off on this daemon (relay.enabled or the relay-connect flag).',
         next: ['Connect to the daemon directly (same network), or turn relay access back on there with relay.enabled and the relay-connect flag.'],
@@ -132,7 +132,7 @@ export function wrapDispatchWithStepUp(
     // Each paired device presents its own relay code; a revoked or unknown one is refused before anything runs.
     if (gate.relayCodeAdmits?.(req.headers.get(RELAY_CODE_HEADER)) !== true) {
       return jsonResponse(refusalErrorBody(refusal({
-        code: 'relay-code-revoked',
+        code: 'RELAY_CODE_REVOKED',
         state: 'this device\'s relay access is revoked or was never issued',
         reason: 'This call arrived over the relay with a relay code this daemon did not issue or has revoked.',
         next: ['Pair this device with the relay again from the home network: /devices pair relay in the terminal app, or goodvibes-agent relay pair.'],
@@ -168,7 +168,9 @@ export function wrapDispatchWithStepUp(
         status: 401,
         retryable: decision.action !== 'register-locally',
       }));
-      return jsonResponse({ ...body, reason: decision.reason, action: decision.action }, 401, { 'www-authenticate': 'WebAuthn' });
+      // The credential was accepted; the call needs a passkey confirmation on top of it,
+      // so the category is 'permission', never 'authentication' (which clients read as "sign in again").
+      return jsonResponse({ ...body, category: 'permission', reason: decision.reason, action: decision.action }, 401, { 'www-authenticate': 'WebAuthn' });
     }
     return dispatch(req);
   };

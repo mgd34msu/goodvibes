@@ -118,10 +118,10 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.cards.create',
-    repeat: 'unsafe',
+    repeat: 'safe',
     title: 'Add a Payment Card',
     description:
-      'Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.',
+      'Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. Sending the same card again (the same label, number and expiry, for example after an answer that was lost) returns the card already stored and stores nothing new; no Idempotency-Key is taken, because a kept request would be a hash of the card on disk. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.',
     category: 'payments',
     effects: ['card.enter'],
     http: { method: 'POST', path: '/api/payments/cards' },

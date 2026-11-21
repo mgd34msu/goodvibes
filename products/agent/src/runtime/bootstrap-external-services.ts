@@ -23,6 +23,7 @@ import { startExternalServices } from '@/runtime/index.ts';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  waitForStartingDaemon,
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { SpineReachability } from '@goodvibes/engine/platform/platform/runtime/session-spine';
@@ -190,7 +191,60 @@ export function wireAgentExternalServices(options: {
   // Start of an installed-but-stopped host: when discovery found nothing on
   // the configured port, start the installed service entry once, wait a
   // bounded time, and re-probe. Every skip/failure path is reported.
-  const startInstalledConnectedHost = async (): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+  // A daemon still starting when the boot-time wait ended is waited for until it
+  // answers or its unit stops; stopping this controller (app exit) ends the wait.
+  const startingDaemonWait = new AbortController();
+  const adoptOnceAnswered = async (serviceName: string): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+    const seams = options.connectedHostAutostart ?? {};
+    const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
+    const result = await waitForStartingDaemon({
+      control: daemonServiceControl(),
+      isReachable: async () => (await probeReachability()) === 'online',
+      serviceName,
+      signal: startingDaemonWait.signal,
+      pollIntervalMs: seams.pollIntervalMs,
+      sleep: seams.sleep,
+    });
+    if (result === 'online') return adoptStarted({ action: 'came-online', serviceName });
+    if (result === 'aborted') return { answered: false, level: null, detail: 'Stopped waiting for the connected host: GoodVibes Agent is exiting' };
+    return {
+      answered: false,
+      level: 'high',
+      detail: `Connected host is installed but not answering, and starting it did not succeed: service "${serviceName}" stopped before the daemon answered (the service manager no longer reports it running), check its logs. Start it with: ${DAEMON_START_COMMAND}`,
+    };
+  };
+  const adoptStarted = async (outcome: { readonly action: 'started' | 'came-online'; readonly serviceName: string }): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+    const settled = await replaceExternalServices();
+    requestRender();
+    const adopted = settled.daemonStatus.mode === 'external';
+    const suffix = adopted
+      ? ''
+      : `, but adopting it still failed: ${settled.daemonStatus.reason ?? settled.daemonStatus.mode}`;
+    return {
+      answered: adopted,
+      level: 'low',
+      detail: outcome.action === 'started'
+        ? `Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}`
+        : `Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}`,
+    };
+  };
+  const reportBringUp = (result: DaemonBringUpResult & { readonly level: 'low' | 'high' | null }): void => {
+    if (result.level === 'low') systemMessageRouter.low(`[Startup] ${result.detail}.`);
+    if (result.level === 'high') systemMessageRouter.high(`[Startup] ${result.detail}`);
+    requestRender();
+  };
+
+  /**
+   * `whenStarting` decides what a unit still starting gets: the boot path
+   * reports it and adopts in the background (`background`); the repair waits
+   * for its answer (`await`).
+   */
+  const startInstalledConnectedHost = async (whenStarting: 'background' | 'await'): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+    // Pointed at a daemon on another machine: starting this machine's daemon would not reach it.
+    const target = externalServices.daemonTarget;
+    if (target && !target.thisMachine) {
+      return { answered: false, level: null, detail: `Nothing was started: the connected host ${target.origin.baseUrl} is on another machine` };
+    }
     const seams = options.connectedHostAutostart ?? {};
     const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
     const outcome = await autostartInstalledDaemon({
@@ -203,20 +257,14 @@ export function wireAgentExternalServices(options: {
     });
     switch (outcome.action) {
       case 'started':
-      case 'came-online': {
-        const settled = await replaceExternalServices();
-        const adopted = settled.daemonStatus.mode === 'external';
-        const suffix = adopted
-          ? ''
-          : `, but adopting it still failed: ${settled.daemonStatus.reason ?? settled.daemonStatus.mode}`;
-        return {
-          answered: adopted,
-          level: 'low',
-          detail: outcome.action === 'started'
-            ? `Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}`
-            : `Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}`,
-        };
-      }
+      case 'came-online':
+        return adoptStarted(outcome);
+      case 'starting':
+        if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName);
+        void adoptOnceAnswered(outcome.serviceName)
+          .then(reportBringUp)
+          .catch((error: unknown) => logger.warn('Adopting the connected host once it answered failed', { error: summarizeError(error) }));
+        return { answered: false, level: 'low', detail: 'The GoodVibes daemon is starting; GoodVibes connects when it answers' };
       case 'start-failed':
         return {
           answered: false,
@@ -237,9 +285,7 @@ export function wireAgentExternalServices(options: {
 
   const maybeStartInstalledConnectedHost = async (): Promise<void> => {
     try {
-      const result = await startInstalledConnectedHost();
-      if (result.level === 'low') systemMessageRouter.low(`[Startup] ${result.detail}.`);
-      if (result.level === 'high') systemMessageRouter.high(`[Startup] ${result.detail}`);
+      reportBringUp(await startInstalledConnectedHost('background'));
     } catch (error) {
       logger.debug('Boot-time connected-host start check failed', { error: summarizeError(error) });
     }
@@ -258,7 +304,8 @@ export function wireAgentExternalServices(options: {
         }
       }
       await replaceExternalServices();
-      const result = await startInstalledConnectedHost();
+      // An explicit repair waits for a daemon that is still starting instead of reporting a failure.
+      const result = await startInstalledConnectedHost('await');
       requestRender();
       return { answered: result.answered, detail: result.detail };
     },
@@ -312,6 +359,7 @@ export function wireAgentExternalServices(options: {
     whenDiscovered: () => discoveryComplete,
     daemon,
     stop: async () => {
+      startingDaemonWait.abort();
       await externalServices.stop();
     },
   };

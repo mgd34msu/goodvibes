@@ -15,24 +15,23 @@ import {
   recordSchema,
 } from './operator-contract-schemas-shared.js';
 import { REASONING_EFFORT_SEVERITY } from '../providers/reasoning-effort.js';
-import type { SharedSessionKind } from './session-types.js';
+import { SHARED_SESSION_KINDS } from './session-types.js';
 import type { TaskKind, TaskLifecycleState } from '../runtime/store/domains/tasks.js';
 
 /**
- * The wire enums below are written out as lists, so a union member added
- * without a matching entry would make `sessions.register` and the task schemas
- * reject a value the platform itself produces. Each list must name every
- * member of its union and nothing else, checked here at compile time.
+ * The task wire enums below are written out as lists, so a union member added
+ * without a matching entry would make the task schemas reject a value the
+ * platform itself produces. Each list must name every member of its union and
+ * nothing else, checked here at compile time. Session kinds come from the list
+ * their union is derived from, so they need no check.
  */
 type ExactMembers<Union extends string, List extends Union> =
   [Exclude<Union, List>] extends [never] ? List : never;
-const SESSION_KINDS = ['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted'] as const;
 const TASK_KINDS = ['exec', 'agent', 'acp', 'scheduler', 'daemon', 'mcp', 'plugin', 'integration'] as const;
 const TASK_STATUSES = ['queued', 'running', 'blocked', 'completed', 'failed', 'cancelled'] as const;
-const sessionKindsAreComplete: ExactMembers<SharedSessionKind, (typeof SESSION_KINDS)[number]> = SESSION_KINDS[0];
 const taskKindsAreComplete: ExactMembers<TaskKind, (typeof TASK_KINDS)[number]> = TASK_KINDS[0];
 const taskStatusesAreComplete: ExactMembers<TaskLifecycleState, (typeof TASK_STATUSES)[number]> = TASK_STATUSES[0];
-void [sessionKindsAreComplete, taskKindsAreComplete, taskStatusesAreComplete];
+void [taskKindsAreComplete, taskStatusesAreComplete];
 
 const TASK_KIND_SCHEMA = enumSchema(TASK_KINDS);
 const TASK_STATUS_SCHEMA = enumSchema(TASK_STATUSES);
@@ -45,7 +44,7 @@ const INBOUND_SERVER_SURFACE_SCHEMA = enumSchema(['controlPlane', 'httpListener'
 const INBOUND_TLS_MODE_SCHEMA = enumSchema(['off', 'proxy', 'direct']);
 const OUTBOUND_TRUST_MODE_SCHEMA = enumSchema(['bundled', 'bundled+custom', 'custom']);
 const OUTBOUND_CA_STRATEGY_SCHEMA = enumSchema(['bun-default', 'bundled+custom', 'custom']);
-const SHARED_SESSION_KIND_SCHEMA = enumSchema(SESSION_KINDS);
+const SHARED_SESSION_KIND_SCHEMA = enumSchema(SHARED_SESSION_KINDS);
 /**
  * READ-path kind schema: an OPEN enum. The known kinds are the same set as
  * {@link SHARED_SESSION_KIND_SCHEMA}, but response/output validation must accept

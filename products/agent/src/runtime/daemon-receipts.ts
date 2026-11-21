@@ -112,11 +112,9 @@ export function createDaemonReceiptConsumption(deps: {
   readonly consumeReceipts: () => Promise<readonly DaemonReceipt[]>;
   readonly acknowledgeReceipts?: DaemonReceiptAcknowledge | undefined;
   readonly feed: Pick<AgentDaemonReceiptFeed, 'push'>;
-  readonly afterAttach: () => Promise<void>;
 }): () => Promise<void> {
   return async () => {
     const receipts = await deps.consumeReceipts();
     if (receipts.length > 0) deps.feed.push(receipts, deps.acknowledgeReceipts);
-    await deps.afterAttach();
   };
 }

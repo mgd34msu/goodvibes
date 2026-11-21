@@ -52,6 +52,7 @@ import {
   callDaemonMethod,
   callDaemonRoute,
   extractOperatorToken,
+  resolveLocalDaemonTarget,
   resolveRemoteDaemonTarget,
   type DaemonFailureCode,
   type DaemonFetch,
@@ -64,10 +65,12 @@ export interface PairCommandDeps {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly daemonHomeDir: string;
   readonly version: string;
-  /** Injected in tests so nothing reads a real token file. */
+  /**
+   * This machine's operator token (`GOODVIBES_DAEMON_TOKEN`, else the token
+   * file), the one reader every command of this program shares; injected in
+   * tests so nothing reads a real token file.
+   */
   readonly readToken: (daemonHomeDir: string) => string | undefined;
-  /** Process-local override, never adopted into the stored companion identity. */
-  readonly operatorToken?: string | undefined;
   /** Asks the daemon, here or remote, with the configured outbound TLS trust (`createDaemonCommandRemote`). */
   readonly fetchImpl: DaemonFetch;
   /** Whether this daemon's pairing store records the shared operator token as revoked. Absent: never. */
@@ -82,21 +85,30 @@ interface HealthBinding {
 type LocalDaemonAnswer =
   | { readonly kind: 'serving'; readonly bound: { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | undefined }
   | { readonly kind: 'refused'; readonly baseUrl: string }
+  /** A daemon answered with a status other than success or a refusal (a 500, a 503). */
+  | { readonly kind: 'unhealthy'; readonly baseUrl: string; readonly status: number }
   | { readonly kind: 'absent'; readonly baseUrl: string };
 
 /**
  * Ask the daemon on this machine whether it accepts `token` and where it is
  * bound. The status code decides; nothing reads wording.
  */
-async function askLocalDaemon(input: RunPairCommandInput, token: string): Promise<LocalDaemonAnswer> {
-  const resolved = resolveRemoteDaemonTarget({
-    flags: { token, ...(input.flags.port === undefined ? {} : { port: input.flags.port }) },
-    configManager: input.configManager,
-    daemonHomeDir: input.daemonHomeDir,
-    readToken: input.readToken,
-  });
-  if (!resolved.ok) return { kind: 'absent', baseUrl: 'this machine' };
-  const target = resolved.target;
+async function askLocalDaemon(input: RunPairCommandInput, token: string, named: RemoteDaemonTarget | undefined): Promise<LocalDaemonAnswer> {
+  let target: RemoteDaemonTarget;
+  if (named !== undefined) {
+    target = { baseUrl: named.baseUrl, token, isLocal: true };
+  } else {
+    // This machine's token goes only to this machine's daemon, at its bind address.
+    const resolved = resolveLocalDaemonTarget({
+      token,
+      ...(input.flags.port === undefined ? {} : { port: input.flags.port }),
+      configManager: input.configManager,
+      daemonHomeDir: input.daemonHomeDir,
+      readToken: input.readToken,
+    });
+    if (!resolved.ok) return { kind: 'absent', baseUrl: 'this machine' };
+    target = resolved.target;
+  }
   const fetchImpl = input.fetchImpl;
   let status: number;
   try {
@@ -105,7 +117,7 @@ async function askLocalDaemon(input: RunPairCommandInput, token: string): Promis
     return { kind: 'absent', baseUrl: target.baseUrl };
   }
   if (status === 401 || status === 403) return { kind: 'refused', baseUrl: target.baseUrl };
-  if (status < 200 || status >= 300) return { kind: 'absent', baseUrl: target.baseUrl };
+  if (status < 200 || status >= 300) return { kind: 'unhealthy', baseUrl: target.baseUrl, status };
   const health = await callDaemonRoute<HealthBinding>(target, '/api/health', { method: 'GET', envelope: 'raw' }, fetchImpl);
   const listener = health.ok ? health.data.network?.controlPlane : undefined;
   const bound = listener?.host !== undefined && typeof listener.port === 'number'
@@ -123,14 +135,10 @@ export interface RunPairCommandInput extends PairCommandDeps {
   readonly flags: PairCommandFlags;
 }
 
-/** The hosts that mean "this machine", matching the remote-target convention. */
-function namesThisMachine(host: string): boolean {
-  const normalized = host.trim().toLowerCase();
-  return normalized === ''
-    || normalized === '127.0.0.1'
-    || normalized === 'localhost'
-    || normalized === '::1'
-    || normalized === '0.0.0.0';
+/** The port a resolved daemon address names, the scheme's default when it names none. */
+function targetPort(target: RemoteDaemonTarget): number {
+  const url = new URL(target.baseUrl);
+  return url.port === '' ? (url.protocol === 'https:' ? 443 : 80) : Number(url.port);
 }
 
 function failure(error: string, fix: string, json: boolean, code?: DaemonFailureCode): DaemonCommandResult {
@@ -178,14 +186,19 @@ interface PairingHandoffCreateResult {
   readonly deepLink?: string;
 }
 
-/** `goodvibes-daemon pair` with no `--host`, or one naming this machine. */
-async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonCommandResult> {
+/**
+ * `goodvibes-daemon pair` with no `--host`, or one naming this machine:
+ * `named` is that `--host` already resolved, so its address and port are used
+ * as given.
+ */
+async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonTarget): Promise<DaemonCommandResult> {
   const { flags } = input;
-  if (flags.port !== undefined && (!Number.isInteger(flags.port) || flags.port < 1 || flags.port > 65535)) {
+  const port = named === undefined ? flags.port : targetPort(named);
+  if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
     return failure('the local pairing port must identify a concrete listener', 'use the nonzero port reported by the running daemon', flags.json);
   }
 
-  const token = flags.token ?? input.operatorToken ?? extractOperatorToken(input.readToken(input.daemonHomeDir));
+  const token = flags.token ?? extractOperatorToken(input.readToken(input.daemonHomeDir));
   if (token === undefined) {
     return failure(
       'no operator token was found for this machine, so there is no link to print',
@@ -196,24 +209,31 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
   // Once the shared token was revoked, the value stored here is the replacement
   // only this machine's apps hold; it is never put in a link for another
   // device. The new device gets its own token from this machine's daemon instead.
-  if (flags.token === undefined && input.operatorToken === undefined && input.sharedTokenRevoked?.() === true) {
-    const resolved = resolveRemoteDaemonTarget({
-      flags: { token, ...(flags.port === undefined ? {} : { port: flags.port }) },
-      configManager: input.configManager,
-      daemonHomeDir: input.daemonHomeDir,
-      readToken: input.readToken,
-    });
-    if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
+  if (flags.token === undefined && input.sharedTokenRevoked?.() === true) {
+    let target: RemoteDaemonTarget;
+    if (named !== undefined) {
+      target = { baseUrl: named.baseUrl, token, isLocal: true };
+    } else {
+      const resolved = resolveLocalDaemonTarget({
+        token,
+        ...(flags.port === undefined ? {} : { port: flags.port }),
+        configManager: input.configManager,
+        daemonHomeDir: input.daemonHomeDir,
+        readToken: input.readToken,
+      });
+      if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
+      target = resolved.target;
+    }
     if (!flags.yes) {
-      return mintPlanResult(resolved.target, flags.json, [
+      return mintPlanResult(target, flags.json, [
         'The shared token on this machine was revoked and replaced; the replacement belongs to this machine\'s own apps and is not put in a pairing link.',
         '',
       ]);
     }
-    return runRemoteMint(input, resolved.target, true);
+    return runRemoteMint(input, target, true);
   }
 
-  const answer = await askLocalDaemon(input, token);
+  const answer = await askLocalDaemon(input, token, named);
   if (answer.kind === 'refused') {
     return failure(
       `the daemon at ${answer.baseUrl} does not accept this machine's stored operator token, so a link built from it would not sign in`,
@@ -224,8 +244,8 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
   // A local reprint writes no token and no setting of its own. With no daemon
   // answering, the binding comes from settings, or from --port when given.
   const bound = answer.kind === 'serving' ? answer.bound
-    : flags.port === undefined ? undefined
-      : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port: flags.port };
+    : port === undefined ? undefined
+      : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port };
   const origin = resolvePairingWebOrigin(input.configManager, undefined, bound);
   if (origin === null) {
     // No web UI is served (and no public URL names one), so a link would open nothing.
@@ -238,7 +258,9 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
   const fromFiles = answer.kind === 'absent'
     ? [`no daemon answered at ${answer.baseUrl}; this link is built from the settings and the token file, and works once the daemon runs with them.`,
       'a daemon started on another port is found with: goodvibes-daemon pair --port <port>']
-    : [];
+    : answer.kind === 'unhealthy'
+      ? [`the daemon at ${answer.baseUrl} answered HTTP ${answer.status}; this link is built from the settings and the token file`]
+      : [];
   const offers = availablePairingOffers({
     relayEnabled: input.configManager.get('relay.enabled') === true,
     stepUpAvailable: true,
@@ -418,10 +440,14 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
 export async function runPairCommand(input: RunPairCommandInput): Promise<DaemonCommandResult> {
   const { flags } = input;
 
-  if (flags.host !== undefined && !namesThisMachine(flags.host)) {
+  // A named host is resolved by the same rule every remote-capable command
+  // uses, so `127.0.0.1`, `localhost:3421`, `[::1]` and `http://127.0.0.1:3421`
+  // all mean this machine and reprint its link instead of minting a token.
+  const host = flags.host?.trim();
+  if (host !== undefined && host !== '') {
     const resolved = resolveRemoteDaemonTarget({
       flags: {
-        host: flags.host,
+        host,
         ...(flags.port === undefined ? {} : { port: flags.port }),
         ...(flags.token === undefined ? {} : { token: flags.token }),
       },
@@ -430,6 +456,7 @@ export async function runPairCommand(input: RunPairCommandInput): Promise<Daemon
       readToken: input.readToken,
     });
     if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
+    if (resolved.target.isLocal) return runLocalReprint(input, resolved.target);
     if (!flags.yes) return mintPlanResult(resolved.target, flags.json);
     return runRemoteMint(input, resolved.target);
   }

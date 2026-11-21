@@ -33,6 +33,7 @@ import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/plat
 import { resolveConnectedHostAddress, type ConnectedHostAddressKey } from './connected-host-dial.js';
 import {
   connectedHostOperatorTokenPath,
+  environmentConnectedHostToken,
   readConnectedHostOperatorToken,
   type ConnectedHostCredentialSource,
   type ConnectedHostOperatorToken,
@@ -294,17 +295,13 @@ function fileStamp(path: string): string | null {
   }
 }
 
-function environmentToken(): boolean {
-  return Boolean(process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim());
-}
-
 /**
  * The credential for one host, re-read only when a file it depends on changed.
  * A pairing outranks the token file, so while the pairing is the source only the
- * pairing file is checked.
+ * pairing file is checked. An environment token for this host is read every time.
  */
 function readCredential(homeDirectory: string, baseUrl: string): ConnectedHostOperatorToken {
-  if (environmentToken()) return readConnectedHostOperatorToken(homeDirectory, baseUrl);
+  if (environmentConnectedHostToken(baseUrl)) return readConnectedHostOperatorToken(homeDirectory, baseUrl);
   const key = `${resolvePath(homeDirectory)}\n${baseUrl}`;
   const pairingStamp = fileStamp(agentHostPairingStorePath(homeDirectory));
   const cached = credentialCache.get(key);

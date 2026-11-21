@@ -10,7 +10,7 @@ import type { ClusterConfig } from './schema-domain-cluster.js';
 import type { CalendarConnectorConfig, GoogleConnectorConfig } from './schema-types-connectors.js';
 import type { ConversationGateSettings } from './schema-domain-conversation-gate.js';
 import type { DeviceConfig } from './schema-domain-device.js';
-import type { AgentsConfig, FetchConfig, IntegrationsConfig, PolicyConfig, SecurityConfig } from './schema-domain-features.js';
+import type { AgentsConfig, FetchConfig, IntegrationsConfig, PolicyConfig, SecurityConfig, WebSearchConfig } from './schema-domain-features.js';
 import type { FleetConfig } from './schema-domain-fleet.js';
 import type { HostedSessionsSettings } from './schema-domain-hosted-sessions.js';
 import type { LearningConfig } from './schema-domain-learning.js';
@@ -227,6 +227,7 @@ export interface GoodVibesConfig {
   conversationGate: ConversationGateSettings;
   device: DeviceConfig;
   fetch: FetchConfig;
+  webSearch: WebSearchConfig;
   security: SecurityConfig;
   integrations: IntegrationsConfig;
   policy: PolicyConfig;

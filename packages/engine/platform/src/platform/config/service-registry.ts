@@ -461,6 +461,7 @@ export class ServiceRegistry {
         const resolved = await resolveSecretRef(candidate, {
           resolveLocalSecret: (key) => secrets.get(key),
           homeDirectory: secrets.getGlobalHome(),
+          providers: secrets.getSecretProviderHostConfig(),
         });
         return revealOrNull(resolved.value, 'dispatch');
       } catch (error) {

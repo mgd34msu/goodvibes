@@ -97,24 +97,13 @@ export function cacheRatiosFromCatalog(models: readonly CatalogModel[]): (provid
   return (provider) => ratios.get(provider);
 }
 
-// Module-level source, wired at bootstrap by wireCostPricing (session-cost.ts)
-// the same way the pricing resolver is: cost surfaces are plain functions with
-// no registry in scope.
-let providerCacheRatios: ((provider: string) => Partial<CacheRatio> | undefined) | null = null;
-
-/** Wire (or clear, with null) where providers' published cache ratios come from. */
-export function setProviderCacheRatios(source: ((provider: string) => Partial<CacheRatio> | undefined) | null): void {
-  providerCacheRatios = source;
-}
-
 /**
  * The cache ratios to price a provider's cache tokens with when the resolved
- * price carried no cache rates: the provider's published ratio from the
- * catalog, else 1.0 (cache tokens at the full input rate, the conservative
- * honest choice when the provider publishes nothing).
+ * price carried no cache rates: the provider's published ratio
+ * (`ProviderRegistry.cacheRatios`), else 1.0 (cache tokens at the full input
+ * rate, the conservative honest choice when the provider publishes nothing).
  */
-export function cacheRateMultipliers(provider: string | undefined): CacheRatio {
-  const published = provider ? providerCacheRatios?.(provider) : undefined;
+export function cacheRateMultipliers(published: Partial<CacheRatio> | undefined): CacheRatio {
   return { read: published?.read ?? 1.0, write: published?.write ?? 1.0 };
 }
 
@@ -131,17 +120,20 @@ export interface UsageTokenCounts {
  * usage x resolved price -> USD. Null when the pricing is not `priced`
  * (unknown/subscription), callers must carry the unpriced state forward,
  * never coerce to $0. Cache tokens use the source's explicit cache rates when
- * present, else the provider's published ratio over the input rate
- * (cacheRateMultipliers).
+ * present, else `cacheRatio`, the billing provider's published ratio over the
+ * input rate, which each caller reads from the registry it holds
+ * (`ProviderRegistry.cacheRatios(provider)`); undefined prices them at the
+ * input rate.
  */
 export function computeUsageCostUsd(
   pricing: ResolvedModelPricing,
   usage: UsageTokenCounts,
-  provider?: string | undefined,
+  provider: string | undefined,
+  cacheRatio: Partial<CacheRatio> | undefined,
 ): number | null {
   if (pricing.status !== 'priced') return null;
   const rates = pricing.rates;
-  const mult = cacheRateMultipliers(provider);
+  const mult = cacheRateMultipliers(cacheRatio);
   const cacheReadRate = rates.cacheReadPerMTok ?? rates.inputPerMTok * mult.read;
   const cacheWriteRate = rates.cacheWritePerMTok ?? rates.inputPerMTok * mult.write;
   // A catalog's single cache-write rate is the five-minute one; a one-hour
@@ -162,9 +154,10 @@ export function computeUsageCostUsd(
 export function computeUsageCostUsdCents(
   pricing: ResolvedModelPricing,
   usage: UsageTokenCounts,
-  provider?: string | undefined,
+  provider: string | undefined,
+  cacheRatio: Partial<CacheRatio> | undefined,
 ): number | null {
-  const usd = computeUsageCostUsd(pricing, usage, provider);
+  const usd = computeUsageCostUsd(pricing, usage, provider, cacheRatio);
   return usd === null ? null : usd * 100;
 }
 

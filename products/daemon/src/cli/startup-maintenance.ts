@@ -1,10 +1,8 @@
 /** Original startup maintenance, scoped to the admitted CLI owner. */
-import { controlPlaneScheme, ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
+import { explicitPublicBaseUrl, isLoopbackHost, publicBaseUrlIsOwnOrigin, pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
 import { formatWorktreeStartupReport, WorktreeRegistry } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
-import { hasReadableWebuiBundle } from '../config/webui-bundle.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 
 export function pruneDaemonStartupTokens(configuration: DaemonCliConfiguration): number {
@@ -14,24 +12,32 @@ export function pruneDaemonStartupTokens(configuration: DaemonCliConfiguration):
   }).failedPaths.length;
 }
 
-export function persistDaemonStartupPublicUrl(
+/**
+ * `web.publicBaseUrl` holds only what a person set; empty means every link is
+ * derived live from the settings. Releases up to 3.3.4 (and their installers)
+ * stored the daemon's own derived origin or a placeholder there, which froze
+ * every link at that address. At start, a saved value that is the old
+ * placeholder, names a loopback host (never a public address for another
+ * device), or is this daemon's own origin (once that answer is settled) is
+ * cleared. Returns the value cleared, or null when nothing changed.
+ */
+export function clearDerivedPublicBaseUrl(
   configuration: DaemonCliConfiguration,
   bound: { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' },
-): void {
+): string | null {
   const { config } = configuration;
-  // Preserve the original empty-only rule. The shipped placeholder and every
-  // explicit public URL remain untouched; webui enable owns its separate rule.
-  if (String(config.get('web.publicBaseUrl') ?? '').trim() || !config.get('controlPlane.webui.serve')) return;
-  // A one-invocation override (including an ephemeral port) cannot become a
-  // durable URL. The settled binding must still match the declared endpoint.
-  const originKeys = ['web.publicBaseUrl', 'controlPlane.webui.serve', 'controlPlane.webui.bundleDir',
-    'web.staticAssetsDir', 'controlPlane.hostMode', 'controlPlane.host', 'controlPlane.port', 'controlPlane.tls.mode'] as const;
-  if (originKeys.some((key) => ['runtime', 'runtime-default'].includes(config.describeConfigKeySource(key).effectiveOrigin ?? ''))) return;
-  const declared = resolveRuntimeEndpointBinding(config, 'controlPlane');
-  if (!declared.recognized || declared.host !== bound.host || declared.port !== bound.port
-    || controlPlaneScheme(config) !== bound.scheme) return;
-  if (!hasReadableWebuiBundle(config)) return;
-  ensurePublicBaseUrl(config, undefined, bound);
+  const stored = String(config.get('web.publicBaseUrl') ?? '').trim();
+  if (!stored) return null;
+  // A value set for this one run (a flag or an environment override) is not the saved setting.
+  const origin = config.describeConfigKeySource('web.publicBaseUrl').effectiveOrigin ?? '';
+  if (origin === 'runtime' || origin === 'runtime-default') return null;
+  const placeholder = explicitPublicBaseUrl(config) === '';
+  let loopback = false;
+  try { loopback = isLoopbackHost(new URL(stored).hostname); } catch { loopback = false; }
+  const own = publicBaseUrlIsOwnOrigin(config, bound);
+  if (!placeholder && !loopback && !(own.own && own.settled)) return null;
+  config.setDynamic('web.publicBaseUrl', '');
+  return stored;
 }
 
 /**

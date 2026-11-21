@@ -39,7 +39,8 @@ import {
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { daemonConfigPath, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
+import { daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
+import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
 import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
@@ -514,10 +515,13 @@ export class ConfigManager {
     // The daemon tier: every daemon-owned key's single home, shared by every
     // product on this machine. Surface-root-independent, exactly like the
     // shared tier, the daemon is a peer runtime, not a guest in the TUI's
-    // storage root. A configDir-only construction (no homeDir) has none.
+    // storage root. Its default is the daemon home the daemon itself resolves
+    // (GOODVIBES_DAEMON_HOME, else ~/.goodvibes/daemon), so every constructor
+    // reads the file the running daemon reads. A configDir-only construction
+    // (no homeDir) has none.
     const daemonTierPath = requireAbsoluteOwnedPath(roots.daemonTierPath, 'daemonTierPath');
     this.daemonTierPath = daemonTierPath ?? (
-      this.homeDirectory ? daemonConfigPath(this.homeDirectory) : null
+      this.homeDirectory ? daemonConfigPathForHome(resolveGoodVibesDaemonHome(this.homeDirectory)) : null
     );
     // Set BEFORE load(): that load is where the daemon-tier migration asks.
     this.daemonTierOwner = !this.readOnly && overrides.ownsDaemonTier === true;
@@ -1256,6 +1260,19 @@ export class ConfigManager {
     this.setRuntimeInput(key, value, true);
   }
 
+  /**
+   * The value `key` has when nothing is stored for it in this product: the
+   * product's registered default (setRuntimeDefault) when there is one, else a
+   * host setting's declared default, else the schema default. What a settings
+   * row compares against for "default" and names as "reset to", and what a
+   * reset brings back. One map read.
+   */
+  defaultOf(key: string): unknown {
+    if (this.runtimeState.defaults.has(key as ConfigKey)) return structuredClone(this.runtimeState.defaults.get(key as ConfigKey));
+    if (this.hostSettings.has(key)) return structuredClone(this.hostSettings.schema(key)?.default);
+    return structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value);
+  }
+
   private setRuntimeInput(key: ConfigKey, value: unknown, isDefault: boolean): void {
     this.invalidateLifetimes();
     const owned = captureRuntimeValue(key, value);
@@ -1314,7 +1331,7 @@ export class ConfigManager {
       const foreign = this._fileWatch?.changedSinceBaseline(path) ?? false;
       const raw = read(path);
       if (mutate(raw) === false) return raw;
-      writeJsonFileAtomic(path, raw);
+      writeJsonFileAtomic(path, raw, { durable: true });
       this.#fileBaselines.set(path, structuredClone(raw));
       this.#durableDirty = true;
       if (!foreign) this._fileWatch?.acknowledge(path);

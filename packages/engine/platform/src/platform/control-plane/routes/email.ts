@@ -88,6 +88,12 @@ export interface EmailGatewayMessageDetail {
   readonly attachments?: readonly EmailGatewayAttachment[];
   /** The mailbox generation (UIDVALIDITY) the UID was read under; `email.inbox.update` needs it. */
   readonly uidValidity?: number;
+  /**
+   * Body sections the message declares that could not be fetched, each with
+   * why. Present only when one failed: the body fields are then empty for them
+   * because they were not read, and reading the message again may fetch them.
+   */
+  readonly bodyUnavailable?: readonly { readonly section: string; readonly reason: string }[];
 }
 
 export interface EmailGatewayListInput {

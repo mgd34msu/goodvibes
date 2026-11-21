@@ -386,12 +386,18 @@ export class DaemonCardStore implements CardMaterialStore {
    */
   async create(input: CardCreateInput): Promise<CardMetadata> {
     const digits = input.number.replace(/\D/g, '');
-    const cardId = this.generateId();
     const storeCvv = this.cvvHandling() === 'stored';
 
     // Reads before it writes, so a damaged file refuses HERE, before any secret
     // is written and before the existing rows could be dropped.
     const existing = this.readOrRaise().cards;
+    // The same card sent again (a save whose answer was lost, pressed again) is
+    // the card already stored: a row with the same label, last four and expiry
+    // whose stored number is this number. One secret read per matching row;
+    // nothing about the request is kept anywhere to recognise it.
+    const same = await this.findSameCard(existing, input, digits);
+    if (same) return same;
+    const cardId = this.generateId();
     const metadata: CardMetadata = {
       id: cardId,
       label: input.label,
@@ -476,6 +482,17 @@ export class DaemonCardStore implements CardMaterialStore {
     const deleted = remaining.length !== fresh.length;
     if (deleted) writeCardsFile(this.filePath, remaining);
     return { deleted, secretsCleared };
+  }
+
+  /** A stored row that is this card: same label, last four and expiry, and the same stored number. */
+  private async findSameCard(rows: readonly CardMetadata[], input: CardCreateInput, digits: string): Promise<CardMetadata | null> {
+    for (const card of rows) {
+      if (card.label !== input.label || card.last4 !== digits.slice(-4)
+        || card.expiryMonth !== input.expiryMonth || card.expiryYear !== input.expiryYear) continue;
+      const stored = await this.secrets.get(cardSecretKey(card.id, 'number'));
+      if (stored !== null && !stored.empty && stored.reveal('dispatch') === digits) return card;
+    }
+    return null;
   }
 
   /** The file's contents, or the refusal. The one read path; nothing else parses. */

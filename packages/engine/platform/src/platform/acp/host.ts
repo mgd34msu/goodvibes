@@ -41,6 +41,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { VERSION } from '../version.js';
 import { ACP_HOST_ERROR_STAGES, HOSTED_ACP_STATES } from './hosted-agent-states.js';
+import { DEFAULT_TERMINAL_AGENT_RETENTION } from '../tools/agent/manager.js';
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 
@@ -217,6 +218,10 @@ export interface AcpHostServiceDeps {
    * Checked synchronously right before the session is recorded.
    */
   readonly admitSession?: (() => string | undefined) | undefined;
+  /** Told each time a hosted session stops holding a fleet slot (its teardown ended). */
+  readonly onSlotReleased?: (() => void) | undefined;
+  /** Finished sessions kept listed; the oldest past this is dropped once its teardown ended. Default DEFAULT_TERMINAL_AGENT_RETENTION, as for native agents. */
+  readonly terminalRetention?: number | undefined;
   readonly now?: (() => number) | undefined;
 }
 
@@ -225,6 +230,14 @@ const PROGRESS_TAIL_CHARS = 400;
 /** A hosted session refused because the fleet ceiling (fleet.maxSize) is reached; nothing was started. */
 export class AcpFleetCapacityError extends Error {
   override readonly name = 'AcpFleetCapacityError';
+}
+
+/** Whether a hosted session still takes a fleet slot (see AcpHostService.fleetOwnership). */
+function holdsFleetSlot(record: HostedRecord): boolean {
+  const state = record.info.state;
+  if (state === 'starting' || state === 'idle' || state === 'prompting') return true;
+  if (record.teardownState === 'pending') return true;
+  return record.teardownState === 'failed' && record.child !== null;
 }
 
 export class AcpHostService {
@@ -239,6 +252,15 @@ export class AcpHostService {
 
   list(): HostedAcpAgent[] {
     return [...this.records.values()].map((record) => ({ ...record.info }));
+  }
+
+  /**
+   * The fleet slots hosted sessions hold, for fleet.maxSize: a session is
+   * active while it is starting, idle or prompting, while its teardown is still
+   * running, and while a teardown that failed left its process owned.
+   */
+  fleetOwnership(): { readonly id: string; readonly active: boolean }[] {
+    return [...this.records.values()].map((record) => ({ id: `acp:${record.info.id}`, active: holdsFleetSlot(record) }));
   }
 
   get(id: string): HostedAcpAgent | null {
@@ -447,19 +469,31 @@ export class AcpHostService {
     return wasRunning;
   }
 
-  /** Drop terminal records (a panel dismiss); live rows are untouched. */
-  dismiss(id: string): boolean {
-    const record = this.records.get(id);
-    if (!record) return false;
-    if (record.info.state !== 'stopped' && record.info.state !== 'failed') return false;
-    // A row whose child is still being stopped stays until that ends.
-    if (record.teardownState === 'pending') return false;
-    if (record.teardownState === 'failed' && record.child) {
-      // Everything that could be done was done; the row says which process is left, then goes.
-      logger.warn('AcpHostService: dismissed a hosted agent whose process could not be reaped', { id, pid: record.child.pid, binary: record.info.binaryPath });
-    } else if (record.child) return false;
-    this.records.delete(id);
-    return true;
+  /**
+   * Drops the oldest finished sessions beyond the retention bound, as the agent
+   * manager does for its finished records. Only a stopped or failed session
+   * whose process is gone is dropped: one whose teardown is still running, or
+   * failed with its process still owned, keeps its row and its fleet slot.
+   */
+  private pruneTerminalRecords(): void {
+    const terminal = [...this.records.values()].filter((record) =>
+      (record.info.state === 'stopped' || record.info.state === 'failed')
+      && record.teardownState !== undefined && record.teardownState !== 'pending'
+      && record.child === null);
+    const excess = terminal.length - Math.max(0, this.deps.terminalRetention ?? DEFAULT_TERMINAL_AGENT_RETENTION);
+    if (excess <= 0) return;
+    terminal.sort((a, b) => (a.info.completedAt ?? a.info.startedAt) - (b.info.completedAt ?? b.info.startedAt));
+    for (const record of terminal.slice(0, excess)) this.records.delete(record.info.id);
+  }
+
+  /** A session's teardown ended: its slot may be free, and finished rows past the bound go. */
+  private teardownEnded(): void {
+    this.pruneTerminalRecords();
+    try {
+      this.deps.onSlotReleased?.();
+    } catch (error) {
+      logger.warn('AcpHostService: the fleet slot listener failed', { error: summarizeError(error) });
+    }
   }
 
   private teardown(record: HostedRecord, cancel?: () => Promise<void>): Promise<void> {
@@ -483,9 +517,10 @@ export class AcpHostService {
         if (record.child === child) record.child = null;
       }
       if (wireError !== undefined) throw new AggregateError([wireError], 'Hosted ACP permission cleanup failed');
-    })().then(() => { record.teardownState = 'done'; complete(); }, (error: unknown) => {
+    })().then(() => { record.teardownState = 'done'; this.teardownEnded(); complete(); }, (error: unknown) => {
       record.teardownState = 'failed';
       logger.warn('AcpHostService: child drainage failed', { id: record.info.id, pid: child?.pid, error: summarizeError(error) });
+      this.teardownEnded();
       fail(error);
     });
     // Prompt and exit callbacks start the same teardown without awaiting it; stop awaits and reports it.

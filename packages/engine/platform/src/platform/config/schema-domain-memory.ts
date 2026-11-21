@@ -36,6 +36,10 @@ export interface MemoryConfig {
    * imminent and the leak was too slow for the rate tripwire to see.
    */
   hardLimitPct: number;
+  projection: {
+    /** Folder `/memory sync-files` writes memory records to as files, relative to the project. */
+    dir: string;
+  };
 }
 
 export const memoryConfigDefaults: { memory: MemoryConfig } = {
@@ -51,6 +55,9 @@ export const memoryConfigDefaults: { memory: MemoryConfig } = {
       sustainSec: 60,
     },
     hardLimitPct: 90,
+    projection: {
+      dir: '.goodvibes/memory/projection',
+    },
   },
 };
 
@@ -110,5 +117,14 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
     description:
       'The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer\'s memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.',
     ...intRange(1, 100),
+  },
+  {
+    key: 'memory.projection.dir',
+    label: 'Folder memories are written to as files',
+    type: 'string',
+    description:
+      '/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /recall files review reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.',
+    validate: (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0,
+    validationHint: 'a folder path, relative to the project or absolute',
   },
 ];

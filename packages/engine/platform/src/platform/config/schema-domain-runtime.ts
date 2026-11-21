@@ -467,7 +467,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'web.publicBaseUrl',
     label: 'Outside address used in web links',
     type: 'string',
-    description: 'Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon\'s own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices.',
+    description: 'Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived live from the current settings: the daemon\'s own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices. Installers and goodvibes-daemon webui enable never fill it; set it only for an address the daemon cannot derive.',
   },
   {
     key: 'web.staticAssetsDir',
@@ -579,6 +579,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'network.remoteFetch.allowPrivateHosts',
     label: 'Allow fetching from addresses on your own network',
+    appliesWhen: 'now',
     type: 'boolean',
     description: 'Allow explicit admin-approved remote fetches from private, localhost, or metadata hosts for artifacts and ingest flows',
   },
@@ -599,6 +600,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'relay.url',
     label: 'Relay address',
+    appliesWhen: 'now',
     type: 'string',
     description: 'Relay URL to dial (wss://…); empty disables the outbound relay connection',
   },

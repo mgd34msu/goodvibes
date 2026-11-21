@@ -78,6 +78,12 @@ export interface ContractRunnerCompositionOptions {
   readonly projectRoot: string;
   /** The fleet ceiling every contract's units share. */
   readonly fleetCapacity: FleetCapacityFn;
+  /**
+   * The slot releases of that fleet, for units refused for capacity. Default:
+   * `agentManager.onFleetSlotReleased`; a graph whose fleet is counted by
+   * another manager passes that manager's, which every owner reports to.
+   */
+  readonly onFleetSlotReleased?: ((listener: () => void) => () => void) | undefined;
   readonly workPlanService?: WorkPlanService | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   /** The `exec` permission check each worktree setup command passes before it runs (orchestration/engine.ts). */
@@ -330,6 +336,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       sessionId: input.sessionId,
       contractUnitSettlement: input.contractUnitSettlement,
       fleetCapacity: input.fleetCapacity,
+      onFleetSlotReleased: options.onFleetSlotReleased ?? ((listener) => options.agentManager.onFleetSlotReleased(listener)),
       judgeAttempts: input.judgeAttempts,
       admitSetupCommand: options.admitSetupCommand,
       priceUsage,

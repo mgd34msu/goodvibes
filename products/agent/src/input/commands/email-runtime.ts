@@ -170,7 +170,11 @@ async function readMail(ctx: CommandContext, uid: number): Promise<string> {
     ...(attachments.length > 0 ? [`Files:   ${attachments.join(', ')}`] : []),
     '',
     // The body keeps its lines; each line loses control characters and direction overrides.
-    message.bodyText.trim() ? message.bodyText.trimEnd().split('\n').map(plainText).join('\n') : '(no plain-text body)',
+    message.bodyText.trim()
+      ? message.bodyText.trimEnd().split('\n').map(plainText).join('\n')
+      : message.bodyUnavailable
+        ? `The body could not be fetched: ${plainText(message.bodyUnavailable.map((entry) => entry.reason).join('; '))}; read it again with /mail read ${uid}.`
+        : '(no plain-text body)',
   ].join('\n');
 }
 

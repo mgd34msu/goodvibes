@@ -17,7 +17,7 @@
  * `import('pkg')` at bundle time exactly as it resolves a static one. Measured
  * with the package absent:
  *
- *   bun build …/daemon/cli.ts --compile
+ *   bun build …/products/daemon/src/cli/entrypoint.ts --compile
  *     → error: Could not resolve: "jsdom"
  *
  * So an install that legitimately skipped an optional package could not

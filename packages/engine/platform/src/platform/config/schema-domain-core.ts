@@ -377,6 +377,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
   {
     key: 'storage.artifacts.maxBytes',
     label: 'Largest file you can upload (bytes)',
+    appliesWhen: 'now',
     type: 'number',
     description: 'Maximum stored artifact size for file, URL, multipart, and raw upload ingest in bytes',
     ...intRange(1 * 1024 * 1024, 10 * 1024 * 1024 * 1024),
@@ -711,7 +712,7 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     label: 'Address of the daemon to connect to',
     type: 'string',
     description:
-      'Where the terminal (goodvibes) dials its daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. Setup\'s "Connect to an existing daemon" writes this, so finishing setup or changing the local bind does not move the terminal off the daemon it connected to. Clear it to go back to the daemon on this machine.',
+      'Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. /setup connect-daemon ("Use a daemon on another computer") writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent\'s --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.',
     validate: (value: unknown): boolean => typeof value === 'string' && (value.trim().length === 0 || parseDaemonOrigin(value) !== null),
     validationHint: 'empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421',
   },

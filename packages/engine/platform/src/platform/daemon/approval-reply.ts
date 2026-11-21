@@ -6,6 +6,7 @@ import { channelSenderActor } from '../channels/policy-manager.js';
 import { admitEffects } from '../security/effect-authority.js';
 import type { ApprovalBroker, SharedApprovalRecord } from '../control-plane/approval-broker.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
+import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
 import { logger } from '../utils/logger.js';
 import { assertJudgmentInput, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { channelApprovalTarget } from './batteries/approval-reply.js';
@@ -17,7 +18,6 @@ import { approvalGuestChannel } from '../control-plane/approval-broker-raise.js'
 export type ApprovalReplyBroker = Pick<ApprovalBroker, 'listApprovals' | 'resolveApproval'>;
 
 const SITE = 'daemon.approval-reply';
-const isPending = (record: SharedApprovalRecord): boolean => record.status === 'pending' || record.status === 'claimed';
 /** What the owner's reply is read against: the ask's id, tool, summary and arguments. */
 export function approvalProposal(record: SharedApprovalRecord) {
   const proposal = {
@@ -88,13 +88,24 @@ export function approvalReplyCandidates(
   })();
   // Inspect all pending records: truncating newest-first can hide ambiguity.
   return broker.listApprovals(Number.MAX_SAFE_INTEGER).filter((record) => {
-    if (!isPending(record)) return false;
+    if (!isOpenApprovalStatus(record.status)) return false;
     if (approvalGuestChannel(record) !== undefined) return input.channelId !== undefined && repliedInOwnConversation();
     const routeId = approvalDeliveryRouteId(record, deps.sessions);
     const binding = routeId ? deps.routeBindings.getBinding(routeId) : undefined;
     return binding !== undefined && binding.surfaceKind === surface
       && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId;
   });
+}
+
+/**
+ * The line a channel prompt carries saying how to answer it, from the same
+ * grammar {@link tryResolveApprovalReplyFromChannel} reads: without a decision
+ * model only `/approve <id>` or `/deny <id>` resolves an ask; with one, a plain reply does.
+ */
+export function approvalReplyHint(approval: Pick<SharedApprovalRecord, 'id'>): string {
+  return isClassicOperation()
+    ? `Reply /approve ${approval.id} or /deny ${approval.id}.`
+    : 'Reply yes or no, or say what to change.';
 }
 
 /**

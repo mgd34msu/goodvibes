@@ -58,7 +58,7 @@ import { SHIPPING_TIERS } from '../types.js';
 import type { ShippingTier } from '../types.js';
 import type { UntrustedContentLedger } from '../../security/untrusted-content.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
-import { HandlerError } from './handler-plumbing.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { TypedHandler } from './handler-plumbing.js';
 import { PaymentApprovalStoreError, type DaemonApprovalStore } from './approval-store.js';
 import type { DaemonCardStore } from './card-store.js';
@@ -139,8 +139,8 @@ export interface RestoredCheckoutWindow {
   release(): Promise<void>;
 }
 
-function invalid(field: string, requirement: string): HandlerError {
-  return new HandlerError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
+function invalid(field: string, requirement: string): GatewayVerbError {
+  return new GatewayVerbError(`${field} ${requirement}`, 'INVALID_ARGUMENT', 400, field);
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -247,7 +247,7 @@ function parseBeginCheckoutInput(params: Record<string, unknown>, settings: Begi
     orderSummaryText: typeof params['orderSummaryText'] === 'string' ? params['orderSummaryText'] : '',
   };
   const checkedReading = readCheckoutReadingInput(reading);
-  if (!checkedReading.ok) throw new HandlerError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400, checkedReading.field);
+  if (!checkedReading.ok) throw new GatewayVerbError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400, checkedReading.field);
   const requestedMax = params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax');
   if (requestedMax !== undefined && parseRequestedMaximum(requestedMax, settings.budgetCurrency) === null) {
     throw invalid('requestedMax', `must be a plain amount in ${settings.budgetCurrency} such as ${plainAmountExample(settings.budgetCurrency)}.`);
@@ -338,7 +338,7 @@ async function hasShippingAddress(addresses: AddressStore, owner: CheckoutOperat
     owner.assertCurrent?.();
     return checkAddress(stored, 'shipping').ok;
   } catch (error) {
-    if (error instanceof PostalAddressHeldError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+    if (error instanceof PostalAddressHeldError) throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
     throw error;
   }
 }
@@ -429,7 +429,7 @@ export class CheckoutServiceHolder {
   }
 
   serviceFor(seam: BrowserCheckoutSeam): PaymentsGatewayServiceImpl {
-    if (this.closed) throw new HandlerError('Checkout service is closed.', 'FAILED_PRECONDITION', 409);
+    if (this.closed) throw new GatewayVerbError('Checkout service is closed.', 'FAILED_PRECONDITION', 409);
     this.service ??= buildCheckoutService(this.deps, seam, this.journal, this.registry);
     return this.service;
   }
@@ -673,7 +673,7 @@ function takeCheckoutApproval(approvals: DaemonApprovalStore, content: Readonly<
     // A failed confirmation may follow publication. Never claim the grant
     // is unspent or restore an in-memory copy over the actual file.
     void error;
-    throw new HandlerError(
+    throw new GatewayVerbError(
       'Spending the approval could not be confirmed. This request did not submit a purchase. Read payments.purchase.status, then restart the daemon if purchases stay paused.',
       'INTERNAL_ERROR',
       500,
@@ -716,13 +716,13 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
       });
     } catch (error) {
       // A full store is a plain refusal that names its cap; nothing was recorded.
-      if (error instanceof PaymentApprovalStoreError && error.kind === 'full') throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof PaymentApprovalStoreError && error.kind === 'full') throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
       // A write error may follow rename: the approval may have been recorded.
       // Answered as unknown (never as "nothing was approved"), without echoing
       // raw filesystem diagnostics; approving the same purchase again returns
       // the recorded approval if there is one, so a retry never makes two.
       void error;
-      throw new HandlerError('The approval may have been recorded: recording it could not be confirmed, so whether it exists is not known. '
+      throw new GatewayVerbError('The approval may have been recorded: recording it could not be confirmed, so whether it exists is not known. '
         + 'Restart the daemon so the approvals file is read again, then approve the same merchant, item and amount again: '
         + 'an approval already recorded is returned, not made twice.', 'OUTCOME_UNKNOWN', 503);
     }
@@ -791,7 +791,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       // Another machine in the group runs payments: refer the owner there
       // before anything is read, held or spent here.
       if (readPaymentsEnabled(deps.config) && !deps.isPaymentsLeader()) {
-        throw new HandlerError(paymentsElsewhereReason(deps.paymentsHolder?.()), 'FAILED_PRECONDITION', 409);
+        throw new GatewayVerbError(paymentsElsewhereReason(deps.paymentsHolder?.()), 'FAILED_PRECONDITION', 409);
       }
       const config = readPaymentsServiceConfig(deps.config), confirmEvery = readConfirmEveryPurchase(deps.config);
       const params = asRecord(body), id = checkoutRequestId(params['requestId']);
@@ -799,13 +799,13 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       const standingId = readStandingId(params);
       const standing = standingId === undefined ? undefined : deps.checkout.standing;
       if (standingId !== undefined && !standing) {
-        throw new HandlerError('Standing purchase authorisations are not kept on this payment host, so a purchase nobody asked for in the moment cannot start here.', 'FAILED_PRECONDITION', 409);
+        throw new GatewayVerbError('Standing purchase authorisations are not kept on this payment host, so a purchase nobody asked for in the moment cannot start here.', 'FAILED_PRECONDITION', 409);
       }
       if (confirmEvery && standingId === undefined && input.requestedMax === undefined) {
         throw invalid('requestedMax', 'is required while payments.confirmEveryPurchase is on: it is the amount the owner approved.');
       }
       const seam = deps.checkout.seam();
-      if (!seam) throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
+      if (!seam) throw new GatewayVerbError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
       const source = retainDetachedCheckout(deps, seam, context, { ownerRequest: standingId === undefined });
       const admission = retainCheckoutInvocation(deps, seam, context);
       // One health read, before any approval is spent: a stopped store names
@@ -822,10 +822,10 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
             reserved = standing.reserve({ id: standingId, purchaseId: id, merchantDomain: admitted.merchantDomain, item: admitted.item,
               requestedMaxMinorUnits: amountMinorUnits, currency: config.budgetCurrency }, standingUseCounter(deps.checkout.operations));
           } catch (error) {
-            if (error instanceof StandingAuthorizationError) throw new HandlerError(`Not started: ${error.message}`, 'FAILED_PRECONDITION', 409);
+            if (error instanceof StandingAuthorizationError) throw new GatewayVerbError(`Not started: ${error.message}`, 'FAILED_PRECONDITION', 409);
             throw error;
           }
-          if (!reserved.ok) throw new HandlerError(`Not started: ${reserved.reason}`, 'FORBIDDEN', 403);
+          if (!reserved.ok) throw new GatewayVerbError(`Not started: ${reserved.reason}`, 'FORBIDDEN', 403);
           standingHeld.current = { store: standing, standingId, purchaseId: id };
           // The owner's own words and maximum, not the caller's spelling of them.
           return { ...admitted, item: reserved.entry.item, requestedMax: plainAmount(reserved.capMinorUnits, config.budgetCurrency),
@@ -837,7 +837,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         try { taken = takeCheckoutApproval(deps.checkout.approvals, content); }
         catch (error) { if (confirmEvery) throw error; return admitted; }
         if (!taken.taken) {
-          if (confirmEvery) throw new HandlerError(approvalRefusalMessage(taken.mismatch, money(amountMinorUnits, config.budgetCurrency)), 'OWNER_APPROVAL_REQUIRED', 403);
+          if (confirmEvery) throw new GatewayVerbError(approvalRefusalMessage(taken.mismatch, money(amountMinorUnits, config.budgetCurrency)), 'OWNER_APPROVAL_REQUIRED', 403);
           return admitted;
         }
         approvalSpent = true;
@@ -854,13 +854,13 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         try { if (deps.checkout.operations.get(held.purchaseId) === null) held.store.release(held.standingId, held.purchaseId); }
         catch { /* Kept, and counted at its maximum until its period passes. */ }
       }
-      if (error instanceof HandlerError) throw error;
-      if (error instanceof PaymentHostStoppedError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
-      if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
+      if (error instanceof GatewayVerbError) throw error;
+      if (error instanceof PaymentHostStoppedError) throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
       if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError || error instanceof BrowserPageConnectionError) {
-        throw new HandlerError(spentNote(error.message), error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
+        throw new GatewayVerbError(spentNote(error.message), error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
-      throw new HandlerError(spentNote('This checkout could not be admitted. Read the original purchase status before trying again.'), 'INTERNAL_ERROR', 500);
+      throw new GatewayVerbError(spentNote('This checkout could not be admitted. Read the original purchase status before trying again.'), 'INTERNAL_ERROR', 500);
     }
   });
 }

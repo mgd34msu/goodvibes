@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Archive, FileText, Inbox, Mail, MailOpen, Pencil, RefreshCw, Reply, Trash2 } from 'lucide-react';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { errorCode, formatError, isDaemonUnreachableError } from '../../lib/errors';
@@ -109,8 +109,13 @@ function formatShort(iso: string): string {
     : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** The original under a reply, quoted the way mail programs do. */
+/**
+ * The original under a reply, quoted the way mail programs do. A body the
+ * daemon could not fetch is not quoted: an empty quote would read as the
+ * sender having written nothing. The message pane says the text is missing.
+ */
 function quotedReply(message: MailMessageData): string {
+  if (message.bodyUnavailable && message.bodyUnavailable.length > 0 && !message.bodyText.trim()) return '';
   const quoted = message.bodyText.replace(/\r\n/g, '\n').trimEnd().split('\n').map((line) => (line ? `> ${line}` : '>')).join('\n');
   return `\n\nOn ${formatWhen(message.date)}, ${message.from} wrote:\n${quoted}\n`;
 }
@@ -183,6 +188,8 @@ export function MailView({ tabs }: MailViewProps = {}) {
   // One id per message as written: kept while the text is unchanged, so a repeated
   // Send (after a lost answer) is answered by the daemon with the first result.
   const sendId = useRef<{ readonly key: string; readonly id: string } | null>(null);
+  // The operation key of this composer's "save as a new draft"; a cleared composer starts a new one.
+  const draftKey = useRef(new IntentKey());
   // A confirmation sheet is open or a send is in flight. Enter in a field submits the
   // form even while Send is disabled; this only keeps a second sheet from opening.
   // Duplicate mail is prevented by the daemon, which answers a repeated clientSendId once.
@@ -281,6 +288,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
     composerLifetime.current = null;
     composerRevision.current++;
     sendId.current = null;
+    draftKey.current = new IntentKey();
     setTo('');
     setSubject('');
     setBody('');
@@ -369,8 +377,16 @@ export function MailView({ tabs }: MailViewProps = {}) {
         const replaced = await platformClient.operator.email.draft.update({ ...input, uid: snapshot.draft.uid, uidValidity: snapshot.draft.uidValidity });
         return { uid: replaced.uid, replaced: replaced.replaced as number | undefined };
       }
-      const created = await platformClient.operator.email.draft.create(input);
-      return { uid: created.uid, replaced: undefined as number | undefined };
+      // This composer's draft key: a save pressed again after a lost answer appends one copy, not two.
+      const intent = draftKey.current;
+      try {
+        const created = await platformClient.operator.email.draft.create(input, intent.keyFor(input));
+        intent.settle();
+        return { uid: created.uid, replaced: undefined as number | undefined };
+      } catch (error) {
+        intent.settle(error);
+        throw error;
+      }
     },
     onSuccess: async (result, snapshot) => {
       if (composerCurrent(snapshot)) clearComposer();
@@ -386,6 +402,10 @@ export function MailView({ tabs }: MailViewProps = {}) {
     },
     onError: (error) => {
       const note = mailRefusalNote(error);
+      if (!note && !isPressRefused(error)) {
+        toast({ title: 'The draft may have been saved', description: `${formatError(error)}. ${MAY_HAVE_BEEN_DONE}`, tone: 'warning' });
+        return;
+      }
       toast({ title: note?.title ?? 'Draft failed', description: note?.description ?? formatError(error), tone: 'danger' });
     },
   });

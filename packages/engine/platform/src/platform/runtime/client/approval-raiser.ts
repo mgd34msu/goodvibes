@@ -85,6 +85,7 @@ import { contentDigest } from '../../utils/target-ref.js';
 import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionExecutionOptions, type PermissionPromptDecision, type PermissionPromptRequest } from '../../permissions/prompt.js';
 import type { RememberTier } from '../../permissions/approval-rules.js';
+import { isOpenApprovalStatus } from '../../control-plane/approval-lifecycle.js';
 import type { ApprovalRaiser } from '../permissions/permission-composition.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 import type { ApprovalUpdateNotice, ApprovalUpdateSubscription } from './approval-updates.js';
@@ -437,7 +438,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
         const answered = await options.verbs.invoke<{ applied?: unknown; approval?: RaisedRecord; refusal?: { code?: unknown } } | null>(
           method, { ...input, ...(revision === undefined ? {} : { expectedRevision: revision }) });
         const record = answered?.approval?.id === approvalId ? answered.approval : null;
-        const waiting = record?.status === 'pending' || record?.status === 'claimed';
+        const waiting = record !== null && isOpenApprovalStatus(record.status);
         if (answered?.applied === false && answered.refusal?.code === 'APPROVAL_CHANGED' && waiting && revisionOf(record) !== revision) {
           revision = revisionOf(record);
           continue;

@@ -11,7 +11,7 @@ import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
 import { digestNameStem, storedNameStem } from '../utils/stored-name.js';
 import { forgetVerificationJournal } from '../core/verification/store.js';
-import { CrossProcessLockBusyError, withCrossProcessLockSync } from '../workspace/checkpoint/cross-process-lock.js';
+import { holdProcessLock, type HeldProcessLock } from '../utils/process-lock.js';
 
 /**
  * Metadata for a saved session (the first JSONL line).
@@ -87,6 +87,49 @@ export class SessionSavedElsewhereError extends Error {
       + `Run \`/session resume ${sessionName}\` to continue from that save, or \`/session save <new name>\` to keep this conversation under another name.`);
     this.name = 'SessionSavedElsewhereError';
   }
+}
+
+/** Another terminal has this session open for writing. Nothing was opened, saved or deleted here. */
+export class SessionOpenElsewhereError extends Error {
+  readonly code = 'SESSION_OPEN_ELSEWHERE';
+  constructor(readonly sessionName: string, action: 'open' | 'delete' = 'open') {
+    super(action === 'delete'
+      ? `Session ${sessionName} is open in another terminal, so it was not deleted. Close it there, or switch that terminal to another session, then delete it.`
+      : `Session ${sessionName} is open in another terminal, which writes it, so it was not opened here: two terminals writing one session would overwrite each other's turns. `
+        + `Continue it in that terminal, or close it there (or switch that terminal to another session) and run \`/session resume ${sessionName}\` here again. To keep working here, start a new session.`);
+    this.name = 'SessionOpenElsewhereError';
+  }
+}
+
+/**
+ * The session files this process has open for writing, by path: each holds the
+ * kernel lock on the file's `.held` companion (utils/process-lock.ts), taken
+ * once when a terminal opens the session and released when every manager of
+ * this process that opened it has switched away or closed it. The kernel drops
+ * it when the process exits, however it exits. A save only looks here.
+ */
+const heldSessionFiles = new Map<string, { readonly lock: HeldProcessLock; readonly holders: Set<object> }>();
+
+/** The kernel lock file beside a session file; it ends in `.held`, so no session listing reads it. */
+function sessionLockPath(filePath: string): string {
+  return `${filePath}.held`;
+}
+
+/** Hold `filePath` open for writing for `holder`; refused when another process holds it. */
+function holdSessionFile(filePath: string, holder: object, sessionName: string): void {
+  const held = heldSessionFiles.get(filePath);
+  if (held) { held.holders.add(holder); return; }
+  const lock = holdProcessLock(sessionLockPath(filePath));
+  if (!lock) throw new SessionOpenElsewhereError(sessionName);
+  heldSessionFiles.set(filePath, { lock, holders: new Set([holder]) });
+}
+
+/** `holder` no longer has `filePath` open; the lock is released when no manager of this process has. */
+function letGoSessionFile(filePath: string, holder: object): void {
+  const held = heldSessionFiles.get(filePath);
+  if (!held || !held.holders.delete(holder) || held.holders.size > 0) return;
+  heldSessionFiles.delete(filePath);
+  held.lock.release();
 }
 
 export interface SessionSaveOptions {
@@ -455,92 +498,122 @@ export class SessionManager {
     mkdirSync(this.sessionsDir, { recursive: true });
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${sanitizedName}.jsonl`);
-    // The check of the file on disk, the write and the rename are one step no other terminal's save can enter:
-    // a save that finds another one in progress is refused at once, as one that finds it already landed is.
-    try {
-      return withCrossProcessLockSync(`${filePath}.lock`, () => {
-        // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
-        // that recorded the name it was saved under is never overwritten by a different name;
-        // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
-        // The file's own stem (what list() shows, what an opened session's id is) always
-        // addresses it, as it does for reads: such a save keeps the name the file recorded.
-        const onDisk: { value?: string | undefined } = {};
-        const existing = this._readExistingMetaRecord(filePath, onDisk);
-        // The file another terminal saved after this process last read or wrote it is not overwritten with this copy.
-        const known = knownSessionFiles.get(filePath);
-        if (!options.replace && known !== undefined && onDisk.value !== undefined && onDisk.value !== known) {
-          throw new SessionSavedElsewhereError(sanitizedName);
-        }
-        const existingName = existing?.name;
-        const addressedByStem = name === sanitizedName;
-        if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
-          throw new Error(
-            `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
-            + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
-          );
-        }
-        // The same name in another conversation would replace that conversation's save.
-        // A file saved before the conversation was recorded holds the conversation
-        // it is named after (an automatic save is named by its session id).
-        const saving = options.savingConversationId ?? meta.conversationId;
-        if (existing && !options.replace && saving !== undefined) {
-          const existingConversation = typeof existing.conversationId === 'string' ? existing.conversationId
-            : typeof existingName === 'string' ? existingName : sanitizedName;
-          if (existingConversation !== saving) {
-            throw new Error(this._describeOtherConversation(name, filePath));
-          }
-        }
+    // A session is written by the one terminal that has it open. Saving the one
+    // this manager already has open is a check in memory; saving another opens
+    // it (one lock taken, refused when another terminal has it open) and lets go
+    // of the one this manager had open before. A copy of a conversation another
+    // owner holds (a daemon-hosted session mirrored here, `mirroredFrom`) is
+    // written by every terminal attached to it from that owner's one transcript,
+    // so it opens nothing; the file-identity check below still applies to it.
+    if (!meta.mirroredFrom) this.#holdOpen(filePath, sanitizedName);
 
-        const lines: string[] = [];
-
-        // First line: meta record
-        const metaRecord = {
-          type: 'meta' as const,
-          name: addressedByStem && typeof existingName === 'string' ? existingName : name,
-          schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
-          timestamp: meta.timestamp,
-          title: meta.title,
-          model: meta.model,
-          provider: meta.provider,
-          titleSource: meta.titleSource ?? 'system',
-          returnContext: loadedReturnContext(meta.returnContext),
-          saveSource: this._resolveSaveSource(filePath, meta.saveSource),
-          ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
-          messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
-          ...(meta.mirroredFrom ? { mirroredFrom: { owner: meta.mirroredFrom.owner, revision: meta.mirroredFrom.revision } } : {}),
-        };
-        lines.push(JSON.stringify(metaRecord));
-
-        // Subsequent lines: one message per line
-        for (const msg of messages) {
-          const { type: _ignored, ...safeMsg } = msg as Record<string, unknown>;
-          const record = { ...safeMsg, type: 'message' as const };
-          lines.push(JSON.stringify(record));
-        }
-
-        // Agent records: one per line, after messages
-        if (agentRecords && agentRecords.length > 0) {
-          for (const agent of agentRecords) {
-            const record = { ...agent, type: 'agent_record' as const };
-            lines.push(JSON.stringify(record));
-          }
-        }
-
-        for (const contract of contracts ?? []) {
-          lines.push(JSON.stringify({ type: 'contract' as const, contract }));
-        }
-
-        if (branches && (Object.keys(branches.branches).length > 0 || branches.currentBranch !== 'main')) {
-          lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
-        }
-
-        this._atomicWrite(filePath, lines.join('\n') + '\n', true);
-        return { filePath, sanitizedName };
-      });
-    } catch (error) {
-      if (error instanceof CrossProcessLockBusyError) throw new SessionSavedElsewhereError(sanitizedName);
-      throw error;
+    // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
+    // that recorded the name it was saved under is never overwritten by a different name;
+    // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
+    // The file's own stem (what list() shows, what an opened session's id is) always
+    // addresses it, as it does for reads: such a save keeps the name the file recorded.
+    const onDisk: { value?: string | undefined } = {};
+    const existing = this._readExistingMetaRecord(filePath, onDisk);
+    // The file another terminal saved after this process last read or wrote it is not overwritten with this copy.
+    const known = knownSessionFiles.get(filePath);
+    if (!options.replace && known !== undefined && onDisk.value !== undefined && onDisk.value !== known) {
+      throw new SessionSavedElsewhereError(sanitizedName);
     }
+    const existingName = existing?.name;
+    const addressedByStem = name === sanitizedName;
+    if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
+      throw new Error(
+        `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
+        + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
+      );
+    }
+    // The same name in another conversation would replace that conversation's save.
+    // A file saved before the conversation was recorded holds the conversation
+    // it is named after (an automatic save is named by its session id).
+    const saving = options.savingConversationId ?? meta.conversationId;
+    if (existing && !options.replace && saving !== undefined) {
+      const existingConversation = typeof existing.conversationId === 'string' ? existing.conversationId
+        : typeof existingName === 'string' ? existingName : sanitizedName;
+      if (existingConversation !== saving) {
+        throw new Error(this._describeOtherConversation(name, filePath));
+      }
+    }
+
+    const lines: string[] = [];
+
+    // First line: meta record
+    const metaRecord = {
+      type: 'meta' as const,
+      name: addressedByStem && typeof existingName === 'string' ? existingName : name,
+      schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
+      timestamp: meta.timestamp,
+      title: meta.title,
+      model: meta.model,
+      provider: meta.provider,
+      titleSource: meta.titleSource ?? 'system',
+      returnContext: loadedReturnContext(meta.returnContext),
+      saveSource: this._resolveSaveSource(filePath, meta.saveSource),
+      ...(meta.conversationId !== undefined ? { conversationId: meta.conversationId } : {}),
+      messageCount: messages.filter(message => (message as { removed?: unknown }).removed !== true).length,
+      ...(meta.mirroredFrom ? { mirroredFrom: { owner: meta.mirroredFrom.owner, revision: meta.mirroredFrom.revision } } : {}),
+    };
+    lines.push(JSON.stringify(metaRecord));
+
+    // Subsequent lines: one message per line
+    for (const msg of messages) {
+      const { type: _ignored, ...safeMsg } = msg as Record<string, unknown>;
+      const record = { ...safeMsg, type: 'message' as const };
+      lines.push(JSON.stringify(record));
+    }
+
+    // Agent records: one per line, after messages
+    if (agentRecords && agentRecords.length > 0) {
+      for (const agent of agentRecords) {
+        const record = { ...agent, type: 'agent_record' as const };
+        lines.push(JSON.stringify(record));
+      }
+    }
+
+    for (const contract of contracts ?? []) {
+      lines.push(JSON.stringify({ type: 'contract' as const, contract }));
+    }
+
+    if (branches && (Object.keys(branches.branches).length > 0 || branches.currentBranch !== 'main')) {
+      lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
+    }
+
+    this._atomicWrite(filePath, lines.join('\n') + '\n', true);
+    return { filePath, sanitizedName };
+  }
+
+  /**
+   * Open a session for writing from this terminal: resuming it, before its
+   * history is read. Refused with SessionOpenElsewhereError, saying what to do,
+   * when another terminal has it open; lets go of the session this manager had
+   * open before. Costs one lock taken at open, nothing per save.
+   */
+  openForWriting(name: string): void {
+    if (!name || !name.trim()) throw new Error('Session name cannot be empty');
+    mkdirSync(this.sessionsDir, { recursive: true });
+    const filePath = this._resolveSessionFile(name) ?? join(this.sessionsDir, `${this.sanitizeName(name)}.jsonl`);
+    this.#holdOpen(filePath, basename(filePath).replace(/\.jsonl$/, ''));
+  }
+
+  /** Close the session this manager has open for writing (the terminal leaves it); another terminal may then open it. */
+  closeForWriting(): void {
+    if (this.#open === null) return;
+    letGoSessionFile(this.#open, this);
+    this.#open = null;
+  }
+
+  /** The session file this manager has open for writing (its lock is in heldSessionFiles), or null. */
+  #open: string | null = null;
+
+  #holdOpen(filePath: string, sessionName: string): void {
+    if (this.#open === filePath && heldSessionFiles.get(filePath)?.holders.has(this) === true) return;
+    holdSessionFile(filePath, this, sessionName);
+    if (this.#open !== null && this.#open !== filePath) letGoSessionFile(this.#open, this);
+    this.#open = filePath;
   }
 
   /**
@@ -777,11 +850,24 @@ export class SessionManager {
     if (filePath === null) throw new Error(`Session not found: ${name}`);
     const sessionId = basename(filePath).replace(/\.jsonl$/, '');
     const journals = this._verificationJournalsOf(filePath, sessionId);
+    // Deleted while holding its lock, so no other terminal has it open meanwhile; its lock file goes with it,
+    // removed before the lock is let go. This process's own hold (a terminal deleting the session it has open) serves.
+    const ownHold = heldSessionFiles.get(filePath);
+    const lock = ownHold?.lock ?? holdProcessLock(sessionLockPath(filePath));
+    if (!lock) throw new SessionOpenElsewhereError(sessionId, 'delete');
     try {
       unlinkSync(filePath);
     } catch (e) {
+      // Not deleted: a hold this process had stays; one taken for the delete is let go.
+      if (!ownHold) lock.release();
       throw new Error(`Failed to delete session: ${summarizeError(e)}`);
     }
+    try { unlinkSync(sessionLockPath(filePath)); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') logger.warn('SessionManager: a deleted session\'s lock file could not be removed', { file: sessionLockPath(filePath), error: summarizeError(e) });
+    }
+    if (ownHold) heldSessionFiles.delete(filePath);
+    lock.release();
+    if (this.#open === filePath) this.#open = null;
     knownSessionFiles.delete(filePath);
     this._forgetVerificationJournals(journals);
     for (const listener of [...this.deletedListeners]) {

@@ -26,13 +26,13 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 
-/** The controller's own status vocabulary, plus the gated-off value. */
+/** The controller's own status vocabulary, plus the gated-off value and a start that failed ('failed', lastRefusal says why). */
 const RELAY_STATUS_SCHEMA: Record<string, unknown> = {
   type: 'string',
-  enum: ['disabled', 'idle', 'connecting', 'registered', 'reconnecting', 'refused', 'stopped'],
+  enum: ['disabled', 'failed', 'idle', 'connecting', 'registered', 'reconnecting', 'refused', 'stopped'],
 };
 
-/** Why the relay refused the registration: what is true, what to do, and whether the daemon keeps trying. */
+/** Why the relay refused the registration, or why its start failed (code relay-start-failed): what is true, what to do, and whether the daemon keeps trying. */
 const RELAY_REFUSAL_SCHEMA = objectSchema({
   code: STRING_SCHEMA,
   message: STRING_SCHEMA,
@@ -82,7 +82,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     repeat: 'unsafe',
     effects: ['control-plane.administer', 'owner.act'],
     title: 'Mint A Relay Pairing Payload',
-    description: 'Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon\'s static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.',
+    description: 'Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon\'s static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.',
     category: 'control-plane',
     transport: ['ws'],
     inputSchema: objectSchema({ name: STRING_SCHEMA }, []),
@@ -109,7 +109,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     repeat: 'safe',
     effects: ['control-plane.administer', 'owner.act'],
     title: 'Revoke Relay Code',
-    description: 'Revoke one device\'s relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device\'s next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.',
+    description: 'Revoke one device\'s relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device\'s next request through the relay is refused with 401 RELAY_CODE_REVOKED, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.',
     category: 'control-plane',
     transport: ['ws'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),

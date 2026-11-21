@@ -100,9 +100,11 @@ export interface ControlRouteContext {
    * response is lost can ask again; the reader names what it showed with
    * `?receipts=ack&ids=<id>,<id>` ({@link acknowledgeReceipts}). A plain
    * /status read (identity probe, keepalive, version poll) never touches them.
+   * `owner` says whether the reader is the owner (actor class `owner`): a
+   * receipt kept for the owner alone is neither shown to nor taken by anyone else.
    */
-  readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
-  readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;
+  readonly peekReceipts?: ((owner: boolean) => readonly { id: string; text: string; at: number }[]) | undefined;
+  readonly acknowledgeReceipts?: ((ids: readonly string[], owner: boolean) => void) | undefined;
   /**
    * Which node on the local network currently consumes inbound channel
    * messages, and how it got there.
@@ -244,6 +246,8 @@ export function createDaemonControlRouteHandlers(
       const searchParams = new URL(req.url).searchParams;
       const receiptsMode = searchParams.get('receipts');
       const peekReceipts = receiptsMode === 'peek' && context.peekReceipts !== undefined;
+      // An owner alert kept as a receipt is the owner's alone: only an owner-class reader sees or takes it.
+      const ownerReader = principal.actor.class === 'owner';
       if (receiptsMode === 'ack' && context.acknowledgeReceipts) {
         // A reader confirms what it received; only then are those receipts
         // delivered, so a response lost in transit is offered again.
@@ -252,7 +256,7 @@ export function createDaemonControlRouteHandlers(
           .map((value) => value.trim())
           .filter((value) => value.length > 0)
           .slice(0, MAX_ACKNOWLEDGED_RECEIPTS);
-        if (ids.length > 0) context.acknowledgeReceipts(ids);
+        if (ids.length > 0) context.acknowledgeReceipts(ids, ownerReader);
       }
       const floorHeader = context.clientCompatibilityFloor && context.clientCompatibilityFloorHeader
         ? { [context.clientCompatibilityFloorHeader]: context.clientCompatibilityFloor }
@@ -269,7 +273,7 @@ export function createDaemonControlRouteHandlers(
         version: buildVersion ?? context.version,
         buildVersion: buildVersion ?? context.version,
         platformVersion: context.version,
-        ...(peekReceipts && context.peekReceipts ? { receipts: context.peekReceipts() } : {}),
+        ...(peekReceipts && context.peekReceipts ? { receipts: context.peekReceipts(ownerReader) } : {}),
         ...(context.collectClusterStatus ? { cluster: context.collectClusterStatus() } : {}),
       }, floorHeader ? { headers: floorHeader } : undefined);
     },

@@ -85,7 +85,35 @@ export async function assertPortFree(port: number): Promise<void> {
 }
 export interface ReadyTiming { now: () => number; sleep: (milliseconds: number) => Promise<void>; timeoutMs: number }
 const REAL_TIMING: ReadyTiming = { now: Date.now, sleep: milliseconds => Bun.sleep(milliseconds), timeoutMs: 90_000 };
+/**
+ * The operator token the installed daemon serves, taken the way it takes it:
+ * GOODVIBES_DAEMON_TOKEN from the installation's environment file (the launcher
+ * sources it last, so it wins), else from this shell (the service definition
+ * carries it when it was set here), else undefined so the token file is read.
+ * A set-but-blank value is not a token.
+ */
+function environmentDaemonToken(options: Options, execute: Run): string | undefined {
+  const nonBlank = (value: string | undefined): string | undefined => (value?.trim() ? value : undefined);
+  const environment = join(options.dataDir, 'environment');
+  if (existsSync(environment)) {
+    const fromFile = nonBlank(execute('sh', ['-c', 'set -a; . "$1"; set +a; printf %s "${GOODVIBES_DAEMON_TOKEN-}"', 'daemon-token', environment],
+      { cwd: options.dataDir, capture: true }));
+    if (fromFile !== undefined) return fromFile;
+  }
+  return nonBlank(process.env.GOODVIBES_DAEMON_TOKEN);
+}
+/** The installed daemon's web UI state (`goodvibes-daemon webui status --json`): whether it serves the bundle, and the directory configured. */
+function readWebuiState(execute: Run, daemon: string, dataDir: string): { serve: boolean; bundleDir: string } {
+  const output = execute(daemon, ['webui', 'status', '--json'], { cwd: dataDir, capture: true });
+  let parsed: { schema?: unknown; serve?: unknown; bundleDir?: unknown };
+  try { parsed = JSON.parse(output) as typeof parsed; } catch { parsed = {}; }
+  if (parsed.schema !== 'goodvibes.daemon.webui-binding' || typeof parsed.serve !== 'boolean' || typeof parsed.bundleDir !== 'string') {
+    throw new Error(`${daemon} webui status --json did not report the web UI state.`);
+  }
+  return { serve: parsed.serve, bundleDir: parsed.bundleDir };
+}
 export async function ready(options: Options, html: string, execute: Run, timing: ReadyTiming = REAL_TIMING): Promise<void> {
+  const environmentToken = environmentDaemonToken(options, execute);
   const deadline = timing.now() + timing.timeoutMs;
   while (timing.now() < deadline) {
     const state = execute('systemctl', ['--user', 'show', serviceUnit(options), '--property=ActiveState', '--value'], { capture: true });
@@ -95,10 +123,10 @@ export async function ready(options: Options, html: string, execute: Run, timing
         const response = await fetch(`http://127.0.0.1:${options.port}/`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
         if (response.ok && await response.text() === html) {
           const tokenPath = join(options.dataDir, '.goodvibes/daemon/operator-tokens.json');
-          const tokenFile = JSON.parse(readFileSync(tokenPath, 'utf8')) as { token?: unknown };
-          if (typeof tokenFile.token === 'string') {
+          const token = environmentToken ?? (JSON.parse(readFileSync(tokenPath, 'utf8')) as { token?: unknown }).token;
+          if (typeof token === 'string') {
             const health = await fetch(`http://127.0.0.1:${options.port}/api/health`, {
-              headers: { Authorization: `Bearer ${tokenFile.token}` }, signal: AbortSignal.timeout(1500), redirect: 'error',
+              headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(1500), redirect: 'error',
             });
             const value = await health.json() as { network?: { controlPlane?: { ready?: boolean } } };
             if (health.ok && value.network?.controlPlane?.ready === true) return;
@@ -343,16 +371,30 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       // Whether this machine has a daemon service, where the daemon (before it
       // would install itself as a service) and doctor read it.
       if (!old || options.serviceStated) writes.push(['service.enabled', options.service]);
+      const webuiBundle = join(options.prefix, 'current/webui');
+      // The owner's web UI choice stands: with a bundle directory configured and serving off (`webui disable`),
+      // only the directory moves to this release's bundle. `--loopback` is written only when no web UI was
+      // configured yet, so a later install keeps the posture the owner chose.
+      const webuiState = realDaemon ? readWebuiState(execute, daemon, options.dataDir) : undefined;
+      const webuiLeftOff = webuiState !== undefined && webuiState.bundleDir !== '' && !webuiState.serve;
+      const webuiFirst = webuiState === undefined ? !old : webuiState.bundleDir === '';
       if (old && realDaemon) {
-        // `webui enable` turns serving on; record those two beside the explicit writes.
-        const recorded: [string, unknown][] = [...writes, ['controlPlane.webui.serve', true], ['web.enabled', true]];
+        // `webui enable` turns serving on; record those two beside the explicit writes (or the directory alone when left off).
+        const recorded: [string, unknown][] = webuiLeftOff ? [...writes, ['controlPlane.webui.bundleDir', webuiBundle]]
+          : [...writes, ['controlPlane.webui.serve', true], ['web.enabled', true]];
         pendingSettings = recorded.map(([key, written]) => ({ key, previous: readDaemonSetting(execute, daemon, options.dataDir, key), written }));
         atomicWrite(receiptPath(options), JSON.stringify({ ...old, pendingSettings }, null, 2) + '\n');
       }
       for (const [key, value] of writes) execute(daemon, ['config', 'set', key, String(value)], { cwd: options.dataDir, capture: true });
-      const webuiOutput = execute(daemon, ['webui', 'enable', ...(old ? [] : ['--loopback']), '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });
-      // The URL the daemon reported in its own receipt: the command that wrote the settings knows where the bundle is served.
-      const webuiUrl = /^\s*(https?:\/\/\S+)/m.exec(webuiOutput)?.[1];
+      let webuiUrl: string | undefined;
+      if (webuiLeftOff) {
+        execute(daemon, ['config', 'set', 'controlPlane.webui.bundleDir', webuiBundle], { cwd: options.dataDir, capture: true });
+        console.log(`Web UI: left off (you turned it off). Turn it on: ${join(options.binDir, 'goodvibes-daemon')} webui enable`);
+      } else {
+        const webuiOutput = execute(daemon, ['webui', 'enable', ...(webuiFirst ? ['--loopback'] : []), '--bundle-dir', webuiBundle], { cwd: options.dataDir, capture: true });
+        // The URL the daemon reported in its own receipt: the command that wrote the settings knows where the bundle is served.
+        webuiUrl = /^\s*(https?:\/\/\S+)/m.exec(webuiOutput)?.[1];
+      }
       if (!hooks.stage) {
         console.log('Verifying the Jev connection...');
         try {
@@ -432,7 +474,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       }
       console.log(`Installed GoodVibes (${commit.slice(0, 12)}). Commands: ${options.binDir}`);
       if (options.service) console.log(`Workspace: ${options.workspace ?? ROOT}`);
-      if (webuiUrl) console.log(`WebUI: ${webuiUrl}`);
+      if (webuiUrl) console.log(`WebUI: ${webuiUrl}\nSign in: run ${join(options.binDir, 'goodvibes')} pair (or ${join(options.binDir, 'goodvibes-daemon')} pair) and open the link it prints, or scan its QR`);
       console.log(options.service ? `Service: systemctl --user status ${serviceUnit(options)}` : `Start the daemon: ${join(options.binDir, 'goodvibes-daemon')} serve`);
       console.log(`Credentials: ${environment}\nUninstall: ${join(options.binDir, 'goodvibes-uninstall')} (add --purge to remove data)`);
       if (!(process.env.PATH ?? '').split(':').includes(options.binDir)) console.log(`Add commands to your shell PATH: export PATH=${quote(options.binDir)}:"$PATH"`);

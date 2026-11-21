@@ -112,6 +112,33 @@ export interface TransportJsonError {
   readonly method: string;
   readonly retryAfterMs?: number | undefined;
   readonly cause?: unknown | undefined;
+  /**
+   * The Idempotency-Key every attempt of this call carried. A caller that
+   * repeats the call once the retries are spent sends this key again, so the
+   * daemon answers the first request instead of acting a second time.
+   */
+  readonly idempotencyKey?: string | undefined;
+}
+
+/** Puts the call's pinned Idempotency-Key on the error it throws (and on its transport detail), so a caller can repeat it with the same key. */
+function carryIdempotencyKey(error: unknown, key: string | undefined): unknown {
+  if (key === undefined || typeof error !== 'object' || error === null) return error;
+  const transport = 'transport' in error ? (error as { readonly transport?: unknown }).transport : undefined;
+  try {
+    Object.assign(error, {
+      idempotencyKey: key,
+      ...(typeof transport === 'object' && transport !== null ? { transport: { ...transport, idempotencyKey: key } } : {}),
+    });
+  } catch {
+    // A frozen error keeps its own fields.
+  }
+  return error;
+}
+
+/** The wait an answer's body states (`retryAfterMs`), when it states one. */
+function bodyRetryAfterMs(body: unknown): number | undefined {
+  const value = typeof body === 'object' && body !== null ? (body as { readonly retryAfterMs?: unknown }).retryAfterMs : undefined;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 export interface HttpJsonTransport {
@@ -624,7 +651,7 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
           : undefined;
         // Never retry a request the caller deliberately aborted.
         if (requestOptions.signal?.aborted) {
-          throw wrappedError;
+          throw carryIdempotencyKey(wrappedError, idempotencyKey);
         }
         // Honor the computed `recoverable` flag for network (status 0) failures so that
         // non-recoverable errors (e.g. AbortError, programmer TypeErrors) are not retried.
@@ -641,21 +668,30 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         const declaredFinal = typeof replyBody === 'object' && replyBody !== null
           && ((replyBody as { readonly recoverable?: unknown }).recoverable === false
             || (replyBody as { readonly category?: unknown }).category === 'billing');
-        const shouldRetry = mayRetry && !declaredFinal && attempt < resolvedRetry.maxAttempts && (
-          (typeof status === 'number' && status > 0 && isRetryableHttpStatus(method, status, resolvedRetry, idempotent))
-          || (typeof status === 'number' && status === 0 && recoverable !== false && isRetryableNetworkError(method, resolvedRetry, idempotent))
+        // A keyed call whose first attempt is still running at the daemon (its answer
+        // was lost, the retry arrived first) is asked again with the same key: the
+        // daemon then answers with the first request's outcome instead of acting twice.
+        const inFlightUnderKey = idempotencyKey !== undefined && status === 409
+          && typeof replyBody === 'object' && replyBody !== null
+          && (replyBody as { readonly code?: unknown }).code === 'IDEMPOTENCY_KEY_IN_FLIGHT'
+          && (replyBody as { readonly recoverable?: unknown }).recoverable === true;
+        const shouldRetry = !declaredFinal && attempt < resolvedRetry.maxAttempts && (
+          inFlightUnderKey
+          || (mayRetry && typeof status === 'number' && status > 0 && isRetryableHttpStatus(method, status, resolvedRetry, idempotent))
+          || (mayRetry && typeof status === 'number' && status === 0 && recoverable !== false && isRetryableNetworkError(method, resolvedRetry, idempotent))
         );
         if (!shouldRetry) {
-          throw wrappedError;
+          throw carryIdempotencyKey(wrappedError, idempotencyKey);
         }
-        // Respect a server-supplied Retry-After (parsed onto transport.retryAfterMs) as a
-        // floor over the computed exponential backoff so we don't hammer a rate-limited server.
+        // Respect the wait the server states, in the Retry-After header (parsed onto
+        // transport.retryAfterMs) or in the body's retryAfterMs, the larger of the two,
+        // as a floor over the computed exponential backoff so a limited server is not hammered.
         const retryAfterMs = typeof wrappedError === 'object' && wrappedError !== null && 'transport' in wrappedError
           ? (wrappedError as { readonly transport?: { readonly retryAfterMs?: number } }).transport?.retryAfterMs
           : undefined;
         const backoffMs = Math.min(
           MAX_RETRY_AFTER_MS,
-          Math.max(getHttpRetryDelay(attempt, resolvedRetry), retryAfterMs ?? 0),
+          Math.max(getHttpRetryDelay(attempt, resolvedRetry), retryAfterMs ?? 0, bodyRetryAfterMs(replyBody) ?? 0),
         );
         const retryReason = typeof status === 'number' && status > 0 ? `http-${status}` : 'network-error';
         // Notify callers before the retry sleep starts.

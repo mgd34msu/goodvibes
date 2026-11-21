@@ -151,7 +151,10 @@ export function createDaemonMediaRouteHandlers(
     postVoiceTtsStream: async (request) => handleVoiceTtsStream(context, request),
     postVoiceStt: async (request) => handleVoiceStt(context, request),
     postVoiceRealtimeSession: async (request) => handleVoiceRealtimeSession(context, request),
-    getWebSearchProviders: async () => Response.json({ providers: await context.webSearchService.getStatus().then((status) => status.providers) }),
+    getWebSearchProviders: async () => {
+      const status = await context.webSearchService.getStatus();
+      return Response.json({ providers: status.providers, ...(status.defaultProviderId === null ? {} : { defaultProviderId: status.defaultProviderId }) });
+    },
     postWebSearch: async (request) => handleWebSearch(context, request),
     getArtifacts: (request) => {
       const admin = context.requireAdmin(request);
@@ -488,7 +491,7 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
   // The store refuses these with plain errors that carry no status; they are the caller's to fix, so say so here.
   if (typeof body.dataBase64 !== 'string' && typeof body.text !== 'string' && typeof body.path !== 'string' && typeof body.uri !== 'string') {
-    return jsonErrorResponse({ error: 'Artifact input requires dataBase64, text, path, or uri.', code: 'INVALID_REQUEST' }, { status: 400 });
+    return jsonErrorResponse({ error: 'Artifact input requires dataBase64, text, path, or uri.', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   const kind = readOptionalChoice(body, 'kind', ARTIFACT_KINDS);
   if (kind instanceof Response) return kind;

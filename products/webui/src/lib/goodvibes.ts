@@ -12,6 +12,7 @@ export { hasSignInSync, tokenStore } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { getActiveRoute, routedFetch } from './relay-connection';
 import { acceptOwnerApprovalAnswer, type AppliedAnswer } from './owner-approval';
+import { errorCode, isDefiniteRefusal } from './errors';
 import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes/engine/platform/platform/channels/telegram-cursor';
 import { DecisionModelsDisabledError } from '@goodvibes/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
@@ -208,6 +209,8 @@ interface RouteDefinition {
 interface RequestOptions {
   /** Set only by a handler for an explicit owner gesture. */
   readonly explicitUserRequest?: boolean;
+  /** Sent as the Idempotency-Key header: the same key on a repeat makes the daemon answer the first result instead of acting again. */
+  readonly idempotencyKey?: string;
   method?: HttpMethod;
   body?: unknown;
   query?: JsonRecord;
@@ -301,14 +304,14 @@ function asRecord(value: unknown): JsonRecord {
  * retryAfterMs) lifted onto the thrown error, where formatError reads them. A body
  * category never decides the two answers the app keys off: only a 401 is
  * 'authentication' and only a transport failure is 'network'. A relay step-up 401
- * (`code: 'step-up-required'`) is its own category: the change needs a passkey, the
+ * (`code: 'STEP_UP_REQUIRED'`) is its own category: the change needs a passkey, the
  * session did not expire.
  */
 export function daemonErrorFields(status: number, body: unknown): { category: string; hint?: string; recoverable?: boolean; retryAfterMs?: number } {
   const record = asRecord(body);
   const bodyCategory = typeof record.category === 'string' ? record.category.trim() : '';
   const category = status === 401
-    ? record.code === 'step-up-required' ? 'step-up' : 'authentication'
+    ? record.code === 'STEP_UP_REQUIRED' ? 'step-up' : 'authentication'
     : bodyCategory && bodyCategory !== 'authentication' && bodyCategory !== 'network' ? bodyCategory : 'service';
   return {
     category,
@@ -356,6 +359,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
     ...(options.authenticated === false ? {} : await authHeaders()),
     ...(method === 'GET' || options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
     ...(options.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+    ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
   };
   const url = buildUrl(path, options.query);
   check();
@@ -511,9 +515,9 @@ export function webuiRouteFor(methodId: string): RouteDefinition | undefined {
 async function invokeOperator<
   TMethodId extends OperatorMethodId,
   TOutput = AppliedAnswer<OperatorMethodOutput<TMethodId>>,
->(methodId: TMethodId, input?: OperatorMethodInput<TMethodId>, signal?: AbortSignal): Promise<TOutput>;
-async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
-  const answer = await invokeOperatorOnce(methodId, input, signal);
+>(methodId: TMethodId, input?: OperatorMethodInput<TMethodId>, signal?: AbortSignal, idempotencyKey?: string): Promise<TOutput>;
+async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal, idempotencyKey?: string): Promise<unknown> {
+  const answer = await invokeOperatorOnce(methodId, input, signal, idempotencyKey);
   // A loosening change asked from a token minted for automation is put to the
   // owner (202 OWNER_APPROVAL_PENDING): it is shown as waiting for him, never as saved.
   return OWNER_APPROVAL_WRITES.has(methodId) ? acceptOwnerApprovalAnswer(answer) : answer;
@@ -543,7 +547,8 @@ export async function invokeOwnerMethod(methodId: string, input: Readonly<Record
 /** The writes the daemon can put to the owner instead of applying (see lib/owner-approval.ts). */
 const OWNER_APPROVAL_WRITES: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'sessions.permissionMode.set']);
 
-async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: AbortSignal): Promise<unknown> {
+async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: AbortSignal, idempotencyKey?: string): Promise<unknown> {
+  const keyed = idempotencyKey ? { idempotencyKey } : {};
   const route = EXTRA_METHOD_ROUTES[methodId];
   if (!route) {
     // A method with no REST binding that the browser platform does not route either
@@ -551,7 +556,7 @@ async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: Ab
     // the generic method invoke; handing it to scopedPlatform would refuse it in the
     // browser and no request would ever leave.
     if (!BROWSER_COVERED_METHOD_IDS.has(methodId)) {
-      return invokeGatewayMethod(methodId as OperatorMethodId, input as OperatorMethodInput<OperatorMethodId>, signal);
+      return invokeGatewayMethod(methodId as OperatorMethodId, input as OperatorMethodInput<OperatorMethodId>, signal, idempotencyKey);
     }
     // Every methodId that reaches this point is a member of BrowserKnowledgeMethodId
     // (SHARED_BROWSER_ROUTES ∪ KNOWLEDGE_BROWSER_ROUTES), a runtime invariant the type
@@ -559,14 +564,66 @@ async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: Ab
     return scopedPlatform.operator.invoke(
       methodId as BrowserKnowledgeMethodId,
       input as OperatorMethodInput<BrowserKnowledgeMethodId>,
-      { signal },
+      { signal, ...keyed },
     );
   }
   const { path, rest } = interpolateRoute(route, input);
   if (route.method === 'GET') return requestJson(path, { method: route.method, query: rest, signal });
-  if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal });
-  return requestJson(path, { method: route.method, body: rest, signal });
+  if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal, ...keyed });
+  return requestJson(path, { method: route.method, body: rest, signal, ...keyed });
 }
+
+/**
+ * The operation key of one thing a person asked for (a draft to save, a chat to
+ * start, a check-in to run): made when the form or bubble is made and sent as
+ * the Idempotency-Key of every press of the same input, so a press repeated
+ * after a lost answer gets the first answer instead of acting twice. A success or a definite
+ * refusal (isDefiniteRefusal) ends the intent: the next press is a new request.
+ * An outcome that is not known (no answer, a 5xx, the key still in flight or
+ * its first run's outcome unknown) keeps the key, so pressing again cannot do
+ * the thing a second time.
+ */
+export class IntentKey {
+  #key = newIntentKey();
+  #input: string | undefined;
+
+  /** The key to send with this press of `input`; a press with different input is a new request with a new key. */
+  keyFor(input: unknown): string {
+    const seen = JSON.stringify(input);
+    if (seen !== this.#input) {
+      if (this.#input !== undefined) this.#key = newIntentKey();
+      this.#input = seen;
+    }
+    return this.#key;
+  }
+
+  /** After a press: `error` undefined for success. */
+  settle(error?: unknown): void {
+    if (error === undefined || isPressRefused(error)) {
+      this.#key = newIntentKey();
+      this.#input = undefined;
+    }
+  }
+}
+
+/** Refusals that say the first request under the key may still act or may have acted: the key is kept. */
+const KEEPS_INTENT_KEY: ReadonlySet<string> = new Set(['IDEMPOTENCY_KEY_IN_FLIGHT', 'IDEMPOTENCY_OUTCOME_UNKNOWN']);
+
+function newIntentKey(): string {
+  return `webui:${crypto.randomUUID()}`;
+}
+
+/**
+ * Whether a failed press was refused, so nothing was done: only then does the
+ * person read "failed". Otherwise the press may have been done, and the same
+ * key on the next press keeps it from being done twice.
+ */
+export function isPressRefused(error: unknown): boolean {
+  return isDefiniteRefusal(error) && !KEEPS_INTENT_KEY.has(errorCode(error));
+}
+
+/** What the person reads when a press is not {@link isPressRefused}. */
+export const MAY_HAVE_BEEN_DONE = 'The answer did not arrive, so this may have been done; pressing again with the same input will not repeat it.';
 
 /** Routes remain derived from the canonical catalog/facade, never a second
  * hand-written URL table. Explicit-user metadata belongs only to answer clicks. */
@@ -733,11 +790,13 @@ async function invokeGatewayMethod<TMethodId extends OperatorMethodId, TOutput =
   methodId: TMethodId,
   body?: OperatorMethodInput<TMethodId>,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ): Promise<TOutput> {
   return requestJson<TOutput>(`/api/control-plane/methods/${methodId}/invoke`, {
     method: 'POST',
     body: { body: body ?? {} },
     signal,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   });
 }
 
@@ -1066,6 +1125,8 @@ export type PushReconcileDrift = OperatorMethodOutput<'push.subscriptions.reconc
 
 export type PublicPairingToken = OperatorMethodOutput<'pairing.tokens.list'>['tokens'][number];
 export type PublicRelayCode = OperatorMethodOutput<'relay.codes.list'>['codes'][number];
+/** A device asking to pair as a node (a phone, a peer daemon), waiting for the owner's approve or reject. */
+export type RemotePairRequest = OperatorMethodOutput<'remote.pair.requests.list'>['requests'][number];
 /** An origin's TLS/capability posture: each browser-gated capability is available or carries the daemon's own reason. */
 export type OriginPosture = OperatorMethodOutput<'pairing.posture.get'>['posture'];
 export type PairingHandoffCompleteInput = OperatorMethodInput<'pairing.handoff.complete'>;
@@ -1390,8 +1451,8 @@ export const client = {
       send: (input: EmailSendInput) =>
         invokeOperator('email.send', input),
       draft: {
-        create: (input: EmailDraftCreateInput) =>
-          invokeOperator('email.draft.create', input),
+        create: (input: EmailDraftCreateInput, idempotencyKey?: string) =>
+          invokeOperator('email.draft.create', input, undefined, idempotencyKey),
         // Replaces the saved draft (uid + uidValidity from email.drafts.list): the folder keeps one copy. ws-only.
         update: (input: EmailDraftUpdateInput): Promise<EmailDraftUpdateResult> =>
           invokeGatewayMethod('email.draft.update', input),
@@ -1467,7 +1528,8 @@ export const client = {
       receipts: {
         list: (limit?: number) => invokeOperator('checkin.receipts.list', limit ? { limit } : {}),
       },
-      run: () => invokeOperator('checkin.run', {}),
+      // The key is the press's (IntentKey): a repeat after a lost answer runs the check-in once.
+      run: (idempotencyKey?: string) => invokeOperator('checkin.run', {}, undefined, idempotencyKey),
     },
     // Principals (principals.*): the named-identity registry.
     //
@@ -1908,6 +1970,18 @@ export const client = {
         revoke: (id: string) => invokeGatewayMethod('relay.codes.revoke', { id }),
       },
     },
+    // Devices asking to pair as a node (Settings, Devices, Phone node on another browser, a
+    // peer daemon): listed with what they announce, then approved or rejected by the owner.
+    // approve refuses with 409 REMOTE_PAIR_REPLACES_PEER when the request names an existing
+    // peer; it is sent again with confirmReplace only after the owner says it is that device.
+    remote: {
+      pairRequests: {
+        list: () => invokeGatewayMethod('remote.pair.requests.list', {}),
+        approve: (requestId: string, confirmReplace = false) =>
+          invokeGatewayMethod('remote.pair.requests.approve', confirmReplace ? { requestId, confirmReplace: true } : { requestId }),
+        reject: (requestId: string) => invokeGatewayMethod('remote.pair.requests.reject', { requestId }),
+      },
+    },
     // cost.attribution.get: windowed (24h/7d), cache-aware-priced cost
     // attribution grouped by a dimension (agent/tool/hook/mcp/model/provider/session).
     // `transport: ["ws"]` only, generic-invoke-only like sessions.changes.get above.
@@ -1937,8 +2011,8 @@ export const client = {
   },
   chat: {
     sessions: {
-      create: (input?: OperatorMethodInput<'companion.chat.sessions.create'>, signal?: AbortSignal) =>
-        invokeOperator('companion.chat.sessions.create', input, signal),
+      create: (input?: OperatorMethodInput<'companion.chat.sessions.create'>, signal?: AbortSignal, idempotencyKey?: string) =>
+        invokeOperator('companion.chat.sessions.create', input, signal, idempotencyKey),
       get: (sessionId: string) => invokeOperator('companion.chat.sessions.get', { sessionId }),
       list: (input?: OperatorMethodInput<'companion.chat.sessions.list'>) => invokeOperator('companion.chat.sessions.list', input),
       update: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.sessions.update>[1]) =>
@@ -2009,7 +2083,12 @@ export const client = {
     },
     events: scopedPlatform.chat.events,
   },
-  artifacts: scopedPlatform.artifacts,
+  artifacts: {
+    ...scopedPlatform.artifacts,
+    // An upload is one intent: the same key on a resend stores the file once (artifacts.create takes an Idempotency-Key).
+    create: (input: OperatorMethodInput<'artifacts.create'>, idempotencyKey?: string, signal?: AbortSignal) =>
+      invokeOperator('artifacts.create', input, signal, idempotencyKey),
+  },
   realtime: {
     // Errors belong to this fresh event bus, alongside its listeners and closer.
     // Keep the native platform in charge of authentication, resumption and reconnect.

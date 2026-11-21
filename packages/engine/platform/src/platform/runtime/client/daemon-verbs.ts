@@ -35,8 +35,11 @@
  * is needed to pass one in.
  */
 export type DaemonReachability =
-  | { readonly available: true }
-  | { readonly available: false; readonly reason: string };
+  | { readonly available: true; readonly thisMachine?: boolean | undefined }
+  | { readonly available: false; readonly reason: string; readonly thisMachine?: boolean | undefined };
+// `thisMachine`: whether the daemon this answer is about runs on this machine
+// (`DaemonTarget.thisMachine`, or the configured address when no target was
+// resolved). An answer that does not say is about a daemon on this machine.
 
 /**
  * A verb caller bound to one product's connection resolution: the shape every

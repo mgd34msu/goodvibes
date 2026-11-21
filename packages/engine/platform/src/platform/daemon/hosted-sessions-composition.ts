@@ -29,6 +29,7 @@ import { hostedSessionPresence } from '../agents/agent-owner-questions.js';
  */
 
 import { existsSync, statSync } from 'node:fs';
+import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../pairing/pairing-token-store.js';
 import { allowedWorkspaceRoots } from '../hosted-sessions/workspace-roots.js';
 import { sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { logger } from '../utils/logger.js';
@@ -111,6 +112,8 @@ export interface HostedSessionCompositionInput {
   readonly ownerQuestions?: HostedSessionManagerOptions['ownerQuestions'];
   /** The daemon's trigger supervisor; each hosted session's `trigger` tool uses it. */
   readonly triggers?: HostedSessionManagerOptions['triggers'];
+  /** Whether a principal id is one this daemon knows; sessions.hosted.share refuses any other. Absent: every id is accepted. */
+  readonly isKnownPrincipal?: ((principalId: string) => boolean) | undefined;
 }
 
 /** The default prompt: what this session is, stated plainly. */
@@ -188,7 +191,10 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     registerNativeHostedTurnGatewayMethods(input.gatewayMethods, native);
   }
   manager.setEventPublisher(input.eventPublisher);
-  registerHostedSessionGatewayMethods(input.gatewayMethods, manager);
+  // The live-turn verbs (cancel, queued messages) admit a caller on a hosted session's owners.
+  input.liveTurns.setSessionOwners((sessionId) => (manager.get(sessionId) === null ? null : manager.ownersOf(sessionId)));
+  registerHostedSessionGatewayMethods(input.gatewayMethods, manager,
+    input.isKnownPrincipal === undefined ? {} : { isKnownPrincipal: input.isKnownPrincipal });
   return manager;
 }
 
@@ -226,12 +232,29 @@ export function composeHostedSessionsForFacade(
     ...(cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken }),
     ...(runtimeServices.ownerInbox === undefined ? {} : { ownerQuestions: runtimeServices.ownerInbox }),
     ...(runtimeServices.triggerManager === undefined ? {} : { triggers: runtimeServices.triggerManager }),
+    // A session is shared only with a principal a credential of this daemon authenticates as.
+    isKnownPrincipal: (principalId) => {
+      if (principalId === LOCAL_OWNER_PRINCIPAL) return true;
+      const tokenId = pairingTokenIdOfPrincipal(principalId);
+      if (tokenId !== undefined) return runtimeServices.pairingTokens.list().some((token) => token.id === tokenId);
+      return runtimeServices.localUserAuthManager.getUser(principalId) !== null;
+    },
   });
   // Hand the broker's idle reaper a way to ask this engine whether a hosted
   // session is mid-turn. Without it the reaper judges a hosted session only by
   // signals a hosted turn never emits, and closes it 'idle-reaped' while its
   // turn is still running.
   runtimeServices.sessionBroker.setExternalLivenessProbe(createHostedSessionLivenessProbe(manager));
+  // A hosted session's title and message count are this engine's; the broker's session list reads them from it.
+  runtimeServices.sessionBroker.setExternalFacts('hosted', (session) => {
+    const record = manager.get(session.id);
+    return record === null ? null : {
+      title: record.title,
+      messageCount: record.messageCount,
+      lastMessageAt: record.lastTurnAt,
+      updatedAt: record.updatedAt,
+    };
+  });
   // A hosted turn in flight makes the daemon busy, as a local one does (a working-directory move waits for it).
   runtimeServices.sessionBroker.setExternalTurnCounter(() => manager.list().filter((record) => record.status === 'running').length);
   // Closing the broker record of a hosted session ends the hosted session too; otherwise its

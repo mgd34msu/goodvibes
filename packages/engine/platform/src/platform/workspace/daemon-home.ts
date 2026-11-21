@@ -140,19 +140,33 @@ export function readOperatorTokenFile(daemonHomeDir: string): string | undefined
 // ---------------------------------------------------------------------------
 
 /**
- * Read a single key from daemon-settings.json, or return undefined if missing.
+ * Read a single key from daemon-settings.json. Undefined when the file or the
+ * key is absent (or the value is not a string). A file that exists but cannot
+ * be read or parsed throws an error naming the file and the cause: reading it
+ * as "nothing saved" would start the daemon in another working directory.
  */
 export function readDaemonSetting(daemonHomeDir: string, key: string): string | undefined {
   const settingsPath = join(daemonHomeDir, 'daemon-settings.json');
   if (!existsSync(settingsPath)) return undefined;
+  let parsed: unknown;
   try {
-    const raw = readFileSync(settingsPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const val = parsed[key]!;
-    return typeof val === 'string' ? val : undefined;
-  } catch {
-    return undefined;
+    parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+  } catch (error: unknown) {
+    const code = (error as { readonly code?: unknown } | null)?.code;
+    if (code === 'ENOENT') return undefined;
+    // The parser's own message can quote the file's text, which holds pairing state; only the kind is named.
+    throw unreadableDaemonSettings(settingsPath, error instanceof SyntaxError ? 'it is not valid JSON'
+      : typeof code === 'string' ? code : 'the file could not be opened');
   }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw unreadableDaemonSettings(settingsPath, 'it does not hold a JSON object');
+  }
+  const val = (parsed as Record<string, unknown>)[key];
+  return typeof val === 'string' ? val : undefined;
+}
+
+function unreadableDaemonSettings(settingsPath: string, cause: string): Error {
+  return new Error(`${settingsPath} could not be read (${cause}); fix or remove it, or start with --working-dir`);
 }
 
 /**

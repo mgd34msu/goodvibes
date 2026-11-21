@@ -88,6 +88,14 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
       if (!registry) {
         return invalid('No active channel registry is available in this runtime.');
       }
+      // A surface the registry does not have, or has switched off, would read below as no accounts,
+      // no entries or an unknown action; it is named here instead.
+      if (surface) {
+        const known = registry.describeSurface(surface);
+        const enabled = known.enabled.length > 0 ? known.enabled.join(', ') : 'none';
+        if (known.state === 'unknown') return invalid(`Unknown channel surface '${surface}'; enabled surfaces: ${enabled}.`);
+        if (known.state === 'disabled') return invalid(`The ${surface} channel is disabled; enable it on the operator surface. Enabled surfaces: ${enabled}.`);
+      }
 
       switch (mode) {
         case 'accounts': {

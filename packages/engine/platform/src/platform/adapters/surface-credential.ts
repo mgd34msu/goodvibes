@@ -41,7 +41,7 @@
  */
 
 import { logger } from '../utils/logger.js';
-import { resolveSecretInput, type SecretRefResolutionOptions } from '../config/secret-refs.js';
+import { readSecretProviderHostConfig, resolveSecretInput, type SecretRefResolutionOptions } from '../config/secret-refs.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { channelCredentials } from '../channels/credential-holder.js';
 
@@ -102,6 +102,7 @@ function secretRefOptions(context: SurfaceCredentialContext, configKey: string):
   return {
     resolveLocalSecret: secrets ? (key) => secrets.get(key) : undefined,
     homeDirectory: secrets?.getGlobalHome?.() ?? undefined,
+    providers: readSecretProviderHostConfig(context.configManager),
     configKey,
   };
 }

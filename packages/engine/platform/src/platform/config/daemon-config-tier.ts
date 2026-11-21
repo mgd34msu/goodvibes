@@ -40,16 +40,6 @@ export function daemonConfigPathForHome(daemonHomeDir: string): string {
   return join(daemonHomeDir, DAEMON_SETTINGS_FILE);
 }
 
-/**
- * Absolute path of the daemon config store derived from a user home directory:
- * `<homeDir>/.goodvibes/daemon/settings.json`. Callers that honor
- * `GOODVIBES_DAEMON_HOME` should resolve the daemon home first and use
- * {@link daemonConfigPathForHome} instead.
- */
-export function daemonConfigPath(homeDir: string): string {
-  return join(homeDir, '.goodvibes', DAEMON_CONFIG_ROOT, DAEMON_SETTINGS_FILE);
-}
-
 /** Read the daemon config store as a plain object ({} when it does not exist). */
 export function readDaemonTierFile(path: string): Record<string, unknown> {
   return readSharedTierFile(path, 'daemon tier');

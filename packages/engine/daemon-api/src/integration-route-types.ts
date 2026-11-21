@@ -12,12 +12,26 @@ export interface IntegrationRuntimeStoreLike {
   };
 }
 
+/** What decides whether a caller may read one shared session: its id and the kind that created it. */
+export interface SessionReadSubject {
+  readonly id: string;
+  readonly kind?: unknown;
+}
+
+/**
+ * Whether the request's caller may read this session. A hosted session is
+ * readable only by its owners and admins (as sessions.hosted.list); absent,
+ * every session is listed to every caller the route admits.
+ */
+export type SessionReadPolicy = (req: Request, session: SessionReadSubject) => boolean;
+
 export interface IntegrationHelperServiceLike {
   buildReview(): unknown;
   getSessionSnapshot(): unknown;
   getTaskSnapshot(limit?: number): unknown;
   getAutomationSnapshot(): unknown;
-  getSessionBrokerSnapshot(): unknown;
+  /** The session list; `readable` keeps only the sessions the caller may read (totals count those). */
+  getSessionBrokerSnapshot(readable?: (session: SessionReadSubject) => boolean): unknown;
   getDeliverySnapshot(): unknown;
   getRouteSnapshot(): unknown;
   getRemoteSnapshot(): unknown;
@@ -206,5 +220,7 @@ export interface DaemonIntegrationRouteContext {
    * task rows are served whole.
    */
   readonly resolveAuthenticatedPrincipal?: ((req: Request) => Pick<RequestPrincipal, 'principalId' | 'admin' | 'scopeSet'> | null) | undefined;
+  /** Which sessions `GET /api/sessions` lists to the caller. Absent: all of them. */
+  readonly mayReadSession?: SessionReadPolicy | undefined;
   readonly userAuth: UserAuthManagerLike;
 }

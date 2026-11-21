@@ -23,6 +23,7 @@ import { PowerManager, wireRuntimePower, createUnavailablePowerSeam } from '../p
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from './feature-announcements.js';
 import type { RuntimeEventBus } from './state.js';
 import { formatConsolidationReceipt } from '../state/consolidation-receipt.js';
+import { classifyDaemonOrigin, configuredDaemonOrigin } from './client/daemon-target-resolver.js';
 
 export interface IdlePowerServicesDeps {
   readonly configManager: ConfigManager;
@@ -129,9 +130,15 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     // Live config subscription: an external edit to power.keepAwake (a settings-
     // modal toggle, a hand-edited settings file) applies LIVE to the in-process
     // manager, acquires/releases the inhibitor and lights the chip with no
-    // restart. This is the config-apply path for the EMBEDDED topology + the
-    // local chip; the external daemon is reached separately over the verb.
+    // restart. power.keepAwake is daemon-owned: a client reads it from the
+    // daemon tier it overlays, so this is the same value the daemon holds.
     subscribeConfig: (key, cb) => (deps.configManager.subscribe as unknown as (k: string, c: (v: unknown) => void) => () => void)(key, (newValue) => cb(newValue)),
+    // power.keepAwake is the daemon's: with the daemon this process works with on
+    // another machine, the value is that machine's and this one's inhibitor does not follow it.
+    holdsKeepAwake: () => {
+      const origin = configuredDaemonOrigin(deps.configManager);
+      return origin === null || classifyDaemonOrigin(origin, deps.configManager) !== 'no';
+    },
     runtimeBus: deps.runtimeBus,
     sleepCheckpoint: deps.snapshotTick,
     wakeCatchUp: [() => memoryConsolidationScheduler.runNow(), deps.snapshotTick, deps.heartbeat],

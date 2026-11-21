@@ -131,7 +131,7 @@ export function persistSharedKey(path: string, key: string, value: unknown): voi
   withSettingsFileLock(path, () => {
     const existing = readSharedTierFile(path);
     writeDotPath(existing, key, value);
-    writeJsonFileAtomic(path, existing);
+    writeJsonFileAtomic(path, existing, { durable: true });
   });
 }
 
@@ -159,7 +159,7 @@ export function raiseReaderFloorInFile(path: string, minReaderVersion: string, s
     const existing = readSharedTierFile(path);
     const { raised } = raiseSettingsReaderFloor(existing, minReaderVersion, setBy);
     if (!raised) return false;
-    writeJsonFileAtomic(path, existing);
+    writeJsonFileAtomic(path, existing, { durable: true });
     return true;
   });
 }
@@ -200,5 +200,5 @@ function removeSharedKeyLocked(path: string, key: string): void {
       break;
     }
   }
-  writeJsonFileAtomic(path, existing);
+  writeJsonFileAtomic(path, existing, { durable: true });
 }

@@ -98,7 +98,7 @@ export type TurnEvent =
     turnId: string;
     provider: string;
     model: string;
-    /** Redacted prompt summary: {length, first100chars} unless telemetry.includeRawPrompts is true. */
+    /** A redacted placeholder (for example `<redacted-length-unknown>`); the prompt itself is never carried here. */
     promptSummary: { length: number; first100chars: string } | string;
   }
   /** A provider chat call completed within the current turn iteration. */
@@ -107,7 +107,7 @@ export type TurnEvent =
     turnId: string;
     provider: string;
     model: string;
-    /** Redacted response summary: {length, first100chars} unless telemetry.includeRawPrompts is true. */
+    /** A redacted placeholder (for example `<response awaiting publication review>`, or empty); the response itself is never carried here. */
     contentSummary: { length: number; first100chars: string } | string;
     toolCallCount: number;
     inputTokens: number;

@@ -29,7 +29,7 @@ import { appendTemporalLabel } from './temporal-label.ts';
 function remoteHostTarget(runtime: CliCommandRuntime): DaemonTarget | undefined {
   const address = resolveConnectedHostAddress(runtime.configManager);
   if (address.refusal) {
-    throw new RefusalError(refusal({ code: 'VALIDATION_FAILED', state: 'nothing was sent', reason: address.refusal, next: ['set daemon.connectedHost.url to the host\'s https:// or http:// origin, then retry'], retryable: false }));
+    throw new RefusalError(refusal({ code: 'INVALID_ARGUMENT', state: 'nothing was sent', reason: address.refusal, next: ['set daemon.connectedHost.url to the host\'s https:// or http:// origin, then retry'], retryable: false }));
   }
   const { baseUrl } = address;
   let host: string;

@@ -1,7 +1,7 @@
 import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
   describeSecretRef,
-  isSecretRefInput,
+  isValidSecretReference,
   resolveSecretRef,
   type SecretsManager,
   type SecretScope,
@@ -26,7 +26,7 @@ interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
 }
 export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy: {
-  readonly createSecrets: (runtime: Runtime) => Pick<SecretsManager, 'get' | 'set' | 'deleteWithReceipt' | 'inspect' | 'listDetailed'>;
+  readonly createSecrets: (runtime: Runtime) => Pick<SecretsManager, 'get' | 'set' | 'deleteWithReceipt' | 'inspect' | 'listDetailed'> & Partial<Pick<SecretsManager, 'getSecretProviderHostConfig'>>;
   readonly binary: (runtime: Runtime) => string;
   readonly inline: boolean;
   readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
@@ -57,10 +57,10 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
     }
     if (sub === 'test') {
       const ref = rest.join(' ').trim();
-      if (!ref || !ref.startsWith('goodvibes://secrets/') || !isSecretRefInput(ref)) {
+      if (!isValidSecretReference(ref)) {
         return usageError(`Usage: ${policy.binary(runtime)} secrets test goodvibes://secrets/<source>/...`);
       }
-      const resolved = await resolveSecretRef(ref, { resolveLocalSecret: (key) => secrets.get(key) });
+      const resolved = await resolveSecretRef(ref, { resolveLocalSecret: (key) => secrets.get(key), providers: secrets.getSecretProviderHostConfig?.() });
       const value = { ref: describeSecretRef(ref), resolved: resolved.value !== null && !resolved.value.empty };
       // A ref that does not resolve is a failed test, in text and in JSON alike.
       return { ...ok(formatJsonOrText(runtime.cli)(
@@ -85,7 +85,7 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
       }
       const value = flags.has('--stdin') ? (valueParts.length === 0 ? await (policy.readStdin ?? readProcessStdin)() : '') : (valueParts[0] ?? '');
       if (!key || !value) return usageError(setUsage);
-      if (sub === 'link' && (!value.startsWith('goodvibes://secrets/') || !isSecretRefInput(value))) {
+      if (sub === 'link' && !isValidSecretReference(value)) {
         return usageError('Invalid secret reference. Use goodvibes://secrets/<source>/...');
       }
       const requestedScope = flags.has('--user') ? 'user' : 'project';

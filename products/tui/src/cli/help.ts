@@ -86,7 +86,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '  -r, --resume [id|latest]       Resume saved session when supported',
     '  -s, --session <id>             run: attach to a specific session',
     '      --continue                 Continue the latest session when supported',
-    '      --fork [id]                Fork session (current or specific id) when supported',
+    '      --fork [id]                Fork session (the last one, or a specific id) when supported',
     '      --timeout <duration>       run: stop after this long (90, 90s, 5m, 1h); exits 124',
     '      --max-turns <n>            run: stop after n model answers that still ask for tools; exits 1',
     '      --omit-accumulated         run: with stream-json, leave `accumulated` out of STREAM_DELTA',

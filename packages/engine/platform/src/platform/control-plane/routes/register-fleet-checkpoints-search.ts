@@ -17,7 +17,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { registerFleetGatewayMethods, type FleetQueryOnlyRegistry, type FleetSteerApprovals, type FleetSteerCapableRegistry, type FleetAttemptsController } from './fleet.js';
 import { registerFleetControlGatewayMethods, type FleetControlRegistry } from './fleet-control.js';
 import { registerCheckpointGatewayMethods, type CheckpointsGatewayManager, type CheckpointsEventSink } from './checkpoints.js';
-import { registerSessionSearchGatewayMethod, type SessionSearchBroker } from './session-search.js';
+import { registerSessionSearchGatewayMethod, type SessionOwnersLookup, type SessionSearchBroker } from './session-search.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
 import type { RuntimeEventBus, RuntimeEventEnvelope } from '../../runtime/events/index.js';
 import type { WorkspaceEvent } from '../../../events/workspace.js';
@@ -28,6 +28,8 @@ export interface FleetCheckpointsSearchGatewayDeps {
   readonly processRegistry: FleetQueryOnlyRegistry & FleetSteerCapableRegistry & FleetControlRegistry;
   readonly workspaceCheckpointManager: CheckpointsGatewayManager;
   readonly sessionBroker: SessionSearchBroker;
+  /** The owners of a hosted session, so sessions.search lists a hosted row only to a caller that may read it. */
+  readonly sessionOwners?: SessionOwnersLookup | undefined;
   /**
    * Optional runtime event bus. When present, checkpoints.revertHunk's receipt
    * (HUNK_REVERTED) fans out on the workspace domain; absent → the verb still
@@ -66,5 +68,5 @@ export function registerFleetCheckpointsSearchGatewayMethods(catalog: GatewayMet
     }
     : undefined;
   registerCheckpointGatewayMethods(catalog, deps.workspaceCheckpointManager, checkpointsEmit);
-  registerSessionSearchGatewayMethod(catalog, deps.sessionBroker);
+  registerSessionSearchGatewayMethod(catalog, deps.sessionBroker, deps.sessionOwners);
 }

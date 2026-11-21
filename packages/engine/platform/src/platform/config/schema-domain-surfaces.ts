@@ -316,7 +316,7 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.ntfy.baseUrl',
     label: 'ntfy server',
     type: 'string',
-    description: 'Base URL for ntfy delivery',
+    description: 'Base URL of the ntfy server notifications are published to and topics are read from. Empty means the public server, https://ntfy.sh.',
   },
   {
     key: 'surfaces.ntfy.topic',

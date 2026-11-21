@@ -30,6 +30,12 @@ function relayConfigured(ctx: CommandContext): { enabled: boolean; url: string; 
 /** The relay's refusal of the daemon's registration: why, whether the daemon keeps trying, and what to do. */
 function refusalLines(refusal: RelayRefusal | undefined): string[] {
   if (!refusal) return [];
+  if (refusal.code === 'relay-start-failed') {
+    return [
+      `  the daemon could not start its relay registration: ${refusal.message || refusal.state}`,
+      ...refusal.next.map((step) => `  next: ${step}`),
+    ];
+  }
   return [
     `  refused by the relay (${refusal.code}): ${refusal.state}${refusal.message ? ` (${refusal.message})` : ''}`,
     refusal.retryable

@@ -10,6 +10,8 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { HttpStatusError } from '@goodvibes/engine/errors';
+import type { ConfigManager } from '../config/manager.js';
+import { surfaceConfigDefaults } from '../config/schema-domain-surfaces.js';
 
 export const GOODVIBES_NTFY_ORIGIN = 'goodvibes-platform';
 export const GOODVIBES_NTFY_ORIGIN_HEADER = 'X-Goodvibes-Origin';
@@ -64,10 +66,26 @@ export interface GoodVibesNtfyTopics {
   readonly refused: readonly RefusedNtfyTopic[];
 }
 
+/** The server an empty `surfaces.ntfy.baseUrl` means: the setting's default. */
+const DEFAULT_NTFY_BASE_URL: string = surfaceConfigDefaults.ntfy.baseUrl;
+
+/** A `surfaces.ntfy.baseUrl` value as the server it names: trimmed, and the default server when empty. */
+export function normalizeNtfyBaseUrl(value: unknown): string {
+  return (typeof value === 'string' ? value.trim() : '') || DEFAULT_NTFY_BASE_URL;
+}
+
+/**
+ * The ntfy server every part of the platform publishes to, reads from and
+ * probes: `surfaces.ntfy.baseUrl`, or the setting's default when it is empty.
+ */
+export function ntfyBaseUrl(config: Pick<ConfigManager, 'get'>): string {
+  return normalizeNtfyBaseUrl(config.get('surfaces.ntfy.baseUrl'));
+}
+
 /** True for the public ntfy server, where anyone who knows a topic name can publish to it and read it. */
 export function isPublicNtfyServer(baseUrl: string | null | undefined): boolean {
   try {
-    const host = new URL(String(baseUrl ?? '').trim() || 'https://ntfy.sh').hostname.toLowerCase();
+    const host = new URL(normalizeNtfyBaseUrl(baseUrl)).hostname.toLowerCase();
     return host === 'ntfy.sh' || host.endsWith('.ntfy.sh');
   } catch {
     return false;
@@ -346,8 +364,9 @@ export function toHeaderSafeTitle(title: string | undefined): string | undefined
 }
 
 export class NtfyIntegration {
+  /** `baseUrl` is the server to publish to; read it with {@link ntfyBaseUrl}. */
   constructor(
-    private readonly baseUrl = 'https://ntfy.sh',
+    private readonly baseUrl: string,
     private readonly token?: string,
   ) {}
 

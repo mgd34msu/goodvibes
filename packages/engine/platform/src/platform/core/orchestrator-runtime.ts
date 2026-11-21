@@ -1,6 +1,6 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import type { ContentPart, LLMProvider } from '../providers/interface.js';
+import type { ContentPart } from '../providers/interface.js';
 import type { CacheHitTracker } from '../providers/cache-strategy.js';
 import type { SessionLineageTracker } from './session-lineage.js';
 import type { IdempotencyStore } from '../runtime/idempotency/index.js';
@@ -90,20 +90,6 @@ export interface OrchestratorLiveTurnControls {
 export interface LiveTurnControlsBinding {
   bind(controls: OrchestratorLiveTurnControls): void;
   unbind(controls: OrchestratorLiveTurnControls): void;
-}
-
-export function normalizeUsage(
-  usage: Awaited<ReturnType<LLMProvider['chat']>>['usage'],
-): Awaited<ReturnType<LLMProvider['chat']>>['usage'] {
-  const cacheReadTokens = usage.cacheReadTokens ?? 0;
-  const hasExplicitCacheBreakout = Object.prototype.hasOwnProperty.call(usage, 'cacheWriteTokens');
-  const freshInputTokens = hasExplicitCacheBreakout
-    ? usage.inputTokens
-    : Math.max(0, usage.inputTokens - cacheReadTokens);
-  return {
-    ...usage,
-    inputTokens: freshInputTokens,
-  };
 }
 
 export function estimateFreshTurnInputTokens(

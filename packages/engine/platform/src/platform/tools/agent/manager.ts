@@ -163,6 +163,8 @@ export class AgentManager {
   private executor: AgentExecutor | null;
   private readonly configManager: Pick<ConfigManager, 'get'> | null;
   private readonly additionalFleetOwnership: (() => readonly AgentFleetOwnership[]) | undefined;
+  /** Told when a fleet slot becomes free (onFleetSlotReleased). */
+  private readonly fleetSlotListeners = new Set<() => void>();
   /**
    * Live snapshot accessors for RUNNING agents (conversation-snapshot bridge).
    * Registered by the executor (orchestrator-runner.ts) right after it
@@ -249,6 +251,29 @@ export class AgentManager {
 
   setRuntimeBus(runtimeBus: RuntimeEventBus | null): void {
     this.runtimeBus = runtimeBus;
+  }
+
+  /**
+   * Be told each time an agent slot of this fleet becomes free: one of this
+   * manager's executions settled (its cleanup included), or an owner counted
+   * through additionalFleetOwnership reported a release with
+   * {@link notifyFleetSlotReleased}. A listener runs after the slot no longer
+   * counts, so {@link hasFleetCapacity} already sees it. Returns the unsubscribe.
+   */
+  onFleetSlotReleased(listener: () => void): () => void {
+    this.fleetSlotListeners.add(listener);
+    return () => { this.fleetSlotListeners.delete(listener); };
+  }
+
+  /** A slot of this fleet became free; also called by the owners counted through additionalFleetOwnership. */
+  notifyFleetSlotReleased(): void {
+    for (const listener of [...this.fleetSlotListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        logger.warn('AgentManager: a fleet slot listener failed', { error: summarizeError(error) });
+      }
+    }
   }
 
   /** Local read-only occupancy; never recursively consults sibling views. */
@@ -754,7 +779,11 @@ export class AgentManager {
     let begin!: (operation: PromiseLike<void> | void) => void;
     const settled = new Promise<void>((resolve) => { begin = resolve; });
     const slot: AgentExecutionSlot = { settled, controller: new AbortController(), active: true };
-    void settled.then(() => { slot.active = false; }, () => { slot.active = false; });
+    const release = (): void => {
+      slot.active = false;
+      this.notifyFleetSlotReleased();
+    };
+    void settled.then(release, release);
     owner.slots.add(slot);
     owner.tail = settled;
     const reclaim = (): void => {

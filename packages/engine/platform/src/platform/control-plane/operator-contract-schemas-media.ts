@@ -178,6 +178,8 @@ export const WEB_SEARCH_RESPONSE_SCHEMA = objectSchema({
 
 export const WEB_SEARCH_PROVIDERS_OUTPUT_SCHEMA = objectSchema({
   providers: arraySchema(WEB_SEARCH_PROVIDER_DESCRIPTOR_SCHEMA),
+  /** The provider a search that names none uses now: webSearch.defaultProvider, else the first configured, else the keyless built-in. */
+  defaultProviderId: STRING_SCHEMA,
 }, ['providers']);
 
 const MEDIA_PROVIDER_DESCRIPTOR_SCHEMA = objectSchema({

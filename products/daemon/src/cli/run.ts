@@ -13,6 +13,8 @@ import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, re
 import { daemonCommandFailureLines } from './command-failure.js';
 import { runCompletionCommand } from './completion.js';
 import { daemonCommandSpec, isRawInterceptCommand } from './command-catalog.js';
+import { isActivatingServiceSubcommand, isDaemonServiceSubcommand } from '../daemon/service-subcommands.js';
+import { readEnvDaemonToken } from './daemon-tokens.js';
 import type { DaemonCliRuntime } from './serve.js';
 import type { ShippedServiceExecutable } from './service-executable.js';
 import type { ChunkSink, ChunkSource } from '@goodvibes/engine/platform/platform/mcp/server';
@@ -55,7 +57,15 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     for (const line of answer.lines) write(line);
     return answer.exitCode;
   };
-  const refuse = (line: string): number => result({ exitCode: 2, lines: [line] });
+  // Whether the caller asked for a JSON document. Until the arguments parse, a
+  // raw scan decides; after, the parsed flag or a passthrough command's own `--json`.
+  let jsonRequested = argv.includes('--json');
+  // Every failure a --json caller gets is one document on stdout, the same
+  // {ok:false, code, error, fix} envelope the commands' own failures use.
+  const failure = (exitCode: number, code: string, error: string, fix: string, prose: readonly string[]): number => (jsonRequested
+    ? result({ exitCode, lines: [JSON.stringify({ ok: false, code, error, fix }, null, 2)] }, stdout)
+    : result({ exitCode, lines: prose }));
+  const refuse = (line: string): number => failure(2, 'COMMAND_REFUSED', line, 'see goodvibes-daemon --help', [line]);
   const env = options.env ?? process.env;
   try {
     const cli = parseDaemonCli(argv);
@@ -63,11 +73,12 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       // The unit carries no endpoint flags, so the parser refuses these before dispatch; name the supported route.
       const endpointFlag = cli.command === 'install-service'
         && cli.refusedFlags.some((flag) => flag === '--port' || flag === '--hostname');
-      return result({ exitCode: 2, lines: [...cli.errors,
-        ...(endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
-          `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : []),
-        '', renderGoodVibesDaemonHelp()] });
+      const endpointLines = endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
+        `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : [];
+      return failure(2, 'PARSE_ERROR', cli.errors.join('; '), endpointLines.length ? endpointLines.join(' ') : 'see goodvibes-daemon --help',
+        [...cli.errors, ...endpointLines, '', renderGoodVibesDaemonHelp()]);
     }
+    jsonRequested = cli.flags.json || (isRawInterceptCommand(cli.command) && cli.commandArgs.includes('--json'));
     for (const warning of cli.warnings) stderr(`[goodvibes-daemon] warning: ${warning}`);
     // A moved daemon home is this daemon's whole tree, for every reader in this process.
     if (env === process.env) applyDaemonHomeEnvironment(cli.flags, options.cwd ?? process.cwd());
@@ -114,12 +125,13 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         },
       }));
     }
-    const needsRuntime = ['serve', 'install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command);
+    const activates = isActivatingServiceSubcommand(cli.command);
+    const needsRuntime = cli.command === 'serve' || activates;
     const runtime = options.runtime ?? (needsRuntime ? await options.createRuntime?.() : undefined);
     if (cli.command === 'serve' && typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
     let serviceExecutable: ShippedServiceExecutable | undefined;
     // refresh-service writes the same launch install-service does, so it is admitted the same way.
-    if (['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)) {
+    if (activates) {
       if (typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
       serviceExecutable = await options.resolveServiceExecutable?.();
       if (!serviceExecutable && !options.serviceBinaryPath) return refuse(`${PARTIAL} Service activation requires an explicitly composed executable.`);
@@ -137,7 +149,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       // a nonzero status carries a degraded/absent state.
       return result(await runProvisionWakeModelCommand(cli.commandArgs, { homeDirectory, env }), stdout);
     }
-    if (cli.command === 'webui' && cli.commandArgs.includes('--json')) {
+    // `webui enable --json` writes settings and takes the full path below; only the status query is an inspection.
+    if (cli.command === 'webui' && cli.commandArgs.includes('--json') && !cli.commandArgs.includes('enable')) {
       // Machine discovery is an inspection: no migration, settings bootstrap,
       // network transport, runtime composition, token acquisition or listener.
       const [{ createDaemonCliConfiguration }, { runWebuiCommand }] = await Promise.all([
@@ -146,15 +159,19 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd, { readOnly: true, diagnosticMode: 'structural' });
       return result(runWebuiCommand(cli.commandArgs, { configManager: configuration.config, baseDirectory: configuration.workingDirectory }));
     }
-    const [{ createDaemonCliConfiguration }, { createDaemonCommandRemote }] = await Promise.all([
+    const [{ createDaemonCliConfiguration }, { createDaemonCommandRemote }, { readOperatorTokenFile }] = await Promise.all([
       import('./configuration.js'), import('../daemon/remote-transport.js'),
+      import('@goodvibes/engine/platform/platform/workspace/daemon-home'),
     ]);
     const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd,
       // A malformed settings file can hold a credential at the parse error; every command withholds it from its diagnostics.
       cli.command === 'serve' || cli.command === 'mcp' ? { readOnly: true, diagnosticMode: 'structural' } : { diagnosticMode: 'structural' });
     const { config, homeDirectory, daemonHomeDirectory, workingDirectory } = configuration;
     const remoteFlags = { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token, json: cli.flags.json };
-    const remote = createDaemonCommandRemote({ configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() });
+    // This machine's operator token as the daemon serves it: the environment override first, as serve takes it.
+    const envDaemonToken = readEnvDaemonToken(env);
+    const remote = createDaemonCommandRemote({ configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir(),
+      readToken: (home) => envDaemonToken ?? readOperatorTokenFile(home) });
     switch (cli.command) {
       case 'config': {
         const [{ runConfigCommand }, { createRuntimeSecretsManager }] = await Promise.all([
@@ -180,9 +197,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
       }
       case 'pair': {
-        const [{ runPairCommand }, { readOperatorTokenFile }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
+        const [{ runPairCommand }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
           import('../daemon/pair-command.js'),
-          import('@goodvibes/engine/platform/platform/workspace'),
           import('@goodvibes/engine/platform/platform/pairing'),
           import('@goodvibes/engine/platform/platform/control-plane'),
           import('@goodvibes/engine/platform/platform/runtime/shell'),
@@ -192,15 +208,16 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         // the running daemon offers the stable name.
         if (pairingOriginUsesStableHost(config)) await refreshStableHostInputs();
         return result(await runPairCommand({ ...remote,
-          version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
-          sharedTokenRevoked: () => readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
+          version: VERSION,
+          // A token the environment sets is not the stored shared token, so its revocation does not apply to it.
+          sharedTokenRevoked: () => envDaemonToken === undefined && readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
             GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json')),
           flags: { ...remoteFlags, yes: cli.flags.yes } }));
       }
       case 'mcp': {
         const { runMcpCommand } = await import('../daemon/mcp-command.js');
         return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
-          flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl,
+          flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl, readToken: remote.readToken,
           input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
       }
       case 'webui': {
@@ -217,7 +234,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       case 'cluster': {
         const { runClusterCommand } = await import('@goodvibes/engine/terminal-shell/cluster-commands');
-        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl });
+        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl, readToken: remote.readToken });
         if (answer.rawOutput) stdout(answer.rawOutput);
         return result(answer);
       }
@@ -256,7 +273,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         finally { releaseCrashCapture?.(); }
       }
       default: {
-        const { isDaemonServiceSubcommand, runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
+        const { runDaemonServiceCli, resolveInstalledDaemonBinary } = await import('../daemon/service-commands.js');
         const { resolveServiceUnitHome } = await import('@goodvibes/engine/platform/platform/daemon/daemon-service-default');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         // A daemon with a moved tree or daemon home needs a service manager whose
@@ -267,7 +284,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         // with the default home and serve the wrong tree.
         const { detectPlatform } = await import('@goodvibes/engine/platform/platform/daemon/service-manager');
         const servicePlatform = detectPlatform(String(config.get('service.platform')));
-        if (configuration.isOverridden && ['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)
+        if (configuration.isOverridden && activates
           && servicePlatform !== 'systemd' && servicePlatform !== 'launchd') {
           return refuse(servicePlatform === 'windows'
             ? 'A daemon with a moved home (GOODVIBES_HOME, GOODVIBES_DAEMON_HOME or --daemon-home) cannot run as a Windows scheduled task: a task created by schtasks carries no environment variables, so it would start with the default home. No service was changed. Start this daemon by hand instead: goodvibes-daemon serve'
@@ -287,7 +304,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     }
   } catch (error) {
     // Do not render arbitrary config, transport, plugin or credential exceptions.
-    for (const line of daemonCommandFailureLines(error)) stderr(line);
-    return 1;
+    const lines = daemonCommandFailureLines(error);
+    const reason = lines.slice(1).join(' ').replace(/^Reason: /, '');
+    return failure(1, 'COMMAND_FAILED', reason, 'run goodvibes-daemon status, or see the daemon log', lines);
   }
 }

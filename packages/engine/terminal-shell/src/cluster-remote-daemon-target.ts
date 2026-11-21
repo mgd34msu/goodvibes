@@ -44,7 +44,7 @@
  * verbs mean. It resolves a target, makes a request, and returns the parsed
  * body. Every decision about what the answer MEANS belongs to the daemon.
  */
-import { parseDaemonOrigin, readConnectedDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { deriveControlPlaneBaseUrl, parseDaemonOrigin, readConnectedDaemonOrigin, readControlPlaneBinding, type DaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { readOperatorTokenFile } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
 import { readConnectedDaemonToken, readDaemonSessionToken } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
@@ -95,6 +95,8 @@ export interface DaemonFailure {
   readonly code: DaemonFailureCode;
   readonly error: string;
   readonly fix: string;
+  /** On a `refused` failure, the daemon's own error code (`SESSION_NOT_FOUND`), when its reply named one. */
+  readonly daemonCode?: string;
 }
 
 export type RemoteTargetResolution =
@@ -176,6 +178,38 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
   const chosen = tokenForOrigin(origin, typed.host ? 'typed' : connected ? 'connected' : 'binding', input);
   if (!chosen.ok) return chosen;
   return { ok: true, target: { baseUrl, token: chosen.token, isLocal, ...(chosen.needsProof ? { needsProof: true } : {}) } };
+}
+
+/** Input of {@link resolveLocalDaemonTarget}. */
+export interface ResolveLocalTargetInput {
+  readonly configManager: Pick<ConfigManager, 'get'>;
+  readonly daemonHomeDir: string;
+  /** A port that replaces the configured one (`--port`). */
+  readonly port?: number | undefined;
+  /** This machine's operator token; read from `daemonHomeDir` when absent. */
+  readonly token?: string | undefined;
+  /** Injectable so tests never read a real token file. */
+  readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
+}
+
+/**
+ * The daemon on THIS machine, with this machine's operator token: the address
+ * comes from the control-plane bind settings alone, never from
+ * `daemon.connectedHost.url` or a typed host, so a command that sends this
+ * machine's token cannot reach another daemon through it.
+ */
+export function resolveLocalDaemonTarget(input: ResolveLocalTargetInput): RemoteTargetResolution {
+  const binding = readControlPlaneBinding((key) => input.configManager.get(key as never));
+  const port = input.port ?? binding.port;
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    return { ok: false, code: 'invalid-port', error: `'${String(port)}' is not a usable port`, fix: 'pass --port with a number between 1 and 65535' };
+  }
+  const baseUrl = deriveControlPlaneBaseUrl({ ...binding, port }, 'loopback');
+  const token = input.token?.trim() || extractOperatorToken((input.readToken ?? readOperatorTokenFile)(input.daemonHomeDir));
+  if (!token) {
+    return { ok: false, code: 'token-missing', error: 'no operator token was found for this machine', fix: 'start the daemon once so it creates its operator token, or pass --token' };
+  }
+  return { ok: true, target: { baseUrl, token, isLocal: true } };
 }
 
 /**
@@ -435,13 +469,14 @@ export async function callDaemonVerb<T>(
         + mayHaveApplied,
     };
   }
-  const body = payload as { ok?: unknown; data?: unknown; error?: unknown; fix?: unknown };
+  const body = payload as { ok?: unknown; data?: unknown; error?: unknown; fix?: unknown; code?: unknown };
   if (body.ok === true) return { ok: true, data: body.data as T };
   return {
     ok: false,
     code: 'refused',
     error: typeof body.error === 'string' ? body.error : `${where} refused the request`,
     fix: typeof body.fix === 'string' ? body.fix : 'run `cluster status` to see the current state',
+    ...(typeof body.code === 'string' && body.code ? { daemonCode: body.code } : {}),
   };
 }
 
@@ -450,7 +485,7 @@ export async function callDaemonVerb<T>(
  * daemon has no such route or verb (`NOT_FOUND`, `METHOD_NOT_FOUND`, or a body
  * that is not the daemon's JSON error).
  */
-async function readHandlerNotFound(response: Response): Promise<{ error: string; fix: string } | undefined> {
+async function readHandlerNotFound(response: Response): Promise<{ error: string; fix: string; daemonCode?: string } | undefined> {
   let body: { error?: unknown; code?: unknown; fix?: unknown; hint?: unknown; next?: unknown };
   try {
     body = await response.json() as typeof body;
@@ -461,5 +496,9 @@ async function readHandlerNotFound(response: Response): Promise<{ error: string;
   if (body.code === 'NOT_FOUND' || body.code === 'METHOD_NOT_FOUND') return undefined;
   const next = Array.isArray(body.next) && typeof body.next[0] === 'string' ? body.next[0] : undefined;
   const fix = typeof body.fix === 'string' ? body.fix : typeof body.hint === 'string' ? body.hint : next;
-  return { error: body.error, fix: fix ?? 'check what you named with the matching list command, then try again' };
+  return {
+    error: body.error,
+    fix: fix ?? 'check what you named with the matching list command, then try again',
+    ...(typeof body.code === 'string' && body.code ? { daemonCode: body.code } : {}),
+  };
 }

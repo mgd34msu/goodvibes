@@ -74,6 +74,7 @@ export {
   generateNtfyTopic,
   isGoodVibesNtfyDeliveryEcho,
   isPublicNtfyServer,
+  ntfyBaseUrl,
   resolveGoodVibesNtfyTopics,
   resolveNtfyDefaultPriority,
 } from './ntfy.js';

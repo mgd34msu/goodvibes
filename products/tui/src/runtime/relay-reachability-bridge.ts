@@ -21,10 +21,11 @@ import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runti
 
 /**
  * What /devices relay-status can be told: the daemon-side registration states, plus
- * `'disabled'` for a relay that is off, plus `'unavailable'` when the daemon
- * could not be asked.
+ * `'disabled'` for a relay that is off, `'failed'` when the daemon's last start
+ * of the registration failed (the refusal says why), and `'unavailable'` when
+ * the daemon could not be asked.
  */
-export type RelayReadableStatus = RelayRegistrationStatus | 'disabled' | 'unavailable';
+export type RelayReadableStatus = RelayRegistrationStatus | 'disabled' | 'failed' | 'unavailable';
 
 /** Why the relay refused the daemon's registration, as the daemon reports it. */
 export interface RelayRefusal {
@@ -94,7 +95,7 @@ function failureReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const KNOWN_STATUSES: ReadonlySet<string> = new Set(['disabled', 'idle', 'connecting', 'registered', 'reconnecting', 'refused', 'stopped']);
+const KNOWN_STATUSES: ReadonlySet<string> = new Set(['disabled', 'failed', 'idle', 'connecting', 'registered', 'reconnecting', 'refused', 'stopped']);
 
 function statusOf(value: unknown): RelayReadableStatus {
   return typeof value === 'string' && KNOWN_STATUSES.has(value) ? value as RelayReadableStatus : 'unavailable';

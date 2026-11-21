@@ -2,12 +2,7 @@ import { revealOrNull, type Secret } from '../security/secret.js';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { SecretsManager, SecretScope } from './secrets.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
-import { isSecretRefInput } from './secret-refs.js';
-
-function isSecretReferenceValue(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
+import { isValidSecretReference } from './secret-refs.js';
 
 export interface DaemonCredentialStore {
   /** Alias/tier-aware local incarnation, including pending mutations; never sent to judgment. */
@@ -78,11 +73,11 @@ export function createDaemonCredentialStore(secrets: Pick<SecretsManager, 'get' 
       getOrCreateDaemonSecret: (key: string, create: () => string, assertCurrent?: () => void) => secrets.getOrCreateDaemonSecret!(key, create, assertCurrent),
     } : {}),
     async resolveRef(ref: string): Promise<string | null> {
-      const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
+      const key = isValidSecretReference(ref) ? secretKeyFromReference(ref) : ref;
       return revealOrNull(await secrets.get(key), 'dispatch');
     },
     async resolveBoundRef(configKey: string, ref: string): Promise<string | null> {
-      const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
+      const key = isValidSecretReference(ref) ? secretKeyFromReference(ref) : ref;
       return key === daemonSecretKeyFor(configKey) ? revealOrNull(await secrets.get(key), 'dispatch') : null;
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {

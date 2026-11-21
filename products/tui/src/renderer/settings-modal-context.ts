@@ -66,12 +66,12 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   },
   'ui.systemMessages': {
     panel: 'Keep system messages out of the transcript: they go to Notifications only (toast and history). Errors and warnings still show in the transcript.',
-    conversation: 'Show system messages in the transcript; each is also kept in Notifications. The default here.',
+    conversation: 'Show system messages in the transcript; each is also kept in Notifications.',
     both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },
   'ui.operationalMessages': {
     panel: 'Keep tool, agent, MCP and plugin activity out of the transcript: it goes to Notifications only (toast and history). Errors and warnings still show in the transcript.',
-    conversation: 'Show operational messages in the transcript; each is also kept in Notifications. The default here.',
+    conversation: 'Show operational messages in the transcript; each is also kept in Notifications.',
     both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },
   'ui.contractMessages': {

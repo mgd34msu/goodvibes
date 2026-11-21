@@ -65,6 +65,22 @@ export class HostedSessionArgumentError extends Error {
   }
 }
 
+/** Removing this owner would leave the session with none, so nobody below admin could reach it again. */
+export class HostedSessionLastOwnerError extends Error {
+  constructor(public readonly sessionId: string, public readonly principalId: string) {
+    super(`${principalId} is the only owner of hosted session ${sessionId}, so it cannot be removed. Share the session with another principal first (sessions.hosted.share), or end it (sessions.hosted.kill).`);
+    this.name = 'HostedSessionLastOwnerError';
+  }
+}
+
+/** A principal to share with that this daemon does not know. */
+export class HostedSessionUnknownPrincipalError extends Error {
+  constructor(public readonly principalId: string) {
+    super(`No principal ${principalId} is known on this daemon, so the session was not shared. Use a sign-in user's name (local_auth.status lists them) or pairing:<id> for a paired device (pairing.tokens.list lists them).`);
+    this.name = 'HostedSessionUnknownPrincipalError';
+  }
+}
+
 /** The configured hosted-session cap is reached. */
 export class HostedSessionLimitError extends Error {
   constructor(message: string) {

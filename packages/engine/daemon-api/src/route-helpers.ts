@@ -204,12 +204,12 @@ export function readStringArrayField(body: JsonRecord, key: string, max = 128): 
 export function refuseEmptySelection(field: string, defaultMeaning: string): Response {
   return jsonErrorResponse({
     error: `${field} is an empty list, which selects nothing; omit ${field} to ${defaultMeaning}.`,
-    code: 'INVALID_REQUEST',
+    code: 'INVALID_ARGUMENT',
   }, { status: 400 });
 }
 
 function invalidSelection(message: string): Response {
-  return jsonErrorResponse({ error: message, code: 'INVALID_REQUEST' }, { status: 400 });
+  return jsonErrorResponse({ error: message, code: 'INVALID_ARGUMENT' }, { status: 400 });
 }
 
 /**

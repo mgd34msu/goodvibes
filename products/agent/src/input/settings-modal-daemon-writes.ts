@@ -42,6 +42,13 @@ export function captureConnectedHostTarget(key: ConfigKey): ConnectedHostTarget 
   return { client, revision: agentDaemonConfigClientRevision() };
 }
 
+/**
+ * The value a reset writes: the stored value is removed where it is kept (here
+ * or on the connected host), so the key reads as its default and follows a
+ * later change of that default, instead of being saved as an explicit choice.
+ */
+export const RESET_TO_DEFAULT: unique symbol = Symbol('reset-to-default');
+
 /** What the modal shows while and after a routed write. */
 export interface DaemonSettingWriteReport {
   readonly ok: boolean;
@@ -83,7 +90,9 @@ export function routeSettingWriteToConnectedHost(
   report({ ok: true, message: 'Saving on the connected host…' });
   void (async () => {
     try {
-      await target.client.set(key, value);
+      if (value !== RESET_TO_DEFAULT) await target.client.set(key, value);
+      else if (target.client.reset) await target.client.reset(key);
+      else throw new Error('the connected host cannot reset a setting to its default (it is older than this Agent); set the value instead');
     } catch (error) {
       const message = summarizeError(error);
       // A loosening change made with a token minted for automation is put to the owner, not refused.

@@ -150,6 +150,8 @@ export function isDeclaredSecretBearingConfigKey(key: string): boolean {
 /**
  * A stored config value that is a `goodvibes://` reference rather than a
  * literal. A reference is the correct at-rest shape; a literal is the defect.
+ * A prefix test only: whether the reference is well formed is
+ * `isValidSecretReference` (secret-refs.ts), which parses it.
  */
 export function isSecretReferenceValue(value: unknown): boolean {
   return typeof value === 'string' && value.trim().startsWith('goodvibes://secrets/');

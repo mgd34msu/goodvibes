@@ -12,6 +12,7 @@ import type { ProviderRegistry } from '../../providers/registry.js';
 import type { RuntimeStore } from '../store/index.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import { BUILTIN_GATEWAY_METHODS } from '../../control-plane/method-catalog.js';
+import { isOpenApprovalStatus } from '../../control-plane/approval-lifecycle.js';
 import { buildProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { ProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -134,7 +135,7 @@ export interface WorktreeSnapshot {
 
 /** Approvals raised and not yet decided, cancelled or expired. */
 function countUndecidedApprovals(approvals: readonly { readonly status: string }[]): number {
-  return approvals.filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
+  return approvals.filter((approval) => isOpenApprovalStatus(approval.status)).length;
 }
 
 export class IntegrationHelperService {
@@ -312,8 +313,10 @@ export class IntegrationHelperService {
     };
   }
 
-  getSessionBrokerSnapshot(): Record<string, unknown> {
-    const sessions = this.context.sessionBroker.listSessions(50);
+  /** The newest sessions; `readable` keeps only those the caller may read (a hosted one: its owners and admins). */
+  getSessionBrokerSnapshot(readable?: (session: { readonly id: string; readonly kind: string }) => boolean): Record<string, unknown> {
+    const listed = this.context.sessionBroker.listSessions(50);
+    const sessions = readable ? listed.filter((session) => readable(session)) : listed;
     const unreadable = this.context.sessionBroker.unreadableEntries();
     return {
       totals: {

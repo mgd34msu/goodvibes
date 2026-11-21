@@ -31,6 +31,15 @@ export interface GitHubStartOwed {
   readonly reply?: GitHubReplyTarget | undefined;
 }
 export type GitHubReplyOperation = GitHubReplyOwed | GitHubReplyPost | GitHubStartOwed;
+/**
+ * The GitHub token the daemon answers issues and pull requests with: the
+ * service registry's `github` `primary` secret, else `GITHUB_TOKEN`. The one
+ * precedence rule for live webhook replies and for replies owed across a restart.
+ */
+export async function resolveGitHubToken(serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>): Promise<string | null> {
+  return (await serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null;
+}
+
 const REPLY_KIND = 'github.reply';
 const POST_KIND = 'github.reply.post';
 const START_KIND = 'github.start';
@@ -71,7 +80,7 @@ export async function handleGitHubAutomationWebhook(
   if (body instanceof Response) return body;
 
   const event = GitHubIntegration.parseEvent(req.headers, body);
-  const resolveToken = async (): Promise<string | null> => (await context.serviceRegistry.resolveSecret('github', 'primary')) ?? process.env.GITHUB_TOKEN ?? null;
+  const resolveToken = (): Promise<string | null> => resolveGitHubToken(context.serviceRegistry);
   // Whether a comment mentions the bot is read before GitHub is asked for the token's login.
   const decision = await GitHubIntegration.readEvent(event, { resolveToken, postsReply: context.awaitAgent !== undefined });
   if (decision.kind === 'ignored') {

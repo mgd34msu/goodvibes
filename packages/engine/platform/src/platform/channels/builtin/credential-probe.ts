@@ -13,7 +13,7 @@
  *
  * One request per explicit retest; nothing per message.
  */
-import { DiscordIntegration, SlackIntegration } from '../../integrations/index.js';
+import { DiscordIntegration, SlackIntegration, ntfyBaseUrl } from '../../integrations/index.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
 import { TelegramApiError, TelegramBotApi } from '../telegram/api.js';
 import { resolveMSTeamsAccessToken } from '../delivery/shared.js';
@@ -156,7 +156,7 @@ async function probeOnce(
       }
     }
     case 'ntfy': {
-      const base = trimBase(text(config.get('surfaces.ntfy.baseUrl')) || 'https://ntfy.sh');
+      const base = trimBase(ntfyBaseUrl(config));
       const token = await resolveSurfaceSecret(deps, 'ntfy', 'primary');
       return token
         ? probeHttp('ntfy', `${base}/v1/account`, { Authorization: `Bearer ${token}` }, (body) => text(body['username']))

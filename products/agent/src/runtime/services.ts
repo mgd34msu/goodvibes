@@ -53,7 +53,6 @@ import { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
 import { ArchetypeLoader } from '@goodvibes/engine/platform/platform/agents';
 import type { MemoryConsolidationRunReceipt } from '@goodvibes/engine/platform/platform/state';
 import { wireRuntimePower } from '@goodvibes/engine/platform/platform/power';
-import { createAgentKeepAwakeForwarder } from './keep-awake-forward.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { AgentDaemonReceiptFeed, createDaemonReceiptConsumption } from './daemon-receipts.ts';
 import { WorkspaceCheckpointManager, checkpointEligibilityRefusal, type CheckpointSessionResolver } from '@goodvibes/engine/platform/platform/workspace';
@@ -896,13 +895,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           readStatus: readDaemonStatusPayload,
           guard: daemonBuildGuard,
         });
-        // Set where the keep-awake forwarder is built; a no-op until then.
-        let forwardKeepAwakeOnAttach: () => Promise<void> = () => Promise.resolve();
         const consumeDaemonReceipts = createDaemonReceiptConsumption({
           consumeReceipts: spineReceiptConsumer,
           acknowledgeReceipts: spineReceiptAcknowledger,
           feed: daemonReceiptFeed,
-          afterAttach: () => forwardKeepAwakeOnAttach(),
         });
         // A daemon update leaves this process on the build it started with; below
         // the floor the daemon announces, shared-session work pauses and the owner is told.
@@ -946,24 +942,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         });
         // The memory spine's wire transport, handed to `memorySpine.activate()` on daemon adoption.
         const memorySpineTransport = createMemorySpineRestTransport({ resolveConnection: spineResolveConnection });
-
-        // The keep-awake hold survives this process only on the daemon, so a toggle
-        // is forwarded while a daemon is adopted, one after another. On each attach
-        // a toggle the daemon has not taken is sent again; otherwise this process
-        // takes the daemon's value. What the daemon did not take is told to the owner.
-        let keepAwakeNoticeCount = 0;
-        const keepAwakeForwarder = createAgentKeepAwakeForwarder({
-          readKeepAwake: () => configManager.get('power.keepAwake') === true,
-          isAdopted: () => base.memorySpine.active,
-          resolveConnection: spineResolveConnection,
-          adoptKeepAwake: (enabled) => configManager.set('power.keepAwake', enabled),
-          notify: (text) => { daemonReceiptFeed.push([{ id: `keep-awake:${++keepAwakeNoticeCount}`, text, at: Date.now() }]); },
-        });
-        forwardKeepAwakeOnAttach = () => keepAwakeForwarder.attached();
-        scope.registry.add('keep-awake forward subscription', configManager.subscribe('power.keepAwake', (newValue, oldValue) => {
-          if (newValue === oldValue) return;
-          void keepAwakeForwarder.set(newValue === true);
-        }));
 
         // The work this process spawned, unioned with the adopted daemon's, local
         // winning on a shared id: what the Activity modal reads.

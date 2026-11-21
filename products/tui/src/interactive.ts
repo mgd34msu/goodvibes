@@ -7,7 +7,7 @@ import { sanitizeSessionName } from '@goodvibes/engine/platform/platform/session
 import { createHerdrSessionReporter } from '@goodvibes/engine/terminal-shell';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { CommandReadings } from './input/commands/command-readings.ts';
-import { TestRuns } from './input/commands/test-runtime.ts';
+import { CommandRunSlot } from './input/commands/test-runtime.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
@@ -121,7 +121,7 @@ import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
 import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
 import { getSharedNotificationFeed } from './views/notifications-feed.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
-import { createKeepAwakeForwarder, readServedKeepAwakeState, watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
+import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
 import { resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
 import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
@@ -394,40 +394,19 @@ async function main(prepared: PreparedShellCliRuntime) {
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // The optional "used N memories" provenance chip (default OFF), see interaction-seams.ts.
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
-  // Topology-aware keep-awake: in adopted-external mode the daemon owns keep-awake, the chip renders its
-  // state (power-chip-source.ts), every toggle from /power, Alt+A or the settings modal (all land on the
-  // power.keepAwake key) is forwarded to it, and each time it becomes reachable a toggle it has not taken is
-  // sent again, on or off; otherwise this terminal takes the daemon's value. One forwarder in the engine.
+  // Topology-aware keep-awake: power.keepAwake is daemon-owned, so every toggle from /power, Alt+A or the
+  // settings modal is a settings write that goes to the daemon (or, with none running, into its settings
+  // file). In adopted-external mode the chip renders the daemon's state (power-chip-source.ts).
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
   const daemonRpc = () => resolveOperatorRpc({ configManager, homeDirectory });
-  const keepAwakeForwarder = createKeepAwakeForwarder({
-    where: 'this terminal',
-    readKeepAwake: () => configManager.get('power.keepAwake') === true,
-    adoptKeepAwake: (enabled) => configManager.set('power.keepAwake', enabled),
-    notify: (line) => { systemMessageRouter.high(line); render(); },
-    send: async (enabled) => {
-      const rpc = daemonRpc();
-      if (!rpc.available) return { attempted: true, result: { ok: false, kind: 'connected_host_unavailable', error: rpc.reason } };
-      try {
-        const keepAwakeState = readServedKeepAwakeState(await rpc.platformClient.operator.invoke('power.keepAwake.set', { enabled }));
-        return { attempted: true, result: keepAwakeState !== undefined ? { ok: true, keepAwakeState } : { ok: true } };
-      } catch (error) {
-        return { attempted: true, result: { ok: false, kind: 'connected_host_error', error: summarizeError(error) } };
-      }
-    },
-  });
   const fetchDaemonPowerState = async (): Promise<PowerState | null> => {
-    let state: PowerState | null = null;
     const rpc = isExternalDaemon() ? daemonRpc() : null;
-    if (rpc?.available) {
-      try {
-        state = await rpc.platformClient.operator.invoke('power.status.get', {}) as unknown as PowerState;
-      } catch {
-        state = null;
-      }
+    if (!rpc?.available) return null;
+    try {
+      return await rpc.platformClient.operator.invoke('power.status.get', {}) as unknown as PowerState;
+    } catch {
+      return null;
     }
-    keepAwakeForwarder.reachable(state !== null, typeof state?.keepAwake?.enabled === 'boolean' ? state.keepAwake.enabled : undefined);
-    return state;
   };
   const powerChipSource = createPowerChipSource({
     powerManager: ctx.services.powerManager,
@@ -441,11 +420,12 @@ async function main(prepared: PreparedShellCliRuntime) {
       return endpoint.available ? await watchDaemonPowerEvents({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token, ...handlers }) : null;
     },
   });
-  const unsubscribeKeepAwakeForward = configManager.subscribe('power.keepAwake', (newValue) => {
-    if (isExternalDaemon()) void keepAwakeForwarder.set(newValue === true).finally(() => powerChipSource.refresh());
+  // A keep-awake change (here or taken from the daemon) redraws the chip from the daemon's state.
+  const unsubscribeKeepAwakeChip = configManager.subscribe('power.keepAwake', () => {
+    if (isExternalDaemon()) powerChipSource.refresh();
   });
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', () => powerChipSource.refresh()));
-  unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeForward);
+  unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeChip);
   // The status bar's mode words, recomputed only when the mode in force can change (session-permission-mode.ts);
   // its flash after Shift+Tab, and the unread notices count, each repaint when they change.
   const modeWords = createModeWordsSource(configManager, () => render(), getSharedModeFlash());
@@ -513,9 +493,13 @@ async function main(prepared: PreparedShellCliRuntime) {
   );
   commandContext.commandReadings = commandReadings;
   unsubs.push(() => commandReadings.dispose());
-  const testRuns = new TestRuns();
+  const testRuns = new CommandRunSlot();
   commandContext.testRuns = testRuns;
   unsubs.push(() => testRuns.dispose());
+  // /eval has its own slot, so an eval and a /test can run side by side; both stop on Esc and at exit.
+  const evalRuns = new CommandRunSlot();
+  commandContext.evalRuns = evalRuns;
+  unsubs.push(() => evalRuns.dispose());
 
   // In-terminal (OSC 9) notifier (approval-wait/turn-end/agent-blocked); writes
   // are restore-gated so no escape sequence lands after the shell resumes.
@@ -666,7 +650,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   const cancelGeneration = (): boolean => {
     shellPassthrough.cancelRunning();
     const stoppedTest = testRuns.cancel();
-    return cancelTurn() || stoppedTest;
+    const stoppedEval = evalRuns.cancel();
+    return cancelTurn() || stoppedTest || stoppedEval;
   };
 
   const jumpToBookmark = (key: string) => {

@@ -15,7 +15,7 @@ import type { WebSearchProviderRegistry } from '../web-search/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { PluginInFlightTracker } from './in-flight.js';
 import { PLUGIN_NAME_PATTERN, resolvePluginGrant } from '../runtime/plugins/manifest.js';
-import type { PluginTrustTier } from '../runtime/plugins/trust.js';
+import { describeUnappliedTier, type PluginTrustTier, type PluginUnappliedTier } from '../runtime/plugins/trust.js';
 import { readInstalledBundleGuard } from '../runtime/ecosystem/installed-bundle-guard.js';
 import { contentDigest } from '../utils/target-ref.js';
 import { sha256Base64Url } from '../utils/sha256.js';
@@ -220,6 +220,12 @@ export interface PluginLoaderDeps {
    * supplies its trust store; without one every plugin starts `untrusted`.
    */
   trustTier?: ((pluginName: string, copy: DiscoveredPlugin) => PluginTrustTier) | undefined;
+  /**
+   * A tier the owner set that is not applied to this copy, and why; read only
+   * when a refusal is worded, so a refused plugin says its tier was set for
+   * other files or another folder instead of reading as never trusted.
+   */
+  unappliedTier?: ((pluginName: string, copy: DiscoveredPlugin) => PluginUnappliedTier | undefined) | undefined;
 }
 
 /**
@@ -299,12 +305,21 @@ export async function loadPlugin(
   // The tier given to THIS copy (its directory and content): another same-named copy, or this one changed, is untrusted.
   const tier = deps.trustTier?.(manifest.name, discovered) ?? 'untrusted';
   const grant = resolvePluginGrant(manifest.name, manifest, tier);
+  // A tier set for other files or another folder is read only to word a refusal.
+  let unapplied: { readonly value: PluginUnappliedTier | undefined } | undefined;
+  const unappliedTier = (): PluginUnappliedTier | undefined => {
+    unapplied ??= { value: tier === 'untrusted' ? deps.unappliedTier?.(manifest.name, discovered) : undefined };
+    return unapplied.value;
+  };
   if (grant.withheldHighRisk.length > 0) {
     // Code in this process cannot be held to a capability it was refused, so a
     // withheld high-risk capability is enforced by not running the plugin.
     const named = grant.withheldHighRisk.join(', ');
-    return fail(`not started: it declares ${named}, which only a trusted plugin may use, and its trust tier is '${tier}'. `
-      + `Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`);
+    const set = unappliedTier();
+    return fail(`not started: it declares ${named}, which only a trusted plugin may use, and `
+      + (set !== undefined
+        ? describeUnappliedTier(manifest.name, set)
+        : `its trust tier is '${tier}'. Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`));
   }
 
   // The tier limits what the host hands the plugin; its own code still runs with this process's access.
@@ -362,6 +377,7 @@ export async function loadPlugin(
       registrations,
       ...(bundle.kind === 'bundle' ? { bundleGuard: bundle.guard } : {}),
       grant,
+      unappliedTier,
     };
 
     const api = createPluginAPI(ctx);

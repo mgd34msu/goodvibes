@@ -282,7 +282,7 @@ async function handlePatchCurrentModel(
 
   if (!rawModelReference) {
     return Response.json(
-      { error: 'Missing required field: registryKey', code: 'INVALID_REQUEST' },
+      { error: 'Missing required field: registryKey', code: 'INVALID_ARGUMENT' },
       { status: 400 },
     );
   }
@@ -303,7 +303,7 @@ async function handlePatchCurrentModel(
       return Response.json(
         {
           error: `Invalid effort '${String(rawEffort)}': expected one of [${REASONING_EFFORT_SEVERITY.join(', ')}], or null to restore the provider default`,
-          code: 'INVALID_REQUEST',
+          code: 'INVALID_ARGUMENT',
         },
         { status: 400 },
       );
@@ -319,7 +319,7 @@ async function handlePatchCurrentModel(
     registryKey = resolveModelReference(rawModelReference, allModels);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: message, code: 'INVALID_REQUEST' }, { status: 400 });
+    return Response.json({ error: message, code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
 
   const modelDef = findModelDefinition(registryKey, allModels);

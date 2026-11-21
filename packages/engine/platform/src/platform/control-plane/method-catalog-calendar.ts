@@ -100,7 +100,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
     replay: IDEMPOTENCY_KEY_REPLAY,
     recipients: ['attendees[]'],
     title: 'Create Calendar Event',
-    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID: read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
+    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
     category: 'calendar',
     effects: ['calendar.administer', 'outward.send'],
     dangerous: true,

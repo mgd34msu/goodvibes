@@ -27,9 +27,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
 import { client as platformClient, getCurrentAuth, setExplicitAuthToken } from '../../lib/goodvibes';
-import type { PublicPairingToken, PublicRelayCode } from '../../lib/goodvibes';
+import type { PublicPairingToken, PublicRelayCode, RemotePairRequest } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
-import { formatError } from '../../lib/errors';
+import { errorCode, formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
 import { useConfirm } from '../ui/ConfirmDialog';
@@ -205,6 +205,67 @@ export function PairingTokensSettings() {
     revokeRelayCode.mutate(code.id);
   }
 
+  // Devices asking to pair as a node (a browser's Phone node, a peer daemon). Read once when
+  // this section opens, then again on the remote-pair-* events (useRealtimeInvalidation).
+  const pairRequests = useQuery({
+    queryKey: queryKeys.remotePairRequests,
+    queryFn: () => platformClient.operator.remote.pairRequests.list(),
+  });
+  const pendingPairRequests = (pairRequests.data?.requests ?? []).filter((request) => request.status === 'pending');
+
+  const approvePairRequest = useMutation({
+    mutationFn: ({ id, confirmReplace }: { id: string; confirmReplace: boolean }) => platformClient.operator.remote.pairRequests.approve(id, confirmReplace),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.remotePairRequests });
+      toast({ title: 'Device approved', description: `Press Finish pairing on "${result.request.label}" to complete it.`, tone: 'success' });
+    },
+  });
+  const rejectPairRequest = useMutation({
+    mutationFn: (id: string) => platformClient.operator.remote.pairRequests.reject(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.remotePairRequests });
+      toast({ title: 'Pairing request rejected', description: 'That device is not paired; it has to ask again.', tone: 'info' });
+    },
+    onError: (error) => toast({ title: 'Could not reject the request', description: formatError(error), tone: 'danger' }),
+  });
+
+  async function handleApprovePairRequest(request: RemotePairRequest): Promise<void> {
+    try {
+      await approvePairRequest.mutateAsync({ id: request.id, confirmReplace: false });
+    } catch (error: unknown) {
+      if (errorCode(error) !== 'REMOTE_PAIR_REPLACES_PEER') {
+        toast({ title: 'Could not approve the request', description: formatError(error), tone: 'danger' });
+        return;
+      }
+      // The request names a device already paired: approving replaces that device's pairing.
+      const ok = await confirm.ask({
+        title: 'Replace the paired device?',
+        target: request.requestedId,
+        description: `"${request.label}" asks to pair as ${request.requestedId}, which is already paired. Approve only if it is that same device pairing again: its old pairing stops working.`,
+        confirmLabel: 'Approve and replace',
+        tone: 'danger',
+      });
+      if (!ok) return;
+      try {
+        await approvePairRequest.mutateAsync({ id: request.id, confirmReplace: true });
+      } catch (replaceError: unknown) {
+        toast({ title: 'Could not approve the request', description: formatError(replaceError), tone: 'danger' });
+      }
+    }
+  }
+
+  async function handleRejectPairRequest(request: RemotePairRequest): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Reject this pairing request?',
+      target: request.label,
+      description: 'The device is not paired and has to ask again.',
+      confirmLabel: 'Reject',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    rejectPairRequest.mutate(request.id);
+  }
+
   const [relayPairing, setRelayPairing] = useState(() => getStoredRelayPairing());
 
   async function handleUnpairRelay(): Promise<void> {
@@ -245,6 +306,52 @@ export function PairingTokensSettings() {
   return (
     <>
       {confirm.element}
+      {pairRequests.isError && (
+        <ErrorState error={pairRequests.error} onRetry={() => void pairRequests.refetch()} title="Failed to load pairing requests" />
+      )}
+      {pendingPairRequests.length > 0 && (
+        <SettingsBlock
+          testId="remote-pair-requests"
+          title="Waiting to pair"
+          description="A device asked to pair as a node of this daemon. Approve only a device you recognise, then press Finish pairing on it."
+        >
+          <RowList aria-label="Waiting to pair">
+            {pendingPairRequests.map((request) => (
+              <Row
+                key={request.id}
+                className="pairing-token-row"
+                title={request.label}
+                meta={[
+                  [request.platform, request.deviceFamily].filter(Boolean).join(', '),
+                  request.capabilities.length > 0 ? `offers ${request.capabilities.join(', ')}` : 'offers nothing yet',
+                  `pairs as ${request.requestedId}`,
+                  whenLabel(request.createdAt) && `asked ${whenLabel(request.createdAt)}`,
+                ].filter(Boolean).join(' · ')}
+                trailing={(
+                  <>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={approvePairRequest.isPending || rejectPairRequest.isPending}
+                      onClick={() => void handleApprovePairRequest(request)}
+                    >
+                      {approvePairRequest.isPending && approvePairRequest.variables?.id === request.id ? 'Approving…' : 'Approve'}
+                    </Button>
+                    <Button
+                      variant="quiet-danger"
+                      size="sm"
+                      disabled={approvePairRequest.isPending || rejectPairRequest.isPending}
+                      onClick={() => void handleRejectPairRequest(request)}
+                    >
+                      {rejectPairRequest.isPending && rejectPairRequest.variables === request.id ? 'Rejecting…' : 'Reject'}
+                    </Button>
+                  </>
+                )}
+              />
+            ))}
+          </RowList>
+        </SettingsBlock>
+      )}
       <SettingsBlock
         testId="pairing-tokens"
         title="Paired devices"

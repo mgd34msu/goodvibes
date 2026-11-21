@@ -1,6 +1,7 @@
 import type { Observed } from '@goodvibes/engine/errors';
 import { readdirSync, readFileSync, realpathSync, type Dirent } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
+import { kindOfProductWorktree, productWorktreePath, productWorktreeRoot, productWorktreeSegments } from '../../git/product-worktree-marker.js';
 import { isContractId, isTerminalContractStatus, type Contract } from '../../contract/types.js';
 import type { WorktreeOwnerInfo } from './retention.js';
 
@@ -96,7 +97,7 @@ function readWorkstreamOwners(workingDirectory: string, worktreesRoot: string): 
  * unknown as ended.
  */
 export function createContractOwnerResolver(workingDirectory: string, contracts: ContractLookup): (path: string) => WorktreeOwnerInfo {
-  const base = join(workingDirectory, '.goodvibes', '.worktrees');
+  const base = productWorktreeRoot(workingDirectory);
   const loaded = new Map<string, WorktreeOwnerInfo & { readonly inputId?: string | undefined }>();
   const contractOwner = (id: string): WorktreeOwnerInfo & { readonly inputId?: string | undefined } => {
     const known = loaded.get(id);
@@ -122,7 +123,7 @@ export function createContractOwnerResolver(workingDirectory: string, contracts:
     if (!inputOwners) {
       inputOwners = new Map();
       let shorts: string[] = [];
-      try { shorts = readdirSync(join(base, 'contract')); } catch { /* no contract worktrees */ }
+      try { shorts = readdirSync(productWorktreePath(workingDirectory, 'contract')); } catch { /* no contract worktrees */ }
       for (const short of shorts) {
         const owner = contractOwner(`ctr-${short}`);
         if (owner.inputId !== undefined) inputOwners.set(owner.inputId, owner);
@@ -134,16 +135,25 @@ export function createContractOwnerResolver(workingDirectory: string, contracts:
   const strip = (owner: WorktreeOwnerInfo & { readonly inputId?: string | undefined }): WorktreeOwnerInfo =>
     owner.state === 'ended' ? { state: 'ended', endedAt: owner.endedAt, baseBranch: owner.baseBranch } : { state: owner.state, baseBranch: owner.baseBranch };
   return (path) => {
-    const rel = relative(base, path);
-    if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) return UNKNOWN;
-    const parts = rel.split(sep);
+    const parts = productWorktreeSegments(workingDirectory, path);
+    const kind = kindOfProductWorktree(workingDirectory, path);
+    if (parts === null || kind === null) return UNKNOWN;
     try {
-      if (parts[0] === 'contract' && parts.length >= 2) return strip(contractOwner(`ctr-${parts[1]}`));
-      if (parts[0] === 'contract-planner' && parts.length === 2) return strip(contractOwner(plannerContractId(parts[1]!)));
-      if (parts[0] === 'contract-input' && parts.length === 2) return inputOwner(parts[1]!);
-      if (parts[0] === 'ws' || parts[0] === 'ws-ns' || parts[0] === 'ws-owned') {
-        workstreamOwners ??= readWorkstreamOwners(workingDirectory, base);
-        return workstreamOwners.get(comparable(path)) ?? UNKNOWN;
+      switch (kind) {
+        case 'contract': return parts.length >= 2 ? strip(contractOwner(`ctr-${parts[1]}`)) : UNKNOWN;
+        case 'contract-planner': return parts.length === 2 ? strip(contractOwner(plannerContractId(parts[1]!))) : UNKNOWN;
+        case 'contract-input': return parts.length === 2 ? inputOwner(parts[1]!) : UNKNOWN;
+        case 'ws':
+        case 'ws-ns':
+        case 'ws-owned':
+          workstreamOwners ??= readWorkstreamOwners(workingDirectory, base);
+          return workstreamOwners.get(comparable(path)) ?? UNKNOWN;
+        case 'agent': return UNKNOWN;
+        default: {
+          // A kind added to the layout without an owner rule here does not compile.
+          const unhandled: never = kind;
+          return unhandled;
+        }
       }
     } catch { /* unreadable: unknown */ }
     return UNKNOWN;

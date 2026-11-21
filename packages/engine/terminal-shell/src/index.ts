@@ -126,6 +126,7 @@ export {
 
 export {
   extractOperatorToken,
+  resolveLocalDaemonTarget,
   resolveRemoteDaemonTarget,
   callDaemonVerb,
   DAEMON_FAILURE_CODES,
@@ -136,6 +137,7 @@ export {
   type RemoteTargetFlags,
   type RemoteTargetResolution,
   type ResolveRemoteTargetInput,
+  type ResolveLocalTargetInput,
   type DaemonFetch,
   type DaemonVerbOutcome,
 } from './cluster-remote-daemon-target.js';

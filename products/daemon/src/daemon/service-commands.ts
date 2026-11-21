@@ -43,6 +43,8 @@ import {
   type ManagedDefinitionOwner,
   type ManagedServiceActionRunner,
 } from '../runtime/managed-daemon-service.js';
+import type { DaemonServiceSubcommand } from './service-subcommands.js';
+import { SERVICE_STATUS_RESULT } from '../cli/machine-contracts.js';
 
 // `resolveInstalledDaemonBinary` lives in the runtime module, re-exported
 // here so this module stays the CLI's stable public surface (and so existing
@@ -53,21 +55,6 @@ export {
 } from '../runtime/managed-daemon-service.js';
 export type { ManagedServiceActionRunner } from '../runtime/managed-daemon-service.js';
 
-export const DAEMON_SERVICE_SUBCOMMANDS = [
-  'install-service',
-  'refresh-service',
-  'uninstall-service',
-  'service-status',
-  'start-service',
-  'stop-service',
-  'restart-service',
-] as const;
-
-export type DaemonServiceSubcommand = (typeof DAEMON_SERVICE_SUBCOMMANDS)[number];
-
-export function isDaemonServiceSubcommand(value: string | undefined): value is DaemonServiceSubcommand {
-  return typeof value === 'string' && (DAEMON_SERVICE_SUBCOMMANDS as readonly string[]).includes(value);
-}
 
 /**
  * Exit codes `service-status` reports, so a script never parses prose.
@@ -117,7 +104,8 @@ export interface DaemonServiceCliInput {
   /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
   readonly actionRunner?: ManagedServiceActionRunner | undefined;
   /**
-   * `service-status` only: report one JSON document instead of prose. The exit
+   * `service-status` reports one JSON document instead of prose, and every
+   * verb's failure is the `{ok:false, code, error, fix}` document. The exit
    * code is the same either way, the codes are the machine-readable answer,
    * and JSON is for when a script wants the fields as well.
    */
@@ -263,6 +251,21 @@ function runLifecycleVerb(
       status,
     };
   }
+  // The exit code is what the platform reports afterwards, not that the verb
+  // was dispatched: a start or restart that left the service down is the same
+  // "installed, not running" answer service-status gives (3), and a stop that
+  // left it running failed (1).
+  if (action !== 'stop' && !status.running) {
+    return { ok: false, exitCode: SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING, lines: buildLifecycleResultLines(action, status), status };
+  }
+  if (action === 'stop' && status.running) {
+    return {
+      ok: false,
+      exitCode: 1,
+      lines: [`service stop failed: the ${status.platform} service ${status.serviceName} (${status.path}) is still running`],
+      status,
+    };
+  }
   return { ok: true, exitCode: 0, lines: buildLifecycleResultLines(action, status), status };
 }
 
@@ -275,11 +278,14 @@ export function serviceStatusExitCode(status: ManagedServiceStatus): number {
 /**
  * The `--json` document for `service-status`: the status fields, who wrote the
  * definition at `path` (`definitionOwner`, see `ManagedDefinitionOwner`) when
- * known, plus the code.
+ * known, plus the code. scripts/install.sh (read_daemon_service) reads it line
+ * by line, one key per line, after checking SERVICE_STATUS_RESULT's schema and
+ * version: a change to the fields or the layout raises the version there too.
  */
 export function serviceStatusJson(status: ManagedServiceStatus, owner?: ManagedDefinitionOwner, productServices?: readonly string[]): string {
   return JSON.stringify(
     {
+      ...SERVICE_STATUS_RESULT,
       ok: true,
       data: {
         platform: status.platform,
@@ -416,21 +422,63 @@ function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceMa
  * hand-started daemon never installs a service the owner removed, and doctor
  * does not ask for one. An installed service starts at login and a removed one
  * does not, so `service.autostart` is recorded with it (the install's start
- * reads it to enable the unit). Best effort: the service command already succeeded.
+ * reads it to enable the unit). An install records it after the service is
+ * written, best effort; an uninstall records it first and removes nothing when
+ * it cannot (see `uninstall-service`).
  */
-function recordServiceChoice(input: DaemonServiceCliInput, enabled: boolean): void {
-  setServiceKey(input, 'service.enabled', enabled);
-  setServiceKey(input, 'service.autostart', enabled);
+function recordServiceChoice(input: DaemonServiceCliInput, enabled: boolean): string | undefined {
+  return setServiceKey(input, 'service.enabled', enabled) ?? setServiceKey(input, 'service.autostart', enabled);
 }
 
-function setServiceKey(input: DaemonServiceCliInput, key: 'service.enabled' | 'service.autostart', value: boolean): void {
-  if (!input.configManager || input.configManager.get(key) === value) return;
-  try { input.configManager.setDynamic(key, value); }
-  catch { /* a read-only or locked setting keeps its value; the service itself is as reported */ }
+type ServiceKey = 'service.enabled' | 'service.autostart';
+
+/**
+ * Write one service setting. Returns why it was not written (the managed-policy
+ * lock that holds it, or the settings file that could not be written), or
+ * undefined when it holds `value` now.
+ */
+function setServiceKey(input: DaemonServiceCliInput, key: ServiceKey, value: boolean): string | undefined {
+  const config = input.configManager;
+  if (!config || config.get(key) === value) return undefined;
+  try {
+    config.setDynamic(key, value);
+    return undefined;
+  } catch (error) {
+    let lock: { readonly source: string; readonly reason: string } | undefined;
+    try { lock = config.readHostManagedSettingLocks().get(key); } catch { lock = undefined; }
+    if (lock) return `${key} is locked by managed policy (${lock.source}: ${lock.reason})`;
+    const file = config.getDaemonTierPath() ?? config.getConfigPath();
+    return `${key} could not be saved to ${file} (${error instanceof Error ? error.message : String(error)})`;
+  }
+}
+
+/** The machine code of a service verb's failure, from the exit code it already reports. */
+function serviceFailureCode(exitCode: number): string {
+  if (exitCode === SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING) return 'SERVICE_NOT_RUNNING';
+  if (exitCode === SERVICE_STATUS_EXIT_NOT_INSTALLED) return 'SERVICE_NOT_INSTALLED';
+  if (exitCode === SERVICE_EXIT_NOT_OURS) return 'SERVICE_DEFINITION_NOT_OURS';
+  return 'SERVICE_ACTION_FAILED';
+}
+
+/**
+ * The failure of any service verb asked for with `--json`: one
+ * `{ok:false, code, error, fix}` document, the envelope every other `--json`
+ * failure of this program uses, with the same exit code as the prose.
+ */
+function asJsonFailure(result: DaemonServiceCliResult): DaemonServiceCliResult {
+  const [error = 'the service command failed', ...rest] = result.lines.map((line) => line.trim()).filter((line) => line !== '');
+  const fix = rest.length > 0 ? rest.join(' ') : 'run goodvibes-daemon service-status for the platform state';
+  return { ...result, lines: [JSON.stringify({ ok: false, code: serviceFailureCode(result.exitCode), error, fix }, null, 2)] };
 }
 
 /** Dispatch a daemon service subcommand to the platform's `PlatformServiceManager`. */
 export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
+  const result = await runServiceVerb(input);
+  // service-status answers 3 and 4 as ok (the question was answered); its JSON document is already written.
+  return input.json && !result.ok ? asJsonFailure(result) : result;
+}
+
+async function runServiceVerb(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
   input.assertCurrent?.();
   const manager = buildManager(input);
   switch (input.subcommand) {
@@ -477,11 +525,29 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
           status: before,
         };
       }
+      // The owner's choice is recorded before anything is removed: a removal
+      // the settings do not record would be undone by the next hand-started
+      // daemon's boot promotion, which installs a service while service.enabled
+      // is true.
+      const enabledBefore = input.configManager?.get('service.enabled') === true;
+      const autostartBefore = input.configManager?.get('service.autostart') === true;
+      const unrecorded = recordServiceChoice(input, false);
+      if (unrecorded !== undefined) {
+        if (enabledBefore) setServiceKey(input, 'service.enabled', true);
+        return {
+          ok: false,
+          exitCode: 1,
+          status: before,
+          lines: [`service uninstall refused: ${unrecorded}, so nothing was removed.`],
+        };
+      }
       // uninstall() stops and unregisters the service before it removes the file.
       let uninstalled: ManagedServiceStatus;
       try {
         uninstalled = manager.uninstall();
       } catch {
+        // Removal may already have happened, so the recorded choice stays: a
+        // retry against a removed service stops at "nothing to uninstall".
         return {
           ...failed('uninstall', before),
           lines: [
@@ -492,12 +558,17 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
         };
       }
       if (uninstalled.actionError !== undefined || uninstalled.installed || uninstalled.running) {
-        return failed('uninstall', {
+        // The service is still there, so the settings go back to what they were.
+        const unrestored = [
+          setServiceKey(input, 'service.enabled', enabledBefore),
+          setServiceKey(input, 'service.autostart', autostartBefore),
+        ].filter((reason): reason is string => reason !== undefined);
+        const result = failed('uninstall', {
           ...uninstalled,
           actionError: uninstalled.actionError || 'removal is incomplete: the platform still reports an installed or running service',
         });
+        return { ...result, lines: [...result.lines, ...unrestored.map(reason => `the service settings could not be put back: ${reason}`)] };
       }
-      recordServiceChoice(input, false);
       return ok('uninstall', uninstalled);
     }
     case 'start-service':

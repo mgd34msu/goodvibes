@@ -56,15 +56,9 @@ import { isLoopbackHost as isLoopbackHostname } from '@goodvibes/engine/transpor
 import { networkInterfaces as osNetworkInterfaces } from 'node:os';
 import {
   deriveControlPlaneBaseUrl,
+  isWildcardHost,
   readControlPlaneBinding,
 } from '../config/control-plane-base-url.js';
-
-const WILDCARD_HOSTS: ReadonlySet<string> = new Set(['0.0.0.0', '::', '[::]', '0:0:0:0:0:0:0:0', '[0:0:0:0:0:0:0:0]', '*']);
-
-export function isWildcardHost(host: string | undefined): boolean {
-  if (!host) return true;
-  return WILDCARD_HOSTS.has(host.trim().toLowerCase());
-}
 
 /** Loopback: this machine, unreachable from any other one; the rule is the transport's `isLoopbackHost`. */
 export function isLoopbackHost(host: string | undefined): boolean {

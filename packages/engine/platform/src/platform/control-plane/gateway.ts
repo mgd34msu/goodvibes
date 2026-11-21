@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isTurnSettlingEvent } from '@goodvibes/engine/transport-core/turn-settlement';
 import { logger } from '../utils/logger.js';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
@@ -166,7 +167,6 @@ interface StreamDeltaWire {
   readonly ends?: true | undefined;
 }
 
-const STREAM_TURN_END_EVENTS: ReadonlySet<string> = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
 /** A delta carries the full text again once the text grew this much past the last full frame (and at least doubled). */
 const STREAM_RESYNC_MIN_GROWTH = 4096;
 /** Turns tracked at once, by the gateway and per connection. */
@@ -1125,7 +1125,7 @@ export class ControlPlaneGateway {
   private decideStreamDeltaWire(record: ScopedControlPlaneRecentEvent, payload: AnyRuntimeEvent): void {
     if (!('turnId' in payload) || typeof payload.turnId !== 'string') return;
     const turnId = payload.turnId;
-    if (STREAM_TURN_END_EVENTS.has(payload.type)) {
+    if (isTurnSettlingEvent(payload.type)) {
       this.streamTurns.delete(turnId);
       this.streamDeltaWires.set(record, { turnId, ends: true });
       return;

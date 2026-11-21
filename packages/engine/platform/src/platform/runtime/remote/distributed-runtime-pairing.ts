@@ -762,7 +762,7 @@ function issueToken(
 ): { token: StoredPeerTokenRecord; value: string; replaced: string[] } {
   if (selection.kind === 'none') {
     throw new RefusalError(refusal({
-      code: 'INVALID_REQUEST',
+      code: 'INVALID_ARGUMENT',
       state: 'no scope was selected for the peer token',
       reason: 'A peer token needs at least one scope.',
       next: ['Omit scopes for the published set, or name the scopes the token should hold.'],

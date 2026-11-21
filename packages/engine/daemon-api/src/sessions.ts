@@ -22,12 +22,12 @@ async function dispatchSessionRoutesInner(
   const { pathname } = url;
   const method = req.method;
 
-  if (pathname === '/api/sessions' && method === 'GET') return handlers.getIntegrationSessions();
+  if (pathname === '/api/sessions' && method === 'GET') return handlers.getIntegrationSessions(url, req);
   if (pathname === '/api/sessions/register' && method === 'POST') return handlers.registerSharedSession(req);
   if (pathname === '/api/sessions' && method === 'POST') return handlers.createSharedSession(req);
 
   const sharedSessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
-  if (sharedSessionMatch && method === 'GET') return handlers.getSharedSession(safeDecodeURIComponent(sharedSessionMatch[1]!));
+  if (sharedSessionMatch && method === 'GET') return handlers.getSharedSession(safeDecodeURIComponent(sharedSessionMatch[1]!), req);
   if (sharedSessionMatch && method === 'DELETE') return handlers.deleteSharedSession(safeDecodeURIComponent(sharedSessionMatch[1]!), req);
 
   const sharedSessionLifecycleMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/(close|reopen|detach)$/);
@@ -40,7 +40,7 @@ async function dispatchSessionRoutesInner(
   }
 
   const sharedSessionMessagesMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
-  if (sharedSessionMessagesMatch && method === 'GET') return handlers.getSharedSessionMessages(safeDecodeURIComponent(sharedSessionMessagesMatch[1]!), url);
+  if (sharedSessionMessagesMatch && method === 'GET') return handlers.getSharedSessionMessages(safeDecodeURIComponent(sharedSessionMessagesMatch[1]!), url, req);
   if (sharedSessionMessagesMatch && method === 'POST') return handlers.postSharedSessionMessage(safeDecodeURIComponent(sharedSessionMessagesMatch[1]!), req);
 
   const sharedSessionInputsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/inputs$/);

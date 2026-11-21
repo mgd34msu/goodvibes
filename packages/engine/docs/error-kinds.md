@@ -205,8 +205,8 @@ try {
 }
 ```
 
-The full set of canonical codes, available as `EngineErrorCodes.*`, is twenty
-seven values grouped by the failure family they name. A credential that is
+The full set of canonical codes, available as `EngineErrorCodes.*`, is thirty
+values grouped by the failure family they name. A credential that is
 missing, expired or revoked is answered `AUTH_REQUIRED`: get a new one and retry.
 
 | Code | What it signals |
@@ -226,7 +226,10 @@ missing, expired or revoked is answered `AUTH_REQUIRED`: get a new one and retry
 | `CREDENTIAL_DESTINATION_UNBOUND` | A write would move where a configured credential is sent without stating that credential; nothing was saved |
 | `NOT_INVOKABLE` | The gateway method exists but cannot be invoked over this path |
 | `METHOD_NOT_FOUND` | No gateway method with that id exists |
-| `VALIDATION_FAILED` | The input failed schema or contract validation |
+| `INVALID_ARGUMENT` | The request's input is wrong: a missing, malformed or out-of-range argument, or input that does not match the method's schema; nothing was changed |
+| `STEP_UP_REQUIRED` | A state-changing call over the relay needs a passkey confirmation; the credential itself was accepted (category `permission`) |
+| `RELAY_DISABLED` | The call arrived over the relay and relay access is turned off on this daemon |
+| `RELAY_CODE_REVOKED` | The call arrived over the relay with a relay code this daemon did not issue or has revoked; pair the device for the relay again |
 | `AGENT_TIMEOUT` | A spawned agent exceeded its time budget |
 | `AGENT_FAILED` | A spawned agent ended in failure |
 | `TOOL_EXEC_FAILED` | A tool execution errored |
@@ -255,7 +258,7 @@ The platform infers a representative canonical code for each `kind` (via `inferK
 | `service` | `SERVICE_UNAVAILABLE` |
 | `internal` | `INTERNAL_ERROR` |
 | `tool` | `TOOL_EXEC_FAILED` |
-| `validation` | `VALIDATION_FAILED` |
+| `validation` | `INVALID_ARGUMENT` |
 | `unknown` | `UNKNOWN` |
 
 ---

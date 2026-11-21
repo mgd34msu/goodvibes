@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
-import { GatewayVerbError as HandlerError } from '../../control-plane/routes/gateway-verb-error.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { MutationPublication } from '../../utils/file-mutation.js';
 
 /**
@@ -122,7 +122,7 @@ interface RouteRow {
 export function parseChannelId(channelId: string): ParsedChannelId {
   const raw = typeof channelId === 'string' ? channelId.trim() : '';
   if (raw.length === 0) {
-    throw new HandlerError('channelId is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
+    throw new GatewayVerbError('channelId is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
   }
   const separator = raw.indexOf(':');
   if (separator === -1) {
@@ -131,7 +131,7 @@ export function parseChannelId(channelId: string): ParsedChannelId {
   const surfaceKind = raw.slice(0, separator).trim();
   const routeId = raw.slice(separator + 1).trim();
   if (surfaceKind.length === 0) {
-    throw new HandlerError('channelId is missing a surfaceKind', 'ROUTING_INVALID_CHANNEL_ID', 400);
+    throw new GatewayVerbError('channelId is missing a surfaceKind', 'ROUTING_INVALID_CHANNEL_ID', 400);
   }
   // A trailing colon with no routeId collapses to a surface-only assignment.
   return routeId.length === 0 ? { surfaceKind } : { surfaceKind, routeId };
@@ -189,7 +189,7 @@ export class RouteStore {
   }
 
   init(): Promise<void> {
-    if (this.closed) return Promise.reject(new HandlerError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500));
+    if (this.closed) return Promise.reject(new GatewayVerbError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500));
     if (this.initialized) return Promise.resolve();
     if (this.initializing) return this.initializing;
     const pending = this.store.init().then(() => { if (!this.closed) this.initialized = true; });
@@ -225,10 +225,10 @@ export class RouteStore {
 
   private requireInit(): void {
     if (this.closed) {
-      throw new HandlerError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500);
+      throw new GatewayVerbError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500);
     }
     if (!this.initialized) {
-      throw new HandlerError('RouteStore not initialized', 'ROUTING_STORE_UNINITIALIZED', 500);
+      throw new GatewayVerbError('RouteStore not initialized', 'ROUTING_STORE_UNINITIALIZED', 500);
     }
   }
 
@@ -313,7 +313,7 @@ export class RouteStore {
     assertCurrent?.();
     const profileId = typeof input.profileId === 'string' ? input.profileId.trim() : '';
     if (profileId.length === 0) {
-      throw new HandlerError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
+      throw new GatewayVerbError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
     }
     const { surfaceKind, routeId } = parseChannelId(input.channelId);
     const channelId = buildChannelId(surfaceKind, routeId);
@@ -334,7 +334,7 @@ export class RouteStore {
       else transaction.run('INSERT INTO routes (assignmentId, channelId, surfaceKind, routeId, profileId, label, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [assignmentId, channelId, surfaceKind, routeId ?? null, profileId, label, now, now]);
       const row = transaction.get<RouteRow>('SELECT * FROM routes WHERE assignmentId = ?', [assignmentId]);
-      if (!row) throw new HandlerError('Failed to read admitted route', 'ROUTING_WRITE_FAILED', 500);
+      if (!row) throw new GatewayVerbError('Failed to read admitted route', 'ROUTING_WRITE_FAILED', 500);
       return { route: rowToRoute(row), created: existing === null };
     }, assertCurrent ?? (() => {}), withPublication);
   }
@@ -352,7 +352,7 @@ export class RouteStore {
     assertCurrent?.();
     const id = typeof assignmentId === 'string' ? assignmentId.trim() : '';
     if (id.length === 0) {
-      throw new HandlerError('assignmentId is required', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
+      throw new GatewayVerbError('assignmentId is required', 'ROUTING_INVALID_ASSIGNMENT_ID', 400);
     }
     return this.store.persistTransaction(transaction => {
       const existing = transaction.get<RouteRow>('SELECT * FROM routes WHERE assignmentId = ?', [id]);
@@ -368,7 +368,7 @@ export class RouteStore {
 function assertRouteUnchanged(what: string, row: { readonly updatedAt: string } | null, expectedUpdatedAt: string | null): void {
   const now = row?.updatedAt ?? null;
   if (now === expectedUpdatedAt) return;
-  throw new HandlerError(
+  throw new GatewayVerbError(
     now === null
       ? `${what} was deleted after this request read it; nothing was written. Read the routes again and retry.`
       : expectedUpdatedAt === null

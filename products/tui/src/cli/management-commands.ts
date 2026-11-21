@@ -11,7 +11,6 @@ import {
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
-import { ensurePublicBaseUrl } from '@goodvibes/engine/platform/platform/pairing';
 import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes/engine/platform/platform/pairing';
 import { defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
@@ -136,13 +135,12 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
   // so no runtime of the folder the command was typed in is built.
   const daemonVerbs = createDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
   const output = await (async (): Promise<string> => {
-    // Freeze a stable web origin once (never clobbering a user-set value) so the
-    // printed link and the daemon's own handoff origin agree and survive a DHCP
-    // lease change where a stable name exists. The verb re-derives the same origin
-    // and returns its honest posture. A wildcard bind waits once for the host
-    // probes (Tailscale name, a `.local` name that resolves here).
+    // The web origin derived live from the settings (a user-set web.publicBaseUrl
+    // wins), so the printed link and the daemon's own handoff origin agree. The
+    // verb re-derives the same origin and returns its honest posture. A wildcard
+    // bind waits once for the host probes (Tailscale name, a `.local` name that resolves here).
     const hostInputs = pairingOriginUsesStableHost(runtime.configManager) ? await refreshStableHostInputs() : undefined;
-    const webOrigin = ensurePublicBaseUrl(runtime.configManager, hostInputs ? () => hostInputs : undefined);
+    const webOrigin = resolvePairingWebOrigin(runtime.configManager, hostInputs ? () => hostInputs : undefined);
     const name = readOptionValue(runtime.cli.commandArgs, '--name') ?? defaultPairingTokenName();
     // Mint through the canonical hand-off verb ON THE DAEMON: the deep link
     // pairs a device to the daemon-hosted web app, and the offer set (push,

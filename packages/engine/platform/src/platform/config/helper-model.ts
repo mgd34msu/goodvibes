@@ -71,7 +71,7 @@ export interface HelperUsage {
 
 export interface HelperModelDeps {
   readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing'
+  readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'getForModel' | 'resolveModelPricing' | 'cacheRatios'
     | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>;
   /**
    * Runtime bus for usage events. When present, every helper-model call
@@ -254,7 +254,8 @@ export class HelperModel {
         };
         // Priced and recorded as the model that answered, a fallback model included.
         const resolvedPricing = this.deps.providerRegistry.resolveModelPricing(answered.modelId, answered.provider.name);
-        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, answered.provider.name);
+        const costUsdCents = computeUsageCostUsdCents(resolvedPricing, usage, answered.provider.name,
+          this.deps.providerRegistry.cacheRatios(answered.provider.name));
         emitLlmResponseReceived(this.deps.runtimeBus, {
           sessionId: this.deps.sessionId?.() ?? '',
           source: 'helper-model',

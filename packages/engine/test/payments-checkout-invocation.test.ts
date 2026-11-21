@@ -27,7 +27,8 @@ import { DurablePaymentOperations } from '../platform/src/platform/payments/host
 import { DurableCheckoutJournal } from '../platform/src/platform/payments/host/checkout-journal-store.js';
 import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
 import type { BeginCheckoutInput } from '../platform/src/platform/payments/payments-gateway-service.js';
-import { HandlerError, type HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
+import type { HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import type { PaymentsHandlerDeps } from '../platform/src/platform/payments/host/register.js';
 import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
 import type { NativeExecutionAuthority, NativePairedSnapshot } from '../platform/src/platform/security/http-auth.js';
@@ -69,7 +70,7 @@ test.each(['revocation', 'budget'] as const)(
     if (kind === 'revocation') f.revoke();
     if (kind === 'budget') f.config.set('payments.budget.dailyItem', 2);
     const error = (() => { try { f.owner.assertCurrent(); } catch (error) { return error; } return null; })();
-    expect(error).toBeInstanceOf(HandlerError);
+    expect(error).toBeInstanceOf(GatewayVerbError);
     expect(String(error)).not.toContain('private-fixture-bearer');
   },
 );
@@ -132,8 +133,8 @@ test.each(['local', 'pairing-token'] as const)('the owner on %s authority can st
 
 test('without the owner\'s explicit request a purchase can be neither started nor cancelled', async () => {
   const f = await paymentHost('local', false);
-  expect(() => f.start()).toThrow(HandlerError);
+  expect(() => f.start()).toThrow(GatewayVerbError);
   const begun = await f.ownerBegins(), before = f.state();
-  await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(HandlerError);
+  await expect(f.cancel(begun.operationId)).rejects.toBeInstanceOf(GatewayVerbError);
   expect(f.state()).toBe(before);
 });

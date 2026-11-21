@@ -1,3 +1,4 @@
+import { isTurnSettlingEvent } from '@goodvibes/engine/transport-core/turn-settlement';
 import type { ControlPlaneClientRecord } from '../runtime/store/domains/control-plane.js';
 import type { AnyRuntimeEvent, RuntimeEventDomain, RuntimeEventEnvelope } from '../runtime/events/index.js';
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
@@ -335,7 +336,6 @@ export function resolveReplayResume(
 }
 
 const CATCH_UP_WINDOW = 20;
-const TURN_END_FRAMES: ReadonlySet<string> = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
 
 function resolveReplayWindow(
   recentEvents: readonly ScopedControlPlaneRecentEvent[],
@@ -366,7 +366,7 @@ function resolveReplayWindow(
   const openStarts: ScopedControlPlaneRecentEvent[] = [];
   for (const event of recentEvents) {
     const type = (event.payload as { type?: unknown } | null)?.type;
-    if (type !== 'TURN_SUBMITTED' && !TURN_END_FRAMES.has(type as string)) continue;
+    if (type !== 'TURN_SUBMITTED' && !isTurnSettlingEvent(type)) continue;
     const session = frameSessionId(event.payload) ?? '';
     if (decided.has(session) || !mayReceive(event)) continue;
     decided.add(session);

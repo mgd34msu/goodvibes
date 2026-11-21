@@ -544,6 +544,15 @@ keeps only the node's id and name, so a reload stays paired. Paired over the
 relay, the token is held in the page's memory and a reload asks to pair again.
 Unpairing clears the cookie.
 
+Pair this phone sends a pairing request that waits for the owner. It is
+listed under "Waiting to pair" in Settings, Devices and pairing on any device
+signed in as the owner (and by `/devices requests` in the terminal), with the
+device's name, platform, the capabilities it offers and the node id it pairs
+as; the list updates as requests arrive. Approve or Reject answers it (`/devices
+approve <request>` and `/devices reject <request>` in the terminal). A request
+that names a device already paired asks once more before it replaces that
+device's pairing. After approving, press Finish pairing on the phone.
+
 The capabilities a phone can announce:
 
 | Capability | What it serves |

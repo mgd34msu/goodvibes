@@ -273,11 +273,21 @@ function buildDefaultDefinition(
     : definition;
 }
 
-function resolveServiceName(configManager: ConfigManager, defaultServiceName?: string): string {
+/** What the unit name is read from: the setting, and where its value came from when the reader can say. */
+export interface ServiceNameSource {
+  get(key: 'service.serviceName'): unknown;
+  describeConfigKeySource?(key: 'service.serviceName'): { readonly tier: string; readonly effectiveOrigin?: string | undefined };
+}
+
+/**
+ * The unit name the service manager installs and manages. A product's default
+ * replaces only the shared schema's pure default; a stored or overlaid name is
+ * the owner's choice and wins, with the product default when it is blank. A
+ * reader that cannot say where the value came from is read by its value alone.
+ * The one rule: status, install and update all name the unit through it.
+ */
+export function resolveServiceName(configManager: ServiceNameSource, defaultServiceName?: string): string {
   const fallback = defaultServiceName ?? 'daemon';
-  // A consumer's platform default may replace the shared schema default, while
-  // every persisted choice and invocation overlay remains the owner's choice.
-  // Minimal embedded config readers without provenance retain prior behavior.
   if (defaultServiceName !== undefined && typeof configManager.describeConfigKeySource === 'function') {
     const source = configManager.describeConfigKeySource('service.serviceName');
     if (source.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return fallback;
@@ -540,8 +550,11 @@ function suggestedCommands(platform: ManagedServicePlatform, path: string, servi
       ];
     case 'manual':
     default:
+      // The product's own verbs drive the manual platform from any directory;
+      // the last entry is the one callers name as the verify command.
       return [
-        `bun run src/daemon/cli.ts`,
+        `goodvibes-daemon start-service`,
+        `goodvibes-daemon service-status`,
       ];
   }
 }

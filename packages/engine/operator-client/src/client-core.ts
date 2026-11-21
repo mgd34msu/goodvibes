@@ -13,6 +13,7 @@ import {
   openContractRouteStream,
   requireContractRoute,
   clientInputRecord,
+  generateIdempotencyKey,
   type ContractRouteDefinition,
   type ContractRouteLike,
   type ContractInvokeOptions,
@@ -252,6 +253,31 @@ function replaysSafely(method: OperatorMethodContract): boolean {
 /** Options for validating one operator response. */
 export interface OperatorResponseValidationOptions {
   readonly signal?: AbortSignal | undefined;
+  /** The Idempotency-Key the request carried, named in the notice a failed check of a keyed write gives. */
+  readonly idempotencyKey?: string | undefined;
+}
+
+/** Whether the method replays on the `Idempotency-Key` header (the key the client pins for a call). */
+function replaysOnKeyHeader(method: OperatorMethodContract): boolean {
+  return method.replay?.in === 'header' && method.replay.name.toLowerCase() === 'idempotency-key';
+}
+
+/**
+ * A keyed call refused with IDEMPOTENCY_KEY_IN_FLIGHT after the transport's
+ * retries: its message names the key, the only one under which a repeat gets
+ * the first request's answer instead of acting a second time.
+ */
+function nameInFlightKey(error: unknown, key: string | undefined): unknown {
+  if (key === undefined || !(error instanceof Error)) return error;
+  const body = (error as { readonly transport?: { readonly body?: unknown } }).transport?.body;
+  const code = typeof body === 'object' && body !== null ? (body as { readonly code?: unknown }).code : undefined;
+  if (code !== 'IDEMPOTENCY_KEY_IN_FLIGHT') return error;
+  try {
+    error.message = `${error.message} The first request under Idempotency-Key ${key} is still running at the daemon; repeat it with that same key (the idempotencyKey option) for its answer, never with a new one.`;
+  } catch {
+    // A frozen error keeps its message; the key is on its idempotencyKey field.
+  }
+  return error;
 }
 
 type ResponseValidator = (
@@ -276,11 +302,12 @@ function compileResponseValidator(method: OperatorMethodContract): ResponseValid
   // is reached only by a hand-built manifest that declares none.
   if (!schema || typeof schema !== 'object') return async () => {};
   const mutating = isMutatingRoute(method.http?.method);
-  const notice = mutating ? receivedNotice(method.repeat === 'keyed' || replaysSafely(method)) : undefined;
+  const keyed = method.repeat === 'keyed' || replaysSafely(method);
   const methodId = method.id;
   return async (body, options) => {
     const failure = await firstJsonSchemaFailureAsync(schema, body, options);
     if (!failure) return;
+    const notice = mutating ? receivedNotice(keyed, options.idempotencyKey) : undefined;
     throw new ContractError(
       `Response validation failed for operator method "${methodId}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`
         + (notice ? ` ${notice}` : ''),
@@ -350,12 +377,19 @@ export function createOperatorRemoteClient(
     const method = requireMethod(contract, methodId);
     const route = methodHttpRoute(method);
     const schema = options.responseSchema ?? clientOptions.getResponseSchema?.(methodId);
+    // A keyed write's key is chosen here, once: every attempt carries it, and the
+    // error or notice of a call whose answer was lost names it for the repeat.
+    const idempotencyKey = options.idempotencyKey
+      ?? (isMutatingRoute(method.http?.method) && replaysOnKeyHeader(method) && !new Headers(options.headers).has('idempotency-key')
+        ? generateIdempotencyKey()
+        : undefined);
+    const callOptions: OperatorRemoteClientInvokeOptions = idempotencyKey !== undefined ? { ...options, idempotencyKey } : options;
     const request = invokeContractRoute<T>(
       transport,
       route,
       input,
-      schema ? { ...options, responseSchema: schema } : options,
-    );
+      schema ? { ...callOptions, responseSchema: schema } : callOptions,
+    ).catch((error: unknown) => { throw nameInFlightKey(error, idempotencyKey); });
     // Which check a response gets:
     // | schema (Zod) | validateResponses | action                                   |
     // |    present   |       any         | Zod, in the transport                    |
@@ -365,7 +399,7 @@ export function createOperatorRemoteClient(
     const validate = responseValidatorFor(method);
     const signal = options.signal;
     return request.then(async (body) => {
-      await validate(body, { signal });
+      await validate(body, { signal, idempotencyKey });
       return body;
     });
   }
@@ -559,10 +593,10 @@ export function createOperatorRemoteClient(
  * method may be repeated with the same key (the daemon answers a repeat with
  * the first answer); any other is not repeated blindly.
  */
-function receivedNotice(keyed: boolean): string {
+function receivedNotice(keyed: boolean, idempotencyKey?: string): string {
   return 'The daemon answered with a success status, so it received this request, but its answer could not be read: whether the change finished, was queued to run later or was already settled is not known. '
     + (keyed
-      ? 'Read the resulting state; to learn the outcome, repeat the request only with the same Idempotency-Key or retry id, which returns the first answer and acts no second time.'
+      ? `Read the resulting state; to learn the outcome, repeat the request only with the same ${idempotencyKey !== undefined ? `Idempotency-Key (${idempotencyKey})` : 'Idempotency-Key'} or retry id, which returns the first answer and acts no second time.`
       : 'Do not repeat the request: read the resulting state first.');
 }
 

@@ -7,18 +7,19 @@ import { combineSubscriptions, createStoreBackedReadModel, listProviderIds, proj
 import type { UiReadModel } from './ui-read-models-base.js';
 import { deriveContextUsage } from './context-usage.js';
 import { readCurrentContextWindow } from '../providers/context-window-reading.js';
+import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
 
 /** How many approvals the broker holds that are pending or claimed: raised, and not yet decided, cancelled or expired. */
 export function countUndecidedApprovals(broker: Pick<RuntimeServices['approvalBroker'], 'listApprovals'>): number {
   return broker.listApprovals(Number.MAX_SAFE_INTEGER)
-    .filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
+    .filter((approval) => isOpenApprovalStatus(approval.status)).length;
 }
 
 /** The id of the oldest approval the broker holds that is pending or claimed, or undefined when none is waiting. */
 export function oldestUndecidedApprovalId(broker: Pick<RuntimeServices['approvalBroker'], 'listApprovals'>): string | undefined {
   let oldest: { readonly id: string; readonly createdAt: number } | undefined;
   for (const approval of broker.listApprovals(Number.MAX_SAFE_INTEGER)) {
-    if (approval.status !== 'pending' && approval.status !== 'claimed') continue;
+    if (!isOpenApprovalStatus(approval.status)) continue;
     if (!oldest || approval.createdAt < oldest.createdAt) oldest = approval;
   }
   return oldest?.id;

@@ -1,5 +1,6 @@
 import type { DaemonRuntimeRouteHandlers } from './context.js';
 import type { JsonRecord } from './route-helpers.js';
+import type { SessionReadPolicy } from './integration-route-types.js';
 import type { ConversationMessageEnvelope } from '@goodvibes/engine/contracts/conversation-message';
 import type { Page } from '@goodvibes/engine/errors';
 
@@ -190,6 +191,8 @@ export interface DaemonRuntimeRouteContext {
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly recordApiResponse: (req: Request, path: string, response: Response) => Response;
   readonly requireAdmin: (req: Request) => Response | null;
+  /** Whether the caller may read a session (a hosted one: its owners and admins). Absent: every session the route admits. */
+  readonly mayReadSession?: SessionReadPolicy | undefined;
   readonly sessionBroker: {
     start(): Promise<void>;
     submitMessage(input: {
@@ -259,7 +262,7 @@ export interface DaemonRuntimeRouteContext {
       reopened: boolean;
       conflict?: { readonly status: 'closed' } | undefined;
     }>;
-    getSession(sessionId: string): { id: string; status: string; messageCount: number; activeAgentId?: string | undefined } | null;
+    getSession(sessionId: string): { id: string; kind?: string | undefined; status: string; messageCount: number; activeAgentId?: string | undefined } | null;
     getMessages(sessionId: string, limit: number, offset?: number): unknown[];
     getInputs(sessionId: string, limit: number): unknown[];
     /** One page of the session's inputs after `since`, oldest first; `more` says ask again from `next`. */
@@ -313,6 +316,8 @@ export interface DaemonRuntimeRouteContext {
     setEnabled(jobId: string, enabled: boolean): Promise<AutomationJobLike | null>;
     runNow(jobId: string): Promise<{ id: string; agentId?: string; status: string }>;
     getSchedulerCapacity(): { slotsTotal: number; slotsInUse: number; queueDepth: number; oldestQueuedAgeMs: number | null };
+    /** The zone a cron schedule created without one is stored in: where the owner is, else the host's zone. */
+    defaultTimezone(): string;
   };
   readonly normalizeAtSchedule: (at: number) => unknown;
   readonly normalizeEverySchedule: (interval: string | number, anchorAt?: number) => unknown;

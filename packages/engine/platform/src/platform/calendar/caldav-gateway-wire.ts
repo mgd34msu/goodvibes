@@ -162,8 +162,9 @@ function basicAuthHeader(username: string, password: string): string {
  * Bind an HTTP port and a credential into a request function that speaks
  * CalDAV and reports failure as a `GatewayVerbError`.
  *
- * Status mapping, unchanged from the surface this replaces: 401/403 are
- * `CALENDAR_AUTH_FAILED`, 404 is `CALENDAR_NOT_FOUND`, any other 4xx keeps its
+ * Status mapping: 401/403 are `CALENDAR_AUTH_FAILED` answered as 424 (the
+ * calendar refused a credential the daemon holds, not the caller's own
+ * sign-in), 404 is `CALENDAR_NOT_FOUND`, any other 4xx keeps its
  * own status under `CALENDAR_REQUEST_FAILED`, and anything else (including a
  * 5xx from the calendar server) is reported as a 502, the daemon is not the
  * thing that failed.
@@ -234,7 +235,8 @@ export function createCalDavRequest(
       throw new GatewayVerbError(
         `CalDAV server returned HTTP ${String(status)}.`,
         code,
-        status >= 400 && status < 500 ? status : 502,
+        // A refused calendar credential is 424: the daemon's own caller is signed in, so it is never a 401 or 403 here.
+        code === 'CALENDAR_AUTH_FAILED' ? 424 : status >= 400 && status < 500 ? status : 502,
       );
     }
     return response;

@@ -3,7 +3,7 @@ import type { RememberTier } from '../permissions/approval-rules.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
 import { assertExplicitApprovalDisposition, type ExplicitApprovalDisposition, type SharedApprovalDecision } from './approval-disposition.js';
 import type { RequestSharedApprovalInput, SharedApprovalRecord } from './approval-broker.js';
-import type { TransitionOutcome } from './approval-lifecycle.js';
+import { isOpenApprovalStatus, type TransitionOutcome } from './approval-lifecycle.js';
 import { raiseSharedApproval, type RaiseApprovalDeps, type RaisedApproval } from './approval-broker-raise.js';
 import { logger } from '../utils/logger.js';
 
@@ -129,7 +129,7 @@ export class OwnerApprovalAuthority {
     // A wire caller serializing a raised result must never export this capability.
     if (resolveOwnerDecision) Object.defineProperty(raised, 'resolveOwnerDecision', { value: resolveOwnerDecision });
     if (input.localPrompt && !raised.coalesced && !pending?.retired
-      && (raised.approval.status === 'pending' || raised.approval.status === 'claimed')) {
+      && isOpenApprovalStatus(raised.approval.status)) {
       const localPrompt = input.localPrompt;
       const actor = input.localPromptActor ?? 'tui-local';
       const actorSurface = input.localPromptSurface ?? 'tui';

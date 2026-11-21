@@ -30,6 +30,7 @@
  * line saying it failed; only an unreachable daemon is a failed command.
  */
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { isChannelWorking, type ChannelHealthState } from '@goodvibes/engine/platform/platform/channels';
 import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes/engine/platform/platform/runtime/crash-capture';
 import { resolveRemoteDaemonTarget } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
 import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes/engine/terminal-shell';
@@ -119,11 +120,12 @@ interface HealthPayload {
   readonly network?: { readonly controlPlane?: HealthNetworkBinding };
 }
 
+/** `/api/channels/status`: each channel's `state` is the channel contract's health state. */
 interface ChannelsPayload {
   readonly channels?: readonly {
     readonly id?: string;
     readonly label?: string;
-    readonly state?: string;
+    readonly state?: ChannelHealthState;
     readonly enabled?: boolean;
   }[];
 }
@@ -271,10 +273,7 @@ function channelLines(outcome: DaemonVerbOutcome<ChannelsPayload>): string[] {
   const channels = outcome.data.channels ?? [];
   if (channels.length === 0) return ['  channels: none configured'];
   const on = channels.filter((channel) => channel.enabled !== false);
-  const unhealthy = on.filter((channel) => channel.state !== undefined
-    && channel.state !== 'ready'
-    && channel.state !== 'healthy'
-    && channel.state !== 'connected');
+  const unhealthy = on.filter((channel) => channel.state !== undefined && !isChannelWorking(channel.state));
   const lines = [`  channels: ${on.length} of ${channels.length} switched on`];
   for (const channel of unhealthy) {
     lines.push(`            ${channel.label ?? channel.id ?? 'a channel'}: ${channel.state}`);

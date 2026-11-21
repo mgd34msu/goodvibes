@@ -295,7 +295,8 @@ export class LlamaCppProvider implements LLMProvider {
       content: responseText,
       toolCalls: finalToolCalls,
       usage: {
-        inputTokens: payload.usage?.prompt_tokens ?? 0,
+        // prompt_tokens includes the cached tokens; inputTokens is the fresh input only.
+        inputTokens: Math.max(0, (payload.usage?.prompt_tokens ?? 0) - (payload.usage?.prompt_tokens_details?.cached_tokens ?? 0)),
         outputTokens: payload.usage?.completion_tokens ?? 0,
         ...(typeof payload.usage?.prompt_tokens_details?.cached_tokens === 'number'
           ? { cacheReadTokens: payload.usage.prompt_tokens_details.cached_tokens }

@@ -30,6 +30,7 @@ import {
   sanitizeArtifactFilename,
 } from './types.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { checkDestination, DestinationRefusedError, pinnedFetch, type CheckedDestination } from '../runtime/network/destination.js';
 
 /** Caller-owned publication fence; never populated from artifact metadata. */
 export interface ArtifactWriteOwnership {
@@ -388,22 +389,20 @@ export class ArtifactStore {
   private readonly recordFiles = new Map<string, { readonly content: string; readonly metadata: string }>();
   private readonly records = new Map<string, ArtifactRecord>();
   private lastPrunedAt = 0;
-  private readonly maxBytes: number;
+  /** Read at each use, so `storage.artifacts.maxBytes` and `network.remoteFetch.allowPrivateHosts` apply as soon as they change. */
+  private readonly config: ArtifactStoreConfig;
   private readonly defaultRetentionMs: number;
   private readonly maxRetentionMs: number;
   private readonly trustedHosts: readonly string[];
   private readonly blockedHosts: readonly string[];
-  private readonly allowPrivateHostFetches: boolean;
 
   constructor(config: ArtifactStoreConfig) {
     this.rootDir = resolve(resolveArtifactRootDir(config));
-    this.maxBytes = readConfiguredArtifactMaxBytes(config);
+    this.config = config;
     this.defaultRetentionMs = Math.max(0, config.defaultRetentionMs ?? DEFAULT_ARTIFACT_RETENTION_MS);
     this.maxRetentionMs = Math.max(this.defaultRetentionMs, config.maxRetentionMs ?? DEFAULT_MAX_RETENTION_MS);
     this.trustedHosts = [...(config.trustedHosts ?? [])];
     this.blockedHosts = [...(config.blockedHosts ?? [])];
-    this.allowPrivateHostFetches = config.allowPrivateHostFetches
-      ?? Boolean(config.configManager?.get?.('network.remoteFetch.allowPrivateHosts'));
     mkdirSync(this.rootDir, { recursive: true, mode: 0o700 });
     // Existing stores receive the same directory boundary as new stores.
     chmodSync(this.rootDir, 0o700);
@@ -417,8 +416,15 @@ export class ArtifactStore {
     return this.rootDir;
   }
 
+  /** The upload limit now: the live `storage.artifacts.maxBytes`, else the constructed limit, else the default. */
   getMaxBytes(): number {
-    return this.maxBytes;
+    return readConfiguredArtifactMaxBytes(this.config);
+  }
+
+  /** Whether a fetch may reach a private host now: an explicit constructor value wins over the live setting. */
+  private allowsPrivateHostFetches(): boolean {
+    return this.config.allowPrivateHostFetches
+      ?? Boolean(this.config.configManager?.get?.('network.remoteFetch.allowPrivateHosts'));
   }
 
   list(limit = 100): ArtifactDescriptor[] {
@@ -674,8 +680,9 @@ export class ArtifactStore {
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
   }): Promise<{ sizeBytes: number }> {
-    if (typeof input.expectedSizeBytes === 'number' && input.expectedSizeBytes > this.maxBytes) {
-      throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
+    const maxBytes = this.getMaxBytes();
+    if (typeof input.expectedSizeBytes === 'number' && input.expectedSizeBytes > maxBytes) {
+      throw new Error(`Artifact exceeds the ${maxBytes}-byte limit.`);
     }
     const writer = createWriteStream(input.leaf.path, { flags: 'wx', mode: 0o600 });
     let descriptor: number | undefined;
@@ -714,9 +721,9 @@ export class ArtifactStore {
         assertArtifactWriteCurrent(input);
         const buffer = chunkToBuffer(next.value);
         sizeBytes += buffer.byteLength;
-        if (sizeBytes > this.maxBytes) {
+        if (sizeBytes > maxBytes) {
           writer.destroy();
-          throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
+          throw new Error(`Artifact exceeds the ${maxBytes}-byte limit.`);
         }
         if (!writer.write(buffer)) {
           await Promise.race([waitForDrain(writer), writerFailure]);
@@ -956,8 +963,9 @@ export class ArtifactStore {
         if (code === 'ENOENT' || code === 'ENOTDIR') throw Object.assign(new Error(`Artifact path not found: ${normalizedPath}`), { status: 400 });
         throw error;
       });
-      if (fileStat.size > this.maxBytes) {
-        throw Object.assign(new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`), { status: 400 });
+      const maxBytes = this.getMaxBytes();
+      if (fileStat.size > maxBytes) {
+        throw Object.assign(new Error(`Artifact exceeds the ${maxBytes}-byte limit.`), { status: 400 });
       }
       return {
         stream: createReadStream(normalizedPath),
@@ -990,15 +998,17 @@ export class ArtifactStore {
 
     let current = parsed.toString();
     for (let redirectCount = 0; redirectCount < 5; redirectCount += 1) {
-      if (allowPrivateHosts && !this.allowPrivateHostFetches) {
+      if (allowPrivateHosts && !this.allowsPrivateHostFetches()) {
         throw Object.assign(new Error('Private-host remote artifact fetches are disabled by config.'), { status: 400 });
       }
       this.assertRemoteHostAllowed(current, fetchMode);
-      const response = await instrumentedFetch(current, {
-        method: 'GET',
-        redirect: 'manual',
-        ...(signal ? { signal } : {}),
-      });
+      const init: RequestInit = { method: 'GET', redirect: 'manual', ...(signal ? { signal } : {}) };
+      // Public-only: the host is resolved and every answer checked, and the
+      // request goes to an address that passed, so a public name that resolves
+      // to loopback or a private network is refused rather than fetched.
+      const response = fetchMode === 'public-only'
+        ? await pinnedFetch(current, init, (await this.checkPublicDestination(current, signal)).addresses)
+        : await instrumentedFetch(current, init);
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         const location = response.headers.get('location');
@@ -1011,9 +1021,10 @@ export class ArtifactStore {
         throw new Error(`Artifact URI fetch failed (${response.status}) for ${current}`);
       }
       const contentLength = Number(response.headers.get('content-length') ?? NaN);
-      if (Number.isFinite(contentLength) && contentLength > this.maxBytes) {
+      const maxBytes = this.getMaxBytes();
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
         await response.body?.cancel();
-        throw new Error(`Remote artifact exceeds the ${this.maxBytes}-byte limit.`);
+        throw new Error(`Remote artifact exceeds the ${maxBytes}-byte limit.`);
       }
       const filename = sanitizeArtifactFilename(
         filenameOverride
@@ -1050,6 +1061,18 @@ export class ArtifactStore {
     } catch (err) {
       logger.warn('filenameFromContentDisposition: failed to decode URI component', { error: summarizeError(err) });
       return match[1].replace(/^"|"$/g, '');
+    }
+  }
+
+  /** Resolve a public-only hop's host and check every answer; a refusal is the caller's 400. */
+  private async checkPublicDestination(uri: string, signal: AbortSignal | undefined): Promise<CheckedDestination> {
+    try {
+      return await checkDestination(uri, 'artifact-fetch', { ...(signal ? { signal } : {}) });
+    } catch (error) {
+      if (error instanceof DestinationRefusedError) {
+        throw Object.assign(new Error(`Artifact URI blocked by SSRF policy: ${error.message.replace(/^Request blocked: /, '')}. ${error.next}`), { status: 400, code: error.code });
+      }
+      throw error;
     }
   }
 

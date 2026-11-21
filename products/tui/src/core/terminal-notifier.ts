@@ -8,8 +8,8 @@
  * host-side notify daemon is not reachable. The two are complementary, a user
  * can enable either, both, or neither.
  *
- * Three signals, each with its own config toggle (documented in
- * settings-modal-data.ts): a tool call waiting on approval (default on), a turn
+ * Three signals, each with its own config toggle (declared in
+ * config/tui-extension-settings.ts): a tool call waiting on approval (default on), a turn
  * finishing (default off), and a delegated agent blocking on human input
  * (default off). A separate `behavior.terminalBell` toggle (default off) adds an
  * audible BEL to whichever of those fire.
@@ -28,25 +28,29 @@
  */
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { allowTerminalWrite } from '@goodvibes/engine/terminal-shell/terminal-output-guard';
-import { readBooleanConfig, type ConfigGet } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { ConfigGet, FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
+import {
+  TERMINAL_BELL_SETTING,
+  TERMINAL_NOTIFY_AGENT_BLOCKED_SETTING,
+  TERMINAL_NOTIFY_APPROVAL_WAIT_SETTING,
+  TERMINAL_NOTIFY_TURN_END_SETTING,
+} from '../config/tui-extension-settings.ts';
 
 export type TerminalNotifySignal = 'approval-wait' | 'turn-end' | 'agent-blocked';
 
-interface SignalSpec {
-  readonly configKey: string;
-  readonly defaultOn: boolean;
-}
-
-/** Per-signal config keys + defaults. The settings modal repeats them; a test holds the two tables equal. */
-export const TERMINAL_NOTIFY_SIGNALS: Record<TerminalNotifySignal, SignalSpec> = {
-  'approval-wait': { configKey: 'behavior.terminalNotifyApprovalWait', defaultOn: true },
-  'turn-end': { configKey: 'behavior.terminalNotifyTurnEnd', defaultOn: false },
-  'agent-blocked': { configKey: 'behavior.terminalNotifyAgentBlocked', defaultOn: false },
+/** Each signal's setting; its key, default and wording are declared once, in config/tui-extension-settings.ts. */
+export const TERMINAL_NOTIFY_SIGNALS: Record<TerminalNotifySignal, HostBooleanSetting> = {
+  'approval-wait': TERMINAL_NOTIFY_APPROVAL_WAIT_SETTING,
+  'turn-end': TERMINAL_NOTIFY_TURN_END_SETTING,
+  'agent-blocked': TERMINAL_NOTIFY_AGENT_BLOCKED_SETTING,
 };
 
-/** The audible-bell toggle key. Default off. */
-export const TERMINAL_BELL_KEY = 'behavior.terminalBell';
+/** A registered boolean setting as the config manager resolves it (its default when the value is not a boolean). */
+function settingOn(configGet: ConfigGet, setting: HostBooleanSetting): boolean {
+  const value = configGet(setting.key);
+  return typeof value === 'boolean' ? value : setting.default;
+}
 
 const BEL = '\x07';
 
@@ -79,8 +83,7 @@ export function shouldEmitTerminalNotification(
   configGet: ConfigGet,
   focusTracker: Pick<FocusTracker, 'shouldAlertWhenUnfocused'>,
 ): boolean {
-  const spec = TERMINAL_NOTIFY_SIGNALS[signal];
-  if (!readBooleanConfig(configGet, spec.configKey, spec.defaultOn)) return false;
+  if (!settingOn(configGet, TERMINAL_NOTIFY_SIGNALS[signal])) return false;
   return focusTracker.shouldAlertWhenUnfocused();
 }
 
@@ -90,7 +93,7 @@ export function createTerminalNotifier(deps: TerminalNotifierDeps): TerminalNoti
       if (!shouldEmitTerminalNotification(signal, deps.configGet, deps.focusTracker)) return;
       // Never write escape sequences once the terminal is back on the shell.
       if (deps.isReleased()) return;
-      const bell = readBooleanConfig(deps.configGet, TERMINAL_BELL_KEY, false);
+      const bell = settingOn(deps.configGet, TERMINAL_BELL_SETTING);
       const seq = buildOsc9(message) + (bell ? BEL : '');
       try {
         allowTerminalWrite(() => deps.stdout.write(seq));

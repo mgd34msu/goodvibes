@@ -675,8 +675,9 @@ export class CompanionChatManager {
     // Saved before the change takes effect: a refused save leaves the chat as it was.
     this.saveForRequest(session, [], updated);
     session.meta = updated;
-    // Heartbeat the broker record (advances participant.lastSeenAt). Title is
-    // never overwritten by this path (broker treats register as a heartbeat).
+    // Heartbeat the broker record (advances participant.lastSeenAt). The broker
+    // keeps the title it was first registered with; its reads take the current
+    // title and message count from this manager (SharedSessionBroker.setExternalFacts).
     this._brokerSync.track(updated.id, () => this._brokerSync.registerSession(updated));
     return updated;
   }

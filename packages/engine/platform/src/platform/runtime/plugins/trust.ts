@@ -43,6 +43,28 @@ import { isHighRiskCapability } from './manifest.js';
  */
 export type PluginTrustTier = 'untrusted' | 'limited' | 'trusted';
 
+/** Why a tier the owner set does not apply to the copy of a plugin found now (PluginTrustStore.unappliedTier). */
+export type PluginTrustUnappliedReason = 'files-changed' | 'moved' | 'unbound';
+
+/** A tier the owner set that is not applied to the copy found now, and why. */
+export interface PluginUnappliedTier {
+  readonly tier: Exclude<PluginTrustTier, 'untrusted'>;
+  readonly why: PluginTrustUnappliedReason;
+}
+
+/**
+ * The sentence that says why a set tier is not applied and how to apply it,
+ * for refusals, capability readings and plugin lists.
+ */
+export function describeUnappliedTier(pluginName: string, unapplied: PluginUnappliedTier, command = 'plugin'): string {
+  const again = `set it again with /${command} trust ${pluginName} ${unapplied.tier}`;
+  if (unapplied.why === 'unbound') {
+    return `its tier '${unapplied.tier}' was set by an earlier version, before a tier was bound to a plugin's files, so it runs untrusted; ${again}`;
+  }
+  const cause = unapplied.why === 'files-changed' ? 'for files that have since changed' : 'for a copy in a different folder';
+  return `its tier '${unapplied.tier}' was set ${cause}, so it runs untrusted; review the change, then ${again}`;
+}
+
 // ── Trust Record ──────────────────────────────────────────────────────────────
 
 /**
@@ -226,6 +248,23 @@ export class PluginTrustStore {
     if (!record) return 'untrusted';
     if (record.boundDir !== copy.dir || copy.digest === null || record.contentDigest !== copy.digest) return 'untrusted';
     return record.tier;
+  }
+
+  /**
+   * A tier the owner set that {@link tierFor} does not apply to this copy, and
+   * why: `unbound` (a record kept from before tiers were bound to a copy),
+   * `moved` (it was given to a copy in another directory) or `files-changed`
+   * (this copy's manifest or entry file changed since, or cannot be read).
+   * Undefined when there is no such tier: no record, an untrusted one, or one
+   * that applies.
+   */
+  unappliedTier(pluginName: string, copy: { readonly dir: string; readonly digest: string | null }): PluginUnappliedTier | undefined {
+    const record = this.records.get(pluginName);
+    if (!record || record.tier === 'untrusted') return undefined;
+    if (record.boundDir === undefined || record.contentDigest === undefined) return { tier: record.tier, why: 'unbound' };
+    if (record.boundDir !== copy.dir) return { tier: record.tier, why: 'moved' };
+    if (copy.digest === null || record.contentDigest !== copy.digest) return { tier: record.tier, why: 'files-changed' };
+    return undefined;
   }
 
   /**

@@ -16,7 +16,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { SendHorizontal, Unlink } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { client as platformClient, WEBUI_SURFACE_ID, WEBUI_SURFACE_KIND } from '../../lib/goodvibes';
+import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE, WEBUI_SURFACE_ID, WEBUI_SURFACE_KIND } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
@@ -78,16 +78,31 @@ function LegacyFleetSteer({ sessionId }: { sessionId: string }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [text, setText] = useState('');
+  // The steer's messageId, kept until it is answered or refused: a press repeated after a
+  // lost answer is recorded once by the daemon (sessions.steer replays by messageId).
+  const [intent] = useState(() => new IntentKey());
 
   const steer = useMutation({
-    mutationFn: (body: string) =>
-      platformClient.operator.sessions.steer(sessionId, { body, surfaceKind: WEBUI_SURFACE_KIND, surfaceId: WEBUI_SURFACE_ID }),
+    mutationFn: async (body: string) => {
+      try {
+        const sent = await platformClient.operator.sessions.steer(sessionId, { body, messageId: intent.keyFor(body), surfaceKind: WEBUI_SURFACE_KIND, surfaceId: WEBUI_SURFACE_ID });
+        intent.settle();
+        return sent;
+      } catch (error) {
+        intent.settle(error);
+        throw error;
+      }
+    },
     onSuccess: async () => {
       setText('');
       toast({ title: 'Steer sent', tone: 'success' });
       await queryClient.invalidateQueries({ queryKey: queryKeys.fleet });
     },
     onError: (error: unknown) => {
+      if (!isPressRefused(error)) {
+        toast({ title: 'The steer may have been sent', description: `${formatError(error)}. ${MAY_HAVE_BEEN_DONE}`, tone: 'warning' });
+        return;
+      }
       toast({ title: 'Steer failed', description: formatError(error), tone: 'danger' });
     },
   });

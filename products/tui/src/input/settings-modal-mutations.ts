@@ -136,7 +136,7 @@ export function applySettingValue({
         if (entry.setting.key !== key) continue;
         // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
         entry.currentValue = configManager.get(key);
-        entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
+        entry.isDefault = deepEqual(entry.currentValue, configManager.defaultOf(key));
         refreshHostSettingEntry(entry, configManager);
       }
     }
@@ -154,7 +154,7 @@ export function applySettingValue({
       return { restartDomain: null, effectMessage: `Save failed: ${summarizeError(e)}`, changed: false, failed: true };
     }
     const removeOnDaemon = removable && daemonConfig.reset !== undefined;
-    const applied = removable ? configManager.getSchema().find((setting) => setting.key === key)?.default : value;
+    const applied = removable ? configManager.defaultOf(key) : value;
     const settled = (removeOnDaemon ? daemonConfig.reset!(key) : daemonConfig.set(key, applied)).then(() => {
       configManager.adoptDaemonValue(key, applied);
       syncEntries();

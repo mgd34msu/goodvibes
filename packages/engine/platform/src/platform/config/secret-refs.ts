@@ -5,6 +5,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { runProcess } from '../utils/process-runner.js';
 import { GOODVIBES_URI_PREFIX } from './secret-ref-refusal.js';
+import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
 
 
 export type SecretProviderSource =
@@ -109,20 +110,33 @@ export interface SecretProviderHostConfig {
   } | undefined;
 }
 
-let hostConfigSource: () => SecretProviderHostConfig = () => ({});
+type SecretProviderSettingKey =
+  | 'onePasswordCli' | 'bitwardenCli' | 'bitwardenAppDataDir' | 'bitwardenSessionEnv'
+  | 'bwsCli' | 'bwsAccessTokenEnv' | 'bwsConfigFile' | 'bwsServerUrl';
 
 /**
- * Install where the provider host settings are read from. The credential owner
- * (`SecretsManager`) installs a reader of its settings; a process that has none
- * uses the providers' defaults.
+ * The owner's password-manager host settings (`storage.secretProviders.*`)
+ * from the settings it names; empty fields fall back to each provider's
+ * defaults. Every resolution whose caller holds settings passes this as
+ * `providers`, so a reference runs the programs that caller's owner chose.
  */
-export function useSecretProviderHostConfig(read: () => SecretProviderHostConfig): void {
-  hostConfigSource = read;
+export function readSecretProviderHostConfig(configManager: { get(key: string): unknown }): SecretProviderHostConfig {
+  const read = (key: SecretProviderSettingKey): string | undefined => {
+    try {
+      const value = configManager.get(`storage.secretProviders.${key}`);
+      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    } catch { return undefined; }
+  };
+  return {
+    onePassword: { cli: read('onePasswordCli') },
+    bitwarden: { cli: read('bitwardenCli'), appDataDir: read('bitwardenAppDataDir'), sessionEnv: read('bitwardenSessionEnv') },
+    bitwardenSecretsManager: { cli: read('bwsCli'), accessTokenEnv: read('bwsAccessTokenEnv'), configFile: read('bwsConfigFile'), serverUrl: read('bwsServerUrl') },
+  };
 }
 
+/** The settings the caller passed, else the providers' own defaults. */
 function hostConfig(options: SecretRefResolutionOptions): SecretProviderHostConfig {
-  if (options.providers) return options.providers;
-  try { return hostConfigSource(); } catch { return {}; }
+  return options.providers ?? {};
 }
 
 export type SecretRef =
@@ -165,7 +179,7 @@ export interface SecretRefResolutionOptions {
   readonly configKey?: string | undefined;
   /** Assert a reference-SHAPED value is a literal. Off by default; secret-ref-refusal.ts. */
   readonly treatUnparseableRefAsLiteral?: boolean | undefined;
-  /** Provider host settings for this resolution; defaults to the installed reader. */
+  /** Provider host settings for this resolution (`readSecretProviderHostConfig`); each provider's defaults when absent. */
   readonly providers?: SecretProviderHostConfig | undefined;
 }
 
@@ -573,6 +587,19 @@ export function normalizeSecretRef(input: unknown): SecretRef | null {
 
 export function isSecretRefInput(input: unknown): input is SecretRefInput {
   return normalizeSecretRef(input) !== null;
+}
+
+/**
+ * A stored value that is a well-formed `goodvibes://secrets/` reference: the
+ * prefix ({@link isSecretReferenceValue}) and a reference the resolver can
+ * parse (a source segment and what that source needs, such as
+ * `goodvibes://secrets/goodvibes/<KEY>`). The prefix test alone only says the
+ * value is meant as a reference; this says it is one. It lives beside the
+ * parser rather than beside the prefix test because the prefix module is
+ * browser-safe and this parser is not.
+ */
+export function isValidSecretReference(value: unknown): boolean {
+  return typeof value === 'string' && isSecretReferenceValue(value) && isSecretRefInput(value.trim());
 }
 
 export function getSecretRefSource(input: unknown): SecretProviderSource | null {

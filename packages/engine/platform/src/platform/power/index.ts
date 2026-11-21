@@ -29,31 +29,10 @@ export type {
   DaemonPowerEventHandlers,
   WatchDaemonPowerEventsOptions,
 } from './daemon-power-source.js';
-// Forward the owner keep-awake toggle from a surface to an adopted daemon:
-// the one forwarder both terminal products use.
+// The keep-awake toggle a daemon serves, for a surface's chip. The toggle itself
+// is the daemon-owned setting power.keepAwake, written like any daemon setting.
 export {
-  postPowerKeepAwakeSet,
-  forwardKeepAwakeToAdoptedDaemon,
   readServedKeepAwakeState,
   readServedKeepAwakeEnabled,
-  readPowerKeepAwakeEnabled,
-  describeKeepAwakeOutcome,
-  forwardKeepAwakeWithNotice,
-  createKeepAwakeForwardQueue,
-  createKeepAwakeForwarder,
-  POWER_KEEP_AWAKE_SET_PATH,
   POWER_STATUS_PATH,
-  POWER_KEEP_AWAKE_SET_TIMEOUT_MS,
-} from './keep-awake-remote.js';
-export type {
-  PowerKeepAwakeRemoteConnection,
-  PowerKeepAwakeRemoteFailureKind,
-  PowerKeepAwakeRemoteSuccess,
-  PowerKeepAwakeRemoteFailure,
-  PowerKeepAwakeRemoteResult,
-  ForwardKeepAwakeDeps,
-  ForwardKeepAwakeOutcome,
-  KeepAwakeNoticeDeps,
-  KeepAwakeForwarderDeps,
-  KeepAwakeForwarder,
 } from './keep-awake-remote.js';

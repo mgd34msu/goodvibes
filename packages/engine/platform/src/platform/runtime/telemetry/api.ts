@@ -41,6 +41,7 @@ import {
   telemetryRecordMatches,
 } from './api-query.js';
 import { createTelemetryEventStream } from './api-stream.js';
+import { isOpenApprovalStatus } from '../../control-plane/approval-lifecycle.js';
 import {
   ingestExternalTelemetryLogs,
   ingestExternalTelemetryTraces,
@@ -350,7 +351,7 @@ export class TelemetryApiService {
         },
         approvals: {
           pending: this.listApprovals
-            ? this.listApprovals().filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length
+            ? this.listApprovals().filter((approval) => isOpenApprovalStatus(approval.status)).length
             : 0,
         },
       },

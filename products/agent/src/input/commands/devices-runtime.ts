@@ -42,7 +42,8 @@ async function relayCall<T>(what: string, call: () => Promise<T>): Promise<T> {
  * link and QR, and the paired phones, grants and captures come from the
  * daemon's `devices.*` verbs. Pairing this Agent with its connected host is
  * the same owner-checked flow as `/setup pair` and `/setup unpair`; the relay
- * is the connected host's, reached through its `relay.*` verbs. Channel setup
+ * is the connected host's, reached through its `relay.*` verbs, and so are the
+ * devices waiting to pair as nodes (`remote.pair.requests.*`). Channel setup
  * and the shared-token actions are the terminal app's, and are refused here
  * saying where they are.
  */
@@ -74,5 +75,11 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       () => readRelayStatus(hostVerbs(ctx), requirePlatform(ctx).configManager))),
     relayCodes: async (ctx) => await relayCall('Listing the connected host\'s relay codes', () => listRelayCodes(hostVerbs(ctx))),
     revokeRelayCode: async (ctx, id) => await relayCall(`Revoking relay code ${id}`, () => revokeRelayCode(hostVerbs(ctx), id)),
+    // The connected host's devices waiting to pair as nodes; a refusal keeps the host's code.
+    pairRequests: {
+      list: async (ctx) => (await invokeConnectedHostMethod(ctx, 'remote.pair.requests.list', {})).requests,
+      approve: async (ctx, id, confirmReplace) => (await invokeConnectedHostMethod(ctx, 'remote.pair.requests.approve', confirmReplace ? { requestId: id, confirmReplace: true } : { requestId: id })).request,
+      reject: async (ctx, id) => (await invokeConnectedHostMethod(ctx, 'remote.pair.requests.reject', { requestId: id })).request,
+    },
   }, CHANNELS_LIST);
 }

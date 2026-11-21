@@ -6,13 +6,20 @@ import {
   type SharedSessionInputRecord,
 } from './session-intents.js';
 import type { SharedSessionStoreSnapshot } from './session-broker-helpers.js';
-import type { SharedSessionMessage, SharedSessionParticipant, SharedSessionRecord } from './session-types.js';
+import {
+  SHARED_SESSION_KINDS,
+  SHARED_SESSION_MESSAGE_ROLES,
+  SHARED_SESSION_STATUSES,
+  type SharedSessionMessage,
+  type SharedSessionParticipant,
+  type SharedSessionRecord,
+} from './session-types.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { isSettableGatePresetName } from '../gate/presets.js';
 
-const SESSION_KINDS = new Set<SharedSessionRecord['kind']>(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
-const SESSION_STATUSES = new Set<SharedSessionRecord['status']>(['active', 'closed']);
-const MESSAGE_ROLES = new Set<SharedSessionMessage['role']>(['user', 'assistant', 'system']);
+const SESSION_KINDS = new Set<SharedSessionRecord['kind']>(SHARED_SESSION_KINDS);
+const SESSION_STATUSES = new Set<SharedSessionRecord['status']>(SHARED_SESSION_STATUSES);
+const MESSAGE_ROLES = new Set<SharedSessionMessage['role']>(SHARED_SESSION_MESSAGE_ROLES);
 
 
 function isFiniteNumber(value: unknown): value is number {

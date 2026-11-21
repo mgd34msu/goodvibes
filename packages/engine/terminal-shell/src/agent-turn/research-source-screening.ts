@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { createClassicProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/classic-owner';
-import { ConfigManager, SecretsManager, daemonConfigPathForHome, isSecretRefInput, normalizeSecretRef, resolveGoodVibesDaemonHome,
+import { ConfigManager, SecretsManager, isSecretRefInput, normalizeSecretRef, resolveGoodVibesDaemonHome,
   type HostBooleanSetting, type SecretStorageMode } from '@goodvibes/engine/platform/platform/config';
 import { createProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/owner';
 import type { ProtectedSourceOwner, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt, ResearchReferenceScreeningReceipt } from '@goodvibes/engine/platform/platform/security';
@@ -49,7 +49,6 @@ export function createAgentSettingsReader(homeDirectory: string): AgentSettingsR
   const manager = new ConfigManager({
     homeDir: homeDirectory,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    daemonTierPath: daemonConfigPathForHome(resolveGoodVibesDaemonHome(homeDirectory)),
     readOnly: true,
     hostSettings: [AGENT_HOSTED_RESEARCH_SCREENING_SETTING],
   });
@@ -96,9 +95,9 @@ export function createAgentSettingsReader(homeDirectory: string): AgentSettingsR
  * the store's revision after re-`stat`ing the store files it has read (one
  * `stat` each per check). A key the Agent process rotates or removes moves it,
  * so the next check retires the acquisition and the next one reads the new
- * key, whether or not the directory watch saw the write. No settings object is given to
- * the stores, so the daemon's process-wide password-manager settings are left
- * as they are. The project tier is left out: the Agent reads only its launch
+ * key, whether or not the directory watch saw the write. No settings object is
+ * given to the stores, so a reference in them runs each password manager with
+ * its own defaults. The project tier is left out: the Agent reads only its launch
  * directory's, and only for a key the owner confirmed there; here the project
  * paths are the user store itself, so they add nothing. One store object per
  * policy, made on first use; each read costs what the Agent's own read costs.

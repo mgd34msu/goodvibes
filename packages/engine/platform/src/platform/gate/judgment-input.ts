@@ -273,6 +273,14 @@ function protectedKey(key: string): JudgmentInputProblem | undefined {
   return undefined;
 }
 
+/**
+ * A secret reference that may go to the decision model in place of the
+ * credential: the shared prefix test, and a plain path with no whitespace,
+ * query or fragment, which is all the model ever needs to read. This module is
+ * loaded in the web UI, so it does not parse the reference with the resolver's
+ * parser (config/secret-refs.ts reads files and runs programs); whether a
+ * stored reference resolves is decided there, at write admission and use.
+ */
 function reference(value: unknown): boolean {
   return isSecretReferenceValue(value) && typeof value === 'string' && /^goodvibes:\/\/secrets\/[^\s?#]+$/.test(value.trim());
 }

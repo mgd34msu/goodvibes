@@ -6,7 +6,7 @@
  */
 import { join } from 'node:path';
 import type { JudgmentPort } from '@goodvibes/judgment';
-import { HandlerError } from '../../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput } from '../aggregator.js';
@@ -66,9 +66,9 @@ const OFF: Readonly<Record<'closed' | 'ungranted' | 'revoked' | 'classic', Triag
   classic: { state: 'off', reason: 'Decision models are turned off, so no model labels mail',
     next: ['Set "When the decision model is missing or fails" to Hybrid or Decision Model Only in settings to label new mail'] },
 });
-function unavailable(state: InboxTriageState): HandlerError {
+function unavailable(state: InboxTriageState): GatewayVerbError {
   const off = state.state === 'off' ? state : OFF.closed;
-  return new HandlerError(`Inbox triage is off: ${off.reason}. ${off.next[0]}`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
+  return new GatewayVerbError(`Inbox triage is off: ${off.reason}. ${off.next[0]}`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
 }
 
 const DEFAULT_BATCH = 50;
@@ -192,9 +192,9 @@ async function createTriagedSource(
   const score: OwnedTriagedInboxSource['runInboxTriage'] = async (query = {}, operation = {}) => {
     if (closed) throw unavailable(OFF.closed);
     const selected = normalizeInboxQuery(query);
-    if (selected.limit > 100) throw new HandlerError('Inbox triage scores at most 100 rows at a time; pass limit 100 or less', 'INVALID_ARGUMENT', 400);
+    if (selected.limit > 100) throw new GatewayVerbError('Inbox triage scores at most 100 rows at a time; pass limit 100 or less', 'INVALID_ARGUMENT', 400);
     if (selected.providers?.some(provider => provider !== providerId)) {
-      throw new HandlerError(`This inbox account labels ${providerId} messages only; pass provider ${providerId}`, 'INVALID_ARGUMENT', 400);
+      throw new GatewayVerbError(`This inbox account labels ${providerId} messages only; pass provider ${providerId}`, 'INVALID_ARGUMENT', 400);
     }
     const now = state();
     const live = grant();

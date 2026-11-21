@@ -110,7 +110,7 @@ export interface WebSearchInput {
 }
 
 export interface WebSearchServiceLike {
-  readonly getStatus: () => Promise<{ readonly providers: readonly unknown[] }>;
+  readonly getStatus: () => Promise<{ readonly providers: readonly unknown[]; readonly defaultProviderId: string | null }>;
   readonly search: (input: WebSearchInput) => Promise<unknown>;
 }
 

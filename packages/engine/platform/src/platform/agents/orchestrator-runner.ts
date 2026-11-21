@@ -641,7 +641,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           reportVerificationUsage({ runtimeBus: context.runtimeBus, emitterContext: context.emitterContext(record.id), turnId: record.id,
             provider: activeRoute.provider.name, model: activeRoute.modelId,
             // Priced like every other request, so fleet cost counts the verification spend.
-            pricing: context.providerRegistry.resolveModelPricing(activeRoute.modelId, activeRoute.provider.name, response.signInRoute?.route ?? null), response, durationMs });
+            pricing: context.providerRegistry.resolveModelPricing(activeRoute.modelId, activeRoute.provider.name, response.signInRoute?.route ?? null),
+            cacheRatio: context.providerRegistry.cacheRatios(activeRoute.provider.name), response, durationMs });
         },
       }),
     });

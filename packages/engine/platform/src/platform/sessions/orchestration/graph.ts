@@ -22,11 +22,6 @@ import type { TaskLifecycleState } from '../../runtime/store/domains/tasks.js';
 import { logger } from '../../utils/logger.js';
 import { taskLifecycle } from '../../runtime/tasks/lifecycle.js';
 
-// ── Module-level constants ────────────────────────────────────────────────────
-
-/** Terminal states that cannot be cancelled or transitioned further. */
-const TERMINAL_STATES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled']);
-
 /** Whether `to` is reachable from `from` by one or more declared task lifecycle moves. */
 function lifecycleReaches(from: TaskLifecycleState, to: TaskLifecycleState): boolean {
   const seen = new Set<TaskLifecycleState>([from]);
@@ -430,7 +425,7 @@ export class SessionTaskGraph {
     const skipped: CancellationResult['skipped'] = [];
 
     for (const ref of targets) {
-      const terminal = TERMINAL_STATES.has(ref.status);
+      const terminal = taskLifecycle.isTerminal(ref.status);
       if (terminal) {
         skipped.push({ sessionId: ref.sessionId, taskId: ref.taskId, title: ref.title, reason: `already ${ref.status}` });
         continue;

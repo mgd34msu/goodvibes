@@ -151,6 +151,7 @@ export type {
   ImapAppendDraftInput,
   ImapAppendDraftResult,
   ImapAttachmentInfo,
+  ImapBodySectionFailure,
   ImapClientOptions,
   ImapCompleteMessageRead,
   ImapEnvelope,

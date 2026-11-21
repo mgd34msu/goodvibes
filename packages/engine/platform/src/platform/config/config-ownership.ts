@@ -124,6 +124,8 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   diagnostics: 'client',
   display: 'client',
   fetch: 'client',
+  // Each process that runs the web search tool reads its own, as with fetch.
+  webSearch: 'client',
   fleet: 'client',
   helper: 'client',
   learning: 'client',
@@ -197,6 +199,12 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // it back on: a daemon key there is left out.
   'update.auto',
   'update.autoUpdateAtLaunch',
+  // The owner's keep-awake toggle. The daemon holds the inhibitor that outlives
+  // every surface, so the choice is stored once, in the daemon's settings: a
+  // surface's toggle goes to the daemon (or, with none running, into its file,
+  // which it reads at start) and every surface reads that one value, so a change
+  // the daemon had not taken is never lost to a surface's older copy.
+  'power.keepAwake',
 ];
 
 /**

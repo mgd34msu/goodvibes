@@ -25,7 +25,7 @@ import type { SecretsManager } from '../config/secrets.js';
 export const NOTIFICATION_WEBHOOK_SECRET_PREFIX = 'GOODVIBES_NOTIFY_WEBHOOK_';
 
 /** The store a URL is written to and read back from. */
-export type NotificationWebhookSecretStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getGlobalHome'>;
+export type NotificationWebhookSecretStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getGlobalHome' | 'getSecretProviderHostConfig'>;
 
 /**
  * Store `url` under a new key of its own and return the reference the
@@ -58,12 +58,13 @@ export function notificationWebhookSecretKey(entry: string): string | null {
  * itself for a literal URL handed to the notifier directly. Null when the
  * reference cannot be read.
  */
-export async function resolveNotificationWebhook(entry: string, secrets: Pick<SecretsManager, 'get' | 'getGlobalHome'>): Promise<string | null> {
+export async function resolveNotificationWebhook(entry: string, secrets: Pick<SecretsManager, 'get' | 'getGlobalHome' | 'getSecretProviderHostConfig'>): Promise<string | null> {
   if (!isSecretReferenceValue(entry)) return entry;
   return resolveSecretInput(entry.trim(), {
     diagnosticMode: 'structural',
     resolveLocalSecret: (key) => secrets.get(key),
     homeDirectory: secrets.getGlobalHome(),
+    providers: secrets.getSecretProviderHostConfig(),
   }, 'dispatch');
 }
 

@@ -305,8 +305,11 @@ export async function detectDaemonServiceManaged(
   runCommand: RunCommand = defaultRunCommand,
 ): Promise<DaemonServiceRestartInfo> {
   // Loaded here, not at start-up: the service module is needed only after an update replaced the daemon.
-  const { resolveConfiguredServiceName } = await import('./managed-daemon-service.js');
-  const unitName = resolveConfiguredServiceName({
+  const [{ MANAGED_SERVICE_NAME }, { resolveServiceName }] = await Promise.all([
+    import('./managed-daemon-service.js'),
+    import('@goodvibes/engine/platform/platform/daemon/service-manager'),
+  ]);
+  const unitName = resolveServiceName({
     get: (key) => configManager.get?.(key),
     // A source that cannot say where the name came from is read like one set by the owner: the stored value, else the default.
     describeConfigKeySource: (key) => {
@@ -314,7 +317,7 @@ export async function detectDaemonServiceManaged(
       if (source === undefined) return { tier: 'unknown' };
       return source.effectiveOrigin === undefined ? { tier: source.tier } : { tier: source.tier, effectiveOrigin: source.effectiveOrigin };
     },
-  });
+  }, MANAGED_SERVICE_NAME);
   if (platform !== 'linux') {
     return { managed: false, unitName, restartCommand: '' };
   }

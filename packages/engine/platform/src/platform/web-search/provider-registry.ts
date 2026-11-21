@@ -11,10 +11,20 @@ import { createSearxngSearchProvider } from './providers/searxng.js';
 import { createTavilySearchProvider } from './providers/tavily.js';
 import type { SearchProviderContext } from './providers/shared.js';
 
+/** The value of `webSearch.defaultProvider` that means the built-in rule, not one provider. */
+export const AUTO_WEB_SEARCH_PROVIDER = 'auto';
+
+export interface WebSearchProviderRegistryOptions {
+  /** Reads `webSearch.defaultProvider` when a search names no provider. */
+  readonly defaultProvider?: (() => unknown) | undefined;
+}
+
 export class WebSearchProviderRegistry {
   private readonly providers = new Map<string, WebSearchProvider>();
+  private readonly readDefaultProvider: () => unknown;
 
-  constructor(context: SearchProviderContext) {
+  constructor(context: SearchProviderContext, options: WebSearchProviderRegistryOptions = {}) {
+    this.readDefaultProvider = options.defaultProvider ?? (() => AUTO_WEB_SEARCH_PROVIDER);
     this.register(createDuckDuckGoProvider(), { replace: true });
     this.register(createSearxngSearchProvider(context), { replace: true });
     this.register(createBraveSearchProvider(context), { replace: true });
@@ -58,14 +68,25 @@ export class WebSearchProviderRegistry {
   }
 
   /**
-   * The provider a search without an id uses: the first one the owner has
-   * configured (a key, a service entry or a base url), otherwise the built-in
-   * keyless default, which is registered first.
+   * The provider a search without an id uses: the one `webSearch.defaultProvider`
+   * names when it is registered and configured; otherwise (`auto`) the first one
+   * the owner has configured (a key, a service entry or a base url), in
+   * registration order, else the built-in keyless default, which is registered first.
    */
   find(providerId?: string): WebSearchProvider | null {
     if (providerId) return this.get(providerId);
+    const chosen = this.readDefaultProvider();
+    if (typeof chosen === 'string' && chosen.trim() && chosen.trim() !== AUTO_WEB_SEARCH_PROVIDER) {
+      const named = this.get(chosen.trim());
+      if (named && named.descriptor?.().configured !== false) return named;
+    }
     const all = [...this.providers.values()];
     const configured = all.slice(1).find((provider) => provider.descriptor?.().configured === true);
     return configured ?? all[0] ?? null;
+  }
+
+  /** The id of the provider a search without an id would use now, or null when none is registered. */
+  defaultProviderId(): string | null {
+    return this.find()?.id ?? null;
   }
 }

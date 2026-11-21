@@ -14,23 +14,20 @@
  *  - `assertConfirmed` is the confirmation gate: `body.confirm === true` AND
  *    `context.explicitUserRequest === true`, else a 403 `REQUIRE_CONFIRM`.
  *
- * The daemon's `HandlerError` is the engine's `GatewayVerbError` (a message, a
- * stable machine `code` and an HTTP `status`, read by shape at the dispatcher),
- * so the engine's own class is used instead of a second one.
+ * Every host handler refuses with the engine's `GatewayVerbError` (a
+ * `RefusalError` with a stable machine `code` and an HTTP `status`, read by
+ * shape at the dispatcher).
  */
 import type { GatewayMethodCatalog } from './method-catalog.js';
 import type {
   GatewayMethodInvocation,
   GatewayMethodInvocationContext,
 } from './method-catalog-shared.js';
+import { RefusalError } from '@goodvibes/engine/errors';
 import { GatewayVerbError, readGatewayVerbRefusal } from './routes/gateway-verb-error.js';
 
 /** Code emitted when a confirmation-gated method is invoked without explicit user confirmation. */
 export const REQUIRE_CONFIRM = 'REQUIRE_CONFIRM';
-
-/** The refusal type every host handler throws. */
-export const HandlerError = GatewayVerbError;
-export type HandlerError = GatewayVerbError;
 
 /** Function returned by every registration; calling it removes the attached handler. */
 export type Unregister = () => void;
@@ -166,7 +163,7 @@ export function assertConfirmed(
     && body !== null
     && (body as { confirm?: unknown }).confirm === true;
   if (!confirmed || ctx.explicitUserRequest !== true) {
-    throw new HandlerError('explicit user confirmation required', REQUIRE_CONFIRM, 403);
+    throw new GatewayVerbError('explicit user confirmation required', REQUIRE_CONFIRM, 403);
   }
 }
 
@@ -183,7 +180,7 @@ export function registerCatalogHandler<TBody, TResult>(
 ): Unregister {
   const descriptor = catalog.get(methodId);
   if (!descriptor) {
-    throw new HandlerError(`Unknown gateway method: ${methodId}`, 'METHOD_NOT_FOUND', 404);
+    throw new GatewayVerbError(`Unknown gateway method: ${methodId}`, 'METHOD_NOT_FOUND', 404);
   }
 
   const wrapped = async (inv: GatewayMethodInvocation): Promise<unknown> => {
@@ -196,12 +193,14 @@ export function registerCatalogHandler<TBody, TResult>(
     try {
       return await handler({ body, query, context });
     } catch (error) {
-      if (error instanceof HandlerError) throw error;
-      // A service error that carries an HTTP status and a machine code is a
-      // refusal the caller can act on, not a handler fault.
-      const refusal = readGatewayVerbRefusal(error);
-      if (refusal) throw new HandlerError(refusal.message, refusal.code, refusal.status, refusal.field);
-      throw new HandlerError(errorMessage(error), 'HANDLER_FAILED', 500);
+      // A refusal (a GatewayVerbError or a service's RefusalError) goes on
+      // unchanged, so its state and next steps reach the caller.
+      if (error instanceof RefusalError) throw error;
+      // A service error that carries only an HTTP status and a machine code is
+      // a refusal the caller can act on, not a handler fault.
+      const shaped = readGatewayVerbRefusal(error);
+      if (shaped) throw new GatewayVerbError(shaped.message, shaped.code, shaped.status, shaped.field);
+      throw new GatewayVerbError(errorMessage(error), 'HANDLER_FAILED', 500);
     }
   };
 

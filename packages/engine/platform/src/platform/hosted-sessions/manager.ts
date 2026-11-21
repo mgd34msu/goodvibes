@@ -73,8 +73,8 @@ import {
   clampAttachmentLease,
 } from './attachments.js';
 export type { HostedSessionSpine } from './spine-intake.js';
-import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
-export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
+import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLastOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
+export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLastOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError, HostedSessionUnknownPrincipalError } from './errors.js';
 import type { HostedContractWorkAdapter } from './contract-work-adapter.js';
 import { isTerminalContractStatus } from '../contract/types.js';
 import type {
@@ -1124,6 +1124,33 @@ export class HostedSessionManager {
       await this.persist(live.record);
     }
     return { session: live.record, owners: live.attached.identifiedOwners(), added };
+  }
+
+  /**
+   * Remove `principalId` from the session's owners and end its attachments, so
+   * it can no longer attach, read the transcript or watch the session. Who may
+   * remove is decided by the caller's route (`session.share`, subject the
+   * current owners). The last owner is never removed (HostedSessionLastOwnerError).
+   * Its clients leave through the ordinary detach, so the session's detach
+   * policy applies when they were the last attached. One write, only when the
+   * principal was an owner.
+   */
+  async unshare(sessionId: string, principalId: string): Promise<{ readonly session: HostedSessionRecord; readonly owners: readonly string[]; readonly removed: boolean }> {
+    const live = this.requireKnown(sessionId);
+    const owners = live.attached.identifiedOwners();
+    if (!owners.includes(principalId)) return { session: live.record, owners, removed: false };
+    if (owners.length === 1) throw new HostedSessionLastOwnerError(sessionId, principalId);
+    const { detachedClients } = live.attached.unshare(principalId);
+    const last = detachedClients.at(-1);
+    if (last === undefined) {
+      live.record = { ...live.record, updatedAt: this.now() };
+      await this.persist(live.record);
+    } else {
+      for (const clientId of detachedClients.slice(0, -1)) this.publish('hosted-session-detached', live.record, { clientId });
+      // The last detach writes the record, with the owners as they now stand.
+      await this.afterDetach(live, last);
+    }
+    return { session: live.record, owners: live.attached.identifiedOwners(), removed: true };
   }
 
   /**

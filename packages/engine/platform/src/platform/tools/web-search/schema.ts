@@ -7,7 +7,7 @@ export const WEB_SEARCH_TOOL_SCHEMA = {
     },
     providerId: {
       type: 'string',
-      description: 'Optional provider id. Defaults to the built-in default provider.',
+      description: 'Optional provider id: duckduckgo, searxng, brave, exa, firecrawl, tavily, perplexity, or one a plugin registered. Left out, the search uses the provider set in webSearch.defaultProvider, else the first configured of searxng, brave, exa, firecrawl, tavily and perplexity, else duckduckgo. The result names the provider that answered (providerId).',
     },
     maxResults: {
       type: 'integer',

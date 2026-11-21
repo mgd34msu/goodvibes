@@ -25,32 +25,17 @@
  *   to safe data labeled as raw. Raw SSE streams recheck the opt-in before
  *   every event and heartbeat and terminate when it is revoked.
  *
- * This module records the bootstrap setting and emits the opt-in warning.
- * DaemonHttpRouter gives each service a getter for its own config manager;
- * this bootstrap value grants no access to another daemon's telemetry.
- * A service constructed without an owning config getter disables raw reads.
+ * This module only words the opt-in warning; the daemon logs it at start and
+ * each time the setting is turned on. DaemonHttpRouter gives each service a
+ * getter for its own config manager, and a service constructed without an
+ * owning config getter disables raw reads.
  */
 import { logger } from '../../utils/logger.js';
 
-/** Bootstrap reporting only; raw-read authorization belongs to each service. */
-let _includeRawPrompts = false;
-
-/**
- * Record telemetry configuration. Called once at daemon bootstrap from
- * config.telemetry.includeRawPrompts. When true, a WARN log is emitted so ops
- * can see the opt-in is active.
- */
-export function setTelemetryIncludeRawPrompts(value: boolean): void {
-  _includeRawPrompts = value;
-  if (value) {
-    logger.warn(
-      'telemetry.includeRawPrompts is ENABLED, authorized raw telemetry reads may expose prompt/response content. '
-      + 'This setting is for debugging only. Disable in production to avoid PII/secret exfiltration.'
-    );
-  }
-}
-
-/** Read the recorded bootstrap setting; this is not a raw-read authorization. */
-export function getTelemetryIncludeRawPrompts(): boolean {
-  return _includeRawPrompts;
+/** Log that the raw-prompt opt-in is on, so an operator sees it is active. */
+export function warnTelemetryRawPromptsEnabled(): void {
+  logger.warn(
+    'telemetry.includeRawPrompts is ENABLED, authorized raw telemetry reads may expose prompt/response content. '
+    + 'This setting is for debugging only. Disable in production to avoid PII/secret exfiltration.'
+  );
 }

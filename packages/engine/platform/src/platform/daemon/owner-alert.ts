@@ -4,8 +4,9 @@
  * An alert names internal failures, so it goes only to conversations that are
  * the owner's own: a direct conversation with the surface's owner, or a
  * surface that is private by nature (the owner's ntfy topic). A group, a
- * shared channel or a webhook route is never a candidate, however recently it
- * was used.
+ * shared channel, a webhook route or a Home Assistant conversation (a voice
+ * pipeline that names the device, never the speaker) is never a candidate,
+ * however recently it was used.
  *
  * Among the owner's conversations, two facts decide the order:
  *
@@ -48,6 +49,9 @@ export function isOwnerConversation(binding: AutomationRouteBinding, owner: stri
   // whatever the caller sent, and its answer goes to a callback the caller
   // chose. Nothing on it can prove a private conversation with the owner.
   if (binding.surfaceKind === 'webhook') return false;
+  // A Home Assistant conversation is a voice pipeline: it reports the device,
+  // never the speaker, and its answer is spoken in a room anyone can be in.
+  if (binding.surfaceKind === 'homeassistant') return false;
   if (owner === undefined) return false;
   const sender = metadataText(binding, 'userId') ?? metadataText(binding, 'fromId')
     ?? metadataText(binding, 'senderId') ?? metadataText(binding, 'from');

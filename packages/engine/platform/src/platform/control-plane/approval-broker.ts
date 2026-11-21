@@ -17,6 +17,7 @@ import { resolveApprovalHunkSelection } from './approval-hunk-apply.js';
 import { raiseSharedApproval, type PendingApprovalEntry, type RaisedApproval } from './approval-broker-raise.js';
 import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import { awaitPermission } from '../permissions/cancellation.js';
+import { isPermissionCategory, isPermissionRiskLevel } from '../permissions/types.js';
 import { assertExplicitApprovalDisposition, finishedApprovalOutcome, isSharedApprovalDisposition, ordinaryApprovalDecision, type SharedApprovalDecision } from './approval-disposition.js';
 import {
   adminApprovalViewer,
@@ -217,9 +218,6 @@ const APPROVAL_AUDIT_ACTIONS = new Set<SharedApprovalAuditRecord['action']>([
 const APPROVAL_CAUSES = new Set<ApprovalCause>([
   'requester-left', 'requester-restarted', 'cancelled-by-actor', 'owner-decision-stale', 'deadline', 'deadline-while-down', 'remembered-rule',
 ]);
-const PERMISSION_CATEGORIES = new Set(['read', 'write', 'execute', 'delegate']);
-const PERMISSION_RISK_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
-
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -247,8 +245,7 @@ function validatePermissionPromptRequestSnapshot(value: unknown): void {
     typeof value['callId'] !== 'string'
     || typeof value['tool'] !== 'string'
     || !isRecord(value['args'])
-    || typeof category !== 'string'
-    || !PERMISSION_CATEGORIES.has(category)
+    || !isPermissionCategory(category)
   ) {
     throwInvalidApprovalSnapshot();
   }
@@ -257,8 +254,7 @@ function validatePermissionPromptRequestSnapshot(value: unknown): void {
   const riskLevel = analysis['riskLevel'];
   if (
     typeof analysis['classification'] !== 'string'
-    || typeof riskLevel !== 'string'
-    || !PERMISSION_RISK_LEVELS.has(riskLevel)
+    || !isPermissionRiskLevel(riskLevel)
     || typeof analysis['summary'] !== 'string'
     || !isStringArray(analysis['reasons'])
   ) {

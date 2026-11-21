@@ -7,7 +7,8 @@
  * storage/display does not authorize sending it to a hosted reader.
  */
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
-import { HandlerError, registerCatalogHandler } from '../control-plane/host-handlers.js';
+import { registerCatalogHandler } from '../control-plane/host-handlers.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { InboxCursorStore } from './cursor-store.js';
 import { InboundPoller } from './poller.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput } from './aggregator.js';
@@ -116,15 +117,15 @@ interface InboxTriageBody {
   readonly dryRun?: unknown;
 }
 
-function scopeUnavailable(): HandlerError {
-  return new HandlerError('Inbox account scope is unavailable', 'INBOX_SCOPE_UNAVAILABLE', 503);
+function scopeUnavailable(): GatewayVerbError {
+  return new GatewayVerbError('Inbox account scope is unavailable', 'INBOX_SCOPE_UNAVAILABLE', 503);
 }
 
-function stopped(): HandlerError {
-  return new HandlerError('Inbox surface or provider startup has been stopped', 'INBOX_SURFACE_STOPPED', 409);
+function stopped(): GatewayVerbError {
+  return new GatewayVerbError('Inbox surface or provider startup has been stopped', 'INBOX_SURFACE_STOPPED', 409);
 }
-function startFailed(): HandlerError {
-  return new HandlerError('Inbox surface initialization failed', 'INBOX_SURFACE_START_FAILED', 503);
+function startFailed(): GatewayVerbError {
+  return new GatewayVerbError('Inbox surface initialization failed', 'INBOX_SURFACE_START_FAILED', 503);
 }
 
 /** Own storage, polling and host gates independently from the canonical method. */
@@ -133,7 +134,7 @@ export function createOwnedInboxSource(
   options: RegisterInboxSurfaceOptions,
 ): OwnedInboxSource {
   if (!options || options.adapters == null) {
-    throw new HandlerError('Inbox adapters must be supplied explicitly', 'INBOX_ADAPTERS_REQUIRED', 500);
+    throw new GatewayVerbError('Inbox adapters must be supplied explicitly', 'INBOX_ADAPTERS_REQUIRED', 500);
   }
   // Copy explicit membership before starting anything; later map mutation must
   // not silently add a provider outside this registration's owned lifetime.
@@ -326,13 +327,13 @@ export function registerCompositeInboxSurface(
   options: { readonly requireFinalProof?: boolean } = {},
 ): InboxSurfaceRegistration {
   const descriptor = ctx.catalog.get(INBOX_LIST_METHOD_ID);
-  if (!descriptor) throw new HandlerError(`Unknown gateway method: ${INBOX_LIST_METHOD_ID}`, 'METHOD_NOT_FOUND', 404);
-  if (ctx.catalog.hasHandler(INBOX_LIST_METHOD_ID)) throw new HandlerError('Inbox read method already has an owner', 'INBOX_SURFACE_ALREADY_REGISTERED', 409);
+  if (!descriptor) throw new GatewayVerbError(`Unknown gateway method: ${INBOX_LIST_METHOD_ID}`, 'METHOD_NOT_FOUND', 404);
+  if (ctx.catalog.hasHandler(INBOX_LIST_METHOD_ID)) throw new GatewayVerbError('Inbox read method already has an owner', 'INBOX_SURFACE_ALREADY_REGISTERED', 409);
   const owned = [...sources];
   const providers = new Set<string>();
   for (const source of owned) for (const id of source.providerIds) {
-    if ((owned.length > 1 || options.requireFinalProof !== false) && (!id || id.includes(':'))) throw new HandlerError('Inbox provider IDs must be nonempty namespaces', 'INBOX_PROVIDER_NAMESPACE_INVALID', 500);
-    if (providers.has(id)) throw new HandlerError('Inbox provider IDs must have exactly one owner', 'INBOX_DUPLICATE_PROVIDER', 500);
+    if ((owned.length > 1 || options.requireFinalProof !== false) && (!id || id.includes(':'))) throw new GatewayVerbError('Inbox provider IDs must be nonempty namespaces', 'INBOX_PROVIDER_NAMESPACE_INVALID', 500);
+    if (providers.has(id)) throw new GatewayVerbError('Inbox provider IDs must have exactly one owner', 'INBOX_DUPLICATE_PROVIDER', 500);
     providers.add(id);
   }
   const requireFinalProof = owned.length > 1 || options.requireFinalProof !== false;
@@ -382,16 +383,16 @@ export function registerCompositeInboxSurface(
       if (closed) throw stopped();
       const body = invocation.body ?? {};
       const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
-      if (!provider) throw new HandlerError(`provider is required; pass one of ${[...providers].join(', ') || '(no inbox account is set up)'}`, 'INVALID_ARGUMENT', 400, 'provider');
-      if (body.dryRun !== undefined && typeof body.dryRun !== 'boolean') throw new HandlerError('dryRun must be true or false', 'INVALID_ARGUMENT', 400, 'dryRun');
-      if (body.limit !== undefined && (typeof body.limit !== 'number' || !Number.isFinite(body.limit))) throw new HandlerError('limit must be a number from 1 to 100', 'INVALID_ARGUMENT', 400, 'limit');
-      if (body.cursor !== undefined && typeof body.cursor !== 'string') throw new HandlerError('cursor must be a nextCursor value from an earlier answer', 'INVALID_ARGUMENT', 400, 'cursor');
+      if (!provider) throw new GatewayVerbError(`provider is required; pass one of ${[...providers].join(', ') || '(no inbox account is set up)'}`, 'INVALID_ARGUMENT', 400, 'provider');
+      if (body.dryRun !== undefined && typeof body.dryRun !== 'boolean') throw new GatewayVerbError('dryRun must be true or false', 'INVALID_ARGUMENT', 400, 'dryRun');
+      if (body.limit !== undefined && (typeof body.limit !== 'number' || !Number.isFinite(body.limit))) throw new GatewayVerbError('limit must be a number from 1 to 100', 'INVALID_ARGUMENT', 400, 'limit');
+      if (body.cursor !== undefined && typeof body.cursor !== 'string') throw new GatewayVerbError('cursor must be a nextCursor value from an earlier answer', 'INVALID_ARGUMENT', 400, 'cursor');
       const source = owned.find(entry => entry.providerIds.includes(provider));
       if (!source) {
-        throw new HandlerError(`No ${provider} inbox account is set up on this host; pass one of ${[...providers].join(', ') || '(none set up)'}`, 'INBOX_PROVIDER_UNKNOWN', 404, 'provider');
+        throw new GatewayVerbError(`No ${provider} inbox account is set up on this host; pass one of ${[...providers].join(', ') || '(none set up)'}`, 'INBOX_PROVIDER_UNKNOWN', 404, 'provider');
       }
       if (!source.runInboxTriage) {
-        throw new HandlerError(`The ${provider} inbox account on this host does not label its messages; set up privacy screening for it, then try again`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
+        throw new GatewayVerbError(`The ${provider} inbox account on this host does not label its messages; set up privacy screening for it, then try again`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
       }
       const query: InboxListInput = { provider, ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
         ...(typeof body.cursor === 'string' ? { cursor: body.cursor } : {}) };
@@ -425,8 +426,8 @@ export function registerCompositeInboxSurface(
 
 /** Backward-compatible single-store owner and canonical binding. */
 export function registerInboxSurface(ctx: InboxSurfaceContext, options: RegisterInboxSurfaceOptions): InboxSurfaceRegistration {
-  if (!options || options.adapters == null) throw new HandlerError('Inbox adapters must be supplied explicitly', 'INBOX_ADAPTERS_REQUIRED', 500);
-  if (!ctx.catalog.get(INBOX_LIST_METHOD_ID)) throw new HandlerError(`Unknown gateway method: ${INBOX_LIST_METHOD_ID}`, 'METHOD_NOT_FOUND', 404);
+  if (!options || options.adapters == null) throw new GatewayVerbError('Inbox adapters must be supplied explicitly', 'INBOX_ADAPTERS_REQUIRED', 500);
+  if (!ctx.catalog.get(INBOX_LIST_METHOD_ID)) throw new GatewayVerbError(`Unknown gateway method: ${INBOX_LIST_METHOD_ID}`, 'METHOD_NOT_FOUND', 404);
   const source = createOwnedInboxSource(ctx, options);
   let binding: InboxSurfaceRegistration;
   try { binding = registerCompositeInboxSurface(ctx, [source], { requireFinalProof: false }); }

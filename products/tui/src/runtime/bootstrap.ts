@@ -21,7 +21,8 @@ import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input'
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
-import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
+import { bearerFor } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { resolveDaemonTargetProven } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
@@ -57,7 +58,7 @@ import { bindControlCommands } from './control-surfaces.ts';
 import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
 import { pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
-import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { createBootstrapShutdown } from './bootstrap-shutdown.ts';
@@ -72,6 +73,8 @@ import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   describeDaemonAutostart,
+  waitForStartingDaemon,
+  type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
@@ -295,6 +298,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     runtimeBus,
     hookDispatcher: services.hookDispatcher,
   });
+  // Every subagent still running is stopped at exit (SIGTERM, then SIGKILL once its grace runs out).
+  bootstrapUnsubs.push(() => acpManager.close());
   // The subagents' own spawn/complete/fail/cancel events keep their task rows current.
   const acpTaskAdapter = new AcpTaskAdapter(store);
   bootstrapUnsubs.push(acpTaskAdapter.attachRuntimeBus(runtimeBus));
@@ -476,13 +481,29 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // ADOPT ONLY. This app never constructs a DaemonServer or an HttpListener: the
   // daemon is a separate product with its own binary and its own service unit,
-  // and the platform's host services only adopt one. The factories carry the
-  // shared bearer so an adopted daemon is authenticated the same way it always was.
-  const createExternalServiceFactories = (token: string): ExternalServiceFactories => ({
-    sharedDaemonToken: token,
-    // Read at every start, so a restart after "connect to an existing daemon" looks there.
-    daemonTarget: readConnectedDaemonOrigin((key) => configManager.get(key)),
+  // and the platform's host services only adopt one. The daemon and the
+  // credential bound to it come from the resolver every client request uses,
+  // read at every start, so a restart after "connect to an existing daemon"
+  // looks there with that daemon's own token. This machine's token is minted
+  // when absent, so the pairing QR's bearer authenticates against it.
+  const createExternalServiceFactories = async (): Promise<ExternalServiceFactories> => ({
+    daemon: await resolveDaemonTargetProven({
+      configManager,
+      homeDirectory: services.homeDirectory,
+      mode: 'mint',
+      client: GOODVIBES_TUI_SURFACE_ROOT,
+    }),
   });
+  // The bearer bound to the daemon a start looked at, for the attach handshake; empty when none is held for it.
+  const adoptedDaemonToken = (handle: ExternalServicesHandle): string => {
+    const target = handle.daemonTarget;
+    return target?.credential ? bearerFor(target.credential, target.origin.baseUrl) : '';
+  };
+  const startDaemonServices = async (): Promise<void> => {
+    externalServicesPromise = createExternalServiceFactories().then((factories) =>
+      startExternalServices(configManager, hookDispatcher, services, factories));
+    externalServices = await externalServicesPromise;
+  };
 
   // Replacing the external-services handle is one step at a time and always
   // releases the handle it replaces: an adopted handle still owns probes and
@@ -492,48 +513,68 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // The one bounded recovery step: a daemon that is INSTALLED on this machine
   // and simply stopped gets started once and waited for, rather than becoming
   // the user's homework. Every boundary is in the platform's client/daemon-autostart.ts.
+  // Adopting a daemon the service manager just brought up: a fresh discovery, the attach handshake, the home's housekeeping.
+  const adoptStartedDaemon = async (): Promise<void> => {
+    await swapExternalServices(async () => {
+      try {
+        await externalServices.stop();
+      } catch (error) {
+        logger.debug('Releasing the previous external services failed', { error: summarizeError(error) });
+      }
+      await startDaemonServices();
+    });
+    await daemonHandshake.attach(adoptedDaemonToken(externalServices));
+    settleHomeHousekeeping();
+  };
+  const announceAutostart = (outcome: Parameters<typeof describeDaemonAutostart>[0]): void => {
+    const notice = describeDaemonAutostart(
+      outcome,
+      externalServices.daemonStatus.mode === 'external',
+      externalServices.daemonStatus.reason ?? externalServices.daemonStatus.mode,
+    );
+    if (notice) systemMessageRouter[notice.level](notice.text);
+    requestRender();
+  };
+  // A daemon still starting when the boot-time wait ended is waited for off the
+  // interactive path until it answers or its unit stops; exit ends the wait.
+  const startingDaemonWait = new AbortController();
+  bootstrapUnsubs.push(() => startingDaemonWait.abort());
+  const adoptWhenStarted = (control: DaemonServiceControl, serviceName: string, isReachable: () => Promise<boolean>): void => {
+    void waitForStartingDaemon({ control, isReachable, serviceName, signal: startingDaemonWait.signal })
+      .then(async (result) => {
+        if (result === 'online') {
+          await adoptStartedDaemon();
+          announceAutostart({ action: 'came-online', serviceName });
+        } else if (result === 'stopped') {
+          announceAutostart({
+            action: 'start-failed',
+            serviceName,
+            reason: `service "${serviceName}" stopped before the daemon answered (the service manager no longer reports it running), check its logs`,
+          });
+        }
+      })
+      .catch((error: unknown) => logger.warn('Adopting the daemon once it answered failed', { error: summarizeError(error) }));
+  };
+
   const maybeStartInstalledDaemon = async (): Promise<void> => {
     // Pointed at a daemon elsewhere: starting this machine's daemon would not reach it.
-    if (readConnectedDaemonOrigin((key) => configManager.get(key))) return;
+    if (externalServices.daemonTarget && !externalServices.daemonTarget.thisMachine) return;
     try {
+      // The service's unit and pid file live under the login home the
+      // control resolves, not this app's tree home.
+      const control = createDaemonServiceControl({
+        configManager,
+        workingDirectory: services.workingDirectory,
+      });
+      const isReachable = async (): Promise<boolean> => (await sessionSpine.probeReachability()) === 'online';
       const outcome = await autostartInstalledDaemon({
         daemonMode: externalServices.daemonStatus.mode,
-        // The service's unit and pid file live under the login home the
-        // control resolves, not this app's tree home.
-        control: createDaemonServiceControl({
-          configManager,
-          workingDirectory: services.workingDirectory,
-        }),
-        isReachable: async () => (await sessionSpine.probeReachability()) === 'online',
+        control,
+        isReachable,
       });
-      if (outcome.action === 'started' || outcome.action === 'came-online') {
-        const companionTokenRecord = resolveDaemonCompanionToken(
-          resolveGoodVibesDaemonHome(services.homeDirectory),
-          GOODVIBES_TUI_SURFACE_ROOT,
-        );
-        await swapExternalServices(async () => {
-          try {
-            await externalServices.stop();
-          } catch (error) {
-            logger.debug('Releasing the previous external services failed', { error: summarizeError(error) });
-          }
-          externalServicesPromise = startExternalServices(
-            configManager,
-            hookDispatcher,
-            services,
-            createExternalServiceFactories(companionTokenRecord.token),
-          );
-          externalServices = await externalServicesPromise;
-        });
-        await daemonHandshake.attach(companionTokenRecord.token);
-        settleHomeHousekeeping();
-      }
-      const notice = describeDaemonAutostart(
-        outcome,
-        externalServices.daemonStatus.mode === 'external',
-        externalServices.daemonStatus.reason ?? externalServices.daemonStatus.mode,
-      );
-      if (notice) systemMessageRouter[notice.level](notice.text);
+      if (outcome.action === 'started' || outcome.action === 'came-online') await adoptStartedDaemon();
+      if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, isReachable);
+      announceAutostart(outcome);
     } catch (error) {
       logger.debug('Boot-time daemon start check failed', { error: summarizeError(error) });
     }
@@ -558,16 +599,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         }
       }
       await externalServices.stop();
-      const daemonHomeDir = resolveGoodVibesDaemonHome(services.homeDirectory);
-      const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);
-      externalServicesPromise = startExternalServices(
-        configManager,
-        hookDispatcher,
-        services,
-        createExternalServiceFactories(companionTokenRecord.token),
-      );
-      externalServices = await externalServicesPromise;
-      await daemonHandshake.attach(companionTokenRecord.token);
+      await startDaemonServices();
+      await daemonHandshake.attach(adoptedDaemonToken(externalServices));
       settleHomeHousekeeping();
       requestRender();
       return inspectExternalServices();
@@ -606,12 +639,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const externalServicesStarted = deferredStartup.schedule({
     label: 'external-services',
     run: async () => {
-      // Register the persistent companion-pairing token as the daemon's shared
-      // bearer, so tokens scanned from the pairing modal's QR (/devices pair device) actually
-      // authenticate against the daemon this surface adopts.
       const daemonHomeDir = resolveGoodVibesDaemonHome(services.homeDirectory);
-      const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);
-      // Fix (TUI 0.19.20): remove stale pre-0.21.28 workspace-scoped operator
+      // Remove stale pre-0.21.28 workspace-scoped operator
       // token files so only the canonical <daemonHomeDir>/operator-tokens.json survives.
       // The prune is best-effort, it silently skips missing files, no-ops when tokens
       // already match, and records un-deletable candidates in `failedPaths` for logging.
@@ -628,16 +657,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           `[bootstrap] Failed to prune ${prune.failedPaths.length} stale operator-token file(s) (permission/race): ${prune.failedPaths.join(', ')}`,
         );
       }
-      externalServicesPromise = startExternalServices(
-        configManager,
-        hookDispatcher,
-        services,
-        createExternalServiceFactories(companionTokenRecord.token),
-      );
-      externalServices = await externalServicesPromise;
+      await startDaemonServices();
       // Installed-but-stopped recovery, before anything reads the status.
       await maybeStartInstalledDaemon();
-      await daemonHandshake.attach(companionTokenRecord.token);
+      await daemonHandshake.attach(adoptedDaemonToken(externalServices));
       settleHomeHousekeeping();
       requestRender();
     },

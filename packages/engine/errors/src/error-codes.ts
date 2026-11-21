@@ -56,8 +56,12 @@ export type EngineErrorCode =
   // Gateway method dispatch
   | 'NOT_INVOKABLE'
   | 'METHOD_NOT_FOUND'
-  // Validation
-  | 'VALIDATION_FAILED'
+  // Validation: the request's input is wrong (a missing, malformed or out-of-range argument)
+  | 'INVALID_ARGUMENT'
+  // Relay gate: the request reached the daemon through the relay and was not let through
+  | 'STEP_UP_REQUIRED'
+  | 'RELAY_DISABLED'
+  | 'RELAY_CODE_REVOKED'
   // Agent execution
   | 'AGENT_TIMEOUT'
   | 'AGENT_FAILED'
@@ -102,7 +106,10 @@ export const EngineErrorCodes = {
   CREDENTIAL_DESTINATION_UNBOUND: 'CREDENTIAL_DESTINATION_UNBOUND',
   NOT_INVOKABLE: 'NOT_INVOKABLE',
   METHOD_NOT_FOUND: 'METHOD_NOT_FOUND',
-  VALIDATION_FAILED: 'VALIDATION_FAILED',
+  INVALID_ARGUMENT: 'INVALID_ARGUMENT',
+  STEP_UP_REQUIRED: 'STEP_UP_REQUIRED',
+  RELAY_DISABLED: 'RELAY_DISABLED',
+  RELAY_CODE_REVOKED: 'RELAY_CODE_REVOKED',
   AGENT_TIMEOUT: 'AGENT_TIMEOUT',
   AGENT_FAILED: 'AGENT_FAILED',
   TOOL_EXEC_FAILED: 'TOOL_EXEC_FAILED',

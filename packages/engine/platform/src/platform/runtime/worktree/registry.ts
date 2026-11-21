@@ -2,7 +2,7 @@ import { withProcessLockSync } from '../../utils/process-lock.js';
 import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { GitService } from '../../git/service.js';
-import { isMarkedProductWorktree, isWorktreeLockedByGit } from '../../git/product-worktree-marker.js';
+import { isMarkedProductWorktree, isWorktreeLockedByGit, kindOfProductWorktree, productWorktreeSegments } from '../../git/product-worktree-marker.js';
 import { logger } from '../../utils/logger.js';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -516,14 +516,15 @@ function sameRecords(a: Record<string, ManagedWorktreeMeta>, b: Record<string, M
 
 function classifyWorktreePath(path: string, workingDirectory: string): Pick<ManagedWorktreeMeta, 'kind' | 'ownerId'> {
   const normalized = normalizePath(path, workingDirectory);
-  const agentMatch = normalized.match(/[/\\]\.goodvibes[/\\]\.worktrees[/\\]agent-([^/\\]+)$/);
-  if (agentMatch) {
-    return { kind: 'agent', ownerId: agentMatch[1] };
+  // Git lists worktrees by their real path; the root may be given through a link.
+  const root = productWorktreeSegments(workingDirectory, normalized) !== null ? workingDirectory : comparablePath(workingDirectory);
+  const segments = productWorktreeSegments(root, normalized);
+  if (segments === null) return { kind: 'manual' };
+  // A pre-3.3.0 agent's own tree, `agent-<id>` directly under the root, names its agent.
+  if (segments.length === 1 && kindOfProductWorktree(root, normalized) === 'agent') {
+    return { kind: 'agent', ownerId: segments[0]!.slice('agent-'.length) };
   }
-  if (normalized.includes(`${join('.goodvibes', '.worktrees')}`)) {
-    return { kind: 'orchestrator' };
-  }
-  return { kind: 'manual' };
+  return { kind: 'orchestrator' };
 }
 
 export class WorktreeRegistry {

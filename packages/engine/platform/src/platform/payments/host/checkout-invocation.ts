@@ -1,7 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
-import { HandlerError, type HandlerContextEnvelope } from './handler-plumbing.js';
+import type { HandlerContextEnvelope } from './handler-plumbing.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
 import { retainTaintEvidence } from '../../security/untrusted-content.js';
@@ -25,7 +26,7 @@ function frame(context: HandlerContextEnvelope) {
  */
 export function retainCheckoutInvocation(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam, context: HandlerContextEnvelope) {
   const signal = context.signal, authorized = context.isAuthorized, native = context.nativeExecutionAuthority;
-  const changed = () => new HandlerError('The original checkout authority, payment settings or browser owner changed. Inspect the purchase before retrying.', 'FAILED_PRECONDITION', 409);
+  const changed = () => new GatewayVerbError('The original checkout authority, payment settings or browser owner changed. Inspect the purchase before retrying.', 'FAILED_PRECONDITION', 409);
   let original: unknown, paired: unknown, config: unknown;
   try {
     original = captureOwnedJson(frame(context));
@@ -72,7 +73,7 @@ export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserC
     || missingScopes(context.scopes, ['write:payments']).length > 0
     || missingScopes(paired.scopes, ['write:payments']).length > 0
     || authorized?.(['write:payments']) !== true) {
-    throw new HandlerError(options.ownerRequest
+    throw new GatewayVerbError(options.ownerRequest
       ? 'Checkout admission requires an explicit request from the owner (an app on the daemon\'s own machine, or a paired device) '
         + 'with admin and write:payments. '
         + 'A purchase a schedule or trigger starts names the owner\'s standing authorisation instead (standingId from payments.standing.list).'
@@ -88,7 +89,7 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   const issue = native.issueContinuation?.bind(native), revoke = native.revokeContinuation?.bind(native);
   const capturePage = seam.capturePageConnection?.bind(seam);
   const captureRecovery = seam.captureCheckoutRecovery?.bind(seam);
-  if (!issue || !revoke) throw new HandlerError('The paired host cannot retain checkout continuation authority.', 'FAILED_PRECONDITION', 409);
+  if (!issue || !revoke) throw new GatewayVerbError('The paired host cannot retain checkout continuation authority.', 'FAILED_PRECONDITION', 409);
   // The dispatcher starts the owner turn before this handler. Include the
   // immediately displaced window, then keep these exact facts across later
   // requests and async card/address preflight. Never recapture at execution.
@@ -99,7 +100,7 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
       if (authorized(['write:payments']) !== true || deps.checkout.seam() !== seam || !deps.isPaymentsLeader()
         || !readPaymentsEnabled(deps.config) || !isDeepStrictEqual(captureOwnedJson(native.current()), expected)
         || !isDeepStrictEqual(captureOwnedJson(readPaymentsServiceConfig(deps.config)), config)) throw new Error();
-    } catch { throw new HandlerError('The original paired checkout owner, payment settings or browser changed. Inspect this purchase before trying again.', 'FAILED_PRECONDITION', 409); }
+    } catch { throw new GatewayVerbError('The original paired checkout owner, payment settings or browser changed. Inspect this purchase before trying again.', 'FAILED_PRECONDITION', 409); }
   };
   assertCurrent();
   return Object.freeze({ principalId, assertCurrent, taintEvidence,

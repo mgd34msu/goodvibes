@@ -12,6 +12,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { RelayCodeStore } from '../../relay/relay-codes.js';
+import { pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
@@ -88,8 +89,7 @@ export function createRelayPairingMintHandler(accessor: RelayReachabilityAccesso
     // Each pairing carries a relay code of its own, so one device's relay
     // access can be revoked without touching any other's.
     // A paired device asking for its own relay code: revoking that device revokes the code with it.
-    const principal = invocation.context.principalId ?? '';
-    const deviceTokenId = principal.startsWith('pairing:') ? principal.slice('pairing:'.length) : undefined;
+    const deviceTokenId = pairingTokenIdOfPrincipal(invocation.context.principalId);
     let minted: ReturnType<RelayCodes['mint']>;
     try { minted = codes.mint(name, deviceTokenId); }
     catch (error) {

@@ -42,6 +42,7 @@ import {
   type RelayPairingPayload,
   type TunnelHeader,
   RELAY_CODE_HEADER,
+  RELAY_VIA_HEADER,
 } from '@goodvibes/engine/transport-core/relay';
 
 /** Structural client WebSocket the daemon uses to dial the relay. */
@@ -52,8 +53,8 @@ export interface RelayClientWebSocket {
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: unknown) => void): void;
 }
 
-/** Header set on every relay-tunneled request so downstream can tell it apart. */
-export const RELAY_VIA_HEADER = 'x-goodvibes-via-relay';
+/** Header set on every relay-tunneled request so downstream can tell it apart; defined once in transport-core/relay. */
+export { RELAY_VIA_HEADER };
 
 /**
  * Whether a request arrived over the relay (vs the trusted LAN). Surfaces and

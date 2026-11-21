@@ -1,4 +1,5 @@
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySettingValue, isSecretBearingConfigKey, isSecretReferenceValue, type SubscriptionImportEntry } from '@goodvibes/engine/platform/platform/config';
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
@@ -16,8 +17,6 @@ import type {
   AgentWorkspaceActionResult,
   AgentWorkspaceSetupPart,
 } from './agent-workspace-types.ts';
-
-const GOODVIBES_TUI_SURFACE_ROOT = 'tui';
 
 const TUI_IMPORTABLE_SETTING_PREFIXES = [
   'display.',

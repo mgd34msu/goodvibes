@@ -48,8 +48,12 @@ export const approvalLifecycle = defineLifecycle<SharedApprovalStatus>('approval
   expired: [],
 });
 
-/** Whether an approval is still waiting for a decision. */
-export function isOpenApprovalStatus(status: SharedApprovalStatus): boolean {
+/**
+ * Whether an approval is still waiting for a decision (pending or claimed).
+ * Takes a plain string as well, so a record read back off the wire is tested
+ * by the same rule; an absent or unknown status is not open.
+ */
+export function isOpenApprovalStatus(status: string | undefined): boolean {
   return status === 'pending' || status === 'claimed';
 }
 
@@ -287,7 +291,15 @@ function refusalFor(record: SharedApprovalRecord, viewer: ApprovalViewer, action
     return { code: 'APPROVAL_SETTLED', reason: `It is ${record.status}, which is final.` };
   }
   if (action === 'claim' || action === 'cancel') {
-    if (viewer.kind === 'agent') return { code: 'OWNER_ONLY', reason: 'An agent can read approvals but never acts on them.' };
+    // An agent never claims an ask, and cancels only one its own credential raised (what it, or the owner
+    // in the same app, asked and no longer wants); every other ask is the owner's to settle.
+    if (viewer.kind === 'agent') {
+      if (action === 'claim') return { code: 'OWNER_ONLY', reason: 'An agent can read approvals but never claims one.' };
+      const raisedBy = metadataText(record, 'raisedByPrincipal');
+      if (viewer.id === undefined || raisedBy !== viewer.id) {
+        return { code: 'OWNER_ONLY', reason: 'An agent can cancel only an ask it raised itself; this one was raised by someone else.' };
+      }
+    }
     if (!viewer.mayAdminister) return { code: 'FORBIDDEN', reason: 'Claiming or cancelling an approval needs an admin credential with write:approvals.' };
     return undefined;
   }
@@ -383,6 +395,26 @@ export function readApproval(record: SharedApprovalRecord, viewer: ApprovalViewe
 /** The viewer the broker publishes events for: an admin who may answer, on the record's own node. */
 export function adminApprovalViewer(node: string): ApprovalViewer {
   return { kind: 'admin', scopes: ['read:approvals', 'write:approvals'], node, mayAnswer: true, mayAdminister: true };
+}
+
+/**
+ * Whether `viewer` may claim or cancel `record`, as the same rule its reading
+ * shows: the refusal when it may not, else undefined. Enforced where every
+ * claim and cancel passes (approval-actions.ts), so what the reading says an
+ * agent or a credential without approvals.administer never does is never
+ * applied for it. A settled record is left to the broker, which answers with
+ * the decision that stands.
+ */
+export function approvalAdministerRefusal(record: SharedApprovalRecord, viewer: ApprovalViewer, action: 'claim' | 'cancel'): Refusal | undefined {
+  const refused = refusalFor(record, viewer, action);
+  if (refused === undefined || refused.code === 'APPROVAL_SETTLED') return undefined;
+  return refusal({
+    code: refused.code,
+    state: `${record.status} (revision ${record.revision})`,
+    status: 403,
+    reason: `${refused.reason} Nothing was changed.`,
+    next: [viewer.kind === 'agent' ? 'Leave it for the owner to decide, or tell the owner what you need.' : 'Ask the owner, or use a credential with write:approvals.'],
+  });
 }
 
 /** The refusal an approval action answers with, in product terms, with the record's state named. */

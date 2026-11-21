@@ -111,7 +111,7 @@ export class DaemonRequestRouter {
       new AppError(`Route not found: ${url.pathname}`, 'NOT_FOUND', false, {
         category: 'not_found',
         source: 'runtime',
-        guidance: 'Check the daemon API path and version. New platform-facing routes are published under /api/v1.',
+        guidance: 'GET /api/control-plane/methods lists every method with its HTTP path; POST /api/control-plane/methods/{methodId}/invoke calls a method by its id.',
       }),
       { status: 404 },
     );

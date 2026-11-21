@@ -2,7 +2,7 @@
  * stepup-prompter.ts, the seam between the transport layer and the step-up ceremony UI.
  *
  * routedFetch (relay-connection.ts) is plain, non-React transport code: when a mutating
- * relay call comes back `401 step-up-required`, it cannot itself open a modal or touch a
+ * relay call comes back `401 STEP_UP_REQUIRED`, it cannot itself open a modal or touch a
  * passkey. Instead it asks the registered prompter to produce a fresh assertion header, then
  * retries the original call with it attached.
  *

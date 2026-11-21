@@ -198,7 +198,7 @@ export function withStoreLock<T>(configDir: string, operation: () => T): T {
 }
 
 export function writeStore(store: SettingsControlPlaneStore, configDir: string): void {
-  writeJsonFileAtomic(getSettingsControlPath(configDir), store);
+  writeJsonFileAtomic(getSettingsControlPath(configDir), store, { durable: true });
 }
 
 export function trimStore(store: SettingsControlPlaneStore): SettingsControlPlaneStore {
@@ -238,13 +238,14 @@ export function isCredentialLiteral(key: string, value: unknown): boolean {
 }
 
 /**
- * Refuse a bundle that carries a credential literal before anything about it is
- * staged, shown or written; the refusal names the setting, never the value.
+ * Refuse a bundle that carries a credential literal, card material or a
+ * malformed secret reference before anything about it is staged, shown or
+ * written; the refusal names the setting, never the value.
  */
 export function assertNoCredentialLiterals(settings: Readonly<Record<string, unknown>>, bundleKind: string): void {
   for (const [key, value] of Object.entries(settings)) {
     const refusal = credentialValueRefusal(key, value);
-    if (refusal) throw new ConfigError(`The ${bundleKind} carries a credential literal for ${key}; nothing was staged or written. ${refusal.reason} ${refusal.next}`);
+    if (refusal) throw new ConfigError(`The ${bundleKind} carries a value for ${key} that a settings file cannot hold; nothing was staged or written. ${refusal.reason} ${refusal.next}`);
   }
 }
 

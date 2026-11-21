@@ -166,6 +166,29 @@ export class McpLifecycleManager {
     tracked.timer = timer;
   }
 
+  /**
+   * The server refused this host's credentials. Reconnecting would repeat the
+   * same refusal, so nothing is scheduled: the server waits in `auth_required`
+   * until a connect is requested again (`/mcp reload`, after the credentials
+   * are set). A report after a deliberate stop is stale and ignored.
+   */
+  authRequired(serverName: string, reason: string, authType: string): void {
+    const tracked = this.#servers.get(serverName);
+    if (!tracked) return;
+    const { entry } = tracked;
+    if (entry.state !== 'connecting' && entry.state !== 'connected') return;
+    this.#cancelTimer(tracked);
+    tracked.generation++;
+    entry.reconnectPending = false;
+    delete entry.nextReconnectAt;
+    if (!this.#move(entry, 'auth_required')) return;
+    entry.lastError = reason;
+    entry.disconnectedAt = Date.now();
+    entry.stoppedReason = 'the server refused its credentials; set them, then run /mcp reload';
+    this.#emit({ type: 'MCP_AUTH_REQUIRED', serverId: serverName, authType });
+    logger.info('McpLifecycleManager: server needs credentials; not reconnecting', { server: serverName, authType, reason });
+  }
+
   /** A deliberate disconnect: cancel any scheduled attempt; nothing reconnects until a connect is requested. */
   stop(serverName: string, reason?: string): void {
     const tracked = this.#servers.get(serverName);

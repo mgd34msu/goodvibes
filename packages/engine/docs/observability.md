@@ -210,14 +210,14 @@ export interface ToolResultSummary {
 
 Do not rely on `payload.result` being the raw tool return value. Downstream consumers that need the full result should read it from the tool-call ledger, not the event stream.
 
-**`contentSummary` on `LLM_RESPONSE_RECEIVED`**. The provider response is surfaced as a redacted summary by default:
+**`promptSummary` on `LLM_REQUEST_STARTED` and `contentSummary` on `LLM_RESPONSE_RECEIVED`**. Neither carries the prompt or the response:
 
 ```ts
 promptSummary: { length: number; first100chars: string } | string;
 contentSummary: { length: number; first100chars: string } | string;
 ```
 
-Raw prompts and responses are only emitted when `telemetry.includeRawPrompts` is explicitly enabled. In all other configurations the summary object is emitted. Subscribers branch on `typeof` to handle both shapes.
+Both are redacted placeholders, a string such as `<redacted-length-unknown>` or `<response awaiting publication review>`, or empty, whatever `telemetry.includeRawPrompts` says. That setting only opens the raw telemetry view (`view: 'raw'`) to an authorized reader, and the daemon logs a warning at start and each time it is turned on.
 
 ### Dispatch ordering
 

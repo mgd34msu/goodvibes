@@ -95,6 +95,7 @@ export function emitLlmRequestStarted(
     turnId: string;
     provider: string;
     model: string;
+    /** A redacted placeholder; the prompt itself is never carried here. */
     promptSummary: { length: number; first100chars: string } | string;
   }
 ): void {
@@ -109,6 +110,7 @@ export function emitLlmResponseReceived(
     turnId: string;
     provider: string;
     model: string;
+    /** A redacted placeholder, or empty; the response itself is never carried here. */
     contentSummary: { length: number; first100chars: string } | string;
     toolCallCount: number;
     inputTokens: number;

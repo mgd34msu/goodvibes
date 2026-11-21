@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
-import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
+import { assertConfirmed, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
+import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
@@ -16,18 +17,18 @@ function authorizedFor(context: HandlerContextEnvelope, required: string): boole
 }
 function field(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 256) {
-    throw new HandlerError(`${name} must be a nonempty purchase/window reference.`, 'INVALID_ARGUMENT', 400, name);
+    throw new GatewayVerbError(`${name} must be a nonempty purchase/window reference.`, 'INVALID_ARGUMENT', 400, name);
   }
   return value;
 }
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-function unavailable(): HandlerError {
-  return new HandlerError('Purchase windows are unavailable on this payment host.', 'FAILED_PRECONDITION', 409);
+function unavailable(): GatewayVerbError {
+  return new GatewayVerbError('Purchase windows are unavailable on this payment host.', 'FAILED_PRECONDITION', 409);
 }
-function forbidden(): HandlerError {
-  return new HandlerError('Answering a purchase requires the owner with admin and write:payments: an app on the daemon\'s own machine or a paired device. '
+function forbidden(): GatewayVerbError {
+  return new GatewayVerbError('Answering a purchase requires the owner with admin and write:payments: an app on the daemon\'s own machine or a paired device. '
     + 'From another device, pair it; then refresh the purchase.', 'FORBIDDEN', 403);
 }
 
@@ -37,7 +38,7 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
   return async ({ body, query, context }) => {
     context.signal?.throwIfAborted();
     if (!context.principalId || !scope(context.scopes, 'read:payments') || !authorizedFor(context, 'read:payments')) {
-      throw new HandlerError('Reading purchase windows requires current read:payments access.', 'FORBIDDEN', 403);
+      throw new GatewayVerbError('Reading purchase windows requires current read:payments access.', 'FORBIDDEN', 403);
     }
     const input = record(body);
     const selected = input['purchaseId'] ?? query['purchaseId'];
@@ -54,7 +55,7 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
         ...(securityCodes.length ? { securityCodes } : {}), ...(stop ? { stopped: paymentHostStopView(stop) } : {}) };
     }
     catch (error) {
-      throw new HandlerError(stop ? paymentHostStopView(stop).message : error instanceof PaymentOperationStoreError ? error.message
+      throw new GatewayVerbError(stop ? paymentHostStopView(stop).message : error instanceof PaymentOperationStoreError ? error.message
         : 'Purchase status is unavailable. Inspect the original payment evidence before taking further action.', 'FAILED_PRECONDITION', 409);
     }
   };
@@ -69,7 +70,7 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
     const purchaseId = field(input['purchaseId'], 'purchaseId');
     const operationId = input['operationId'] === undefined ? undefined : field(input['operationId'], 'operationId');
     if (operationId !== undefined && (action !== 'cancel' || input['windowId'] !== undefined)) {
-      throw new HandlerError('Choose either the exact window or the exact operation to cancel.', 'INVALID_ARGUMENT', 400);
+      throw new GatewayVerbError('Choose either the exact window or the exact operation to cancel.', 'INVALID_ARGUMENT', 400);
     }
     const windowId = operationId === undefined ? field(input['windowId'], 'windowId') : undefined;
     const replies = deps.replies;
@@ -100,18 +101,18 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
         }
       });
     } catch (error) {
-      if (error instanceof HandlerError) throw error;
+      if (error instanceof GatewayVerbError) throw error;
       // Operation refusals name the purchase's actual state and what is still possible.
-      if (error instanceof PaymentOperationStoreError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof PaymentOperationStoreError) throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
       if (error instanceof PaymentReplyWindowError && error.kind === 'stale') {
-        throw new HandlerError('That purchase window has closed or was replaced, so this answer was not used. Read payments.purchase.status for the '
+        throw new GatewayVerbError('That purchase window has closed or was replaced, so this answer was not used. Read payments.purchase.status for the '
           + 'current window; to stop the purchase before it is submitted, use payments.purchase.cancel with its operationId.', 'FAILED_PRECONDITION', 409);
       }
       if (error instanceof PaymentReplyWindowError || error instanceof PaymentReplyInboxClosedError) {
-        throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+        throw new GatewayVerbError(error.message, 'FAILED_PRECONDITION', 409);
       }
       // Neither pairing failures nor underlying callbacks may echo private data.
-      throw new HandlerError('The purchase window could not be answered. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
+      throw new GatewayVerbError('The purchase window could not be answered. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
     }
   };
 }
@@ -150,14 +151,14 @@ function pairedOwner(context: HandlerContextEnvelope) {
 export function purchaseSecurityCodeHandler(deps: PaymentWindowHandlerDeps): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
     // A security code is card material: it crosses only this machine, TLS or the tailnet.
-    if (!mayCrossWithCardDetails(context.transport)) throw new HandlerError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
+    if (!mayCrossWithCardDetails(context.transport)) throw new GatewayVerbError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
     assertConfirmed(body, context);
     const input = record(body);
     const purchaseId = field(input['purchaseId'], 'purchaseId');
     const windowId = field(input['windowId'], 'windowId');
     const code = typeof input['code'] === 'string' && input['code'].length <= 16 ? input['code'] : '';
     const codes = deps.securityCodes;
-    if (!codes) throw new HandlerError('This payment host does not ask for security codes; payments.cvvHandling prompt needs the daemon the terminal app is paired with.', 'FAILED_PRECONDITION', 409);
+    if (!codes) throw new GatewayVerbError('This payment host does not ask for security codes; payments.cvvHandling prompt needs the daemon the terminal app is paired with.', 'FAILED_PRECONDITION', 409);
     const { authority, expected, current } = pairedOwner(context);
     try {
       current();
@@ -166,11 +167,11 @@ export function purchaseSecurityCodeHandler(deps: PaymentWindowHandlerDeps): Typ
         return codes.supply({ purchaseId, windowId, code });
       });
     } catch (error) {
-      if (error instanceof HandlerError) throw error;
+      if (error instanceof GatewayVerbError) throw error;
       if (error instanceof SecurityCodeRequestError) {
-        throw new HandlerError(error.message, error.kind === 'invalid' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION', error.kind === 'invalid' ? 400 : 409);
+        throw new GatewayVerbError(error.message, error.kind === 'invalid' ? 'INVALID_ARGUMENT' : 'FAILED_PRECONDITION', error.kind === 'invalid' ? 400 : 409);
       }
-      throw new HandlerError('The security code could not be handed to the purchase. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
+      throw new GatewayVerbError('The security code could not be handed to the purchase. Refresh its status before trying again.', 'FAILED_PRECONDITION', 409);
     }
   };
 }

@@ -1,7 +1,8 @@
 /**
- * web-origin.ts, the web-app origin a pairing deep link points at, and the
- * one-time write of `web.publicBaseUrl` from the stable-name resolution.
+ * web-origin.ts, the web-app origin a pairing deep link points at.
  *
+ * `web.publicBaseUrl` holds only what a person set, and nothing here writes
+ * it: an empty value means the origin is derived live from the settings.
  * An explicit public URL is authoritative. The bundled WebUI shares the
  * control-plane listener: its fallback must use that binding, not the declared
  * web port, which has no separate bundle listener. `web.host`/`web.port` are
@@ -31,7 +32,7 @@ export interface PairingWebOrigin {
   readonly alternateOrigin?: string | undefined;
 }
 
-/** The shipped `web.publicBaseUrl` default; a placeholder, never a user's choice of origin. */
+/** The `web.publicBaseUrl` placeholder older releases stored; never a user's choice of origin. */
 const SHIPPED_PUBLIC_BASE_URL = 'http://127.0.0.1:3423';
 
 function trimTrailingSlash(value: string): string {
@@ -129,8 +130,11 @@ function webBindHost(config: Pick<ConfigManager, 'get'>): string {
 
 type BoundListener = { readonly host: string; readonly port: number; readonly scheme?: 'http' | 'https' };
 
-/** A user-set public URL, or '' when the setting is empty or the shipped placeholder. */
-function explicitPublicBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
+/**
+ * A user-set public URL, or '' when the setting is empty or the placeholder
+ * older releases shipped. The one reading of the setting every caller uses.
+ */
+export function explicitPublicBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
   const publicBaseUrl = trimTrailingSlash(String(configManager.get('web.publicBaseUrl') ?? '').trim());
   return publicBaseUrl === SHIPPED_PUBLIC_BASE_URL ? '' : publicBaseUrl;
 }
@@ -248,8 +252,8 @@ function derivedPairingWebOrigin(
 
 /**
  * Whether `web.publicBaseUrl` holds nothing but this daemon's own derived web
- * origin (the value {@link ensurePublicBaseUrl} stores, or the address beside
- * it), or is empty or the shipped placeholder: then no tunnel or reverse proxy
+ * origin (the value older releases stored there, or the address beside it),
+ * or is empty or the old placeholder: then no tunnel or reverse proxy
  * publishes the daemon through it. Any other value (a tunnel, a proxy, a
  * Tailscale serve URL) is not. `settled` is false while the answer could still
  * change once this process has its slow host facts (the Tailscale name, the
@@ -275,27 +279,4 @@ function hostnameOf(origin: string): string {
   } catch {
     return origin;
   }
-}
-
-/**
- * Persist web.publicBaseUrl once, from the stable-name resolution, and only when
- * it is empty AND the resolution produced a stable name (a DHCP-bound address is
- * not worth freezing into config). Returns the resolved origin either way, or
- * null (and writes nothing) when no web UI is served. Never
- * overwrites a stored value, the shipped placeholder included: other surfaces
- * (notifications, channels) read that setting as a public URL, and pairing does
- * not decide that a LAN name should become one.
- */
-export function ensurePublicBaseUrl(
-  configManager: Pick<ConfigManager, 'get' | 'setDynamic'>,
-  probe?: () => StableHostInputs,
-  boundControlPlane?: BoundListener,
-): PairingWebOrigin | null {
-  const resolved = resolvePairingWebOrigin(configManager, probe, boundControlPlane);
-  if (resolved === null) return null;
-  if (!String(configManager.get('web.publicBaseUrl') ?? '').trim() && !resolved.fromPublicBaseUrl && resolved.resolvedHost.stable) {
-    configManager.setDynamic('web.publicBaseUrl', resolved.origin);
-    return { ...resolved, fromPublicBaseUrl: true };
-  }
-  return resolved;
 }

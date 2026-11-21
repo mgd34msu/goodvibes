@@ -5,7 +5,7 @@
  */
 import type { CommandContext } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import { TemplateManager, parseTemplateArgs, type TemplateScope } from '@goodvibes/engine/platform/platform/templates';
+import { TemplateManager, parseTemplateArgs, storedTemplateName, type TemplateScope } from '@goodvibes/engine/platform/platform/templates';
 import { RefusalError, formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { defineCommand, defineList, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
@@ -20,8 +20,8 @@ function managerOf(ctx: CommandContext): TemplateManager {
 
 /** The file a template loads from (project before global), or undefined when there is none. */
 function templatePath(manager: TemplateManager, name: string): string | undefined {
-  // Stored names are folded the way TemplateManager.save folds them.
-  const stored = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '') || 'template';
+  const stored = storedTemplateName(name);
+  if (stored === '') return undefined;
   const wanted = manager.list().filter((entry) => entry.name === stored);
   return (wanted.find((entry) => entry.scope === 'project') ?? wanted[0])?.path;
 }
@@ -119,16 +119,26 @@ export const templateCommand = defineCommand<CommandContext>({
     }),
     {
       id: 'save', label: 'Save your last message as a template', word: 'save',
-      inputs: [textInput({ id: 'name', label: 'Name', help: 'What to call it', why: 'a name you choose', typed: { position: 1 } })],
-      sentence: 'Your last message is kept as template {name} in this project, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'delete', operator: LOCAL_ONLY, example: { name: 'review-pr' },
+      inputs: [
+        textInput({ id: 'name', label: 'Name', help: 'What to call it', why: 'a name you choose', typed: { position: 1 } }),
+        choiceInput({
+          id: 'scope', label: 'For', help: 'This project only, or every project on this machine',
+          choices: [{ value: 'project', label: 'This project' }, { value: 'global', label: 'Every project', help: 'Every project can use it.' }],
+          typed: { flag: '--everywhere', switchOn: 'global' }, optional: { default: 'project', means: 'this project' },
+        }),
+      ],
+      sentence: 'Your last message is kept as template {name} ({scope}); a template already saved under that name there is replaced.', done: '',
+      touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', operator: LOCAL_ONLY, example: { name: 'review-pr' },
       async run(values, ctx) {
+        let saved: ReturnType<TemplateManager['save']>;
         try {
-          const stored = managerOf(ctx).save(values.name!, ctx.session.conversationManager.getLastUserMessage() || '# Template\n\nReplace this with your template content.\n');
-          return `Template saved: ${stored}`;
+          saved = managerOf(ctx).save(values.name!, ctx.session.conversationManager.getLastUserMessage() || '# Template\n\nReplace this with your template content.\n', (values.scope || 'project') as TemplateScope);
         } catch (error) {
+          if (readRefusal(error)) throw error;
           throw commandRefusal(`The template was not saved: ${summarizeError(error)}`);
         }
+        const where = saved.scope === 'global' ? 'for every project' : 'in this project';
+        return `${saved.replaced ? 'Template replaced' : 'Template saved'}: ${saved.name} (${where})`;
       },
     },
     readAction<CommandContext>({

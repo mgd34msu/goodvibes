@@ -23,8 +23,9 @@
  *  5. Disclose what was reaped, every sweep returns an itemised report.
  */
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, existsSync, fsyncSync, openSync, promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import { dirname } from 'node:path';
+import { syncDirectory } from '../../utils/atomic-json-store.js';
 import { PersistentStore, type PersistentStoreCorruption } from '../../state/persistent-store.js';
 import { openRecordLog, type RecordLog } from '../../state/record-log.js';
 import { logger } from '../../utils/logger.js';
@@ -907,12 +908,6 @@ export class InboundMailStore {
   async runRecoverySweep(): Promise<InboundMailRecordSweepReport> {
     return this.sweep('recovery');
   }
-}
-
-/** Make the entries of a directory durable (a file created or removed in it). */
-function syncDirectory(directory: string): void {
-  const fd = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY);
-  try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
 /** Replace each card-number shape with the marker `redactCardShapes` uses. Local, no model. */

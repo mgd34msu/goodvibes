@@ -279,19 +279,24 @@ export class HomeAssistantConversationRoutes {
       duplicate: true as const,
       ...(known.chatMessageId ? { chatMessageId: known.chatMessageId } : {}),
     };
-    if (known.failure) return { ...base, ok: false, status: known.failure.status, error: known.failure.error };
+    return { ...base, ...this.messageOutcome(known) };
+  }
+
+  /** What a known message came to, read from its recorded failure and the session transcript. */
+  private messageOutcome(known: HomeAssistantMessageIndex): Pick<HomeAssistantSubmitResult, 'ok' | 'status' | 'assistant' | 'error'> {
+    if (known.failure) return { ok: false, status: known.failure.status, error: known.failure.error };
     const chat = this.context.chatManager;
     if (!chat.getSession(known.sessionId)) {
-      return { ...base, ok: false, status: 'failed', error: 'The chat session for this message no longer exists.' };
+      return { ok: false, status: 'failed', error: 'The chat session for this message no longer exists.' };
     }
     const transcript = known.chatMessageId ? chat.getMessages(known.sessionId) : [];
     const reply = transcript.find((message) => message.role === 'assistant' && message.inReplyTo === known.chatMessageId);
-    if (reply?.deliveryState === 'cancelled') return { ...base, ok: false, status: 'cancelled', error: 'Turn cancelled' };
-    if (reply) return { ...base, ok: true, status: 'completed', assistant: buildAssistantResult(reply.content) };
+    if (reply?.deliveryState === 'cancelled') return { ok: false, status: 'cancelled', error: 'Turn cancelled' };
+    if (reply) return { ok: true, status: 'completed', assistant: buildAssistantResult(reply.content) };
     if (transcript.find((message) => message.id === known.chatMessageId)?.deliveryState === 'unanswered') {
-      return { ...base, ok: false, status: 'failed', error: 'The message was never answered.' };
+      return { ok: false, status: 'failed', error: 'The message was never answered.' };
     }
-    return { ...base, ok: true, status: 'running' };
+    return { ok: true, status: 'running' };
   }
 
   private async postTurn(
@@ -479,7 +484,9 @@ export class HomeAssistantConversationRoutes {
    * the turns.cancel verb existed this closed the whole session: the only
    * available hammer, and the next message silently started a fresh session
    * with no memory of the exchange.) "Nothing running" is a success, the
-   * user's intent (stop) is already true. The response contract is unchanged.
+   * user's intent (stop) is already true, and the answer says what is true:
+   * a known messageId reports what that message came to (completed with its
+   * reply, cancelled or failed), a sessionId alone reports `not-running`.
    */
   private async cancelConversation(body: JsonRecord): Promise<Response> {
     const indexed = readString(body.messageId ?? body.message_id)
@@ -527,6 +534,19 @@ export class HomeAssistantConversationRoutes {
           { status: 500 },
         );
       }
+      // Nothing of it was running, so nothing was cancelled: a known message answers what it
+      // actually came to (a reply that was stored is reported as completed, with its text), and
+      // a session named alone answers that no turn was running.
+      if (!indexed) return Response.json({ ok: true, sessionId, status: 'not-running' });
+      const outcome = this.messageOutcome(indexed);
+      return Response.json({
+        ok: true,
+        sessionId,
+        messageId: indexed.messageId,
+        status: outcome.status,
+        ...(outcome.assistant ? { assistant: outcome.assistant } : {}),
+        ...(outcome.status === 'failed' && outcome.error ? { error: outcome.error } : {}),
+      });
     }
     return Response.json({ ok: true, sessionId, status: 'cancelled' });
   }

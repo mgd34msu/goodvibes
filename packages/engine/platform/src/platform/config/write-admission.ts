@@ -10,6 +10,7 @@ import { ConfigError } from '../types/errors.js';
 import { coerceSchemaValue } from './manager-bootstrap.js';
 import { configKeyFacts, isProjectRestrictedKey } from './config-key-facts.js';
 import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
+import { isValidSecretReference } from './secret-refs.js';
 import { restrictProjectLayer } from './project-layer-restrictions.js';
 import { writeRawDotPath } from './settings-io.js';
 
@@ -34,11 +35,8 @@ export function schemaTypeRefusal(schema: Pick<ConfigSetting, 'type'>, value: un
  * register it (the daemon's, for instance) may still write it.
  */
 const PRODUCT_OWNED_LEAVES: ReadonlySet<string> = new Set([
-  'behavior.budgetAlertUsd', 'behavior.notifyAfterSeconds', 'behavior.notifyOnAgentFailure',
-  'behavior.notifyOnApprovalPending', 'behavior.notifyOnBudgetBreach', 'behavior.notifyOnChainFailure',
-  'behavior.notifyOnlyWhenUnfocused', 'behavior.terminalBell', 'behavior.terminalNotifyAgentBlocked',
-  'behavior.terminalNotifyApprovalWait', 'behavior.terminalNotifyTurnEnd', 'behavior.notificationsMetadataOnly',
-  'tools.hostedResearchScreening', 'memory.projection.dir', 'storage.codeIndexEnabled',
+  'behavior.notificationsMetadataOnly',
+  'tools.hostedResearchScreening',
   'permissions.execEnvScrubAllowlist',
   'payments.shippingAddress', 'payments.billingAddress',
 ]);
@@ -66,11 +64,19 @@ export function nonSchemaKeyRefusal(key: string, _value: unknown, config?: unkno
  * for every writer (`set`, `setDynamic`, `setMany`, prepared imports). The
  * reason never quotes the value. Cost: one facts lookup.
  */
-export function credentialValueRefusal(key: string, value: unknown): { readonly code: 'CONFIG_CARD_MATERIAL' | 'CONFIG_SECRET_LITERAL'; readonly reason: string; readonly next: string } | null {
+export function credentialValueRefusal(key: string, value: unknown): { readonly code: 'CONFIG_CARD_MATERIAL' | 'CONFIG_SECRET_LITERAL' | 'CONFIG_SECRET_REFERENCE_INVALID'; readonly reason: string; readonly next: string } | null {
   const facts = configKeyFacts(key);
   if (facts.cardMaterial) {
     return { code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`,
       next: 'Enter the card with /payments add-card in a terminal app, or under Payments in the web UI.' };
+  }
+  // A value meant as a reference that the resolver cannot read would be saved
+  // and later reported as a missing credential; it is refused as malformed.
+  const malformed = facts.secret && (Array.isArray(value) ? value : [value])
+    .some((member) => isSecretReferenceValue(member) && !isValidSecretReference(member));
+  if (malformed) {
+    return { code: 'CONFIG_SECRET_REFERENCE_INVALID', reason: `${key} holds a goodvibes://secrets/ reference that is not well formed.`,
+      next: `Write the reference as goodvibes://secrets/goodvibes/<KEY>, naming a key saved with /secrets set <KEY> <value>.` };
   }
   if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
     return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,

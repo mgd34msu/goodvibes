@@ -7,8 +7,12 @@ import type {
   SharedSessionRoutingIntent,
 } from './session-intents.js';
 
-export type SharedSessionStatus = 'active' | 'closed';
-export type SharedSessionMessageRole = 'user' | 'assistant' | 'system';
+/** Every session status; readers of stored sessions validate against this list. */
+export const SHARED_SESSION_STATUSES = ['active', 'closed'] as const;
+export type SharedSessionStatus = (typeof SHARED_SESSION_STATUSES)[number];
+/** Every message role a session message may carry. */
+export const SHARED_SESSION_MESSAGE_ROLES = ['user', 'assistant', 'system'] as const;
+export type SharedSessionMessageRole = (typeof SHARED_SESSION_MESSAGE_ROLES)[number];
 
 /**
  * A session participant, the identity triple {surfaceKind, surfaceId, userId?}
@@ -63,21 +67,23 @@ export interface SharedSessionMessage {
  *   at a project directory just because that happens to be the daemon's
  *   process cwd.
  */
-export type SharedSessionKind =
-  | 'tui'
-  | 'agent'
-  | 'webui'
-  | 'companion-task'
-  | 'companion-chat'
-  | 'automation'
-  | 'channel'
+export const SHARED_SESSION_KINDS = [
+  'tui',
+  'agent',
+  'webui',
+  'companion-task',
+  'companion-chat',
+  'automation',
+  'channel',
   // A hosted third-party coding agent (Claude Code / Codex CLI / opencode)
   // running as a daemon session over the Agent Client Protocol.
-  | 'acp'
+  'acp',
   // A first-party conversation loop composed INSIDE the daemon
   // (platform/hosted-sessions): the same orchestrator a terminal runs, hosted
   // here so the conversation does not depend on a client staying open.
-  | 'hosted';
+  'hosted',
+] as const;
+export type SharedSessionKind = (typeof SHARED_SESSION_KINDS)[number];
 
 /**
  * Why a session was closed. Drives the honest reopen-on-heartbeat rule:
@@ -150,6 +156,21 @@ export interface SharedSessionRecord {
   readonly lastError?: string | undefined;
   readonly metadata: Record<string, unknown>;
 }
+
+/**
+ * Facts a session's owning manager holds for a session it mirrors into the
+ * broker (a companion chat, a hosted session): the broker reads them from the
+ * owner instead of keeping its own copy. Null when the owner does not know the
+ * session.
+ */
+export interface SharedSessionExternalFacts {
+  readonly title: string;
+  readonly messageCount: number;
+  readonly lastMessageAt?: number | undefined;
+  readonly updatedAt: number;
+}
+
+export type SharedSessionExternalFactsProvider = (session: SharedSessionRecord) => SharedSessionExternalFacts | null;
 
 interface SharedSessionSubmissionBase {
   readonly session: SharedSessionRecord;

@@ -147,7 +147,8 @@ export function validateTimezone(timezone: string): void {
   formatterFor(timezone);
 }
 
-function processTimeZone(): string {
+/** The zone of the host the daemon runs on (UTC when the runtime names none). */
+export function hostTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
@@ -196,7 +197,7 @@ function dayMatches(expression: CronExpression, dom: number, dow: number): boole
  */
 export function computeNextCronRun(expression: string | CronExpression, fromMs: number, timezone?: string): number {
   const cron = typeof expression === 'string' ? parseCron(expression) : expression;
-  const formatter = formatterFor(timezone || processTimeZone());
+  const formatter = formatterFor(timezone || hostTimezone());
   let cur = Math.floor(fromMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
   const limit = cur + SCAN_LIMIT_MS;
   while (cur < limit) {

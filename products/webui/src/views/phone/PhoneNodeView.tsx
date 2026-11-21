@@ -26,20 +26,9 @@ import { whenLabel } from '../../lib/when-label';
 import { Button } from '../../components/ui/Button';
 import { Row } from '../../components/ui/Row';
 import { StatusDot } from '../../components/ui/StatusDot';
+import { capabilityTitle } from '../../lib/device-node/capability-bindings';
 import '../../styles/components/device.css';
 
-const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
-  'device.camera.rear.capture': 'Rear camera picture',
-  'device.camera.front.capture': 'Front camera picture',
-  'device.screen.capture': 'Screen picture',
-  'device.location.coarse': 'Approximate location',
-  'device.location.precise': 'Precise location',
-  'device.clipboard.read': 'Read the clipboard',
-  'device.clipboard.write': 'Put text on the clipboard',
-  'device.command.notify': 'Show a notification',
-  'device.command.open_url': 'Open a link',
-  'device.command.vibrate': 'Vibrate',
-};
 
 function defaultLabel(): string {
   if (typeof navigator === 'undefined') return 'Phone';
@@ -136,7 +125,7 @@ export function PhoneNodeView() {
             </li>
           ) : (
             state.announced.map((id) => (
-              <Row key={id} title={CAPABILITY_LABELS[id] ?? id} meta="Asks before every use" />
+              <Row key={id} title={capabilityTitle(id)} meta="Asks before every use" />
             ))
           )}
         </RowGroup>
@@ -149,7 +138,7 @@ export function PhoneNodeView() {
               <Row
                 key={`${String(entry.at)}-${entry.capabilityId}`}
                 leading={<StatusDot tone={entry.ok ? 'ok' : 'bad'} />}
-                title={CAPABILITY_LABELS[entry.capabilityId] ?? entry.capabilityId}
+                title={capabilityTitle(entry.capabilityId)}
                 meta={[entry.ok ? 'Served' : 'Refused', entry.detail, whenLabel(entry.at)].filter(Boolean).join(' · ')}
               />
             ))

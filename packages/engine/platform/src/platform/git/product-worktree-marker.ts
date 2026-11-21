@@ -22,10 +22,63 @@ function administrativeDirectory(worktreePath: string): string | null {
   } catch { return null; }
 }
 
+// ── The product-worktree layout ──────────────────────────────────────────────
+//
+// Every worktree this product creates lives under `<root>/.goodvibes/.worktrees`,
+// in a first segment that names its kind. Creators build their paths here and
+// every reader (retention, owners, the registry, directory walks) recognises
+// them here, so a new kind is added once and is swept and classified at once.
+
+/** The directory segments, under a project root, that hold the product's worktrees. */
+export const PRODUCT_WORKTREE_DIR_SEGMENTS = ['.goodvibes', '.worktrees'] as const;
+
+/**
+ * The kinds of worktree the product creates, each the first segment under the
+ * worktree root: a contract's own tree (and its work items' trees nested in it),
+ * a fix planner's view, a contract's captured input, and a workstream item's
+ * tree (by its branch: `ws/...`, `ws-ns/...`, `ws-owned/...`).
+ */
+export const PRODUCT_WORKTREE_KINDS = ['contract', 'contract-planner', 'contract-input', 'ws', 'ws-ns', 'ws-owned'] as const;
+export type ProductWorktreeCreatedKind = typeof PRODUCT_WORKTREE_KINDS[number];
+/** A created kind, or `agent`: an `agent-<id>` tree made only by versions before 3.3.0, still recognised so it is swept. */
+export type ProductWorktreeKind = ProductWorktreeCreatedKind | 'agent';
+
+const CREATED_KINDS: ReadonlySet<string> = new Set(PRODUCT_WORKTREE_KINDS);
+const LEGACY_AGENT_PREFIX = 'agent-';
+
+/** `<root>/.goodvibes/.worktrees`. */
+export function productWorktreeRoot(root: string): string {
+  return join(root, ...PRODUCT_WORKTREE_DIR_SEGMENTS);
+}
+
+/** True when `segment` is a kind the product creates. */
+export function isProductWorktreeKind(segment: string | undefined): segment is ProductWorktreeCreatedKind {
+  return segment !== undefined && CREATED_KINDS.has(segment);
+}
+
+/** The path of a worktree of `kind`, with `rest` as the segments below the kind. */
+export function productWorktreePath(root: string, kind: ProductWorktreeCreatedKind, ...rest: string[]): string {
+  return join(productWorktreeRoot(root), kind, ...rest);
+}
+
+/** The segments of `path` below `<root>/.goodvibes/.worktrees`, or null when it is not inside (or is the directory itself). */
+export function productWorktreeSegments(root: string, path: string): string[] | null {
+  const rel = relative(productWorktreeRoot(root), isAbsolute(path) ? path : resolve(root, path));
+  if (rel.length === 0 || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  return rel.split(sep);
+}
+
+/** The kind of product worktree `path` is (or lies inside), or null when it is none the product makes. */
+export function kindOfProductWorktree(root: string, path: string): ProductWorktreeKind | null {
+  const first = productWorktreeSegments(root, path)?.[0];
+  if (first === undefined) return null;
+  if (isProductWorktreeKind(first)) return first;
+  return first.startsWith(LEGACY_AGENT_PREFIX) && first.length > LEGACY_AGENT_PREFIX.length ? 'agent' : null;
+}
+
 /** True when `path` lies under `<root>/.goodvibes/.worktrees`. */
 export function isInsideProductWorktreeDirectory(root: string, path: string): boolean {
-  const rel = relative(join(root, '.goodvibes', '.worktrees'), isAbsolute(path) ? path : resolve(root, path));
-  return rel.length > 0 && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  return productWorktreeSegments(root, path) !== null;
 }
 
 /** Record that this product created the worktree. Returns false when the administrative directory cannot be written. */

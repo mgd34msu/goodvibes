@@ -20,8 +20,10 @@ import {
 } from './loader.js';
 import {
   PluginTrustStore,
+  describeUnappliedTier,
   type PluginTrustTier,
   type PluginTrustRecord,
+  type PluginUnappliedTier,
   type SignatureValidationResult,
 } from '../runtime/plugins/trust.js';
 import { isQuarantineActive, readQuarantineRecords, type QuarantineRecord } from '../runtime/plugins/quarantine.js';
@@ -85,6 +87,12 @@ export interface PluginStatus {
   active: boolean;
   /** Trust tier for this plugin. */
   trustTier: PluginTrustTier;
+  /**
+   * A tier the owner set that is not applied to the copy found now, and why:
+   * its files changed, it was given to a copy in another folder, or it was set
+   * before tiers were bound to a copy. Setting it again applies it.
+   */
+  unappliedTier?: PluginUnappliedTier | undefined;
   /** Whether this plugin is currently quarantined. */
   quarantined: boolean;
   /** Why its last start failed, until it starts again. */
@@ -102,8 +110,8 @@ export interface PluginManagerObserver {
     safe: string[];
     tier: PluginTrustTier;
     blocked: string[];
-    /** A tier 3.3.1 or earlier set, not bound to this copy's files, so not applied: set it again to apply it. */
-    earlierTier?: PluginTrustTier | undefined;
+    /** A tier the owner set that is not applied to this copy, and why (see PluginStatus.unappliedTier). */
+    unappliedTier?: PluginUnappliedTier | undefined;
   } | null;
   getTrustRecord(name: string): Readonly<PluginTrustRecord> | undefined;
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined;
@@ -135,9 +143,9 @@ export function isUnboundTrustRecord(record: Readonly<PluginTrustRecord> | undef
 const unboundTrustNoted = new Set<string>();
 function noteUnboundTrust(records: Readonly<Record<string, PluginTrustRecord>>): void {
   for (const [name, record] of Object.entries(records)) {
-    if (!isUnboundTrustRecord(record) || unboundTrustNoted.has(name)) continue;
+    if (!isUnboundTrustRecord(record) || record.tier === 'untrusted' || unboundTrustNoted.has(name)) continue;
     unboundTrustNoted.add(name);
-    logger.warn(`[plugins] ${name}: its trust tier '${record.tier}' was set by an earlier version, before a tier was bound to a plugin's files, so it runs untrusted; set it again with /plugin trust ${name} ${record.tier}`);
+    logger.warn(`[plugins] ${name}: ${describeUnappliedTier(name, { tier: record.tier, why: 'unbound' })}`);
   }
 }
 
@@ -280,7 +288,8 @@ export class PluginManager {
     return this.ownOperation(async () => {
       if (deps.inFlight) this.inFlight = deps.inFlight;
       // Each start reads the plugin's current tier, including one another app set since.
-      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName, copy) => this.tierOf(pluginName, copy) };
+      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName, copy) => this.tierOf(pluginName, copy),
+        unappliedTier: (pluginName, copy) => this.currentTrust().unappliedTier(pluginName, copyIdentity(copy)) };
       this.refreshState();
       this.loadTrust();
       await this.loadEnabledPlugins();
@@ -294,6 +303,8 @@ export class PluginManager {
     return discovered.map((d) => {
       const loaded = this.plugins.get(d.manifest.name);
       const startFailure = this.startFailures.get(d.manifest.name);
+      const copy = copyIdentity(d);
+      const unappliedTier = trust.unappliedTier(d.manifest.name, copy);
       return {
         name: d.manifest.name,
         version: d.manifest.version,
@@ -301,7 +312,8 @@ export class PluginManager {
         author: d.manifest.author,
         enabled: this.isEnabled(d.manifest.name),
         active: loaded?.active ?? false,
-        trustTier: trust.tierFor(d.manifest.name, copyIdentity(d)),
+        trustTier: trust.tierFor(d.manifest.name, copy),
+        ...(unappliedTier !== undefined ? { unappliedTier } : {}),
         quarantined: this.isQuarantined(d.manifest.name),
         ...(startFailure !== undefined ? { startFailure } : {}),
       };
@@ -464,8 +476,8 @@ export class PluginManager {
     safe: string[];
     tier: PluginTrustTier;
     blocked: string[];
-    /** A tier 3.3.1 or earlier set, not bound to this copy's files, so not applied: set it again to apply it. */
-    earlierTier?: PluginTrustTier | undefined;
+    /** A tier the owner set that is not applied to this copy, and why (see PluginStatus.unappliedTier). */
+    unappliedTier?: PluginUnappliedTier | undefined;
   } | null {
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -473,14 +485,16 @@ export class PluginManager {
     }
 
     const requested = declaredPluginCapabilities(discovered.manifest) as PluginCapability[];
-    const tier = this.tierOf(name, discovered);
+    const trust = this.currentTrust();
+    const copy = copyIdentity(discovered);
+    const tier = trust.tierFor(name, copy);
     const highRisk = requested.filter((c) => isHighRiskCapability(c));
     const safe = requested.filter((c) => !isHighRiskCapability(c));
     const grant = resolvePluginGrant(name, discovered.manifest, tier);
     const blocked = [...grant.declared].filter((capability) => !grant.granted.has(capability));
 
-    const record = this.currentTrust().getRecord(name);
-    return { ok: true, requested, highRisk, safe, tier, blocked, ...(isUnboundTrustRecord(record) ? { earlierTier: record!.tier } : {}) };
+    const unappliedTier = trust.unappliedTier(name, copy);
+    return { ok: true, requested, highRisk, safe, tier, blocked, ...(unappliedTier !== undefined ? { unappliedTier } : {}) };
   }
 
   /**

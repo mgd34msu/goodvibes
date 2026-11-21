@@ -23,10 +23,11 @@
 // https when the listener holds TLS itself (`controlPlane.tls.mode` direct),
 // not `web.port`. `web.port` is where the web UI's development server listens
 // (it reads it from `webui status --json`); nothing else binds it and no link,
-// pairing address or `tailscale serve` uses it. This command therefore reports,
-// and, when it is still sitting on the shipped placeholder, writes,
-// `web.publicBaseUrl` as the origin that actually answers, so the printed URL,
-// the pairing deep link and the running server all agree.
+// pairing address or `tailscale serve` uses it. This command reports the origin
+// that actually answers and never stores it: `web.publicBaseUrl` holds only an
+// address a person set, and a stored copy of this daemon's own origin (or the
+// old placeholder) is cleared, so the printed URL, the pairing deep link and the
+// running server all follow the settings as they change.
 //
 // EXPOSURE IS NEVER WIDENED AS A SIDE EFFECT
 //
@@ -43,9 +44,10 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import type { ConfigManager, DaemonConfigPatch } from '@goodvibes/engine/platform/platform/config';
 import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
-import { SHIPPED_PUBLIC_BASE_URL } from '../config/webui-bundle.js';
-import { WEBUI_BINDING_RESULT } from '../cli/machine-contracts.js';
-import { isLoopbackHost, probeStableHostInputs, resolveControlPlaneOrigin, type StableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
+import { WEBUI_BINDING_RESULT, WEBUI_ENABLE_RESULT } from '../cli/machine-contracts.js';
+import {
+  explicitPublicBaseUrl, isLoopbackHost, probeStableHostInputs, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, type StableHostInputs,
+} from '@goodvibes/engine/platform/platform/pairing';
 
 
 export interface WebuiCommandResult {
@@ -149,8 +151,8 @@ function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
     if (loopback) errors.push(`--loopback only applies to 'webui enable', not '${subcommand}'`);
     if (bundleDir !== undefined) errors.push(`--bundle-dir only applies to 'webui enable', not '${subcommand}'`);
   }
-  if (json && (subcommand !== 'status' || posture !== 'unchanged' || bundleDir !== undefined)) {
-    errors.push('--json only supports the read-only status query, without bundle or exposure flags');
+  if (json && subcommand === 'disable') {
+    errors.push('--json applies to \'webui status\' and \'webui enable\', not \'disable\'');
   }
   return { subcommand, bundleDir, posture, json, errors };
 }
@@ -221,13 +223,29 @@ function postureLines(origin: string, loopback: boolean, servesOtherMachines: bo
  * exit code and lines, because the caller is often an installer reading both.
  */
 export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommandResult {
+  const answer = runWebui(argv, deps);
+  if (!argv.includes('--json') || answer.exitCode === 0) return answer;
+  // A --json caller gets every refusal and failure as the one {ok:false, code, error, fix} document.
+  const [first = 'webui: the command failed', ...rest] = answer.lines.map((line) => line.trim()).filter((line) => line !== '');
+  return {
+    exitCode: answer.exitCode,
+    lines: [JSON.stringify({
+      ok: false,
+      code: answer.exitCode === 2 ? 'WEBUI_REFUSED' : 'WEBUI_FAILED',
+      error: first.replace(/^webui: /, ''),
+      fix: rest.length > 0 ? rest.join(' ') : 'run goodvibes-daemon webui status',
+    }, null, 2)],
+  };
+}
+
+function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommandResult {
   const parsed = parseWebuiArgs(argv);
   if (parsed.errors.length > 0) {
     return {
       exitCode: 2,
       lines: [
         ...parsed.errors.map((error) => `webui: ${error}`),
-        'Usage: goodvibes-daemon webui [enable|disable|status] [--bundle-dir <dir>] [--lan|--loopback]',
+        'Usage: goodvibes-daemon webui [enable|disable|status] [--bundle-dir <dir>] [--lan|--loopback] [--json]',
       ],
     };
   }
@@ -256,6 +274,10 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
           host: binding.host,
           port: binding.port,
           url: readString(config, 'web.publicBaseUrl'),
+          // Whether the daemon serves the bundle, and the directory it was told to serve:
+          // an installer keeps serving off when the owner turned it off.
+          serve: config.get('controlPlane.webui.serve') === true,
+          bundleDir: readString(config, 'controlPlane.webui.bundleDir'),
         })],
       };
     }
@@ -263,10 +285,22 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
   }
 
   if (parsed.subcommand === 'disable') {
+    // `enable` declares the web surface too, so `disable` withdraws it in the
+    // same write; otherwise status keeps reporting it enabled. A saved web
+    // address that is only this daemon's own origin (what `enable` stores) is
+    // cleared with it, judged while the settings still serve: pairing and
+    // notification links read it first and would keep pointing at a daemon
+    // that no longer serves the app. A tunnel or proxy URL the owner set is kept.
+    const values: { -readonly [K in keyof DaemonConfigPatch]: DaemonConfigPatch[K] } = {
+      'controlPlane.webui.serve': false,
+      'web.enabled': false,
+    };
+    const savedPublic = explicitPublicBaseUrl(config);
+    const hasSavedPublic = savedPublic !== '';
+    const clearPublic = hasSavedPublic && publicBaseUrlIsOwnOrigin(config, undefined, probe).own;
+    if (clearPublic) values['web.publicBaseUrl'] = '';
     try {
-      // `enable` declares the web surface too, so `disable` withdraws it in the
-      // same write; otherwise status keeps reporting it enabled.
-      config.setDaemonValues({ 'controlPlane.webui.serve': false, 'web.enabled': false });
+      config.setDaemonValues(values);
     } catch (error) {
       return { exitCode: 1, lines: [`webui: could not write settings: ${message(error)}`] };
     }
@@ -275,6 +309,8 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
       exitCode: 0,
       lines: [
         'web UI: no longer served by the daemon.',
+        ...(clearPublic ? [`  the saved web address (web.publicBaseUrl ${savedPublic}) was this daemon's own and is cleared, so pairing and notification links no longer point at it`] : []),
+        ...(hasSavedPublic && !clearPublic ? [`  web.publicBaseUrl is still ${savedPublic}; pairing and notification links keep using it`] : []),
         ...(kept ? [`  the bundle is left on disk at ${kept}; 'goodvibes-daemon webui enable' serves it again`] : []),
         '  A running daemon stops serving it within about a second; no restart is needed.',
       ],
@@ -324,14 +360,14 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
   let hostInputs: StableHostInputs | undefined;
   const stableProbe = () => hostInputs ??= probe();
   const serving = servingOrigin(projected, stableProbe);
-  const currentPublic = readString(config, 'web.publicBaseUrl');
-  // Equality with the prior computed serving origin is a documented default-
-  // continuation rule only during an explicit posture change, not provenance.
-  // A distinct operator-selected URL remains authoritative.
-  const followsPriorOrigin = parsed.posture !== 'unchanged'
-    && currentPublic.replace(/\/+$/, '') === servingOrigin(config, stableProbe).origin;
-  if (!currentPublic || currentPublic === SHIPPED_PUBLIC_BASE_URL || followsPriorOrigin) {
-    values['web.publicBaseUrl'] = serving.origin;
+  // web.publicBaseUrl holds only what a person set: links are derived live from
+  // the settings. A stored value that is empty, the old placeholder or this
+  // daemon's own derived origin (judged against the settings before this
+  // change) is cleared, so a later posture or port change moves every link.
+  const storedPublic = readString(config, 'web.publicBaseUrl');
+  const currentPublic = explicitPublicBaseUrl(config);
+  if (storedPublic !== '' && publicBaseUrlIsOwnOrigin(config, undefined, stableProbe).own) {
+    values['web.publicBaseUrl'] = '';
   }
   try {
     config.setDaemonValues(values);
@@ -343,7 +379,7 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
     `  ${serving.origin}`,
   ];
 
-  if (!Object.hasOwn(values, 'web.publicBaseUrl') && currentPublic !== serving.origin) {
+  if (!Object.hasOwn(values, 'web.publicBaseUrl') && currentPublic !== '' && currentPublic !== serving.origin) {
     lines.push(`  note: web.publicBaseUrl is set to ${currentPublic}; links use that, the bundle is served at the URL above.`);
   }
 
@@ -353,6 +389,19 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
   lines.push(...postureLines(serving.origin, serving.loopback, projected.get('controlPlane.enabled') === true, serving.alternate));
   // The daemon reads the serving settings per request and rebinds its listener on a host or port change.
   lines.push('  A running daemon applies this within about a second; no restart is needed.');
+  if (parsed.json) {
+    // The receipt an installer reads: the URL, and the lines it prints as they are.
+    return {
+      exitCode: 0,
+      lines: [JSON.stringify({
+        ...WEBUI_ENABLE_RESULT,
+        ok: true,
+        url: serving.origin,
+        ...(serving.alternate ? { alternateUrl: serving.alternate } : {}),
+        lines,
+      }, null, 2)],
+    };
+  }
   return { exitCode: 0, lines };
 }
 
@@ -391,7 +440,7 @@ function renderStatus(
     const problem = describeBundleProblem(absoluteDir, deps.directoryExists, deps.fileExists);
     lines.push(problem ? `  bundle (${source}): ${absoluteDir} (UNUSABLE: ${problem})` : `  bundle (${source}): ${absoluteDir}`);
   }
-  const currentPublic = readString(config, 'web.publicBaseUrl');
+  const currentPublic = explicitPublicBaseUrl(config);
   if (currentPublic && currentPublic !== serving.origin) {
     lines.push(`  note: web.publicBaseUrl is ${currentPublic}; links use that, the bundle is served at the URL above.`);
   }

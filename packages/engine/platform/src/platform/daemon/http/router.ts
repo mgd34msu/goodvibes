@@ -140,6 +140,8 @@ interface DaemonHttpRouterContext {
   readonly gatewayMethods: GatewayMethodCatalog;
   readonly providerRegistry: ProviderRegistry;
   readonly sessionBroker: SharedSessionBroker;
+  /** A hosted session's owners (creator and whoever it was shared with); absent, a hosted session is shown to the owner and admins only. */
+  readonly sessionOwners?: ((sessionId: string) => readonly string[]) | undefined;
   readonly routeBindings: RouteBindingManager;
   readonly channelPolicy: ChannelPolicyManager;
   readonly channelPlugins: ChannelPluginRegistry;
@@ -945,10 +947,11 @@ export class DaemonHttpRouter {
           setEnabled: (jobId, enabled) => this.context.automationManager.setEnabled(jobId, enabled),
           runNow: (jobId) => this.context.automationManager.runNow(jobId) as never,
           getSchedulerCapacity: () => this.context.automationManager.getSchedulerCapacity(),
+          defaultTimezone: () => this.context.automationManager.defaultTimezone(),
         },
         normalizeAtSchedule,
         normalizeEverySchedule,
-        normalizeCronSchedule,
+        normalizeCronSchedule: (expression, timezone, staggerMs) => normalizeCronSchedule(expression, timezone, staggerMs, this.context.automationManager.defaultTimezone()),
         routeBindings: {
           start: () => this.context.routeBindings.start(),
           getBinding: (id) => this.context.routeBindings.getBinding(id),

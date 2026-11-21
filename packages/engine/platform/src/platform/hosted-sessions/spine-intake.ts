@@ -23,8 +23,11 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * The engine is the one owner of "this hosted session is alive": the broker
  * routes a steer for a `hosted` session to this intake whatever its
  * participant's age, its reaper asks the engine (liveness-probe.ts), and so a
- * session is registered when it appears or its title or workspace changes,
- * never again as a heartbeat. Inputs are collected when the broker says its
+ * session is registered when it appears or its workspace changes, never again
+ * as a heartbeat. The broker keeps the title of the first registration; its
+ * reads take the current title and message count from the hosted session
+ * manager (SharedSessionBroker.setExternalFacts), so a later title needs no
+ * registration to show. Inputs are collected when the broker says its
  * sessions changed (`subscribe`); the interval only retries deliveries and
  * consumed marks that did not land.
  */
@@ -228,7 +231,7 @@ export class HostedSessionSpineIntake {
   /** One delivery lane per session with work outstanding. */
   private readonly lanes = new Map<string, SessionDeliveryLane>();
   /** What each session's last successful registration said, and when. */
-  private readonly lastRegistered = new Map<string, { readonly at: number; readonly title: string; readonly project: string }>();
+  private readonly lastRegistered = new Map<string, { readonly at: number; readonly project: string }>();
   /**
    * Inputs whose turn ran but whose consumed mark has not reached the spine. The
    * spine still lists them as queued, so they are not collected again; the mark
@@ -356,7 +359,7 @@ export class HostedSessionSpineIntake {
           lastSeenAt: this.options.now(),
         },
       });
-      this.lastRegistered.set(record.id, { at: this.options.now(), title: record.title, project: record.workspaceRoot });
+      this.lastRegistered.set(record.id, { at: this.options.now(), project: record.workspaceRoot });
     } catch (error) {
       logger.warn('[hosted-sessions] registering a hosted session on the shared spine failed; it runs but is not in the union list', {
         sessionId: record.id,
@@ -479,8 +482,9 @@ export class HostedSessionSpineIntake {
   }
 
   /**
-   * Register one session when it is new to the spine or its title or workspace
-   * changed (never as a heartbeat: liveness is the engine's), without letting a broker
+   * Register one session when it is new to the spine or its workspace changed
+   * (never as a heartbeat: liveness is the engine's; the title the broker shows
+   * is read from the manager), without letting a broker
    * call that never settles hold the pass. A registration still outstanding
    * from an earlier tick is left to finish rather than stacked; a new one is
    * given one interval, then the pass moves on and it finishes on its own.
@@ -488,7 +492,7 @@ export class HostedSessionSpineIntake {
   private async heartbeat(record: HostedSessionRecord): Promise<void> {
     if ((this.registrations.get(record.id)?.size ?? 0) > 0) return;
     const last = this.lastRegistered.get(record.id);
-    if (last && last.title === record.title && last.project === record.workspaceRoot) return;
+    if (last && last.project === record.workspaceRoot) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const bound = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, this.options.intervalMs ?? DEFAULT_INTAKE_INTERVAL_MS);

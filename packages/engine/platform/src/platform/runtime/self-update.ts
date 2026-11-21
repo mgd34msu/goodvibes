@@ -17,7 +17,7 @@ export type { DarwinDaemonInstallation, DarwinDaemonSqliteOwner } from './darwin
 export { resolveDaemonUpdateTargets, inspectDaemonUpdateInstallation } from './daemon-update-installation.js';
 export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } from './client-reader-artifact.js';
 export { assertStagedClientReaderCompatible } from './client-reader-update.js';
-export { admitInstalledClientDataWriter, installedReaderCommand } from './installed-client-data-writer.js';
+export { admitInstalledClientDataWriter, installedReaderCommand, InstallReaderUsageError, INSTALL_READER_CHECK_RESULT } from './installed-client-data-writer.js';
 export type { InstalledClientDataOptions } from './installed-client-data-writer.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**

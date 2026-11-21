@@ -16,7 +16,7 @@ import type { FeatureFlagManager } from '@/runtime/index.ts';
 import { buildSubscriptionEntries } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
 import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
-import { CODE_INDEX_ENABLED_CONFIG_KEY, NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY,
   WORKTREE_SETUP_COMMANDS_CONFIG_KEY,
@@ -27,8 +27,6 @@ import {
   readWorktreeSetupSetting,
 } from './worktree-setup-config.ts';
 import { worktreeSetupSettingValue } from '@goodvibes/engine/platform/platform/runtime/shell';
-import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes/engine/platform/platform/providers';
-import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
 import {
   injectSandboxExecSyntheticEntries,
   isSandboxExecListConfigKey,
@@ -241,10 +239,13 @@ export function buildSettingGroups(
     // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
     const currentValue = configManager.get(setting.key as ConfigKey);
     const resolved = lookup?.(setting.key as ConfigKey)?.entry;
+    // "Default" and "reset to" are this product's default, which a product may set over the schema's.
+    const productDefault = configManager.defaultOf(setting.key);
+    const row = deepEqual(productDefault, setting.default) ? setting : { ...setting, default: productDefault };
     const entry: SettingEntry = {
-      setting,
+      setting: row,
       currentValue,
-      isDefault: deepEqual(currentValue, setting.default),
+      isDefault: deepEqual(currentValue, productDefault),
       effectiveSource: resolved?.effectiveSource,
       locked: resolved?.locked,
       conflict: resolved?.conflict,
@@ -299,57 +300,15 @@ export function buildSettingGroups(
     }
   }
 
-  // Synthetic behavior.notifyAfterSeconds (TUI-local): long-task push threshold.
+  // The notification settings (behavior.notify*, terminalNotify*, terminalBell,
+  // budgetAlertUsd) and storage.codeIndexEnabled are the terminal app's own
+  // settings, registered on its manager (config/tui-extension-settings.ts) and
+  // listed above from its host schema. The host-owned privacy control goes
+  // after the notification toggles.
   const behaviorEntries = groups.get('behavior');
-  if (behaviorEntries && !behaviorEntries.some((e) => e.setting.key === ('behavior.notifyAfterSeconds' as ConfigKey))) {
-    behaviorEntries.push(buildNotifyAfterSecondsSyntheticEntry(configManager));
-  }
-
-  // Synthetic behavior.budgetAlertUsd (TUI-local): no schema surface previously,
-  // never in /settings; /settings-sync show rejects any key not
-  // in CONFIG_KEYS. The Usage modal's 'b' key and /usage alert <dollars> remain
-  // the primary way to change it; this entry makes the current effective
-  // value (and whether it's still the "no budget configured" default)
-  // visible from /settings open behavior too, same rationale as notifyAfterSeconds.
-  if (behaviorEntries && !behaviorEntries.some((e) => e.setting.key === (BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey))) {
-    behaviorEntries.push(buildBudgetAlertUsdSyntheticEntry(configManager));
-  }
-
-  // Inject the alert-class toggles + master focus gate. TUI-local
-  // synthetic settings, same rationale as notifyAfterSeconds above.
   if (behaviorEntries) {
-    for (const entry of buildNotifyAlertSyntheticEntries(configManager)) {
-      if (!behaviorEntries.some((e) => e.setting.key === entry.setting.key)) {
-        behaviorEntries.push(entry);
-      }
-    }
-    // In-terminal (OSC 9) notification toggles + audible bell, same category,
-    // per-key defaults (see terminal-notifier.ts).
-    for (const entry of buildTerminalNotifySyntheticEntries(configManager)) {
-      if (!behaviorEntries.some((e) => e.setting.key === entry.setting.key)) {
-        behaviorEntries.push(entry);
-      }
-    }
-    // The TUI registers behavior.notificationsMetadataOnly on its manager.
-    // Keep the host-owned privacy control next to the notification toggles.
     const privacyIndex = behaviorEntries.findIndex((e) => e.setting.key === NOTIFICATIONS_METADATA_ONLY_KEY);
     if (privacyIndex >= 0) behaviorEntries.push(...behaviorEntries.splice(privacyIndex, 1));
-  }
-
-  // Inject the storage.codeIndexEnabled toggle into the
-  // storage category. TUI-local synthetic setting (not in the platform ConfigKey
-  // union, see code-index-services.ts), same rationale as
-  // notifyAfterSeconds above: opt-in, default off, states its own bounds.
-  const storageEntries = groups.get('storage');
-  if (storageEntries && !storageEntries.some((e) => e.setting.key === (CODE_INDEX_ENABLED_CONFIG_KEY as ConfigKey))) {
-    storageEntries.push(buildCodeIndexEnabledSyntheticEntry(configManager));
-  }
-
-  // Inject the memory.projection.dir synthetic entry into the storage
-  // category (alongside codeIndexEnabled, both are local-storage posture
-  // settings). Not a ConfigKey (no GoodVibesConfig field), same rationale as above.
-  if (storageEntries && !storageEntries.some((e) => e.setting.key === MEMORY_PROJECTION_DIR_CONFIG_KEY)) {
-    storageEntries.push(buildMemoryProjectionDirSyntheticEntry(configManager));
   }
 
   // Inject the worktree.setup.commands / worktree.setup.carryOverGlobs
@@ -410,222 +369,6 @@ export function buildSettingGroups(
   }
 
   return groups;
-}
-
-// ---------------------------------------------------------------------------
-// behavior.notifyAfterSeconds synthetic setting
-// ---------------------------------------------------------------------------
-
-/** Default threshold in seconds for the synthetic notifyAfterSeconds setting. */
-export const NOTIFY_AFTER_SECONDS_DEFAULT_SETTING = 60;
-
-/**
- * The synthetic ConfigSetting descriptor for behavior.notifyAfterSeconds.
- *
- * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field). The
- * descriptor is injected into the behavior settings group so users can
- * configure the long-task push notification threshold from /settings open behavior.
- *
- * 0 = off (no notifications). Any positive integer = threshold in seconds.
- * Default 60s matches the default in long-task-notifier.ts.
- *
- * The key is cast to ConfigKey because ConfigSetting requires it. The cast
- * is safe: configManager.get returns undefined for unknown keys rather than
- * throwing.
- */
-export const NOTIFY_AFTER_SECONDS_SYNTHETIC_SETTING: ConfigSetting = {
-  key: 'behavior.notifyAfterSeconds' as ConfigKey,
-  label: 'Notify when an answer takes longer than (seconds)',
-  type: 'number',
-  default: NOTIFY_AFTER_SECONDS_DEFAULT_SETTING,
-  description: 'Seconds a turn must run before a push notification fires (0 = off). Delivers to desktop (notify-send/osascript) and configured ntfy/webhook URLs.',
-};
-
-/**
- * Build the synthetic SettingEntry for behavior.notifyAfterSeconds.
- *
- * Reads the raw value from configManager using a cast key. Falls back to
- * NOTIFY_AFTER_SECONDS_DEFAULT_SETTING when absent or invalid.
- */
-export function buildNotifyAfterSecondsSyntheticEntry(configManager: Pick<ConfigManager, 'get'>): SettingEntry {
-  const raw = configManager.get('behavior.notifyAfterSeconds' as ConfigKey);
-  const parsed = typeof raw === 'number' ? raw : parseFloat(String(raw ?? ''));
-  const currentValue: number = Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : NOTIFY_AFTER_SECONDS_DEFAULT_SETTING;
-  return {
-    setting: NOTIFY_AFTER_SECONDS_SYNTHETIC_SETTING,
-    currentValue,
-    isDefault: currentValue === NOTIFY_AFTER_SECONDS_DEFAULT_SETTING,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// behavior.budgetAlertUsd synthetic setting
-// ---------------------------------------------------------------------------
-
-/**
- * The synthetic ConfigSetting descriptor for behavior.budgetAlertUsd.
- *
- * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field), it never
- * appeared in CONFIG_SCHEMA, so it was invisible to every schema-driven
- * inspection surface (/settings, /settings-sync show <key>) even though the
- * value round-trips correctly through configManager.get/set. The descriptor
- * is injected into the behavior settings group so /settings open behavior shows the
- * real current threshold, not just the behavior.notifyOnBudgetBreach gate.
- *
- * 0 = no budget configured (disabled). Any positive number = the USD
- * threshold. Default matches BUDGET_ALERT_USD_DEFAULT in cost-utils.ts, the
- * single source of truth the Usage modal and budget-breach-notifier.ts share.
- */
-export const BUDGET_ALERT_USD_SYNTHETIC_SETTING: ConfigSetting = {
-  key: BUDGET_ALERT_USD_CONFIG_KEY as ConfigKey,
-  label: 'Session budget for alerts (USD)',
-  type: 'number',
-  default: BUDGET_ALERT_USD_DEFAULT,
-  description: 'Session cost-budget alert threshold in USD (0 = no budget configured). Set via the Usage modal\'s "b" key or /usage alert <dollars>; this entry only displays the current effective value.',
-};
-
-/**
- * Build the synthetic SettingEntry for behavior.budgetAlertUsd.
- *
- * Delegates parsing/fallback to readBudgetAlertUsd (cost-utils.ts) so this
- * display entry can never disagree with what the Usage modal and the
- * background budget-breach notifier actually read.
- */
-export function buildBudgetAlertUsdSyntheticEntry(configManager: Pick<ConfigManager, 'get'>): SettingEntry {
-  const currentValue = readBudgetAlertUsd((key) => configManager.get(key as ConfigKey));
-  return {
-    setting: BUDGET_ALERT_USD_SYNTHETIC_SETTING,
-    currentValue,
-    isDefault: currentValue === BUDGET_ALERT_USD_DEFAULT,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// alert-class synthetic settings, behavior.notifyOn* + notifyOnlyWhenUnfocused
-// ---------------------------------------------------------------------------
-
-/**
- * The five alert-gating booleans, all TUI-local (no GoodVibesConfig field,
- * so not ConfigKeys), all defaulting to on. Read/written generically by
- * core/alert-gating.ts (readBooleanConfig) and the per-alert-class modules
- * (budget-breach-notifier.ts, approval-alert.ts, turn-event-wiring.ts,
- * long-task-notifier.ts), this is only the settings-modal-visible surface.
- */
-const NOTIFY_ALERT_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly label: string; readonly description: string }> = [
-  {
-    key: 'behavior.notifyOnBudgetBreach',
-    label: 'Alert when the session goes over budget',
-    description: 'Alert when session cost crosses the configured budget (set via the Usage modal\'s "b" key).',
-  },
-  {
-    key: 'behavior.notifyOnAgentFailure',
-    label: 'Alert when a helper agent fails',
-    description: 'Alert when a delegated or background agent fails.',
-  },
-  {
-    key: 'behavior.notifyOnChainFailure',
-    label: 'Alert when a review chain fails',
-    description: 'Alert when a WRFC review chain fails.',
-  },
-  {
-    key: 'behavior.notifyOnApprovalPending',
-    label: 'Alert when something waits for your approval',
-    description: 'Alert when a tool call is waiting on your approval.',
-  },
-  {
-    key: 'behavior.notifyOnlyWhenUnfocused',
-    label: 'Alert only when the terminal is in the background',
-    description: 'Master gate for the four alerts above: fire only when the terminal window is unfocused, or when focus state was never observed (terminal does not report focus). Turn off to always fire regardless of focus.',
-  },
-];
-
-function buildBooleanSyntheticEntry(
-  configManager: Pick<ConfigManager, 'get'>,
-  key: string,
-  label: string,
-  description: string,
-  defaultValue: boolean,
-): SettingEntry {
-  const raw = configManager.get(key as ConfigKey);
-  const currentValue = typeof raw === 'boolean' ? raw : defaultValue;
-  return {
-    setting: { key: key as ConfigKey, label, type: 'boolean', default: defaultValue, description },
-    currentValue,
-    isDefault: currentValue === defaultValue,
-  };
-}
-
-/** Build the five synthetic SettingEntry rows for the behavior category. */
-export function buildNotifyAlertSyntheticEntries(configManager: Pick<ConfigManager, 'get'>): SettingEntry[] {
-  return NOTIFY_ALERT_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.label, spec.description, true));
-}
-
-// ---------------------------------------------------------------------------
-// In-terminal (OSC 9) notification settings, see core/terminal-notifier.ts
-// ---------------------------------------------------------------------------
-
-/**
- * The OSC 9 in-terminal desktop-notification toggles + the audible bell.
- * TUI-local synthetic booleans (no GoodVibesConfig field, so not ConfigKeys), each carrying
- * its OWN default (unlike the always-on alert toggles above): approval-wait
- * on, turn-end/agent-blocked off, bell off. Read generically by
- * core/terminal-notifier.ts (readBooleanConfig); this is only the
- * settings-modal-visible surface. These are independent of the master
- * `notifyOnlyWhenUnfocused` gate, an in-terminal notification is always
- * focus-gated on its own (only fires for an unfocused/unknown terminal).
- */
-const TERMINAL_NOTIFY_SYNTHETIC_SETTINGS: ReadonlyArray<{ readonly key: string; readonly label: string; readonly description: string; readonly defaultOn: boolean }> = [
-  {
-    key: 'behavior.terminalNotifyApprovalWait',
-    label: 'Notify from the terminal when something waits for approval',
-    description: 'Send an in-terminal (OSC 9) desktop notification when a tool call is waiting on your approval. Fires only when the terminal window is unfocused. Works over SSH/tmux where OS notifications do not.',
-    defaultOn: true,
-  },
-  {
-    key: 'behavior.terminalNotifyTurnEnd',
-    label: 'Notify from the terminal when an answer finishes',
-    description: 'Send an in-terminal (OSC 9) desktop notification when a turn finishes. Off by default. Fires only when the terminal window is unfocused.',
-    defaultOn: false,
-  },
-  {
-    key: 'behavior.terminalNotifyAgentBlocked',
-    label: 'Notify from the terminal when a helper agent needs you',
-    description: 'Send an in-terminal (OSC 9) desktop notification when a delegated agent blocks waiting for your input. Off by default. Fires only when the terminal window is unfocused.',
-    defaultOn: false,
-  },
-  {
-    key: 'behavior.terminalBell',
-    label: 'Ring the terminal bell with notifications',
-    description: 'Also ring the terminal bell alongside in-terminal notifications. Off by default.',
-    defaultOn: false,
-  },
-];
-
-/** Build the OSC 9 in-terminal notification SettingEntry rows for the behavior category. */
-export function buildTerminalNotifySyntheticEntries(configManager: Pick<ConfigManager, 'get'>): SettingEntry[] {
-  return TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.map((spec) => buildBooleanSyntheticEntry(configManager, spec.key, spec.label, spec.description, spec.defaultOn));
-}
-
-// ---------------------------------------------------------------------------
-// storage.codeIndexEnabled synthetic setting
-// ---------------------------------------------------------------------------
-
-/**
- * The repo source-tree code index's auto-build-on-startup toggle
- * (code-index-services.ts). TUI-local, default OFF: /codebase build is the
- * explicit trigger unless a user opts in here. Honest bounds stated inline
- * so enabling this isn't a surprise, see code-index-services.ts's
- * CODE_INDEX_MAX_FILES/CODE_INDEX_MAX_FILE_BYTES for the numbers this
- * description would otherwise duplicate as magic numbers.
- */
-export function buildCodeIndexEnabledSyntheticEntry(configManager: Pick<ConfigManager, 'get'>): SettingEntry {
-  return buildBooleanSyntheticEntry(
-    configManager,
-    CODE_INDEX_ENABLED_CONFIG_KEY,
-    'Keep the code index up to date',
-    'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; see /codebase status. Off by default: /codebase build indexes once, on demand, and the index is NOT kept current after edits.',
-    false,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -716,24 +459,6 @@ export function updateEntryForKey(
   }
 }
 
-/**
- * TUI-local rows are absent from the platform schema, so the generic read
- * would return undefined for them; they must go through the same reader that
- * built them at open (including their own default for the boolean toggles).
- */
-function rebuildTuiLocalSyntheticEntry(entry: BuiltinSettingEntry, configManager: ConfigManager): SettingEntry | null {
-  const key: string = entry.setting.key;
-  if (key === NOTIFY_AFTER_SECONDS_SYNTHETIC_SETTING.key) return buildNotifyAfterSecondsSyntheticEntry(configManager);
-  if (key === BUDGET_ALERT_USD_SYNTHETIC_SETTING.key) return buildBudgetAlertUsdSyntheticEntry(configManager);
-  const isLocalBoolean = NOTIFY_ALERT_SYNTHETIC_SETTINGS.some((spec) => spec.key === key)
-    || TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.some((spec) => spec.key === key)
-    || key === CODE_INDEX_ENABLED_CONFIG_KEY;
-  if (isLocalBoolean && typeof entry.setting.default === 'boolean') {
-    return buildBooleanSyntheticEntry(configManager, key, entry.setting.label, entry.setting.description, entry.setting.default);
-  }
-  return null;
-}
-
 /** Synthetic rows retain their declared reader during refresh and policy recovery. */
 function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: ConfigManager): void {
   const key: string = entry.setting.key;
@@ -756,21 +481,10 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
     entry.isDefault = value.length === 0;
     return;
   }
-  if (key === MEMORY_PROJECTION_DIR_CONFIG_KEY) {
-    const refreshed = buildMemoryProjectionDirSyntheticEntry(configManager);
-    entry.currentValue = refreshed.currentValue;
-    entry.isDefault = refreshed.isDefault;
-    return;
-  }
   if (key === PAYMENTS_CARDS_ROW_KEY) return;
-  const refreshedLocal = rebuildTuiLocalSyntheticEntry(entry, configManager);
-  if (refreshedLocal) {
-    entry.currentValue = refreshedLocal.currentValue;
-    entry.isDefault = refreshedLocal.isDefault;
-    return;
-  }
   entry.currentValue = configManager.get(entry.setting.key);
-  entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
+  // The row's default is the product's (buildSettingGroups), read again in case it changed since.
+  entry.isDefault = deepEqual(entry.currentValue, configManager.defaultOf(key));
 }
 
 // ---------------------------------------------------------------------------

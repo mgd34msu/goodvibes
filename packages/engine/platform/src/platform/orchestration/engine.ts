@@ -114,6 +114,13 @@ export interface OrchestrationEngineDeps {
   readonly judgeAttempts?: AttemptJudge | undefined;
   /** Live probe of the fleet ceiling for every workstream; absent = ungated. */
   readonly fleetCapacity?: FleetCapacityFn | undefined;
+  /**
+   * Subscribes to the fleet's slot releases (AgentManager.onFleetSlotReleased
+   * of the manager every fleet owner reports to); returns the unsubscribe. An
+   * item refused for capacity is claimed again when a slot frees. Absent, such
+   * an item is claimed again on the engine's next tick.
+   */
+  readonly onFleetSlotReleased?: ((listener: () => void) => () => void) | undefined;
   /** Bounded per-task auto-retries before hard-fail (elastic fix graphs). Default 0 = off (legacy). */
   readonly maxItemRetries?: number | undefined;
   /** In-phase items with no observed activity past this window carry the stalled tell. Default 10 minutes. */
@@ -198,10 +205,8 @@ export interface OrchestrationEngine {
   join(): Promise<void>;
 }
 
-const CAPACITY_RETRY_BASE_MS = 500;
 /** Starts the warning a passed item carries when its commit failed; a successful retryItemCommit removes it. */
 const COMMIT_WARNING_PREFIX = 'scoped commit did not complete (non-fatal): ';
-const CAPACITY_RETRY_MAX_MS = 5_000;
 
 function generateId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -585,7 +590,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       priceProvenance: deps.priceProvenance,
       skipClaimVerification: deps.skipClaimVerification,
       contractUnitSettlement: deps.contractUnitSettlement,
-      onAgentSpawned: (agentId) => { capacityRetries = 0; emit({ type: 'item-agent-spawned', workstreamId: workstream.id, itemId: item.id, agentId }); },
+      onAgentSpawned: (agentId) => { emit({ type: 'item-agent-spawned', workstreamId: workstream.id, itemId: item.id, agentId }); },
       launchDirtySnapshot,
       itemWorktree,
     });
@@ -662,22 +667,17 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     );
   }
 
-  let capacityRetry: ReturnType<typeof setTimeout> | undefined;
-  /** Consecutive rechecks that found capacity still refused; reset when a claim is admitted. */
-  let capacityRetries = 0;
-  function retryWhenCapacityChanges(): void {
-    if (disposed || capacityRetry !== undefined) return;
-    // A terminal event can precede release of the executor's reservation.
+  /** An item is waiting for a fleet slot: the next slot release ticks every workstream. */
+  let awaitingCapacity = false;
+  const unsubscribeSlotReleases = deps.onFleetSlotReleased?.(() => {
+    if (disposed || !awaitingCapacity) return;
+    awaitingCapacity = false;
     // Recheck locally without another model call, visit, or failure attempt.
-    // A refusal that persists is rechecked less and less often, up to a cap, so a
-    // long-lived refusal does not become a steady poll.
-    const delay = Math.min(CAPACITY_RETRY_MAX_MS, CAPACITY_RETRY_BASE_MS * 2 ** Math.min(capacityRetries, 10));
-    capacityRetries += 1;
-    capacityRetry = setTimeout(() => {
-      capacityRetry = undefined;
-      for (const id of workstreams.keys()) tick(id);
-    }, delay);
-    capacityRetry.unref?.();
+    for (const id of workstreams.keys()) tick(id);
+  });
+  function retryWhenCapacityChanges(): void {
+    if (disposed) return;
+    awaitingCapacity = true;
   }
 
   function tick(workstreamId: string): void {
@@ -1038,7 +1038,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (disposed) return;
     disposed = true;
     setupAbort.abort();
-    if (capacityRetry !== undefined) clearTimeout(capacityRetry);
+    unsubscribeSlotReleases?.();
     unsubscribeWriter();
     listeners.clear();
   }

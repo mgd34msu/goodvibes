@@ -78,6 +78,13 @@ export function MailMessageBody({ detail, onDownload, downloading = false }: {
     <div className="mail-detail" data-testid="mail-message-detail">
       <pre className="mail-detail__text">{message.bodyText}</pre>
 
+      {message.bodyUnavailable && message.bodyUnavailable.length > 0 ? (
+        <p className="mail-detail__note" role="status">
+          {`Part of this message's text could not be fetched (${message.bodyUnavailable.map((entry) => entry.reason).join('; ')}). `}
+          <Button variant="ghost" size="sm" onClick={() => void detail.refetch()}>Read it again</Button>
+        </p>
+      ) : null}
+
       {message.bodyHtml ? (
         <p className="mail-detail__note">
           This message also has an HTML part. The plain-text part is shown above. The console does not render

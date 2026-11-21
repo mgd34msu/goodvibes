@@ -8,19 +8,19 @@
  * The variable therefore seeds the key only when nothing was ever stored for it;
  * a stored 0 is the owner's choice and stays.
  */
-import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-
-const BUDGET_ALERT_KEY = 'behavior.budgetAlertUsd';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { BUDGET_ALERT_USD_SETTING } from '../config/tui-extension-settings.ts';
 
 /** Returns the budget it seeded, or null when it left the key alone. */
 export function seedCostBudgetFromEnv(
-  config: Pick<ConfigManager, 'get' | 'set'>,
+  config: Pick<ConfigManager, 'describeConfigKeySource' | 'set'>,
   rawEnvValue: string | undefined,
 ): number | null {
   const parsed = Number(rawEnvValue);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  const stored = config.get(BUDGET_ALERT_KEY as Parameters<typeof config.get>[0]) as unknown;
-  if (stored !== undefined && stored !== null) return null;
-  config.set(BUDGET_ALERT_KEY as Parameters<typeof config.set>[0], parsed as never);
+  // The setting is registered, so a read always has a value; whether one was stored is its source.
+  const key = BUDGET_ALERT_USD_SETTING.key as ConfigKey;
+  if (config.describeConfigKeySource(key).tier !== 'default') return null;
+  config.set(key, parsed as never);
   return parsed;
 }

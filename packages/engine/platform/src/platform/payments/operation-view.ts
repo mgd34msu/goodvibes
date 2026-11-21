@@ -219,7 +219,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'reply-unsettled': 'A reply arrived before the window closed but was still being read when it closed, so it was neither used nor treated as silence. Nothing was submitted. Start the purchase again if you still want it.',
   'reply-unreadable': 'A reply to the purchase notice could not be read, so it was neither used nor treated as silence. Nothing was submitted. Check decision model access, then start the purchase again if you still want it.',
   'clock-unavailable': 'The system clock could not be read while the purchase window was open, so the window could not be timed. Nothing was submitted. Check the host clock, then start the purchase again.',
-  'window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Read payments.purchase.status for any purchase already waiting for an answer, then start this one again.',
+  'window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Open /payments pending (or Purchases in the web UI settings) for any purchase already waiting for an answer, then start this one again.',
   'page-in-use': 'This browser page already has a checkout that is running or waiting for a merchant check. Nothing was submitted. Finish or reconcile that purchase, or open the checkout in a new tab.',
 };
 /** Processing stopped before a decision, for the cause named. */

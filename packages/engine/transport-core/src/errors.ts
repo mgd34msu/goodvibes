@@ -1,4 +1,4 @@
-import { GoodVibesError } from '@goodvibes/engine/errors';
+import { GoodVibesError, categoryForCode, structuredTransience } from '@goodvibes/engine/errors';
 
 export function isAbortError(error: unknown): boolean {
   return Boolean(
@@ -44,19 +44,15 @@ export function transportErrorFromUnknown(error: unknown, context: string): Erro
     && error !== null
     && typeof (error as { readonly code?: unknown }).code === 'string'
     ? (error as { readonly code: string }).code
-    : '';
-  // Include undici/Bun error codes alongside Node-style errno codes.
-  // recoverable is ONLY set to true for recognized network-layer error codes
-  // (errno values, undici codes, and 'fetch failed'). Unknown/unrecognized codes
-  // (including programmer errors wrapped as non-Error objects) get recoverable:false
-  // so they do not trigger retry loops.
-  const recoverable = /^(?:EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EPIPE|ECONNABORTED)$/.test(code)
-    || /^UND_ERR_/.test(code)
-    || code === 'fetch failed';
+    : undefined;
+  // The category and retryability come from the one connection-code table
+  // (Node errno, Bun's fetch codes, undici's) and the one transience decision.
+  // Anything they do not recognise (a programmer error wrapped as a non-Error
+  // object, say) is not recoverable, so it does not start a retry loop.
   return new GoodVibesError(`${context}: ${describeUnknownTransportError(error)}`, {
-    category: 'network',
+    category: categoryForCode(code) ?? 'network',
     source: 'transport',
-    recoverable,
+    recoverable: structuredTransience(error)?.failureClass === 'retryable',
   });
 }
 

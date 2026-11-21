@@ -3,7 +3,7 @@ import { admitInstalledClientDataWriter } from '@goodvibes/engine/platform/platf
 import { COMPILED_VERSION } from '../version.js';
 const installedDataWriter = process.platform === 'darwin' ? undefined : admitInstalledClientDataWriter({ moduleUrl: import.meta.url, execPath: process.execPath, compiledVersion: COMPILED_VERSION, platform: process.platform });
 /** One home/tier resolution shared by command and explicit serving entrypoints. */
-import { copyFileSync, constants as fsConstants, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership } from '@goodvibes/engine/platform/platform/config';
 import { readDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
@@ -66,6 +66,11 @@ export type DaemonCliConfiguration = ReturnType<typeof createDaemonCliConfigurat
  * before it had its own. The first start with its own file begins from a copy
  * of that one, so nothing the daemon was configured with changes underfoot;
  * from then on the two are separate. One existence check per start.
+ *
+ * The copy leaves out `daemon.connectedHost.*`: those say which daemon the
+ * terminal app dials, and in the daemon's file they would aim every flag-less
+ * daemon command (status, cluster, mcp) at that other daemon. A file that is
+ * not a JSON object is copied as it is; the daemon's settings reader reports it.
  */
 function seedDaemonSettings(baseDirectory: string): void {
   const own = join(baseDirectory, '.goodvibes', GOODVIBES_DAEMON_SETTINGS_ROOT, 'settings.json');
@@ -73,9 +78,32 @@ function seedDaemonSettings(baseDirectory: string): void {
   try {
     if (existsSync(own) || !existsSync(previous)) return;
     mkdirSync(dirname(own), { recursive: true, mode: 0o700 });
-    copyFileSync(previous, own, fsConstants.COPYFILE_EXCL);
+    const text = readFileSync(previous, 'utf-8');
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      copyFileSync(previous, own, fsConstants.COPYFILE_EXCL);
+      return;
+    }
+    writeFileSync(own, `${JSON.stringify(withoutConnectedHost(parsed as Record<string, unknown>), null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   } catch {
     // Another start copied it first, or the directory is not writable: the
     // daemon starts from its defaults for client-scoped settings, as a new install does.
   }
+}
+
+/** The settings without `daemon.connectedHost`, written nested or as dotted keys. */
+function withoutConnectedHost(settings: Record<string, unknown>): Record<string, unknown> {
+  const copy: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if (key === 'daemon.connectedHost' || key.startsWith('daemon.connectedHost.')) continue;
+    if (key === 'daemon' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const daemon = Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .filter(([inner]) => inner !== 'connectedHost' && !inner.startsWith('connectedHost.')));
+      if (Object.keys(daemon).length > 0) copy[key] = daemon;
+      continue;
+    }
+    copy[key] = value;
+  }
+  return copy;
 }

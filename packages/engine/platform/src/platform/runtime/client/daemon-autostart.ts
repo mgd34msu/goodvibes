@@ -186,6 +186,8 @@ export type DaemonAutostartOutcome =
   | { readonly action: 'not-installed' }
   | { readonly action: 'started'; readonly serviceName: string }
   | { readonly action: 'came-online'; readonly serviceName: string }
+  /** The service manager still reports the unit running but the daemon has not answered yet: wait with {@link waitForStartingDaemon}. */
+  | { readonly action: 'starting'; readonly serviceName: string }
   | { readonly action: 'start-failed'; readonly serviceName: string; readonly reason: string };
 
 export interface DaemonAutostartOptions {
@@ -202,6 +204,78 @@ export interface DaemonAutostartOptions {
 
 const DEFAULT_WAIT_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 400;
+
+/** A pause between probes that ends early when `signal` fires. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+/** Whether the service manager reports `serviceName` running now. */
+function unitRunning(control: DaemonServiceControl, serviceName: string): boolean {
+  try {
+    return control.snapshot().some((entry) => entry.serviceName === serviceName && entry.running);
+  } catch (error) {
+    logger.debug('[startup] reading the daemon service state failed', { serviceName, error: summarizeError(error) });
+    return false;
+  }
+}
+
+/** What the foreground wait says once it ends unanswered: the service manager's state decides, not the time spent. */
+function unansweredOutcome(control: DaemonServiceControl, serviceName: string): DaemonAutostartOutcome {
+  if (unitRunning(control, serviceName)) return { action: 'starting', serviceName };
+  return {
+    action: 'start-failed',
+    serviceName,
+    reason: `service "${serviceName}" stopped before the daemon answered (the service manager no longer reports it running), check its logs`,
+  };
+}
+
+export interface WaitForStartingDaemonOptions {
+  readonly control: DaemonServiceControl;
+  readonly isReachable: () => Promise<boolean>;
+  readonly serviceName: string;
+  /** Ends the wait (the app is shutting down); the wait then resolves `aborted`. */
+  readonly signal: AbortSignal;
+  readonly pollIntervalMs?: number | undefined;
+  /** Injectable so tests drive the wait loop deterministically. */
+  readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+}
+
+/**
+ * Wait for a daemon whose unit the service manager reports running but which
+ * has not answered yet ({@link DaemonAutostartOutcome} `starting`). The same
+ * probe at the same interval as the boot-time wait; `online` on the first
+ * answer, `stopped` once the service manager reports the unit not running,
+ * `aborted` when `signal` fires. Never throws.
+ */
+export async function waitForStartingDaemon(options: WaitForStartingDaemonOptions): Promise<'online' | 'stopped' | 'aborted'> {
+  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  const sleep = options.sleep ?? ((ms: number) => pause(ms, options.signal));
+  for (;;) {
+    if (options.signal.aborted) return 'aborted';
+    try {
+      if (await options.isReachable()) return 'online';
+    } catch (error) {
+      logger.debug('[startup] re-probing the starting daemon failed', { error: summarizeError(error) });
+    }
+    if (options.signal.aborted) return 'aborted';
+    if (!unitRunning(options.control, options.serviceName)) return 'stopped';
+    await sleep(pollIntervalMs);
+  }
+}
 
 function classifyMode(daemonMode: string): DaemonAutostartInactionReason | 'recoverable' {
   switch (daemonMode) {
@@ -270,11 +344,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     // The service manager already reports the unit active, it may be mid-start
     // or mid-restart. Wait for it, but never issue another start underneath it.
     if (await waitForAnswer()) return { action: 'came-online', serviceName: target.serviceName };
-    return {
-      action: 'start-failed',
-      serviceName: target.serviceName,
-      reason: `service "${target.serviceName}" is active per the service manager but the daemon did not answer within ${waitTimeoutMs}ms, check its logs`,
-    };
+    return unansweredOutcome(options.control, target.serviceName);
   }
 
   if (!target.startSupported) {
@@ -294,11 +364,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     };
   }
   if (await waitForAnswer()) return { action: 'started', serviceName: target.serviceName };
-  return {
-    action: 'start-failed',
-    serviceName: target.serviceName,
-    reason: `the service start command was accepted but the daemon did not answer within ${waitTimeoutMs}ms`,
-  };
+  return unansweredOutcome(options.control, target.serviceName);
 }
 
 /** What a surface says when no daemon answers and no daemon service is installed to start. */
@@ -321,6 +387,8 @@ export function describeDaemonAutostart(
       return { level: 'low', text: `[Startup] The GoodVibes daemon was stopped; GoodVibes started it${suffix}.` };
     case 'came-online':
       return { level: 'low', text: `[Startup] The GoodVibes daemon was already starting; GoodVibes connected once it answered${suffix}.` };
+    case 'starting':
+      return { level: 'low', text: '[Startup] The GoodVibes daemon is starting; GoodVibes connects when it answers.' };
     case 'start-failed':
       return { level: 'high', text: `[Startup] The daemon is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start` };
     case 'not-installed':

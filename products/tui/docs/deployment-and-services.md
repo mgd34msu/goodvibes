@@ -234,7 +234,7 @@ This build does not produce a daemon executable. The daemon binary is built from
 
 The daemon and listener are protected by local auth plus optional service tokens.
 
-Two environment variables carry the tokens: `GOODVIBES_DAEMON_TOKEN` is the bearer token every daemon route requires, and `GOODVIBES_HTTP_TOKEN` protects the webhook HTTP listener.
+Two environment variables carry the tokens: `GOODVIBES_DAEMON_TOKEN` is the bearer token every daemon route requires, and `GOODVIBES_HTTP_TOKEN` protects the webhook HTTP listener. Without `GOODVIBES_HTTP_TOKEN` the listener uses its own token, created in `<daemon home>/http-listener-token.json` on first use; it never accepts the operator token.
 
 Beyond fixed tokens, the runtime supports bootstrap credentials for first contact, local user management with password rotation (`goodvibes auth add-user` / `auth rotate-password`), session revocation, and local-auth review surfaces in the TUI and operator APIs.
 

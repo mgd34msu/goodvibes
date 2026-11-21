@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
-import { unsettledWorktreeReason, WORKTREE_CREATION_GRACE_MS } from '../../git/product-worktree-marker.js';
+import { join } from 'node:path';
+import { kindOfProductWorktree, unsettledWorktreeReason, WORKTREE_CREATION_GRACE_MS } from '../../git/product-worktree-marker.js';
 
 /**
  * Retention policy for product-created worktrees under `.goodvibes/.worktrees`.
@@ -82,16 +82,12 @@ export async function runGit(cwd: string, args: readonly string[]): Promise<GitR
 }
 
 /**
- * Product-created worktrees sit directly under `.goodvibes/.worktrees/` in one
- * of the shapes the product itself creates. A directory that merely lives
- * under `.goodvibes` is not one.
+ * Product-created worktrees sit under `.goodvibes/.worktrees/` in one of the
+ * kinds the product itself creates (git/product-worktree-marker.ts). A
+ * directory that merely lives under `.goodvibes` is not one.
  */
-const PRODUCT_WORKTREE_SEGMENT = /^(?:agent-.+|contract|contract-planner|contract-input|ws|ws-ns|ws-owned)$/;
-
 export function isProductWorktreePath(path: string, workingDirectory: string): boolean {
-  const rel = relative(join(workingDirectory, '.goodvibes', '.worktrees'), path);
-  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) return false;
-  return PRODUCT_WORKTREE_SEGMENT.test(rel.split(sep)[0]!);
+  return kindOfProductWorktree(workingDirectory, path) !== null;
 }
 
 /**

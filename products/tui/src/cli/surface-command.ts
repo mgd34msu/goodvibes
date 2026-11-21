@@ -143,7 +143,7 @@ function ntfyTopicSecrets(runtime: CliCommandRuntime) {
 async function ntfyTopicName(runtime: CliCommandRuntime, secrets: ReturnType<typeof ntfyTopicSecrets>, key: string): Promise<string> {
   const value = runtime.configManager.get(key as ConfigKey);
   if (typeof value !== 'string' || value.trim() === '') return '';
-  return (await resolveSecretInput(value, { resolveLocalSecret: (name) => secrets.get(name), homeDirectory: secrets.getGlobalHome() }, 'dispatch'))?.trim() ?? '';
+  return (await resolveSecretInput(value, { resolveLocalSecret: (name) => secrets.get(name), homeDirectory: secrets.getGlobalHome(), providers: secrets.getSecretProviderHostConfig() }, 'dispatch'))?.trim() ?? '';
 }
 
 async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {

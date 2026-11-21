@@ -24,6 +24,8 @@ import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/met
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.ts';
+import { HttpListener } from '../platform/src/platform/daemon/http-listener.ts';
+import { HookDispatcher } from '../platform/src/platform/hooks/dispatcher.ts';
 
 const DAEMON = 'http://127.0.0.1:3421';
 const OPERATOR_TOKEN = 'synthetic-operator-token';
@@ -156,4 +158,40 @@ test('a browser cookie acts for no page of another origin: no change, no event s
   expect(userAuth.validateSession(session)).not.toBeNull();
   expect(await send('POST', '/logout', cookie, DAEMON)).toBe('let through');
   expect(userAuth.validateSession(session)).toBeNull();
+});
+
+test('the webhook listener fires no hook for a page of another origin on the sign-in cookie; the daemon\'s own page and a bearer sender do', async () => {
+  const { userAuth, configManager } = daemon();
+  const catalog = new GatewayMethodCatalog();
+  type Fetch = (req: Request, server: { requestIP(req: Request): { address: string } }) => Promise<Response>;
+  let fetch: Fetch | null = null;
+  const serveFactory = ((options: { fetch: Fetch }) => { fetch = options.fetch; return { stop: () => {} }; }) as unknown as typeof Bun.serve;
+  // The listener as the daemon host builds it, with its own token; only Bun.serve is an in-process dispatch.
+  const listener = new HttpListener({
+    configManager, userAuth, hookDispatcher: new HookDispatcher(), serveFactory, host: '127.0.0.1', port: 3422,
+    grantedScopes: (includeWrite) => catalog.grantedScopes(includeWrite),
+  });
+  listener.enable({ httpListener: true }, 'synthetic-listener-token');
+  await listener.start();
+  const cookie = `goodvibes_session=${encodeURIComponent(userAuth.createSession('admin').token)}`;
+  const fire = async (headers: Record<string, string>) => {
+    const response = await fetch!(new Request('http://127.0.0.1:3422/webhook', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ event: 'deploy', phase: 'Post' }),
+    }), { requestIP: () => ({ address: '127.0.0.1' }) });
+    const body = await response.json().catch(() => null) as { code?: string; fired?: boolean } | null;
+    return body?.code === 'ORIGIN_NOT_ALLOWED' ? 'refused for its origin' : body?.fired === true ? 'fired' : `answered ${response.status}`;
+  };
+  const rows: ReadonlyArray<readonly [string, Record<string, string>, string]> = [
+    ['the sign-in cookie from another origin', { cookie, origin: 'https://elsewhere.example' }, 'refused for its origin'],
+    ['the sign-in cookie from another port on this host', { cookie, origin: 'http://127.0.0.1:8080' }, 'refused for its origin'],
+    ['the sign-in cookie with no origin', { cookie }, 'refused for its origin'],
+    // The controls: the daemon's own page and a webhook sender with the listener token fire the hook.
+    ['the sign-in cookie from the daemon\'s own origin', { cookie, origin: DAEMON }, 'fired'],
+    ['the listener token as a bearer', { authorization: 'Bearer synthetic-listener-token' }, 'fired'],
+  ];
+  try {
+    for (const [name, headers, expected] of rows) expect(`${name}: ${await fire(headers)}`).toBe(`${name}: ${expected}`);
+  } finally {
+    await listener.stop();
+  }
 });

@@ -1,5 +1,5 @@
 // Proves: A project test run inside the sandbox reads a private file in home, replaces the interpreter, or has a network route.
-// Red when: Home is bound into the sandbox, the runtime becomes writable, or the network namespace is shared: the inner run exits non-zero.
+// Red when: Home is bound into the sandbox, a secret inside a cache folder shown through the home mask is not covered again, the runtime becomes writable, or the network namespace is shared: the inner run exits non-zero.
 // Proves: A contained command names a working directory outside the project and can write there.
 // Red when: The exec runtime stops refusing a contained command whose working directory is outside the project root, or a link inside the project that leads out of it.
 /**
@@ -52,6 +52,42 @@ test('real contained Bun execution', () => {
     expect(output).toMatchObject({ sandboxed: true, sandbox_network: 'disabled', exit_code: 0 });
     expect(readFileSync(privatePath, 'utf8')).toBe('PRIVATE_RUNTIME_SENTINEL');
   } finally { await manager.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a cache folder shown writable through the home mask does not show the browser profile or registry token inside it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-home-cache-'));
+  const workspace = join(root, 'project'), home = join(root, 'private-home');
+  const cache = join(home, '.cache'), cargo = join(cache, 'cargo');
+  const cookies = join(cache, 'chromium', 'Default', 'Cookies'), token = join(cargo, 'credentials.toml'), built = join(cache, 'go-build', 'object');
+  for (const dir of [workspace, join(cache, 'chromium', 'Default'), join(cache, 'go-build'), join(cargo, 'registry')]) mkdirSync(dir, { recursive: true });
+  writeFileSync(cookies, 'BROWSER_COOKIE_SENTINEL');
+  writeFileSync(token, 'REGISTRY_TOKEN_SENTINEL');
+  // The cache folders the view reads come from these variables; pinned to this home so the case does not depend on the caller's.
+  const saved = { XDG_CACHE_HOME: process.env.XDG_CACHE_HOME, CARGO_HOME: process.env.CARGO_HOME };
+  process.env.XDG_CACHE_HOME = cache;
+  process.env.CARGO_HOME = cargo;
+  writeFileSync(join(workspace, 'home.test.ts'), `import { expect, test } from 'bun:test';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+const read = (path: string): string => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+test('caches are writable, the secrets inside them are not there', () => {
+  writeFileSync(${JSON.stringify(built)}, 'built');
+  expect({ cookies: existsSync(${JSON.stringify(cookies)}), token: read(${JSON.stringify(token)}).includes('SENTINEL') }).toEqual({ cookies: false, token: false });
+});\n`);
+  const manager = new ProcessManager();
+  const tool = createExecTool(manager, { defaultWorkingDirectory: workspace,
+    overflowHandler: new OverflowHandler({ baseDir: workspace }), credentialEnvScrub: { enabled: false },
+    sandbox: { config: { enabled: true, egressAllowlist: [], workspaceWritable: [] }, availability, featureEnabled: true, homeDir: home } });
+  try {
+    const result = await tool.execute({ commands: [{ cmd: 'bun test', progress: false, timeout_ms: 10_000 }] });
+    expect(result.success, result.output ?? result.error).toBe(true);
+    expect(JSON.parse(result.output!)).toMatchObject({ sandboxed: true, exit_code: 0 });
+    // The control: the cache write reached the host, so the cache folder really was shown.
+    expect(readFileSync(built, 'utf8')).toBe('built');
+    expect([readFileSync(cookies, 'utf8'), readFileSync(token, 'utf8')]).toEqual(['BROWSER_COOKIE_SENTINEL', 'REGISTRY_TOKEN_SENTINEL']);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    await manager.close(); rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a contained command cannot move its working directory out of the project', async () => {

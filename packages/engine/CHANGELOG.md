@@ -80,7 +80,16 @@ The full write-up is in
   is starting; the failure line appears only when the service stopped.
 - An approved loosening is applied as part of the approval; a change that
   cannot be applied leaves the ask open (`APPROVED_NOT_APPLIED`). Every
-  confirmation refusal is `CONFIRMATION_REQUIRED`.
+  confirmation refusal is `CONFIRMATION_REQUIRED`, and a method that needs a
+  confirmation lists `confirm` as required in its input schema.
+- `devices.grants.revoke` declares in its schema that one of `grantId`,
+  `nodeId` or `capabilityId` is required.
+- `/plugin` and `/update` have one description in both programs: the Agent
+  gains `/plugin dirs|inspect|review` and `/update review|save-review|read-review`;
+  `/plugin open`, `publish-local` and `unpublish` stay the terminal app's and
+  are refused in the Agent with the reason.
+- `/devices revoke` of a device another principal paired says it was put to
+  the owner as an approval, instead of "was already gone".
 - Deletions and sends run through wrappers (`setsid`, `flock`, `busybox`, `env
   -S`, ...) or a script are read as such: owner-only and new-recipient asks.
 - A program attached to a daemon on another machine shows that daemon's
@@ -96,7 +105,12 @@ The full write-up is in
 ### Fixed
 
 - After a restart accepted by systemd the old daemon exits at once instead of
-  using a full processor core until stopped.
+  using a full processor core until stopped; a supervised daemon also exits
+  right after an accepted rollback handover.
+- `run --timeout` no longer uses a full processor core while it waits for the
+  deadline.
+- Saving the same card twice keeps the security code when the repeat carries
+  it and the stored card had none.
 - A Stop sent before a queued turn starts cancels it
   (`stoppedBeforeStart: true`) instead of `NO_ACTIVE_TURN` followed by the turn
   running.
@@ -113,6 +127,11 @@ The full write-up is in
   asks it did not raise.
 - A remote artifact URL whose name resolves to a private or loopback address
   is refused.
+
+### For contributors
+
+- The measurement scripts (`bun run measure`, `measure:check`) and their CI
+  job are removed.
 
 ## [3.3.4] - 2026-11-20
 

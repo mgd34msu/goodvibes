@@ -1,7 +1,7 @@
 // Proves: A starting app sends the operator token to whatever answers the daemon's port.
 // Red when: The token is sent before the daemon's identity answer is verified for the dialled port.
 // Proves: A client sends this machine's daemon token, or the token stored for one daemon, to another daemon it was not issued for.
-// Red when: The target resolver falls back to this machine's token for a connected or typed daemon that is not this machine's, or the one header builder attaches a bound credential to a URL on another origin.
+// Red when: The target resolver falls back to this machine's token for a connected or typed daemon that is not this machine's, the one header builder attaches a bound credential to a URL on another origin, or the Agent's credential reader or the pair command's local target hands this machine's token to another machine's address.
 /**
  * A terminal app that finds something listening on the daemon's port asks it to
  * prove it holds the operator token before it sends that token. The stand-in is
@@ -31,6 +31,8 @@ import { writeConnectedDaemonToken } from '../platform/src/platform/runtime/clie
 import { getOrCreateCompanionToken } from '../platform/src/platform/pairing/companion-token.ts';
 import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { readConnectedHostBootstrapToken, readConnectedHostOperatorToken } from '../terminal-shell/src/agent-turn/connected-host-auth.ts';
+import { resolveLocalDaemonTarget } from '../terminal-shell/src/cluster-remote-daemon-target.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema-types.ts';
 import type { RuntimeServices } from '../platform/src/platform/runtime/services.ts';
 
@@ -118,6 +120,43 @@ test('a credential goes only to the daemon it was issued for: this machine\'s to
     // The controls: each daemon gets the token issued for it.
     ['the connected host with its own stored token', () => { connectTo(storedDaemon); return sent(storedDaemon); }, 'token-issued-by-the-stored-daemon'],
     ['this machine\'s daemon', () => { connectTo(null); return sent(thisMachine); }, 'this machine\'s token'],
+  ];
+  for (const [name, run, expected] of rows) expect(`${name}: ${run()}`).toBe(`${name}: ${expected}`);
+});
+
+test('the Agent and goodvibes-daemon pair give this machine\'s token only to this machine\'s daemon, whatever host is configured', () => {
+  const home = mkdtempSync(join(tmpdir(), 'gv-agent-credential-'));
+  const saved = { connected: process.env.GOODVIBES_CONNECTED_HOST_TOKEN, daemon: process.env.GOODVIBES_DAEMON_TOKEN };
+  cleanups.push(() => {
+    rmSync(home, { recursive: true, force: true });
+    for (const [name, value] of [['GOODVIBES_CONNECTED_HOST_TOKEN', saved.connected], ['GOODVIBES_DAEMON_TOKEN', saved.daemon]] as const) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+  delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
+  // This machine's daemon token, in its file (what the Agent reads) and in the environment.
+  const fileToken = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveGoodVibesDaemonHome(home) }).token;
+  const configManager = new ConfigManager({ configDir: join(home, 'config') });
+  const thisMachine = `http://127.0.0.1:${String(configManager.get('controlPlane.port' as ConfigKey))}`;
+  const otherDaemon = 'http://192.0.2.10:3421';
+  const named = (token: string | null | undefined) => token === fileToken ? 'the file token' : token === 'environment-daemon-token' ? 'the environment token' : 'no token';
+  const withEnv = <T>(value: string | undefined, run: () => T): T => {
+    if (value === undefined) delete process.env.GOODVIBES_DAEMON_TOKEN; else process.env.GOODVIBES_DAEMON_TOKEN = value;
+    return run();
+  };
+  const rows: Array<readonly [string, () => string, string]> = [
+    ['the Agent dialling another machine, the daemon token in the environment', () => withEnv('environment-daemon-token', () => named(readConnectedHostOperatorToken(home, otherDaemon).token)), 'no token'],
+    ['the Agent dialling another machine, the daemon token in its file', () => withEnv(undefined, () => named(readConnectedHostOperatorToken(home, otherDaemon).token)), 'no token'],
+    ['the Agent repeating a pairing request to another machine', () => withEnv('environment-daemon-token', () => named(readConnectedHostBootstrapToken(home, otherDaemon).token)), 'no token'],
+    ['goodvibes-daemon pair with the connected host set to another machine', () => {
+      const set = configManager.setMany([{ key: 'daemon.connectedHost.url' as ConfigKey, value: otherDaemon }], localOwnerActor());
+      if (!set.ok) throw new Error('the connected host could not be set');
+      const resolved = resolveLocalDaemonTarget({ configManager, daemonHomeDir: resolveGoodVibesDaemonHome(home) });
+      return resolved.ok ? `${named(resolved.target.token)} to ${resolved.target.baseUrl === thisMachine ? 'this machine' : resolved.target.baseUrl}` : `refused ${resolved.code}`;
+    }, 'the file token to this machine'],
+    // The controls: this machine's daemon is given its token.
+    ['the Agent dialling this machine, the daemon token in the environment', () => withEnv('environment-daemon-token', () => named(readConnectedHostOperatorToken(home, thisMachine).token)), 'the environment token'],
+    ['the Agent dialling this machine, the daemon token in its file', () => withEnv(undefined, () => named(readConnectedHostOperatorToken(home, thisMachine).token)), 'the file token'],
   ];
   for (const [name, run, expected] of rows) expect(`${name}: ${run()}`).toBe(`${name}: ${expected}`);
 });

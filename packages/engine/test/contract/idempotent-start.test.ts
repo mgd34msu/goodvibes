@@ -4,6 +4,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { RefusalError } from '@goodvibes/engine/errors';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
+import { createContractOperatorService } from '../../platform/src/platform/contract/operator-service.ts';
+import { createHostedContractWorkAdapter, type HostedContractWorkAdapterDeps } from '../../platform/src/platform/hosted-sessions/contract-work-adapter.ts';
 
 const roots: string[] = [];
 const harnesses: Harness[] = [];
@@ -51,4 +53,41 @@ test('a retried start with the same caller and key returns the first contract, a
   const afterRestart = await restarted.runner.startIdempotent!(input(root), { principalId: 'p1', key: 'k1' });
   expect(afterRestart.replayed).toBe(true);
   expect(afterRestart.contract.id).toBe(started.contract.id);
+});
+
+/**
+ * contracts.dispatch goes through its own adapter, which makes a hosted session
+ * and starts the contract there; the key reaches the durable record only if the
+ * adapter and the operator service pass it on. The session manager is a stand-in
+ * that only names sessions: the key's record is the runner's store, which is real.
+ */
+test('a retried dispatch with the same caller and key after a restart returns the first contract and starts no second one', async () => {
+  const root = makeRepo(); roots.push(root);
+  const created: string[] = [];
+  const hostedSessions = {
+    create: async () => { const id = `dispatch-session-${created.length + 1}`; created.push(id); return { id }; },
+    hosts: () => true,
+    kill: async () => undefined,
+  } as unknown as HostedContractWorkAdapterDeps['hostedSessions'];
+  const daemon = (h: Harness) => {
+    const service = createContractOperatorService({ runner: h.runner, workingDirectory: root });
+    const adapter = createHostedContractWorkAdapter({ runner: service, hostedSessions, workspaceRoot: root });
+    return { service, adapter };
+  };
+  const ask = { ask: 'Keep the original requested work', workspaceRoot: root, principalId: 'p1', idempotencyKey: 'k1' };
+
+  const first = harness(root);
+  const before = daemon(first);
+  const started = await before.service.dispatch(ask);
+  before.adapter.close();
+  await first.dispose();
+
+  const restarted = harness(root);
+  // As the daemon does at start: contracts left on disk are taken up again.
+  await restarted.runner.resumeAll();
+  const after = daemon(restarted);
+  const retried = await after.service.dispatch(ask);
+  after.adapter.close();
+  expect(retried.contract.id).toBe(started.contract.id);
+  expect(created).toEqual(['dispatch-session-1']);
 });

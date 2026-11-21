@@ -224,6 +224,17 @@ export function secretArg(index: number): Secret {
   return Secret.of(dispatch.secrets.inline.has(index) ? value.slice(value.indexOf('=') + 1) : value, `/${dispatch.name} argument ${index}`);
 }
 
+/**
+ * Words typed after `/` that run another command but are not commands: no
+ * entry in any list, the picker, completion, /help or the reference. Looked up
+ * only when no registered command or alias has the word.
+ */
+const ACCEPTED_COMMAND_WORDS: Readonly<Record<string, string>> = { exit: 'quit' };
+/** True for a word in that table; a command or alias of the same name still wins over it. */
+export function isAcceptedCommandWord(word: string): boolean {
+  return Object.hasOwn(ACCEPTED_COMMAND_WORDS, word);
+}
+
 export interface TerminalCommandRegistry<Context> {
   register(command: TerminalSlashCommand<Context>): void;
   unregister(name: string): void;
@@ -349,7 +360,9 @@ export function createTerminalCommandRegistry<
      * get - Look up a command by its primary name or any alias. O(1) for both.
      */
     get(name: string): TerminalSlashCommand<Context> | undefined {
-      return this.commands.get(name) ?? this.aliasIndex.get(name);
+      const found = this.commands.get(name) ?? this.aliasIndex.get(name);
+      if (found || !isAcceptedCommandWord(name)) return found;
+      return this.commands.get(ACCEPTED_COMMAND_WORDS[name]!);
     }
     /** The commands on the first screen. */
     getVisible(): TerminalSlashCommand<Context>[] {

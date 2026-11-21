@@ -1,10 +1,12 @@
 import { completeArguments, type ArgumentCompletion } from './command-actions/completion.js';
 import { readList, type ListRow } from './command-actions/lists.js';
 import type { CommandDescription, ListName } from './command-actions/types.js';
+import { isAcceptedCommandWord } from './command-registry.js';
 
 export interface AutocompleteCommand {
   readonly name: string;
   readonly description: string;
+  readonly aliases?: readonly string[] | undefined;
   /** Set on a command built with defineCommand: completion continues past its name. */
   readonly described?: CommandDescription<never> | undefined;
 }
@@ -146,6 +148,10 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
     if (this.state.selectedIndex >= this.state.results.length) {
       this.state.selectedIndex = Math.max(0, this.state.results.length - 1);
     }
+    // An accepted word typed exactly (`/exit`) is what Enter runs: no fuzzy match is
+    // highlighted over it, unless a command or alias has that very name.
+    const exact = this.state.results.some(({ command }) => command.name === query || command.aliases?.includes(query) === true);
+    if (isAcceptedCommandWord(query) && !exact) this.state.selectedIndex = -1;
   }
 
   /** Move selection down one item (wraps around). */
@@ -159,7 +165,7 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
   moveUp(): void {
     const count = this.state.argument?.items.length ?? this.state.results.length;
     if (count === 0) return;
-    this.state.selectedIndex = (this.state.selectedIndex - 1 + count) % count;
+    this.state.selectedIndex = (Math.max(0, this.state.selectedIndex) - 1 + count) % count;
   }
 
   /**

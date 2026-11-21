@@ -2,6 +2,8 @@
 // Red when: The start-up pass stops expiring an approval whose deadline passed while the daemon was down, a restart loses an approval already given, or a deadline still ahead is not re-armed or expires on sight.
 // Proves: Two people answer one approval at once and the waiting command runs with the typed answer of one whose decision did not stand, or a decision given to a revision that has since changed is applied.
 // Red when: The broker applies a second decision to a settled approval or one given to a stale revision, or hands the waiting command an answer other than the applied one.
+// Proves: A change put to the owner is recorded as approved while it is not in effect, or a change that could not be applied ends the owner's ask as if decided.
+// Red when: The owner's approve records the approval without running the change registered for it, or records it approved when the change failed instead of leaving the ask waiting.
 /**
  * A pending approval survives a daemon restart and is never left hanging.
  *
@@ -26,6 +28,7 @@ import { join } from 'node:path';
 import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
+import { putToOwner } from '../platform/src/platform/control-plane/owner-act.ts';
 
 /** Far longer than the file may run, so no timer of the first broker fires during it. */
 const WINDOW_MS = 10 * 60_000;
@@ -148,4 +151,33 @@ test('two approvers at once: one decision stands, the command gets only its type
   const answered = await command;
   expect(answered).toEqual({ answered: true, text: stood });
   expect(broker.getApproval(raised.id)?.audit.filter((entry) => entry.action === 'approved').length).toBe(1);
+});
+
+test('a change put to the owner is in effect when his approve returns; one that cannot be applied leaves the ask waiting', async () => {
+  const broker = new ApprovalBroker({ storePath });
+  await broker.start();
+  // An admin who is not the owner asked to switch the sandbox off: the change is put to the owner.
+  const settings = { 'sandbox.enabled': true };
+  let diskFull = true;
+  const { approvalId } = await putToOwner(broker, {
+    summary: 'Switch the sandbox off', reasons: ['sandbox.enabled: true -> false'],
+    tool: 'config.set', args: { key: 'sandbox.enabled', value: false }, requestedBy: 'admin-2',
+    apply: () => {
+      if (diskFull) throw new Error('ENOSPC: no space left on device');
+      settings['sandbox.enabled'] = false;
+    },
+  });
+  const approve = () => broker.resolveApproval(approvalId, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: broker.getApproval(approvalId)!.revision });
+
+  // The change fails: nothing was decided, and the ask still waits for him.
+  const failed = await approve().then(() => 'recorded', (error: { code?: unknown }) => error.code);
+  expect(failed).toBe('APPROVED_NOT_APPLIED');
+  expect(broker.getApproval(approvalId)?.status).toBe('pending');
+  expect(settings['sandbox.enabled']).toBe(true);
+
+  // Approved again once it can be applied: the change is in effect by the time the approval says approved.
+  diskFull = false;
+  expect((await approve()).applied).toBe(true);
+  expect(settings['sandbox.enabled']).toBe(false);
+  expect((await restart()).getApproval(approvalId)?.status).toBe('approved');
 });

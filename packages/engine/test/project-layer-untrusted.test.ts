@@ -4,6 +4,8 @@
 // Red when: A pointer in the project store is followed into the owner's store or the environment: `get` returns the owner's value.
 // Proves: A cloned repository's hooks file or MCP file runs a command before the workspace is trusted, replaces the owner's server of the same name, or grants its own server allow-all.
 // Red when: The hooks file or a project MCP file is loaded while the workspace is undecided (its hook command or server process runs, or its server takes the owner's server's name), or a project file's allow-all trust mode is kept.
+// Proves: A repository's hooks keep running in a process after the owner restricts the workspace he had trusted.
+// Red when: The trust manager stops telling its level listeners about a change to restricted, or the hook workbench stops clearing the loaded hooks of a file the new decision holds back, so the repository's hook command still runs.
 /**
  * A repository's own files are content its author wrote, not the owner. Its
  * settings file cannot set a restricted key, loosen one or run a command;
@@ -244,4 +246,26 @@ test('a repository\'s hooks file and MCP file start nothing and replace nothing 
   } finally {
     await registry.disconnectAll();
   }
+});
+
+test('a repository\'s hooks stop firing the moment the owner restricts a workspace he had trusted', async () => {
+  const hookMarker = join(dir, 'hook-ran');
+  writeJson(join(repo, 'hooks.json'), { hooks: { 'Pre:tool:*': [{ type: 'command', command: `touch '${hookMarker}'` }] } });
+  const trust = new WorkspaceTrustManager({ shellPaths: createShellPathService({ workingDirectory: repo, homeDirectory: home }), surfaceRoot: 'agent' });
+  await trust.setLevel('trusted');
+  const dispatcher = new HookDispatcher();
+  const workbench = new HookWorkbench(dispatcher, () => join(repo, 'hooks.json'));
+  // The gate as the products bind it, with the trust manager's own level notice.
+  workbench.bindTrustGate(repositoryFileGate(trust, home));
+  const event = { path: 'Pre:tool:exec', phase: 'Pre', category: 'tool', specific: 'exec', sessionId: 's', timestamp: 1, payload: {} } as const;
+
+  // The control: trusted, the repository's hook runs.
+  await workbench.loadAndApplyManagedHooks();
+  await dispatcher.fire(event);
+  const ranWhileTrusted = existsSync(hookMarker);
+  rmSync(hookMarker, { force: true });
+
+  await trust.setLevel('restricted');
+  await dispatcher.fire(event);
+  expect({ ranWhileTrusted, ranAfterRestricting: existsSync(hookMarker) }).toEqual({ ranWhileTrusted: true, ranAfterRestricting: false });
 });

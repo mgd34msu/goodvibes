@@ -12,7 +12,7 @@
  * port that counts every question, so "never to Jev" is a count of zero.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
@@ -20,7 +20,7 @@ import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
 import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { installJudgmentPort } from '@goodvibes/engine/errors';
 import {
-  classifyCall, classifyPaths, declaredRecoverable, declaredValues, 
+  classifyCall, classifyPaths, declaredRecoverable, declaredValues, recognizeOwnerOnly,
   type CallFacts, type OwnerOnlyKind,
 } from '../platform/src/platform/gate/classify.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
@@ -110,6 +110,27 @@ test('each owner-only kind goes to the owner in every deciding mode; only the ow
       expect(`${mode} ${kind} answered: ${shown(mode, ownAnswer)}`).toBe(`${mode} ${kind} answered: fact:allow:rule`);
     }
   }
+});
+
+/**
+ * A command that deletes with no copy kept is the owner's to decide, never
+ * Jev's. The command is read through the wrappers and scripts that run it: a
+ * prefix such as setsid or a script the call runs does not hide the delete.
+ */
+test('a delete nothing keeps a copy of is the owner\'s however the command wraps or scripts it; a harmless one is not', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gv-unrecoverable-'));
+  try {
+    writeFileSync(join(dir, 'tidy.sh'), '#!/bin/sh\nrm -rf ./data\n');
+    writeFileSync(join(dir, 'list.sh'), '#!/bin/sh\nls ./data\n');
+    const kindOf = (cmd: string) => recognizeOwnerOnly('exec', { commands: [{ cmd }] }, undefined, {}, dir) ?? 'none';
+    const rows = ['rm -rf ./data', 'setsid rm -rf ./data', 'nohup setsid rm -rf ./data', 'flock /tmp/l rm -rf ./data', 'bash ./tidy.sh',
+      'sh -c "rm -rf ./data"', 'ls ./data', 'setsid ls ./data', 'bash ./list.sh'];
+    expect(Object.fromEntries(rows.map((cmd) => [cmd, kindOf(cmd)]))).toEqual({
+      'rm -rf ./data': 'unrecoverable-delete', 'setsid rm -rf ./data': 'unrecoverable-delete', 'nohup setsid rm -rf ./data': 'unrecoverable-delete',
+      'flock /tmp/l rm -rf ./data': 'unrecoverable-delete', 'bash ./tidy.sh': 'unrecoverable-delete', 'sh -c "rm -rf ./data"': 'unrecoverable-delete',
+      'ls ./data': 'none', 'setsid ls ./data': 'none', 'bash ./list.sh': 'none',
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('declared subjects and recoverability are read from argument paths; an unreadable one is not taken as inside', () => {

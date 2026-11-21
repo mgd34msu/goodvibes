@@ -1015,9 +1015,9 @@ How to set an update setting for each program:
 | `/update rollback` | yes | yes | Restores the kept previous release (see [Rolling back](#rolling-back)). |
 | `/update daemon` | yes | yes | The connected daemon's own update loop, as `goodvibes-daemon update` prints it. |
 | `/update daemon --check` | yes | yes | Runs one daemon check now. |
-| `/update review` | yes | no (not an Agent action) | "See this install": the installed version, the latest release, the release channel, the install kind (`binary`, `bun-global-package` or `source`), whether a rollback copy is kept, the subscription providers, the sandbox profile, and how many settings profiles and stored secrets an update keeps. |
-| `/update save-review <file> [--replace]` | yes | no (not an Agent action) | Saves that review as JSON to a file. An existing file is kept unless `--replace` (which asks first). It is a record for support, not an update. |
-| `/update read-review <file>` | yes | no (not an Agent action) | Reads a saved review back. |
+| `/update review` | yes | yes | "See this install": the installed version, the latest release, the release channel, the install kind (`binary`, `bun-global-package` or `source`), whether a rollback copy is kept, the subscription providers, the sandbox profile, and how many settings profiles and stored secrets an update keeps. |
+| `/update save-review <file> [--replace]` | yes | yes | Saves that review as JSON to a file. An existing file is kept unless `--replace` (which asks first). It is a record for support, not an update. |
+| `/update read-review <file>` | yes | yes | Reads a saved review back. |
 
 On an installation that cannot update itself, `/update apply` prints `This install is not a self-updatable binary install (detected: running from source).` (or `bun/npm package install`) and `Update with: curl -fsSL https://goodvibes.sh/install.sh | sh`. A terminal program run from a source checkout prints instead: `This copy of GoodVibes runs from its source folder, so it does not update itself. To update it, get the latest source in that folder and rebuild it there: bun run --filter @goodvibes/tui build` (`GoodVibes Agent` and `@goodvibes/agent` for the Agent).
 
@@ -1112,7 +1112,7 @@ After a successful rollback, restart the programs; for the daemon run `goodvibes
 
 Running `/update rollback` a second time, right after a successful one, also succeeds: it exchanges the live and kept copies again, so the newer release is live once more and the older one is the `.previous` copy, and it prints `Restored GoodVibes <newer version>: ...`. The command does not compare versions; each run swaps the two sets, provided they still form one complete release each and the release being made live can read the saved data.
 
-`/update review` in the terminal app shows `rollback copy: kept beside this program; /update rollback restores it` when `<program>.previous` exists beside the running program, and `rollback copy: none kept (/update apply keeps one)` otherwise.
+`/update review` in either program shows `rollback copy: kept beside this program; /update rollback restores it` when `<program>.previous` exists beside the running program, and `rollback copy: none kept (/update apply keeps one)` otherwise.
 
 After an upgrade with the installer, no complete rollback set is kept. To go back to an earlier release then, install it by tag: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.0 sh`, subject to the data-reader check above. Then pin it (see [Pinning a release](#pinning-a-release)), or the update loop installs the newest release again within the hour.
 

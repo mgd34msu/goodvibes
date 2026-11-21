@@ -21,7 +21,7 @@
  * once.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -193,6 +193,42 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
   cleanups.push(() => third.stop());
   await third.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
   expect(ntfy.received).toHaveLength(1);
+});
+
+test('an answer a closed conversation still owed when 3.3.4 stopped is sent once by the first start of this release', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gv-delivery-upgrade-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const ntfy = await ntfyServer();
+  let reachedSend!: () => void;
+  const sending = new Promise<void>((resolve) => { reachedSend = resolve; });
+  const first = await daemon(root, { dies: () => reachedSend() });
+  let firstRunning = true;
+  cleanups.push(async () => { if (firstRunning) await first.stop(); });
+  first.configManager.setMany([{ key: 'surfaces.ntfy.enabled' as ConfigKey, value: true }, { key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
+  const session = await conversation(first, 'topic-upgrade', 'agent-upgrade');
+
+  // The answer is stored, the conversation is closed, and the daemon stops inside the send.
+  void first.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-upgrade', sessionId: session, body: 'the upgrade answer' });
+  await sending;
+  await first.sessionBroker.closeSession(session);
+  await first.stop();
+  firstRunning = false;
+  ntfyOutboundDedup.reset();
+
+  // The index as 3.3.4 wrote it: the logs say what is owed, the index states no count.
+  const indexPath = join(root, 'sessions.json');
+  const index = JSON.parse(readFileSync(indexPath, 'utf8')) as { owedReplyCounted?: unknown; sessions: Array<Record<string, unknown>> };
+  expect(index.sessions.find((entry) => entry['id'] === session)?.['status']).not.toBe('active');
+  delete index.owedReplyCounted;
+  for (const entry of index.sessions) delete entry['owedReplyCount'];
+  writeFileSync(indexPath, JSON.stringify(index));
+
+  // The first start of this release sends what was owed, once.
+  const second = await daemon(root);
+  cleanups.push(() => second.stop());
+  await second.helper.resendOwedChannelReplies();
+  await second.helper.resendOwedChannelReplies();
+  expect(ntfy.received.filter((entry) => entry.topic === 'topic-upgrade' && entry.body.startsWith('the upgrade answer'))).toHaveLength(1);
 });
 
 test('an answer refused once by a rate limit still arrives once, and a retried part of a long answer does not repeat the part already sent', async () => {

@@ -4,6 +4,8 @@
 // Red when: The update loop skips the checksum comparison, swaps while the daemon is not idle, or ignores the version a crash-loop rollback rejected.
 // Proves: This release's packaging writes evidence the previous release's updater refuses, so no installed copy can update.
 // Red when: A program's identifier in release evidence, the saved-data format name the release publishes, or the service description 3.3.1 wrote no longer matches what version 3.3.1 accepts.
+// Proves: An update asked for on request hangs the daemon half-stopped: the request waits for the install, and the install's orderly stop waits for the request.
+// Red when: `checkNow` answers only when the whole tick ends, so the handover's stop is reached while the update.check request still has no answer.
 /**
  * A daemon replaces or hands itself over only when it owns the artifact and a
  * successor is ready:
@@ -196,7 +198,7 @@ describe('the update loop', () => {
   }
 
   /** A real installation directory holding 1.0.0, and an updater over it with the given release host. */
-  function updaterFor(host: ReturnType<typeof releaseHost>, options: { idle?: () => boolean; rejected?: string } = {}) {
+  function updaterFor(host: ReturnType<typeof releaseHost>, options: { idle?: () => boolean; rejected?: string; stopGracefully?: () => void } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'update-loop-'));
     scratchDirs.push(root);
     const execPath = join(root, 'gv', 'goodvibes-daemon');
@@ -215,7 +217,7 @@ describe('the update loop', () => {
       rejectedVersion: () => options.rejected ?? null,
       serviceActions: { isSupervised: () => true, adoptIntoService: () => {}, restartService: () => { restarts.push(1); return { status: 'accepted' }; } },
       receipts: new DaemonReceiptStore(join(root, 'receipts.json')),
-      stopGracefully: () => {}, exitProcess: () => {}, stderr: { write: () => {} },
+      stopGracefully: options.stopGracefully ?? (() => {}), exitProcess: () => {}, stderr: { write: () => {} },
       setTimer: () => 0 as unknown as ReturnType<typeof setTimeout>, clearTimer: () => {},
     });
     const unchanged = () => Object.entries(files).every(([path, bytes]) => readFileSync(path).equals(bytes)) && !existsSync(execPath + PREVIOUS_FILE_SUFFIX);
@@ -248,6 +250,19 @@ describe('the update loop', () => {
     expect(readFileSync(good.execPath, 'utf8')).toBe('daemon 2.0.0');
     expect(readFileSync(good.execPath + PREVIOUS_FILE_SUFFIX, 'utf8')).toBe('daemon 1.0.0');
     expect(good.restarts).toEqual([1]);
+  });
+
+  test('a check asked for on request is answered before the handover stops the daemon', async () => {
+    // The real orderly stop closes the listener and waits for the requests it serves, the
+    // update.check request among them; here the stop records whether that request had its answer.
+    let answer = null as string | null;
+    const answerAtStop: Array<string | null> = [];
+    const { updater, restarts } = updaterFor(releaseHost(), { stopGracefully: () => { answerAtStop.push(answer); } });
+    const asked = updater.checkNow().then((outcome) => { answer = outcome; });
+    await asked;
+    await updater.drainHandover();
+    expect({ answer, answerAtStop, applied: updater.snapshot().appliedVersion ?? null, restarts: restarts.length })
+      .toEqual({ answer: 'installing', answerAtStop: ['installing'], applied: '2.0.0', restarts: 1 });
   });
 });
 

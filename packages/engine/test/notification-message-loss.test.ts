@@ -1,7 +1,7 @@
 // Proves: A notification or an inbound chat message is lost.
 // Red when: Dead letters live in memory only or a resend does not remove its row, a Socket Mode envelope is acknowledged before it was taken, ntfy suppresses a repeat by its text, or the ntfy subscription reconnects from now instead of from the last message it read.
 // Proves: A notification that could not be sent is lost when a resend of it fails again.
-// Red when: A resend that fails again drops the dead letter (or duplicates it). notification-message-loss.test.ts only ever resends successfully; add the failing resend to its restart case (the list and its file still hold the one entry).
+// Red when: A resend that fails again drops the dead letter (or duplicates it), a resend waiting to retry leaves the file, or a stop drops what waited to retry.
 /**
  * Notifications and inbound chat messages are not lost: a failed notification
  * outlives a restart and can be resent, a Slack Socket Mode envelope is only
@@ -62,6 +62,43 @@ describe('failed notifications', () => {
       expect((JSON.parse(readFileSync(file, 'utf8')) as { entries: unknown[] }).entries).toHaveLength(0);
     } finally {
       await after.close();
+    }
+  });
+
+  test('a resend left waiting to retry is still listed after a crash, and a notification waiting to retry is listed after a stop', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'notify-retrying-'));
+    dirs.push(dir);
+    const file = join(dir, 'dead-letters.json');
+    const refusing = { postWebhook: async () => { throw new HttpStatusError('HTTP 404: webhook revoked', { status: 404 }); } } as unknown as SlackIntegration;
+    const first = new Notifier({ slack: refusing });
+    first.persistDeadLetters(file);
+    await expect(first.notify('AGENT_COMPLETED', { summary: 'the report is done' })).rejects.toThrow();
+    await first.close();
+
+    // Slack is down for a while: the resend and a new notification each fail once and wait to retry.
+    const unavailable = { postWebhook: async () => { throw new HttpStatusError('HTTP 503: service unavailable', { status: 503 }); } } as unknown as SlackIntegration;
+    const second = new Notifier({ slack: unavailable });
+    second.persistDeadLetters(file);
+    const [resent] = second.listDeadLetters();
+    expect(await second.replayDeadLetters([resent!.id])).toEqual([{ id: resent!.id, outcome: 'retrying' }]);
+    const listed = (notifier: Notifier) => notifier.listDeadLetters().map((entry) => entry.event).sort();
+
+    // The process is killed now: the resent notification is still on disk to resend.
+    const afterCrash = new Notifier({ slack: unavailable });
+    afterCrash.persistDeadLetters(file);
+    expect(listed(afterCrash)).toEqual(['AGENT_COMPLETED']);
+    await afterCrash.close();
+
+    // An orderly stop instead, with a new notification also waiting to retry: both are kept to resend.
+    await second.notify('AGENT_FAILED', { summary: 'the build failed' });
+    expect(listed(second)).toEqual(['AGENT_COMPLETED']);
+    await second.close();
+    const afterStop = new Notifier({ slack: unavailable });
+    afterStop.persistDeadLetters(file);
+    try {
+      expect(listed(afterStop)).toEqual(['AGENT_COMPLETED', 'AGENT_FAILED']);
+    } finally {
+      await afterStop.close();
     }
   });
 

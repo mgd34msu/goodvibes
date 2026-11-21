@@ -1,5 +1,5 @@
 // Proves: An owner alert (an approval prompt that could not be shown, a dead channel, a failed update) is sent to a group, a shared channel, a webhook route or another person's chat.
-// Red when: isOwnerConversation stops requiring the owner's own private conversation.
+// Red when: isOwnerConversation stops requiring the owner's own private conversation, or takes a Home Assistant conversation for one.
 /**
  * An alert names what the assistant is doing for the owner, so it goes only to
  * a conversation that is the owner's own. The conversations are recorded the
@@ -19,6 +19,7 @@ import { rmSync } from 'node:fs';
 import { processTelegramUpdate } from '../platform/src/platform/adapters/telegram/index.ts';
 import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.ts';
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
+import { handleHomeAssistantSurfaceWebhook } from '../platform/src/platform/adapters/homeassistant/index.ts';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
 import type { ChannelSurface } from '../platform/src/platform/channels/types.ts';
@@ -35,11 +36,15 @@ afterEach(async () => {
 test('an owner alert is offered only to the owner\'s own private chat, never to a group, a channel, a webhook route or a friend\'s chat', async () => {
   const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
   const daemon = await surfaceDaemon({
-    settings: { 'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret' },
+    settings: {
+      'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret',
+      'surfaces.homeassistant.enabled': true, 'surfaces.homeassistant.webhookSecret': 'ha-secret',
+    },
     policies: {
       telegram: { allowlistUserIds: ['42', '77'], allowGroupMessages: true, requireMention: false },
       slack: { allowlistUserIds: ['U-OWNER'], allowGroupMessages: true, requireMention: false },
       webhook: { allowlistUserIds: ['hook-owner'] },
+      homeassistant: { allowlistUserIds: ['ha-owner'] },
     },
   });
   daemons.push(daemon);
@@ -63,9 +68,14 @@ test('an owner alert is offered only to the owner\'s own private chat, never to 
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-webhook-secret': 'hook-secret' },
     body: JSON.stringify({ task: 'hello', userId: 'hook-owner', conversationKind: 'direct', callbackUrl: 'https://caller.example.test/hook' }),
   }), daemon.webhookContext());
+  // A Home Assistant voice conversation naming the surface's owner as the user, one-to-one: it names the device, never who is speaking.
+  await handleHomeAssistantSurfaceWebhook(new Request('http://localhost/webhook/homeassistant', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-homeassistant-secret': 'ha-secret' },
+    body: JSON.stringify({ message: '', userId: 'ha-owner', conversationId: 'kitchen', mode: 'conversation' }),
+  }), context);
   retirePolicy();
   const surfaces = routeBindings.listBindings().map((binding) => binding.surfaceKind).sort();
-  expect(surfaces).toEqual(['slack', 'telegram', 'telegram', 'telegram', 'webhook']);
+  expect(surfaces).toEqual(['homeassistant', 'slack', 'telegram', 'telegram', 'telegram', 'webhook']);
 
   const tried: AutomationRouteBinding[] = [];
   const receipts: string[] = [];

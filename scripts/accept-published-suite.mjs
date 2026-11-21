@@ -725,9 +725,17 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const sentinel = join(data, 'published-acceptance-preserved.txt'); let preserved, originalWebui;
   const verifyOptOut = async () => { for (const key of ['update.auto', 'update.autoUpdateAtLaunch']) assert.equal(await setting(key), false); };
   const verifyPreserved = async () => {
-    if (preserved !== undefined) assert.equal(readFileSync(sentinel, 'utf8'), preserved);
-    for (const name of products) assert.ok(!existsSync(join(bin, name)), 'Uninstall must remove original installed programs.');
-    assert.deepEqual(productDefinitions(), [], 'Uninstall must retire its original native service.');
+    checkpoint('preserved.owner-data');
+    if (preserved !== undefined) assert.equal(readFileSync(sentinel, 'utf8'), preserved, 'Uninstall must keep the owner\'s data.');
+    for (const name of products) {
+      checkpoint(`preserved.${name}.removed`);
+      assert.ok(!existsSync(join(bin, name)), 'Uninstall must remove original installed programs.');
+    }
+    checkpoint('preserved.service-definition-removed');
+    const definitions = productDefinitions();
+    evidence.serviceDefinitions = definitions.map(path => path === servicePath ? basename(path) : 'other-definition');
+    assert.deepEqual(definitions, [], 'Uninstall must retire its original native service.');
+    checkpoint('preserved.service-stopped');
     const stopped = await runOwnedCommand(...(process.platform === 'linux' ? ['systemctl', ['--user', 'is-active', serviceUnit]]
       : ['launchctl', ['print', `gui/${account.uid}/${label}`]]), { env });
     // Proof is the probe's own "not installed / not running" answer, never any failure: a probe

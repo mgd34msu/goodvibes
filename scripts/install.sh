@@ -191,11 +191,17 @@ read_daemon_service() {
   [ -x "$INSTALL_DIR/goodvibes-daemon" ] || return 1
   # Exits 0, 3 and 4 all print the service-status document (schema
   # goodvibes.daemon.service-status, version 1); 1 (manager unreachable) prints
-  # the {ok:false, code, error, fix} failure document.
+  # the {ok:false, code, error, fix} failure document. A daemon from 3.3.4 or
+  # before prints the same fields with "ok": true and no schema; the uninstall
+  # asks whichever daemon is installed, and a rollback reinstates such a daemon.
   _rds_json=$(daemon_service_command service-status --json 2>/dev/null) || :
   [ -n "$_rds_json" ] || return 1
   _rds_schema=$(daemon_service_string schema "$_rds_json")
   _rds_version=$(printf '%s\n' "$_rds_json" | sed -n 's/^ *"schemaVersion": *\([0-9]*\),\{0,1\}$/\1/p' | head -n 1)
+  if [ -z "$_rds_schema" ] && [ -z "$_rds_version" ] && [ "$(daemon_service_word ok "$_rds_json")" = true ]; then
+    _rds_schema=goodvibes.daemon.service-status
+    _rds_version=1
+  fi
   if [ "$_rds_schema" != goodvibes.daemon.service-status ] || [ "$_rds_version" != 1 ]; then
     _rds_error=$(daemon_service_string error "$_rds_json")
     if [ -n "$_rds_error" ]; then

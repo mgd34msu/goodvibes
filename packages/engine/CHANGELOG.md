@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.3.3] - 2026-11-20
+
+The full write-up is in
+[docs/releases/3.3.3.md](https://github.com/mgd34msu/goodvibes/blob/v3.3.3/docs/releases/3.3.3.md).
+
+### Added
+
+- Add `KnowledgeService.scopeReadingsSettled()`, which resolves once the
+  knowledge store's background ordinary-view readings are done.
+
+### Changed
+
+- Show each setting on one line in the settings screen, its name and its value
+  in words; the section and key under each name are gone. Search still finds
+  a setting by its key.
+- Open the settings screen at once when `Open settings…` is chosen from
+  `/settings`, with no form; `/settings open <where>` still works.
+
+### For contributors
+
+- The test runner sets no time limit; no test, file or run fails for how long
+  it takes.
+- Times in the speed table are printed and never judged; `measure:check`
+  fails only on counts and bytes.
+- The security audit job no longer decides `CI ok`.
+- The measurement scenarios await the product instead of the clock.
+
 ## [3.3.2] - 2026-11-20
 
 The full write-up, with upgrade notes and the list of removed and renamed

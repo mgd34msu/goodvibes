@@ -92,18 +92,46 @@ const MANUAL_STOP_POLL_MS = 100;
 const MANUAL_KILL_WAIT_MS = 2_000;
 /** How long a service-manager command may take before it is reported as not answering (a broken user bus). */
 const SERVICE_QUERY_TIMEOUT_MS = 10_000;
+/**
+ * How long a blocking start, stop or restart may take. The manager answers
+ * only once the job is done, and a stop waits for the daemon's own orderly
+ * shutdown (systemd allows 90 s by default before it kills), so the query
+ * bound would end the client while the job it asked for still runs.
+ */
+const SERVICE_JOB_TIMEOUT_MS = 120_000;
 
 /** One step a service flow hands its driver: a command to run and read, a command to issue and leave, or a wait. */
 type ServiceStep =
-  | { readonly run: readonly string[] }
+  | { readonly run: readonly string[]; readonly timeoutMs?: number | undefined }
   | { readonly detach: readonly string[] }
   | { readonly pause: number };
 type ServiceFlow<T> = Generator<ServiceStep, T, ManagedServiceActionResult>;
 const DONE: ManagedServiceActionResult = Object.freeze({ status: 0 });
 
+/** Results of a command a signal ended, with that signal. */
+const endedBySignal = new WeakMap<ManagedServiceActionResult, NodeJS.Signals>();
+
+/**
+ * A command that ended without an exit status: what ended it, in words. Its
+ * own output, if any, follows. A manager client that was stopped did not
+ * report a result; the job it asked for may still have been carried out.
+ */
+function unfinishedCommand(command: string, args: readonly string[], timeoutMs: number, ended: { signal?: NodeJS.Signals | null | undefined; timedOut?: boolean; error?: Error | undefined }, output: { stdout?: string | undefined; stderr?: string | undefined }): ManagedServiceActionResult {
+  const name = [command, ...args.filter(word => !word.startsWith('-'))].slice(0, 3).join(' ');
+  const why = ended.timedOut
+    ? `${name} did not finish within ${Math.round(timeoutMs / 1000)} seconds and was stopped`
+    : ended.signal
+      ? `${name} was ended by ${ended.signal} before it reported a result`
+      : `${name} could not be run${ended.error ? ` (${ended.error.message})` : ''}`;
+  const said = (output.stderr ?? '').trim();
+  const result: ManagedServiceActionResult = { status: null, stdout: output.stdout, stderr: said ? `${why}: ${said}` : why };
+  if (!ended.timedOut && ended.signal) endedBySignal.set(result, ended.signal);
+  return result;
+}
+
 /** What a failed command said, for the person reading the action's result. */
 function commandFailureText(result: ManagedServiceActionResult): string {
-  return ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
+  return ((result.stderr ?? '') || (result.stdout ?? '') || (result.status === null ? 'the command ended without an exit status' : `command exited with ${result.status}`)).trim();
 }
 
 /**
@@ -1142,7 +1170,10 @@ export class PlatformServiceManager {
         if (platform === 'systemd') {
           // The stop reaches this process after the answer: the manager is asked to queue the job, not to wait for it.
           const queued = yield { run: ['systemctl', '--user', '--no-block', action, `${serviceName}.service`] };
-          if ((queued.status ?? 1) !== 0) return { ...before, lastAction: action, actionError: commandFailureText(queued) };
+          // The client runs in this service's control group: the stop it queued
+          // can end it with SIGTERM before it exits, and that stop is the job.
+          const stoppedWithService = queued.status === null && endedBySignal.get(queued) === 'SIGTERM';
+          if ((queued.status ?? 1) !== 0 && !stoppedWithService) return { ...before, lastAction: action, actionError: commandFailureText(queued) };
           return {
             ...before,
             lastAction: action,
@@ -1199,7 +1230,7 @@ export class PlatformServiceManager {
     }
     let actionError: string | undefined;
     for (const step of steps) {
-      const result = yield { run: step.argv };
+      const result = yield { run: step.argv, timeoutMs: SERVICE_JOB_TIMEOUT_MS };
       if ((result.status ?? 1) !== 0 && !step.bestEffort) {
         actionError = commandFailureText(result);
         break;
@@ -1314,7 +1345,7 @@ export class PlatformServiceManager {
       } else if ('detach' in step) {
         next = flow.next(this.runDetached(step.detach));
       } else {
-        next = flow.next(this.runQuery(step.run[0]!, step.run.slice(1)));
+        next = flow.next(this.runQuery(step.run[0]!, step.run.slice(1), step.timeoutMs));
       }
     }
     return next.value;
@@ -1332,24 +1363,28 @@ export class PlatformServiceManager {
       } else if ('detach' in step) {
         next = flow.next(this.runDetached(step.detach));
       } else {
-        next = flow.next(await this.runQueryAsync(step.run[0]!, step.run.slice(1)));
+        next = flow.next(await this.runQueryAsync(step.run[0]!, step.run.slice(1), step.timeoutMs));
       }
     }
     return next.value;
   }
 
   /** Runs a service-management query/action through the injected actionRunner when present, else a real spawnSync. */
-  private runQuery(command: string, args: readonly string[]): ManagedServiceActionResult {
+  private runQuery(command: string, args: readonly string[], timeoutMs = SERVICE_QUERY_TIMEOUT_MS): ManagedServiceActionResult {
     this.assertCurrent();
     try {
-      return this.actionRunner
-        ? this.actionRunner(command, args)
-        : spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8', timeout: SERVICE_QUERY_TIMEOUT_MS });
+      if (this.actionRunner) return this.actionRunner(command, args);
+      const result = spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8', timeout: timeoutMs });
+      if (result.status !== null) return result;
+      // spawnSync ends a command that outlives its timeout with SIGTERM and reports it in `error`.
+      return unfinishedCommand(command, args, timeoutMs, {
+        timedOut: (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT', signal: result.signal, error: result.error,
+      }, result);
     } finally { this.assertCurrent(); }
   }
 
   /** `runQuery` without blocking: the same timeout, the output collected as it arrives. */
-  private async runQueryAsync(command: string, args: readonly string[]): Promise<ManagedServiceActionResult> {
+  private async runQueryAsync(command: string, args: readonly string[], timeoutMs = SERVICE_QUERY_TIMEOUT_MS): Promise<ManagedServiceActionResult> {
     this.assertCurrent();
     try {
       if (this.actionRunner) return this.actionRunner(command, args);
@@ -1371,14 +1406,14 @@ export class PlatformServiceManager {
         }
         timer = setTimeout(() => {
           try { child.kill('SIGKILL'); } catch { /* already gone */ }
-          finish({ status: null, stdout, stderr: `${stderr}${stderr ? '\n' : ''}${command} did not answer within ${SERVICE_QUERY_TIMEOUT_MS / 1000} seconds` });
-        }, SERVICE_QUERY_TIMEOUT_MS);
+          finish(unfinishedCommand(command, args, timeoutMs, { timedOut: true }, { stdout, stderr }));
+        }, timeoutMs);
         child.stdout?.setEncoding('utf8');
         child.stderr?.setEncoding('utf8');
         child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
         child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
         child.once('error', (error) => finish({ status: null, stdout, stderr: error.message }));
-        child.once('close', (code) => finish({ status: code, stdout, stderr }));
+        child.once('close', (code, signal) => finish(code === null ? unfinishedCommand(command, args, timeoutMs, { signal }, { stdout, stderr }) : { status: code, stdout, stderr }));
       });
     } finally { this.assertCurrent(); }
   }

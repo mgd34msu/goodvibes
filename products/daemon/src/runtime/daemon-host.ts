@@ -285,6 +285,8 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         if (state === 'ready' || state === 'degraded') moveTo('handover');
         const failures: Error[] = [];
         const drain = async (label: string, action: () => void | Promise<void>) => {
+          // Each step is named as it starts: a handover stop that runs out of time then says which step held it.
+          logger.info('Daemon native handover step', { step: label });
           try { await bounded(label, action); } catch { failures.push(new Error(`Daemon native handover ${label} failed`)); }
         };
         await drain('discovery close', async () => { await discovery?.close(); });

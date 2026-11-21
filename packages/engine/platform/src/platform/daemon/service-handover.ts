@@ -26,6 +26,18 @@ function lastLine(text: string): string | undefined {
   return lines.at(-1)?.slice(0, 300);
 }
 
+/** Outcomes of a manager client that a signal ended, with that signal. */
+const endedBySignal = new WeakMap<ServiceHandoverOutcome, NodeJS.Signals>();
+
+/**
+ * The signal that ended the manager client behind `outcome`, when one did.
+ * A client that stops or restarts this very service runs in the service's own
+ * control group, so the stop it queued can end it before it exits by itself.
+ */
+export function serviceCommandSignal(outcome: ServiceHandoverOutcome): NodeJS.Signals | undefined {
+  return endedBySignal.get(outcome);
+}
+
 /** Own both spawn errors (including asynchronous ENOENT) and command completion. */
 export function createServiceCommandRunner(spawnChild: typeof spawn = spawn): ServiceCommandRunner {
   return (argv, signal) => new Promise((resolve) => {
@@ -54,11 +66,15 @@ export function createServiceCommandRunner(spawnChild: typeof spawn = spawn): Se
       child.once('error', (error) => finish({ status: 'failed', detail: error.message }));
       child.once('close', (code, terminationSignal) => {
         const said = lastLine(stderr);
+        if (code === null) {
+          const outcome: ServiceHandoverOutcome = { status: 'unknown', detail: `${commandName(argv)} terminated (${terminationSignal ?? 'no exit status'})${said ? `: ${said}` : ''}` };
+          if (terminationSignal) endedBySignal.set(outcome, terminationSignal);
+          finish(outcome);
+          return;
+        }
         finish(code === 0
           ? { status: 'accepted' }
-          : code === null
-            ? { status: 'unknown', detail: `${commandName(argv)} terminated (${terminationSignal ?? 'no exit status'})${said ? `: ${said}` : ''}` }
-            : { status: 'failed', detail: `${commandName(argv)} exited ${code}${said ? `: ${said}` : ''}` });
+          : { status: 'failed', detail: `${commandName(argv)} exited ${code}${said ? `: ${said}` : ''}` });
       });
       signal.addEventListener('abort', abort, { once: true });
       if (signal.aborted) abort();

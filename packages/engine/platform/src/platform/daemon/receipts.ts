@@ -178,6 +178,11 @@ export class DaemonReceiptStore {
 
   /** Record a receipt: logged immediately, persisted for the next surface. */
   record(text: string): DaemonReceipt {
+    // One event is often both recorded and raised as an owner alert, and an
+    // alert no channel took is kept here too: the same line still waiting for
+    // the next surface is that receipt, not a second one.
+    const waiting = this.receipts.find((kept) => kept.deliveredAt === undefined && kept.text === text);
+    if (waiting) return waiting;
     const receipt: DaemonReceipt = {
       id: `receipt-${this.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,

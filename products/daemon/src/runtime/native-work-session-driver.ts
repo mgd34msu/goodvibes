@@ -11,6 +11,7 @@ import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/provi
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { FeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
+import { logger } from '@goodvibes/engine/platform/platform/utils';
 
 type ToolDependencies = Parameters<AgentOrchestrator['setDependencies']>[0];
 export interface NativeSessionDriverOptions {
@@ -167,7 +168,22 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       if (current && !isTerminalContractStatus(current.status) && !stopped.has(contractId)) {
         options.runner.cancel(contractId, `Native session turn failed after ${attempts} attempt${attempts === 1 ? '' : 's'} and could not pause for the owner (${describeError(error)}): ${what}. The contract was stopped; the work done so far stays in the project tree.`);
       }
+      fenceIfStillWaiting(contractId, `it could not pause for the owner (${describeError(error)})`);
     }
+  }
+
+  /**
+   * A contract this driver could neither run, pause nor cancel (its runner is
+   * disposed or refuses the change, as while the runtime stops) stays waiting
+   * with nothing changed. Driving it again at once would repeat the same
+   * refusal forever without progress, so it is fenced: it is driven again only
+   * when `release` lifts the fence, and ends the fence once it is terminal.
+   */
+  function fenceIfStillWaiting(contractId: string, why: string): void {
+    const current = options.runner.get(contractId);
+    if (!current || isTerminalContractStatus(current.status) || !waitingUnit(current) || stopped.has(contractId)) return;
+    stopped.add(contractId);
+    logger.warn('Native session work is not driven again: the contract could not be started, paused or cancelled', { contractId, why });
   }
 
   function schedule() {
@@ -201,7 +217,12 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     const checks = unit.checks.length;
     let session: ReturnType<typeof createTurn>;
     try { session = sessions.get(contract.id) ?? createTurn(contract); sessions.set(contract.id, session); }
-    catch (error) { options.runner.cancel(contract.id, `Native session could not start: ${error instanceof Error ? error.message : String(error)}`); schedule(); return; }
+    catch (error) {
+      try { options.runner.cancel(contract.id, `Native session could not start: ${describeError(error)}`); }
+      catch (cancelError) { logger.warn('Native session work could not be cancelled after it failed to start', { contractId: contract.id, error: describeError(cancelError) }); }
+      fenceIfStillWaiting(contract.id, `it could not start (${describeError(error)})`);
+      schedule(); return;
+    }
     // Construction can invoke supplied readers. Honor a reentrant stop before
     // reserving or deferring any foreground execution.
     if (closed || stopped.has(contract.id)) return;

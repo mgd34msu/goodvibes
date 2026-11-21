@@ -3,9 +3,10 @@
  * in its own scratch home on free loopback ports, serving the web UI build the
  * run made (globalSetup). Nothing reads or writes the login home: HOME, the
  * GoodVibes homes, the XDG folders and TMPDIR all point inside the scratch
- * folder, and the run-through guard (packages/engine/scripts/runthrough/guard.ts)
- * is preloaded into the daemon so it refuses any connection off loopback or to a
- * port that was listening before (the owner's own daemon among them).
+ * folder, and the engine's network preload and the port guard (port-guard.ts
+ * beside this file) are preloaded into the daemon so it refuses any connection
+ * off loopback or to a port that was listening before (the owner's own daemon
+ * among them).
  *
  * The only stand-in is the conversation model at the HTTP wire: an
  * OpenAI-compatible endpoint on loopback that asks for one command and then
@@ -22,7 +23,8 @@ import { E2E_DIST_DIR } from './build';
 
 const REPO = fileURLToPath(new URL('../../../..', import.meta.url));
 const DAEMON_ENTRY = join(REPO, 'products/daemon/src/cli/entrypoint.ts');
-const GUARD = join(REPO, 'packages/engine/scripts/runthrough/guard.ts');
+const NETWORK_GUARD = join(REPO, 'packages/engine/toolchain/src/test-runner/test-network-preload.ts');
+const PORT_GUARD = fileURLToPath(new URL('./port-guard.ts', import.meta.url));
 const MODEL_ID = 'e2e-1';
 
 export interface ScriptedCommand {
@@ -151,8 +153,8 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local/share'), XDG_CACHE_HOME: join(home, '.cache'),
     XDG_STATE_HOME: join(home, '.local/state'), XDG_RUNTIME_DIR: tmp, TMPDIR: tmp, TMP: tmp, TEMP: tmp,
     E2E_FAKE_API_KEY: 'e2e-local-key',
-    BUN_OPTIONS: `--preload ${GUARD}`,
-    RUNTHROUGH_DENY_PORTS: before.filter((port) => !own.has(port)).join(','),
+    BUN_OPTIONS: `--preload ${NETWORK_GUARD} --preload ${PORT_GUARD}`,
+    DAEMON_GUARD_DENY_PORTS: before.filter((port) => !own.has(port)).join(','),
   };
   const child: ChildProcess = spawn('bun', ['--no-env-file', DAEMON_ENTRY, 'serve', '--port', String(ports.controlPlane), '--hostname', '127.0.0.1'], {
     cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'],

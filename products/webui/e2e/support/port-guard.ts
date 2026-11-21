@@ -1,30 +1,27 @@
 /**
- * Preload for every product process the run-through starts (passed through
- * BUN_OPTIONS, so child bun processes inherit it). Every connection must stay
- * on loopback, and never to a port that was already listening on this machine
- * when the run started (RUNTHROUGH_DENY_PORTS, the owner's own daemon among
- * them) or to a GoodVibes default port: an isolated home must never reach the
- * owner's services. Ports the run's own children open later (the daemon, the
- * scripted model, a browser's debugging port) are reachable.
+ * Preload for the daemon a browser journey starts (passed through BUN_OPTIONS,
+ * so child bun processes inherit it), beside the engine's loopback-only network
+ * preload. No connection may go to a port that was already listening on this
+ * machine when the daemon started (DAEMON_GUARD_DENY_PORTS, the owner's own
+ * daemon among them) or to a GoodVibes default port: an isolated home must
+ * never reach the owner's services. Ports the run's own children open later
+ * (the daemon, the scripted model) are reachable.
  */
 import net from 'node:net';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { installTestNetworkGuard } from '../../toolchain/src/test-runner/test-network-guard.ts';
 
-const denied = new Set([...(process.env.RUNTHROUGH_DENY_PORTS ?? '').split(','), '3421', '3422', '3423', '4444'].map((port) => port.trim()).filter(Boolean));
+const denied = new Set([...(process.env.DAEMON_GUARD_DENY_PORTS ?? '').split(','), '3421', '3422', '3423', '4444'].map((port) => port.trim()).filter(Boolean));
 
 function refuse(what: string): never {
-  const line = `[runthrough guard] refused ${what}`;
+  const line = `[port guard] refused ${what}`;
   process.stderr.write(`${line}\n`);
   throw new Error(line);
 }
 
-installTestNetworkGuard((diagnostic) => { process.stderr.write(`[runthrough guard] ${diagnostic}\n`); });
-
 function checkPort(port: unknown, what: string): void {
   if (port === undefined || port === null || port === '') return;
   const text = String(port);
-  if (denied.has(text)) refuse(`${what} to loopback port ${text} (a service that was running before this run)`);
+  if (denied.has(text)) refuse(`${what} to loopback port ${text} (a service that was running before this daemon started)`);
 }
 
 function checkUrl(value: unknown, what: string): void {
@@ -36,21 +33,9 @@ function checkUrl(value: unknown, what: string): void {
 }
 
 const guardedFetch = globalThis.fetch;
-const trace = process.env.RUNTHROUGH_TRACE === '1';
 const portFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
   checkUrl(input, 'fetch');
-  if (!trace) return guardedFetch(input, init);
-  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-  const url = input instanceof Request ? input.url : String(input);
-  try {
-    const response = await guardedFetch(input, init);
-    const body = response.status >= 400 ? ` ${(await response.clone().text()).slice(0, 400)}` : '';
-    process.stderr.write(`[runthrough trace] ${method} ${url} -> ${response.status}${body}\n`);
-    return response;
-  } catch (error) {
-    process.stderr.write(`[runthrough trace] ${method} ${url} -> ${error instanceof Error ? error.message : String(error)}\n`);
-    throw error;
-  }
+  return guardedFetch(input, init);
 }) as typeof fetch;
 Object.assign(portFetch, guardedFetch);
 globalThis.fetch = portFetch;

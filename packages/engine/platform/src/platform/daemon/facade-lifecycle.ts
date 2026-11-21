@@ -12,7 +12,7 @@ import { drainOwned } from '@goodvibes/judgment/decisions';
  */
 import { join } from 'node:path';
 import { assertNativeReaderCompatible, parseNativeReaderCapabilities, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
-import { observeServiceCommand, runServiceCommand, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
+import { observeServiceCommand, runServiceCommand, serviceCommandSignal, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -771,7 +771,15 @@ export class DaemonLifecycleRuntime {
       const actions = this.buildServiceActions(abort.signal);
       const supervised = prepared?.supervised ?? actions.isSupervised();
       let outcome = await (prepared ? prepared.request(abort.signal) : supervised ? actions.restartService() : actions.adoptIntoService());
-      if (abort.signal.aborted) outcome = { status: 'unknown', detail: 'handover cancelled' };
+      if (abort.signal.aborted) {
+        // A supervised restart was asked for and this process is now being
+        // stopped: the manager's stop is that restart, not a cancellation.
+        if (supervised && !prepared?.exitRequired) {
+          logger.info('DaemonServer: the service manager is carrying out the rollback restart');
+          return;
+        }
+        outcome = { status: 'unknown', detail: 'handover cancelled' };
+      }
       if (outcome?.status !== 'accepted') {
         this.reportIncompleteHandover('rollback', outcome ?? { status: 'unknown', detail: 'no outcome returned' });
         exitWhenIncomplete();
@@ -1262,7 +1270,15 @@ export class DaemonLifecycleRuntime {
           if (detectPlatform(String(this.options.configManager.get('service.platform')), platform) !== 'systemd') {
             return { status: 'unsupported', detail: 'service restart needs the systemd service manager (service.platform)' };
           }
-          return command(['systemctl', '--user', '--no-block', 'restart', `${serviceName}.service`], actionSignal);
+          const restarted = await command(['systemctl', '--user', '--no-block', 'restart', `${serviceName}.service`], actionSignal);
+          // systemctl runs in this service's control group. When the restart it
+          // queued begins, systemd stops that group and SIGTERM can reach the
+          // client before it exits on its own: the job was queued, and the stop
+          // ending the client is the restart under way.
+          if (restarted.status === 'unknown' && serviceCommandSignal(restarted) === 'SIGTERM') {
+            return { status: 'accepted', detail: 'the service manager began the restart by stopping this service' };
+          }
+          return restarted;
         }
         if (platform !== 'darwin') return { status: 'unsupported', detail: 'no supported service restart handover' };
         // Being listed by launchd does not acknowledge a replacement job.

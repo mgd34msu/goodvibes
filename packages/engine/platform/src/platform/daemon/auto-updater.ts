@@ -184,6 +184,8 @@ export interface DaemonAutoUpdaterOptions {
    * cancels the handover, and draining it here would wait on this hook itself.
    */
   readonly stopGracefully?: (() => Promise<void> | void) | undefined;
+  /** How long that orderly stop may take before the handover is reported incomplete. Default 60 s. */
+  readonly handoverStopDeadlineMs?: number | undefined;
   /** Exits the current process after an unsupervised daemon is adopted. */
   readonly exitProcess?: ((code: number) => void) | undefined;
   /**
@@ -228,6 +230,13 @@ export interface DaemonAutoUpdaterOptions {
 
 /** @deprecated Compatibility value only; the canonical failure reading decides alerts. */
 export const DEFAULT_UPDATE_ALERT_AFTER_FAILED_CHECKS = 3;
+
+/**
+ * How long the orderly stop before a handover may take. A stop finishes in
+ * seconds; past this, a step that never settles holds the process with no
+ * listener, and only ending it lets the service manager start the new release.
+ */
+const DEFAULT_HANDOVER_STOP_DEADLINE_MS = 60_000;
 
 /** Default quiet window between update alerts about the same ongoing failure. */
 export const DEFAULT_UPDATE_ALERT_WINDOW_MS = 12 * 60 * 60 * 1000;
@@ -299,6 +308,10 @@ export class DaemonAutoUpdater {
   private runtimeStopStarted = false;
   /** The orderly stop ran and the handover then did not complete; exit once any reservation is released. */
   private incompleteAfterStop = false;
+  /** A supervised restart (no exit of this process needed) has been asked of the service manager. */
+  private restartRequested = false;
+  /** An external stop arrived after that request: the manager is carrying the restart out. */
+  private stoppedByRequestedRestart = false;
   private handoverTask: Promise<void> | null = null;
   private handoverAbort: AbortController | null = null;
   /** Settles only after lookup/apply/handover, including checks started by the timer. */
@@ -565,6 +578,9 @@ export class DaemonAutoUpdater {
     // An external shutdown can arrive during graceful stop or during the
     // service action. Timing alone cannot distinguish it from our own stop.
     if (!forHandover) {
+      // After a supervised restart was requested, the manager's stop of this
+      // process is that restart, not a cancellation of it.
+      if (this.restartRequested) this.stoppedByRequestedRestart = true;
       this.handoverCancelled = true;
       this.failureReadAbort.abort();
       this.handoverAbort?.abort();
@@ -961,14 +977,20 @@ export class DaemonAutoUpdater {
       logger.info(supervised
         ? 'DaemonAutoUpdater: requesting restart via the service manager'
         : 'DaemonAutoUpdater: unsupervised daemon; requesting adoption into the service manager');
+      // A supervised restart ends this process from outside: the manager's stop
+      // of this service is the restart's first step, so an external stop from
+      // here on is the handover being carried out (see stop()).
+      this.restartRequested = supervised && prepared?.exitRequired !== true;
       outcome = await (prepared ? prepared.request(signal) : supervised ? actions.restartService(signal) : actions.adoptIntoService(signal));
     } catch (error) {
+      if (this.stoppedByRequestedRestart) { this.recordRestartUnderway(); return; }
       // Includes rejected promises and even `throw undefined`: an exception
       // cannot be confused with a legacy action that returned no evidence.
       this.reportIncompleteHandover({ status: 'failed', detail: summarizeError(error) });
       this.incompleteAfterStop = true;
       return;
     }
+    if (this.stoppedByRequestedRestart) { this.recordRestartUnderway(); return; }
 
     // Legacy void actions remain source-compatible, but silence is not an
     // acknowledgement. Only positive acceptance authorizes an adoption exit.
@@ -1001,6 +1023,17 @@ export class DaemonAutoUpdater {
       this.reportIncompleteHandover({ status: 'failed', detail: 'The original process could not exit after the acknowledged handover.' });
       this.incompleteAfterStop = true;
     }
+  }
+
+  /**
+   * The service manager stopped this process after it was asked to restart
+   * it: that stop is the restart, so the handover is under way. Whatever the
+   * request's own observation says (cancelled by this stop, or its client
+   * ended by the same stop) is not a refusal and is not reported as one.
+   */
+  private recordRestartUnderway(): void {
+    this.handover = { status: 'accepted', detail: 'the service manager is stopping this daemon to start the installed release' };
+    logger.info('DaemonAutoUpdater: the service manager is carrying out the requested restart', { versionOnDisk: this.appliedVersion });
   }
 
   private reportIncompleteHandover(outcome: ServiceHandoverOutcome): void {
@@ -1044,14 +1077,33 @@ export class DaemonAutoUpdater {
   private async stopGracefully(): Promise<boolean> {
     const stop = this.options.stopGracefully;
     if (!stop) return true;
+    // The stop is bounded: a teardown step that never settles (work that keeps
+    // the thread busy, a wait nothing resolves) must not hold the process,
+    // listener gone, until someone restarts it by hand. When the bound passes,
+    // the handover is incomplete and the process owner ends this process, so
+    // the service manager starts the installed release.
+    const limitMs = Math.max(1, this.options.handoverStopDeadlineMs ?? DEFAULT_HANDOVER_STOP_DEADLINE_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<'expired'>((resolve) => {
+      timer = (this.options.setTimer ?? setTimeout)(() => resolve('expired'), limitMs);
+      (timer as { unref?: () => void } | undefined)?.unref?.();
+    });
+    const stopping = Promise.resolve().then(() => stop()).then(() => 'stopped' as const);
     try {
-      await stop();
-      return true;
+      if (await Promise.race([stopping, expired]) === 'stopped') return true;
+      // The stop keeps running; its eventual failure is already this report.
+      void stopping.catch(drainOwned);
+      this.reportIncompleteHandover({ status: 'failed',
+        detail: `the orderly stop did not finish within ${Math.round(limitMs / 1000)} seconds; no service handover was requested` });
+      this.incompleteAfterStop = true;
+      return false;
     } catch (error) {
       drainOwned(error);
       this.reportIncompleteHandover({ status: 'failed', detail: 'owned runtime cleanup did not complete; no service handover was requested' });
       this.incompleteAfterStop = true;
       return false;
+    } finally {
+      if (timer !== undefined) (this.options.clearTimer ?? clearTimeout)(timer);
     }
   }
 }

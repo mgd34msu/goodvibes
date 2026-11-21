@@ -25,8 +25,7 @@ release.
    `bun run agent-spec:generate`, `bun run llms:generate`,
    `bun run --cwd products/webui release:prepare`, `bun run build`,
    `bun run api:extract` and `bun run api:subpath`.
-5. Run the sixteen product journeys by hand, `bun run journeys`; they are not part of validate or CI.
-6. Commit, push to `main`, and wait for the CI workflow to finish green on that
+5. Commit, push to `main`, and wait for the CI workflow to finish green on that
    commit.
 
 ## Cutting the release

@@ -887,8 +887,10 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       await verifyPreviousReleaseData();
     },
     async startPreviousService() {
-      await invoke('sh', [previousInstaller], { GOODVIBES_VERSION: previousTag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0' },
-        false, readFileSync(previousInstaller, 'utf8'));
+      // installPrevious ran with GOODVIBES_DAEMON_SERVICE=0, which saves service.enabled=false; from 3.4.0 an
+      // installer run that states no choice keeps that, so the service is asked for explicitly here.
+      await invoke('sh', [previousInstaller], { GOODVIBES_VERSION: previousTag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0',
+        GOODVIBES_DAEMON_SERVICE: '1' }, false, readFileSync(previousInstaller, 'utf8'));
     },
     async verifyPreviousService() {
       // All baseline readers/settings were checked while service-off. The

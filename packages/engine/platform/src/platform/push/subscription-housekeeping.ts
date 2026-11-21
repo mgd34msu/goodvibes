@@ -35,7 +35,8 @@ import { describeSubscriptionProblem } from './subscription-validation.js';
 import type { StoredPushSubscription } from './types.js';
 
 /** Why a subscription left the store. Every value is evidence-backed. */
-export type PushSubscriptionRemovalReason = 'gone' | 'failure-threshold' | 'unusable' | 'malformed';
+/** `access-withdrawn`: the principal that registered it was deleted or no longer holds the admin role pushes are reserved for. */
+export type PushSubscriptionRemovalReason = 'gone' | 'failure-threshold' | 'unusable' | 'malformed' | 'access-withdrawn';
 
 /** One removal, with the evidence that the subscription was dead. */
 export interface PushSubscriptionRemoval {

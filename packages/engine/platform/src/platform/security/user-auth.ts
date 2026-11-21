@@ -582,9 +582,37 @@ export class UserAuthManager {
       .filter((username) => !sameUser(this.users.get(username), next.get(username)));
     if (changed.length === 0) return;
     const ended = changed.filter((username) => this.users.get(username)?.passwordHash !== next.get(username)?.passwordHash);
+    const previous = this.users;
     this.users = next;
     this.#revision++;
     for (const username of ended) this.revokeSessionsForUser(username);
+    this.#noticeAdminWithdrawn(previous, next);
+  }
+
+  readonly #adminWithdrawnListeners = new Set<(username: string) => void>();
+
+  /**
+   * Be told when a user stops holding full admin authority: deleted, the admin
+   * role gone, or a scope list without `*` (a change made here, or on another
+   * machine of the group). What only an admin receives (web pushes of approvals
+   * and owner questions) is withdrawn on it. Returns the unsubscribe.
+   */
+  onAdminWithdrawn(listener: (username: string) => void): () => void {
+    this.#adminWithdrawnListeners.add(listener);
+    return () => { this.#adminWithdrawnListeners.delete(listener); };
+  }
+
+  #noticeAdminWithdrawn(before: ReadonlyMap<string, AuthUser>, after: ReadonlyMap<string, AuthUser>): void {
+    const holdsAdmin = (user: AuthUser | undefined): boolean =>
+      user?.roles?.includes('admin') === true && (user.scopes === undefined || user.scopes.includes('*'));
+    for (const [username, user] of before) {
+      if (!holdsAdmin(user) || holdsAdmin(after.get(username))) continue;
+      for (const listener of [...this.#adminWithdrawnListeners]) {
+        try { listener(username); } catch (error) {
+          logger.warn('A listener for a user that lost admin authority failed', { username, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
   }
 
   /** Write a user change to the authority record; logged on failure, the change stands here. */
@@ -1132,8 +1160,10 @@ export class UserAuthManager {
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
     const { scopes: _previous, ...rest } = existing;
     const next: AuthUser = scopes === null ? rest : { ...rest, scopes: normalizeScopeList(scopes) };
+    const previous = this.users;
     this.persist(new Map(this.users).set(normalized, next));
     this.#publish(normalized, 'upsert', true);
+    this.#noticeAdminWithdrawn(previous, this.users);
     return userRecord(next);
   }
 
@@ -1149,11 +1179,13 @@ export class UserAuthManager {
     if (isAdmin(existing) && ![...this.users.values()].some(user => user.username !== normalized && isAdmin(user))) {
       throw new Error(`Cannot delete ${normalized}: it is the last local auth user with the admin role. Give another user the admin role first.`);
     }
+    const previous = this.users;
     const next = new Map(this.users);
     next.delete(normalized);
     this.persist(next);
     this.#publish(normalized, 'delete', true);
     this.revokeSessionsForUser(normalized);
+    this.#noticeAdminWithdrawn(previous, this.users);
     return true;
   }
 

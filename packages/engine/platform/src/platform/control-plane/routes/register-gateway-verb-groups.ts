@@ -197,6 +197,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * on every machine.
    */
   readonly authority?: AuthorityRecordFile | undefined;
+  /** The sign-in users: one deleted or no longer an admin loses the push endpoints it registered. */
+  readonly users?: { onAdminWithdrawn(listener: (username: string) => void): () => void } | undefined;
   /** Whether the rendezvous relay is available ⇒ the pairing hand-off offers a relay step. */
   readonly relayAvailable?: (() => boolean) | undefined;
   /** The configured web-app origin the pairing QR points at ⇒ hand-off returns a full deep link. */
@@ -683,7 +685,9 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     registerPairingGatewayMethods(catalog, deps.pairingTokens, deps.runtimeBus
       ? ({ id, principalId }) => emitCompanionTokenRevoked(deps.runtimeBus!, { sessionId: 'system', traceId: `pairing-revoke:${id}`, source: 'pairing-tokens' },
         { clientIp: 'unknown', reason: `paired device token ${id} revoked${principalId ? ` by ${principalId}` : ''}` })
-      : undefined);
+      : undefined,
+    // Revoking a device the caller neither holds nor minted is put to the owner from an admin.
+    deps.approvalRaise);
     // Pairing hand-off bundle: one exchange carries the notifications/relay/
     // passkey offer set for a surface to complete in one pass, each declinable.
     registerPairingHandoffGatewayMethods(catalog, {
@@ -768,6 +772,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       // ("your price" vs "catalog price") and the pricing's as-of date.
       source: resolved.source,
       asOf: resolved.asOf,
+      ...(provider ? { cacheRatio: registry.cacheRatios(provider) } : {}),
     };
   };
   const costAttribution = new CostAttributionService({ resolvePricing });

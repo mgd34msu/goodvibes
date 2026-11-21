@@ -6,7 +6,6 @@ import {
   disposeTerminalFeatureFlags,
   createTerminalEventState,
   initializeTerminalMemory,
-  attachTerminalCompanionInput,
   seedTerminalSession,
   syncTerminalNotifierQueues,
 } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
@@ -16,6 +15,9 @@ import {
   attachTerminalRuntimeBindings,
 } from '@goodvibes/engine/terminal-shell/bootstrap-runtime-bindings';
 import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/render-scheduler';
+import { createBootstrapInboundInputPoller, type SessionInboundInputPoller } from '@goodvibes/engine/terminal-shell/session-inbound-inputs';
+import { handOverLiveSession } from '@goodvibes/engine/terminal-shell/session-handover';
+import type { OwnerInputRoute } from '@goodvibes/engine/terminal-shell/companion-input';
 import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
 import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
@@ -31,6 +33,7 @@ import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../conf
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { AGENT_PLATFORM_TOOL_ADMISSION } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
 import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
@@ -42,7 +45,6 @@ import { Compositor } from '../renderer/compositor.ts';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
@@ -87,11 +89,13 @@ export interface BootstrapCoreState {
   readonly systemMessageRouterRef: { value: SystemMessageRouter | null };
   readonly conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null };
   /**
-   * Mutable ref patched by bootstrap.ts after the Orchestrator is constructed.
-   * When non-null, COMPANION_MESSAGE_RECEIVED fires a real LLM turn via
-   * orchestrator.handleUserInput() instead of only appending the user message.
+   * Mutable ref patched by bootstrap.ts after the Orchestrator is constructed:
+   * the path an input another surface queued for this session takes into the
+   * conversation as a real turn.
    */
-  readonly orchestratorHandleUserInputRef: { value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null };
+  readonly orchestratorHandleUserInputRef: { value: OwnerInputRoute | null };
+  /** Inbound steer and follow-up delivery; dormant until bootstrap.ts activates it on adopting the connected host. */
+  readonly sessionInboundInputs: SessionInboundInputPoller;
   /** Delivers boot-time faults held until the message router exists. */
   readonly startupNotices: StartupNotices;
   readonly requestRender: () => void;
@@ -99,18 +103,9 @@ export interface BootstrapCoreState {
   readonly runtimeSessionIdRef: { value: string };
 }
 
-import {
-  companionMessageToOrchestratorInputOptions,
-  registerWebhookNotifier,
-} from './bootstrap-core-helpers.ts';
+import { registerWebhookNotifier } from './bootstrap-core-helpers.ts';
 
-// Re-exported so every existing importer of this module is unaffected by the
-// split; the definitions moved, the public surface did not.
-export type { CompanionMessagePayload } from './bootstrap-core-helpers.ts';
-export {
-  companionMessageToOrchestratorInputOptions,
-  registerWebhookNotifier,
-} from './bootstrap-core-helpers.ts';
+export { registerWebhookNotifier } from './bootstrap-core-helpers.ts';
 
 /**
  * The runtime state object of an Agent process. Its `sessionId` is not a plain
@@ -198,8 +193,13 @@ export async function initializeBootstrapCore(
   // While the connected host is reachable it is the one writer of its own
   // settings: a daemon-owned key set anywhere in this process goes to it.
   const daemonConfigClient = services.daemonConfigClient;
+  // A host on another machine keeps its own settings: they are read from it on
+  // attach, and a write it cannot take is refused, never saved in this machine's file.
   configManager.attachDaemonRoute({
     reachable: () => daemonConfigClient.reachable(),
+    thisMachine: () => daemonConfigClient.thisMachine(),
+    describe: () => `the connected host at ${resolveConnectedHostAddress(configManager).baseUrl}`,
+    snapshot: () => daemonConfigClient.snapshot(),
     write: (key, value) => daemonConfigClient.set(key, value),
     writeMany: (changes) => daemonConfigClient.setMany(changes),
     ...(daemonConfigClient.reset ? { reset: (key: string) => daemonConfigClient.reset!(key) } : {}),
@@ -355,25 +355,35 @@ export async function initializeBootstrapCore(
     toolRegistry,
   });
 
-  // Subscribe to companion main-chat messages received from the connected host's HTTP layer.
-  // The connected host emits COMPANION_MESSAGE_RECEIVED on the runtime bus when a companion
-  // POST /api/sessions/:id/messages with kind='message' arrives.
-  //
   // bootstrap.ts patches orchestratorHandleUserInputRef.value after the Orchestrator
-  // is constructed. When that ref is set, we delegate to orchestrator.handleUserInput()
-  // which (a) adds the user message to the conversation view and (b) fires a real LLM
-  // turn whose STREAM_DELTA / TURN_COMPLETED events flow to both TUI and companion SSE.
-  //
-  // The fallback (ref not yet set) adds the message to the conversation view only,
-  // this path is unreachable in practice because the event bus is not connected to
-  // any live HTTP traffic until after the orchestrator is wired in bootstrap.ts.
+  // is constructed. Inputs another surface queued for this session on the
+  // connected host (a steer from the web app, a companion or ntfy message, sent
+  // as follow-ups) are collected by the inbound poller and run through it as real
+  // turns; bootstrap.ts activates the poller when the host is adopted.
   const orchestratorHandleUserInputRef: {
-    value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
+    value: OwnerInputRoute | null;
   } = { value: null };
-  runtimeUnsubs.push(attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender, undefined, {
-    activeSessionId: () => runtimeSessionIdRef.value,
-    notice: (text) => startupNotices.report(text),
-  }));
+  const inboundInputs = createBootstrapInboundInputPoller({
+    runtimeSessionIdRef,
+    narrate: (text) => systemMessageRouterRef.value?.low(text),
+    orchestratorHandleUserInputRef,
+    runtimeBus,
+    ownSurfaceId: 'surface:goodvibes-agent',
+    // Another terminal ran `/session resume <id> --force` for this session: save it, let go, say so.
+    onHandover: (sessionId) => {
+      handOverLiveSession({
+        sessionId,
+        liveSessionId: () => runtime.sessionId,
+        conversation,
+        sessionManager: services.sessionManager,
+        runtime,
+        surface: services.surface,
+        notify: (text) => systemMessageRouterRef.value?.high(text),
+      });
+    },
+  });
+  const sessionInboundInputs = inboundInputs.poller;
+  runtimeUnsubs.push(inboundInputs.dispose);
 
   providerRegistry.startWatching(runtimeBus);
 
@@ -568,6 +578,7 @@ export async function initializeBootstrapCore(
     startupNotices,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,
+    sessionInboundInputs,
     requestRender,
     setRenderRequest: (fn) => {
       renderRequestRef.value = fn;

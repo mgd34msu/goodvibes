@@ -38,7 +38,7 @@ import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { GOODVIBES_TUI_SURFACE_ROOT, TUI_TRUSTS_SAVED_SCANNED_SERVERS } from '../config/surface.ts';
-import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
+import { createDaemonVerbCaller, resolveControlPlaneBaseUrl } from './client/operator-endpoint.ts';
 import { createTerminalApprovalUpdateSubscriber } from './client/approval-updates.ts';
 import { createHostedSessionsClient } from './client/hosted-sessions.ts';
 import { getSharedHostedSessionRoster } from './client/hosted-roster.ts';
@@ -313,8 +313,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // While the daemon is reachable it is the one writer of its own settings:
       // a daemon-owned key set anywhere in this process goes to it
       // (ConfigManager.attachDaemonRoute). Detached when this graph closes.
+      // A daemon on another machine keeps its own settings: they are read from it,
+      // and a write it cannot take is refused rather than saved in this machine's file.
       scope.registry.add('daemon settings route', configManager.attachDaemonRoute({
         reachable: () => daemonConfig.reachable(),
+        thisMachine: () => daemonConfig.thisMachine(),
+        describe: () => `the daemon at ${resolveControlPlaneBaseUrl(configManager) ?? 'the connected address'}`,
+        snapshot: () => daemonConfig.snapshot(),
         write: (key, value) => daemonConfig.set(key, value),
         writeMany: (changes) => daemonConfig.setMany(changes),
         ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
@@ -326,6 +331,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       const settleHomeHousekeeping = (daemonAdopted: boolean): void => {
         if (housekeepingClosed) return;
         if (daemonAdopted) {
+          // The daemon answers again: a daemon on another machine's settings are read from it once more.
+          void configManager.refreshDaemonSettings();
           base.storeSnapshotScheduler.stop();
           base.stopWakeHousekeeping();
           return;

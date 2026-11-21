@@ -11,7 +11,7 @@
  */
 
 import type { AgentEvent, TurnEvent } from '../runtime/events/index.js';
-import { resolveSessionCost, type PricingSourceKind, type SessionCostResult } from '../providers/session-cost.js';
+import { resolveSessionCost, type PricingSourceKind, type SessionCostResult, type SessionPricing } from '../providers/session-cost.js';
 import type { AgentRecord } from '../tools/agent/record.js';
 import type { UiEventFeed } from '../runtime/ui-events.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
@@ -63,16 +63,24 @@ export const agentCostLifecycle = defineLifecycle<TrackedAgentCost['status']>('a
 /** Prices cumulative token counters for a model, in USD. */
 export type SessionPricer = (input: number, output: number, cacheRead: number, cacheWrite: number, model: string) => number;
 
-export interface CostTrackerOptions {
+interface CostTrackerCommonOptions {
   /** The agent record for an id, for real usage on completion and while running; without it agent rows stay at zero (usage unavailable). */
   readonly getAgentStatus?: ((agentId: string) => AgentRecord | null) | undefined;
-  /** Optional explicit pricing override; treated as priced with no invented provenance. */
-  readonly price?: SessionPricer | undefined;
   /** Cost deltas kept for the history; 16 by default, the Cost panel's sparkline width. */
   readonly historyLength?: number | undefined;
   /** Maximum retained detail rows (200 by default). Running rows survive; compact per-id accounting survives eviction for same-id wakes. */
   readonly maxAgents?: number | undefined;
 }
+
+/**
+ * What the tracker prices with: the runtime's ProviderRegistry (`pricing`,
+ * the shared session-cost quote with its provenance), or an explicit pricer
+ * (`price`), treated as priced with no invented provenance.
+ */
+export type CostTrackerOptions = CostTrackerCommonOptions & (
+  | { readonly pricing: SessionPricing; readonly price?: undefined }
+  | { readonly price: SessionPricer; readonly pricing?: undefined }
+);
 
 /** The Cost panel's sparkline width. */
 export const COST_HISTORY_LENGTH = 16;
@@ -109,9 +117,14 @@ export class CostTracker {
   private readonly historyLength: number;
   private readonly getAgentStatus: ((agentId: string) => AgentRecord | null) | undefined;
 
-  constructor(options: CostTrackerOptions = {}) {
-    const price = options.price;
-    this.price = price ? (...args) => ({ cost: price(...args), priced: true }) : resolveSessionCost;
+  constructor(options: CostTrackerOptions) {
+    if (options.price !== undefined) {
+      const price = options.price;
+      this.price = (...args) => ({ cost: price(...args), priced: true });
+    } else {
+      const pricing = options.pricing;
+      this.price = (input, output, cacheRead, cacheWrite, model) => resolveSessionCost(pricing, input, output, cacheRead, cacheWrite, model);
+    }
     this.maxAgents = options.maxAgents ?? COST_TRACKER_MAX_AGENTS;
     if (!Number.isInteger(this.maxAgents) || this.maxAgents < 0) {
       throw new RangeError('CostTracker maxAgents must be a non-negative integer');

@@ -11,8 +11,8 @@
  *  - `normalizeContext` reads the invocation context into the least-privilege
  *    envelope (an absent context is the empty one: no principal, no scopes, not
  *    admin, nobody claiming a person asked).
- *  - `assertConfirmed` is the confirmation gate: `body.confirm === true` AND
- *    `context.explicitUserRequest === true`, else a 403 `REQUIRE_CONFIRM`.
+ *  - A descriptor that declares `confirmation` is held to it by the catalog
+ *    before any handler runs (control-plane/confirmation-gate.ts).
  *
  * Every host handler refuses with the engine's `GatewayVerbError` (a
  * `RefusalError` with a stable machine `code` and an HTTP `status`, read by
@@ -25,9 +25,6 @@ import type {
 } from './method-catalog-shared.js';
 import { RefusalError } from '@goodvibes/engine/errors';
 import { GatewayVerbError, readGatewayVerbRefusal } from './routes/gateway-verb-error.js';
-
-/** Code emitted when a confirmation-gated method is invoked without explicit user confirmation. */
-export const REQUIRE_CONFIRM = 'REQUIRE_CONFIRM';
 
 /** Function returned by every registration; calling it removes the attached handler. */
 export type Unregister = () => void;
@@ -60,14 +57,6 @@ export interface HandlerInvocation<TBody> {
 export type TypedHandler<TBody, TResult> = (
   input: HandlerInvocation<TBody>,
 ) => Promise<TResult>;
-
-export interface RegisterHandlerOptions {
-  /**
-   * When true, the wrapper enforces a confirmation gate before the handler
-   * runs: `body.confirm === true` AND `context.explicitUserRequest === true`.
-   */
-  readonly confirm?: boolean;
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -150,24 +139,6 @@ function foldQueryIntoBody(
 }
 
 /**
- * Guard a confirmation-gated mutation. Throws `GatewayVerbError(REQUIRE_CONFIRM, 403)`
- * unless the caller both set `body.confirm === true` and the request was an
- * explicit user request.
- */
-export function assertConfirmed(
-  body: unknown,
-  ctx: { readonly explicitUserRequest: boolean },
-): void {
-  const confirmed =
-    typeof body === 'object'
-    && body !== null
-    && (body as { confirm?: unknown }).confirm === true;
-  if (!confirmed || ctx.explicitUserRequest !== true) {
-    throw new GatewayVerbError('explicit user confirmation required', REQUIRE_CONFIRM, 403);
-  }
-}
-
-/**
  * Attach a typed handler to the descriptor identified by `methodId`. Reuses the
  * descriptor the catalog already holds and re-registers it with the wrapped
  * handler via `{ replace: true }`.
@@ -176,7 +147,6 @@ export function registerCatalogHandler<TBody, TResult>(
   catalog: GatewayMethodCatalog,
   methodId: string,
   handler: TypedHandler<TBody, TResult>,
-  options?: RegisterHandlerOptions,
 ): Unregister {
   const descriptor = catalog.get(methodId);
   if (!descriptor) {
@@ -189,7 +159,6 @@ export function registerCatalogHandler<TBody, TResult>(
       ...(inv.isAuthorized ? { isAuthorized: inv.isAuthorized } : {}) };
     const query = normalizeQuery(inv.query);
     const body = foldQueryIntoBody(inv.body, query, descriptor.inputSchema) as TBody;
-    if (options?.confirm) assertConfirmed(inv.body, context);
     try {
       return await handler({ body, query, context });
     } catch (error) {
@@ -211,7 +180,6 @@ export function registerCatalogHandler<TBody, TResult>(
 export interface CatalogHandlerEntry {
   readonly id: string;
   readonly handler: TypedHandler<unknown, unknown>;
-  readonly options?: RegisterHandlerOptions;
 }
 
 /**
@@ -225,7 +193,7 @@ export function registerCatalogHandlers(
 ): Unregister {
   const teardowns: Unregister[] = [];
   for (const entry of entries) {
-    teardowns.push(registerCatalogHandler(catalog, entry.id, entry.handler, entry.options));
+    teardowns.push(registerCatalogHandler(catalog, entry.id, entry.handler));
   }
   return () => {
     for (let i = teardowns.length - 1; i >= 0; i -= 1) {

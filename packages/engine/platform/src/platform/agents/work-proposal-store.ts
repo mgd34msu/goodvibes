@@ -100,6 +100,13 @@ export interface WorkProposalRecord {
    */
   readonly started?: boolean | undefined;
   /**
+   * The agreed work's start was claimed (an accepted proposal only), written
+   * before the start. Found after a restart without `started`, the start was
+   * under way when the daemon stopped: its agent died with that process, so it
+   * is not run again; the owner is told to send it again.
+   */
+  readonly starting?: boolean | undefined;
+  /**
    * The direction the owner added to his "yes" (an accepted proposal only),
    * saved with the answer so work started later (after a restart) still carries it.
    */
@@ -195,6 +202,7 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
     // delivery was never confirmed, loads as unseen and stays unanswerable.
     delivered: value.delivered === true,
     ...(value.started === true ? { started: true } : {}),
+    ...(status === 'accepted' && value.starting === true && value.started !== true ? { starting: true } : {}),
     ...(status === 'accepted' && optionalString(value.agreedNote) ? { agreedNote: optionalString(value.agreedNote) } : {}),
     ...(optionalString(value.surfaceId) ? { surfaceId: optionalString(value.surfaceId) } : {}),
     ...(optionalString(value.routeId) ? { routeId: optionalString(value.routeId) } : {}),
@@ -261,6 +269,8 @@ export interface CreateWorkProposalInput {
 
 export class WorkProposalStore {
   private readonly proposals = new Map<string, WorkProposalRecord>();
+  /** Proposals whose start this process claimed and has not settled; a `starting` record outside it was left by a process that is gone. */
+  private readonly startsInFlight = new Set<string>();
   private readonly storePath: string | undefined;
   private readonly maxPending: () => number;
   private readonly now: () => number;
@@ -519,20 +529,70 @@ export class WorkProposalStore {
   }
 
   /**
-   * Record that an accepted proposal's work was started, or was settled as not
-   * started with the owner told (one write); either way it is no longer owed.
+   * Claim an accepted proposal's start before the work is started: the claim is
+   * saved first (a failed save throws and nothing is claimed), so a restart
+   * after this point never starts the same work a second time. Returns the
+   * claimed record, or null when it is not an accepted proposal still owed
+   * work, or another start in this process already claimed it.
    */
-  markStarted(id: string): void {
+  async markStarting(id: string): Promise<WorkProposalRecord | null> {
     const record = this.proposals.get(id);
-    if (!record || record.status !== 'accepted' || record.started) return;
-    this.proposals.set(id, { ...record, started: true });
-    void this.persist();
+    if (!record || record.status !== 'accepted' || record.started || record.starting || this.startsInFlight.has(id)) return null;
+    const claimed: WorkProposalRecord = { ...record, starting: true };
+    this.proposals.set(id, claimed);
+    this.startsInFlight.add(id);
+    try {
+      await this.persistOrThrow();
+    } catch (error) {
+      this.startsInFlight.delete(id);
+      if (this.proposals.get(id) === claimed) this.proposals.set(id, record);
+      throw error;
+    }
+    return claimed;
   }
 
-  /** Accepted proposals whose work was never started: read at start-up, each is started then. */
+  /**
+   * Give back a claimed start the daemon held (it is restarting into an
+   * update): the proposal is owed work again and starts after the restart.
+   */
+  async releaseStart(id: string): Promise<void> {
+    this.startsInFlight.delete(id);
+    const record = this.proposals.get(id);
+    if (!record || !record.starting || record.started) return;
+    const { starting: _released, ...owed } = record;
+    this.proposals.set(id, owed);
+    await this.persistOrThrow();
+  }
+
+  /**
+   * Record that an accepted proposal's work was started, or was settled as not
+   * started with the owner told (one awaited write); either way it is no longer owed.
+   */
+  async markStarted(id: string): Promise<void> {
+    this.startsInFlight.delete(id);
+    const record = this.proposals.get(id);
+    if (!record || record.status !== 'accepted' || record.started) return;
+    const { starting: _settled, ...rest } = record;
+    this.proposals.set(id, { ...rest, started: true });
+    await this.persistOrThrow();
+  }
+
+  /** Accepted proposals whose work was never started nor claimed: read at start-up, each is started then. */
   listAcceptedUnstarted(): WorkProposalRecord[] {
     this.reap();
-    return [...this.proposals.values()].filter((record) => record.status === 'accepted' && record.started !== true);
+    return [...this.proposals.values()].filter((record) => record.status === 'accepted' && record.started !== true && record.starting !== true);
+  }
+
+  /**
+   * Accepted proposals whose start was claimed by a process that is gone (the
+   * daemon stopped while starting them): their agent died with it, so each is
+   * settled and the owner told, never run again. A start this process is
+   * making is not one of them.
+   */
+  listInterruptedStarts(): WorkProposalRecord[] {
+    this.reap();
+    return [...this.proposals.values()].filter((record) => record.status === 'accepted' && record.started !== true
+      && record.starting === true && !this.startsInFlight.has(record.id));
   }
 
   /**

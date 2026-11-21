@@ -319,8 +319,17 @@ export interface SteerCompanionChatMessageOutput {
 
 export interface CancelCompanionChatTurnOutput {
   readonly sessionId: string;
-  readonly turnId: string;
+  /** The turn that was stopped; absent when the stop landed before the turn started (`stoppedBeforeStart`). */
+  readonly turnId?: string | undefined;
   readonly cancelled: true;
+  /**
+   * True when no turn was running yet but one was on its way (a send being
+   * saved, or a queued message about to start): that turn never starts, and
+   * its message stays in the transcript, unanswered.
+   */
+  readonly stoppedBeforeStart?: true | undefined;
+  /** The queued messages whose turns the stop cancelled, when it named them. */
+  readonly messageIds?: readonly string[] | undefined;
   /** True when this turn had already been cancelled, repeat cancels are idempotent. */
   readonly alreadyCancelled?: boolean | undefined;
   /**

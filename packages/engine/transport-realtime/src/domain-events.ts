@@ -46,6 +46,10 @@ export type DomainEventConnector<
 export interface DomainEventConnectionEnd {
   /** True when connecting again cannot help (a refused credential). */
   readonly final: boolean;
+  /** The daemon's code for a feed it ended on its own (EVENT_ACCESS_DENIED, UNKNOWN_EVENT_DOMAIN). */
+  readonly code?: string | undefined;
+  /** Why, in the daemon's or the connector's words. */
+  readonly reason?: string | undefined;
 }
 
 export type DomainEvents<
@@ -170,7 +174,7 @@ function createRemoteDomainEventFeed<
 
   // The connection the feed currently believes in. A late onEnded from a
   // connection the feed already let go of must not tear down its successor.
-  let activeAttempt: { ended: boolean; handedOver: boolean; final: boolean; readonly cancel?: AbortController } | null = null;
+  let activeAttempt: { ended: boolean; handedOver: boolean; final: boolean; end?: DomainEventConnectionEnd | undefined; readonly cancel?: AbortController } | null = null;
   // Reopening after a connection that ended or could not be made: one timer,
   // a capped backoff, and a count that resets once an event arrives.
   let reopenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -195,12 +199,15 @@ function createRemoteDomainEventFeed<
 
   const maybeConnect = (): void => {
     if (connected || disconnect || connectPromise || reopenTimer) return;
-    const attempt = { ended: false, handedOver: false, final: false, cancel: new AbortController() };
+    const attempt: { ended: boolean; handedOver: boolean; final: boolean; end?: DomainEventConnectionEnd | undefined; readonly cancel: AbortController } = {
+      ended: false, handedOver: false, final: false, cancel: new AbortController(),
+    };
     activeAttempt = attempt;
     const onEnded = (end?: DomainEventConnectionEnd): void => {
       if (attempt.ended) return;
       attempt.ended = true;
       attempt.final = end?.final === true;
+      attempt.end = end;
       // Still being handed over: the then-handler below settles it.
       if (!attempt.handedOver) return;
       forgetConnection(attempt);
@@ -270,7 +277,7 @@ function createRemoteDomainEventFeed<
   let scheduleReopenAfterSettle = false;
 
   /** The connection ended by itself: let go of it, and open a new one unless that cannot help. */
-  const forgetConnection = (attempt: { ended: boolean; handedOver: boolean; final: boolean }, cleanup: (() => void) | null = disconnect): void => {
+  const forgetConnection = (attempt: { ended: boolean; handedOver: boolean; final: boolean; end?: DomainEventConnectionEnd | undefined }, cleanup: (() => void) | null = disconnect): void => {
     if (activeAttempt !== attempt) return;
     activeAttempt = null;
     disconnect = null;
@@ -282,6 +289,16 @@ function createRemoteDomainEventFeed<
     }
     if (!attempt.final) {
       scheduleReopen();
+      return;
+    }
+    // The daemon ended this one domain and said why (the credential may not read it, or no
+    // such domain exists): that is the answer the listener is given.
+    if (attempt.end?.code) {
+      reportUnexpectedConnectionError(
+        Object.assign(new Error(attempt.end.reason ?? `The daemon sends nothing for the "${domain}" event domain on this connection (${attempt.end.code}), so it is not reopened.`), { code: attempt.end.code }),
+        domain,
+        options,
+      );
       return;
     }
     reportUnexpectedConnectionError(

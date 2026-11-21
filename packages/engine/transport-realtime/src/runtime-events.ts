@@ -6,6 +6,7 @@ import {
 } from '@goodvibes/engine/contracts';
 import {
   ConfigurationError,
+  DaemonErrorCategory,
   GoodVibesError,
   createHttpStatusError,
   isStructuredDaemonErrorBody,
@@ -32,7 +33,7 @@ import {
 } from './domain-events.js';
 import { buildGate } from './event-source-connector.js';
 import { readEventEnvelope } from './envelope.js';
-import { createSharedDomainConnector } from './shared-connection.js';
+import { createSharedDomainConnector, endUnservedDomains } from './shared-connection.js';
 import { readTurnLifecycleFrame } from './turn-lifecycle-gate.js';
 
 export type SerializedRuntimeEnvelope<TEvent extends RuntimeEventRecord = RuntimeEventRecord> =
@@ -306,6 +307,8 @@ export function createRemoteRuntimeEvents<TEvent extends RuntimeEventRecord = Ru
 export function buildWebSocketUrl(
   baseUrl: string,
   domains: readonly RuntimeEventDomain[],
+  /** The id of the last event the client holds: the daemon replays what came after it. */
+  lastEventId?: string | null,
 ): string {
   // buildUrl runs normalizeBaseUrl, the one rule for which hosts may use plain
   // http/ws (loopback, private-network and .local hosts, or the explicit
@@ -327,8 +330,12 @@ export function buildWebSocketUrl(
   if (domains.length > 0) {
     url.searchParams.set('domains', domains.join(','));
   }
+  if (lastEventId) url.searchParams.set('lastEventId', lastEventId);
   return url.toString();
 }
+
+/** The categories a daemon refusal frame may name. */
+const DAEMON_ERROR_CATEGORIES: readonly DaemonErrorCategory[] = Object.values(DaemonErrorCategory);
 
 /** Messages the WebSocket connector holds for sending while its socket is down or not yet authenticated. */
 const DEFAULT_WS_MAX_QUEUED_MESSAGES = 1024;
@@ -359,6 +366,10 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
   // One gate per connector, not per connection: it must outlive a reconnect, whose
   // replay of recent traffic is what it exists to filter.
   const gate = buildGate(options.turnScope);
+  // The id of the last event frame this connector was handed, for the life of the
+  // connector: every new socket presents it as `lastEventId`, so the daemon replays
+  // what a dropped or lagging socket lost (as the SSE connector's Last-Event-ID does).
+  let position: string | null = null;
   const maxQueuedMessages = Math.max(1, options.maxQueuedMessages ?? DEFAULT_WS_MAX_QUEUED_MESSAGES);
   const maxQueuedBytes = Math.max(1, options.maxQueuedBytes ?? DEFAULT_WS_MAX_QUEUED_BYTES);
   // Every domain the connector's feeds listen to rides one socket; a changed set
@@ -368,7 +379,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     // the current socket (its URL and auth frame, then subscription frames).
     let carried = new Set<RuntimeEventDomain>(domains);
     let told = new Set<RuntimeEventDomain>();
-    let url = buildWebSocketUrl(baseUrl, [...carried]);
+    let url = buildWebSocketUrl(baseUrl, [...carried], position);
     const reconnect = options.reconnect;
     // On unless the caller turns it off, with no attempt limit by default: a
     // refused credential ends the connection at once (see onMessage), so the
@@ -618,14 +629,14 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         const wsTraceHeaders: Record<string, string> = {};
         await injectTraceparentAsync(wsTraceHeaders);
         if (stopped || socket !== openedSocket) return;
+        // No domains here: the authenticated upgrade's URL already subscribed them, and a
+        // change since is sent as subscribe/unsubscribe once the daemon accepts this frame.
         openedSocket.send(JSON.stringify({
           type: 'auth',
           token: authToken,
-          domains: [...carried],
           ...(wsTraceHeaders['traceparent'] ? { traceparent: wsTraceHeaders['traceparent'] } : {}),
           ...(wsTraceHeaders['tracestate'] ? { tracestate: wsTraceHeaders['tracestate'] } : {}),
         }));
-        told = new Set([...told, ...carried]);
       } catch (error) {
         reportError(transportErrorFromUnknown(error, 'WebSocket send failed'));
         closeSocket();
@@ -640,20 +651,65 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         }
         const decoded = assembler.accept(JSON.parse(event.data));
         if (decoded === undefined) return;
-        const frame = decoded as { type?: string; event?: string; payload?: unknown; ok?: boolean; error?: unknown };
+        const frame = decoded as { type?: string; event?: string; id?: unknown; payload?: unknown; ok?: boolean; error?: unknown; code?: unknown; category?: unknown; next?: unknown };
+        // A refusal frame's own code and category, as the daemon sent them.
+        const frameCode = typeof frame.code === 'string' && frame.code.trim() ? frame.code.trim() : undefined;
+        const frameCategory = DAEMON_ERROR_CATEGORIES.find((category) => category === frame.category);
+        const frameNext = Array.isArray(frame.next) && typeof frame.next[0] === 'string' ? frame.next[0] : undefined;
         if (frame.type === 'auth' && frame.ok === false) {
-          // The daemon refuses the credential. Nothing will ever authenticate this socket,
-          // and the same token fails again on a reconnect, so end here and say why.
+          // The daemon refused the auth frame, for the reason its code and category say (a
+          // refused credential, or a frame it could not accept). The same frame is refused
+          // again on a reconnect, so end here and say why.
           const reason = typeof frame.error === 'string' && frame.error.trim() ? frame.error.trim() : 'no reason given';
-          const authError = new WebSocketTransportError(`The daemon refused the WebSocket authentication: ${reason}`, {
-            code: 'WS_REMOTE_ERROR',
-            category: 'authentication',
-            recoverable: false,
-            hint: 'Check the auth token, or request a new one, then open a new connection.',
-          });
-          reportError(authError);
+          const authentication = frameCategory === undefined || frameCategory === 'authentication';
+          const hint = frameNext ?? (authentication
+            ? 'Check the auth token, or request a new one, then open a new connection.'
+            : 'Fix what the daemon named, then open a new connection.');
+          reportError(frameCode
+            ? new GoodVibesError(`The daemon refused the WebSocket authentication: ${reason}`, {
+              code: frameCode, category: frameCategory ?? 'authentication', source: 'transport', recoverable: false, hint,
+            })
+            : new WebSocketTransportError(`The daemon refused the WebSocket authentication: ${reason}`, {
+              code: 'WS_REMOTE_ERROR', category: frameCategory ?? 'authentication', recoverable: false, hint,
+            }));
           closeSocket();
           terminate('failed', true);
+          return;
+        }
+        if (frame.type === 'error') {
+          // A frame the daemon refused (a subscription it could not apply, a malformed frame):
+          // the connection goes on, and the caller is told what was refused.
+          const reason = typeof frame.error === 'string' && frame.error.trim() ? frame.error.trim() : 'no reason given';
+          reportError(new GoodVibesError(`The daemon refused a WebSocket frame: ${reason}`, {
+            code: frameCode ?? 'WS_REMOTE_ERROR',
+            category: frameCategory ?? 'protocol',
+            source: 'transport',
+            recoverable: true,
+            ...(frameNext ? { hint: frameNext } : {}),
+          }));
+          endUnservedDomains(frame, sink);
+          return;
+        }
+        if (frame.type === 'event' && frame.event === 'ready') {
+          // What the presented position turned into, read as the SSE connector reads it: an
+          // unresolved one replayed nothing, so the gap is said, the position forgotten and the gate reset.
+          const ready = frame.payload;
+          const resume = (ready as { resume?: { resume?: unknown } } | null | undefined)?.resume?.resume;
+          if (resume === 'unresolved') {
+            position = null;
+            gate?.reset();
+            reportError(new GoodVibesError('The daemon could not resume the event stream from its last position, so events since then were not replayed.', {
+              category: 'protocol',
+              source: 'transport',
+              recoverable: true,
+              hint: 'The daemon restarted or the position aged out of its recent-event window. Re-read current state instead of waiting for events that may already have happened.',
+            }));
+          }
+          endUnservedDomains(ready, sink);
+          return;
+        }
+        if (frame.type === 'subscribed') {
+          endUnservedDomains(frame, sink);
           return;
         }
         if (frame.type === 'closed') {
@@ -680,10 +736,13 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
           authenticatedAt = Date.now();
           emitConnectionState('connected');
           options.onOpen?.();
+          endUnservedDomains(frame, sink);
           sendSubscriptionChanges(socket);
           flushOutboundQueue(socket);
           return;
         }
+        // Every event frame advances the position the next socket resumes from.
+        if (frame.type === 'event' && typeof frame.id === 'string' && frame.id) position = frame.id;
         if (frame.type === 'event' && typeof frame.event === 'string' && carried.has(frame.event as RuntimeEventDomain)
           && frame.payload && typeof frame.payload === 'object') {
           // The shared envelope reader (envelope.ts): unknown keys are ignored.
@@ -768,7 +827,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       closeSocket();
       emitConnectionState('connecting');
       // A new socket subscribes, through its URL, to the domains carried now.
-      url = buildWebSocketUrl(baseUrl, [...carried]);
+      url = buildWebSocketUrl(baseUrl, [...carried], position);
       told = new Set(carried);
       let nextSocket: WebSocket;
       if (options.createSocket) {

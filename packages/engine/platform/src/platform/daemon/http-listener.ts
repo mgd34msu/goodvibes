@@ -24,6 +24,7 @@ import { resolveClientAddress } from './client-address.js';
 import { handleOperatorLogin, handleOperatorLogout, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';
 import { authenticationRequiredResponse } from './http/error-response.js';
+import { ownBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './http/browser-origin.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitAuthFailed } from '../runtime/emitters/security.js';
 import { captureJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
@@ -55,7 +56,7 @@ interface HttpListenerConfig {
   trustProxy?: boolean | undefined;
   /**
    * When true, CORS enforcement is active:
-   *   - Constructor refuses to start when hostMode=network and allowedOrigins is empty
+   *   - start() refuses to bind beyond loopback when allowedOrigins is empty
    *   - Requests carrying an Origin header are validated against allowedOrigins
    * Default: false (permissive, no CORS enforcement). Opt-in for multi-user,
    * internet-exposed, or enterprise deployments where browser-based CSRF is a
@@ -76,8 +77,33 @@ interface HttpListenerConfig {
   /** Pre-configured UserAuthManager owned by the runtime service graph. */
   userAuth: UserAuthManager;
   pairingTokens?: PairingTokenAuthenticator | undefined;
+  /**
+   * The operator method catalog's default grant (full, or read-only for a
+   * sign-in without the admin role), so a credential is judged here as the
+   * control plane judges it. Absent: a credential holds only its stored list.
+   */
+  grantedScopes?: ((includeWrite: boolean) => readonly string[]) | undefined;
   /** When present, authentication outcomes are published on its `security` domain. */
   runtimeBus?: RuntimeEventBus | undefined;
+  /**
+   * Whether a refused credential is the daemon's operator token. The listener
+   * never accepts that token; this only lets the refusal say why and which
+   * token to send instead.
+   */
+  isOperatorToken?: ((token: string) => boolean) | undefined;
+  /** Told when a request was refused for presenting the operator token (the host reports it to the owner once). */
+  onOperatorTokenRefused?: (() => void) | undefined;
+}
+
+/** The refusal for a webhook sender that presented the operator token. Names no path, value or account. */
+function operatorTokenNotAcceptedResponse(): Response {
+  return Response.json({
+    error: 'The operator token is not accepted by the webhook listener. Send the listener token instead.',
+    code: 'OPERATOR_TOKEN_NOT_ACCEPTED',
+    category: 'authentication',
+    status: 401,
+    next: ['On the daemon\'s machine, goodvibes-daemon listener token --show prints the listener token (kept in http-listener-token.json in the daemon home, or GOODVIBES_HTTP_TOKEN when that is set).'],
+  }, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
 }
 
 interface HttpDangerConfig {
@@ -119,9 +145,8 @@ export class HttpListener {
   private server: ReturnType<typeof Bun.serve> | null = null;
   private port: number;
   private host: string;
-  private allowedOrigins: string[];
-  /** Opt-in strict CORS enforcement. Default false (permissive). */
-  private enforceCors: boolean;
+  /** The CORS allowlist as last read, kept while the settings revision is unchanged. */
+  private corsOriginsCache: { readonly revision: number; readonly origins: readonly string[] } | null = null;
   private hookDispatcher: HookDispatcher | null;
   private authToken: string | null = null;
   private userAuth: UserAuthManager;
@@ -129,10 +154,6 @@ export class HttpListener {
   private readonly rateLimiter: AddressRateLimiter;
   /** Dedicated tight limit for POST /login. */
   private readonly loginRateLimiter: AddressRateLimiter;
-  /** Whether to trust x-forwarded-for / x-real-ip for client IP resolution. */
-  private trustProxy: boolean;
-  /** When true, trust CF-Connecting-IP only from validated Cloudflare edge IPs. */
-  private trustCloudflare: boolean;
   private readonly configManager: ConfigManager;
   private readonly serveFactory: typeof Bun.serve;
   private tlsState: ResolvedInboundTlsContext | null = null;
@@ -180,38 +201,43 @@ export class HttpListener {
     );
     this.port = config.port ?? resolvedHttpBinding.port;
     this.host = config.host ?? resolvedHttpBinding.host;
-    // CORS defaults come from the shared controlPlane.cors.* config (the same keys
-    // the control-plane router honors) rather than a parallel httpListener.cors.*
-    // surface. An explicit constructor config.allowedOrigins / config.enforceCors
-    // still overrides. Default remains permissive because controlPlane.cors.enabled
-    // defaults false.
-    this.allowedOrigins = config.allowedOrigins ?? readCorsAllowedOrigins(this.configManager);
-    this.enforceCors = config.enforceCors ?? (this.configManager.get('controlPlane.cors.enabled') === true);
-
-    // When enforceCors is true, refuse to construct on a network-reachable bind with empty allowedOrigins.
-    // Off by default, home and single-user local deployments don't need CORS enforcement.
-    // Enterprise / multi-user / internet-exposed deployments set enforceCors: true to gate against CSRF.
-    // Decided from the address actually bound, not the raw setting: 'Network', ' network ' and
-    // custom with 0.0.0.0 all bind beyond loopback and must get the same refusal.
-    if (this.enforceCors && this.allowedOrigins.length === 0 && !isLoopbackHost(this.host)) {
-      throw new Error(
-        `SECURITY_UNSAFE_ORIGIN_CONFIG: binding ${this.host} (hostMode=${resolvedHttpBinding.effectiveMode}) with enforceCors=true requires non-empty allowedOrigins. `
-        + 'Set config.httpListener.allowedOrigins to a list of trusted origins '
-        + "(e.g. ['https://companion.example.com']), or leave enforceCors unset for permissive mode.",
-      );
-    }
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.userAuth = config.userAuth;
     this.rateLimiter = new AddressRateLimiter(config.rateLimit ?? 60);
     this.loginRateLimiter = new AddressRateLimiter(config.loginRateLimit ?? SIGN_IN_ATTEMPTS_PER_MINUTE);
-    this.trustProxy = config.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy'));
-    // Falls back to config exactly as trustProxy does. It had no fallback and
-    // no config key at all, so the only way to turn it on was to construct the
-    // listener by hand with the flag set, which no shipped composition does.
-    // The Cloudflare-range check the listener carries was therefore dead code
-    // on every daemon anyone actually runs.
-    this.trustCloudflare = config.trustCloudflare ?? Boolean(this.configManager.get('httpListener.trustCloudflare'));
     this.serveFactory = config.serveFactory ?? Bun.serve;
+  }
+
+  // Proxy trust and CORS are read from the settings at each request (an explicit
+  // HttpListenerConfig value overrides), so tightening one applies at once
+  // instead of at the next daemon start. CORS uses the shared controlPlane.cors.*
+  // keys the control-plane router honors; it stays permissive by default
+  // because controlPlane.cors.enabled defaults false.
+
+  /** Whether x-forwarded-for / x-real-ip are trusted for the client address. */
+  private trustsProxy(): boolean {
+    return this.config.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy'));
+  }
+
+  /** Whether CF-Connecting-IP is trusted, and then only from a Cloudflare edge address. */
+  private trustsCloudflare(): boolean {
+    return this.config.trustCloudflare ?? Boolean(this.configManager.get('httpListener.trustCloudflare'));
+  }
+
+  /** Opt-in strict CORS enforcement. */
+  private enforcesCors(): boolean {
+    return this.config.enforceCors ?? (this.configManager.get('controlPlane.cors.enabled') === true);
+  }
+
+  /** The CORS allowlist, re-read only when the settings revision moved (every request when the owner has none). */
+  private allowedOrigins(): readonly string[] {
+    if (this.config.allowedOrigins) return this.config.allowedOrigins;
+    const revision = (this.configManager as { readonly revisionSource?: { revision(): number } }).revisionSource?.revision();
+    const cached = this.corsOriginsCache;
+    if (cached && revision !== undefined && cached.revision === revision) return cached.origins;
+    const origins = readCorsAllowedOrigins(this.configManager);
+    this.corsOriginsCache = revision === undefined ? null : { revision, origins };
+    return origins;
   }
 
   /**
@@ -244,6 +270,18 @@ export class HttpListener {
       logger.info('HttpListener: already running');
       return;
     }
+    // With CORS enforced, refuse to bind beyond loopback with an empty allowlist,
+    // judged on the current settings at every bind. Off by default: home and
+    // single-user deployments do not need CORS enforcement. Decided from the
+    // address actually bound, not the raw setting: 'Network', ' network ' and
+    // custom with 0.0.0.0 all bind beyond loopback and get the same refusal.
+    if (this.enforcesCors() && this.allowedOrigins().length === 0 && !isLoopbackHost(this.host)) {
+      throw new Error(
+        `SECURITY_UNSAFE_ORIGIN_CONFIG: binding ${this.host} with CORS enforced (controlPlane.cors.enabled) requires a non-empty allowlist. `
+        + 'Set controlPlane.cors.allowedOrigins to the trusted origins '
+        + '(for example https://companion.example.com), or turn controlPlane.cors.enabled off.',
+      );
+    }
 
     // Skip the OS port probe when the host injects a custom serve factory.
     if (this.serveFactory === Bun.serve) {
@@ -269,7 +307,7 @@ export class HttpListener {
       host: this.host,
       tlsMode: this.tlsState.mode,
       scheme: this.tlsState.scheme,
-      trustProxy: this.tlsState.trustProxy,
+      trustProxy: this.trustsProxy(),
     });
   }
 
@@ -360,7 +398,8 @@ export class HttpListener {
     });
     if (authenticated === null) return null;
     const ownerUser = this.userAuth.ownerUsername();
-    return operatorRequestActor(authenticated, ownerUser === null ? NO_OWNER_USER : { ownerUser });
+    return operatorRequestActor(authenticated, ownerUser === null ? NO_OWNER_USER : { ownerUser },
+      this.config.grantedScopes ?? (() => []));
   }
 
   /** A presented credential the listener refused; never carries the credential. */
@@ -379,8 +418,8 @@ export class HttpListener {
     const startMs = Date.now();
     const url = new URL(req.url);
     const clientIp = resolveClientAddress(req, peerIp, {
-      trustProxy: this.trustProxy || (this.tlsState?.trustProxy ?? false),
-      trustCloudflare: this.trustCloudflare,
+      trustProxy: this.trustsProxy(),
+      trustCloudflare: this.trustsCloudflare(),
     });
     let response: Response | null = null;
     try {
@@ -421,16 +460,17 @@ export class HttpListener {
     // enforceCors is true:
     //   - No Origin header → same-origin or non-browser request → allow.
     //   - Origin present + allowedOrigins empty → no allowlist configured; 403 CORS_NOT_CONFIGURED.
-    //     (Constructor already refuses hostMode=network + empty allowlist at startup; this is
+    //     (start() already refuses a bind beyond loopback with an empty allowlist; this is
     //     defence-in-depth for non-network modes configured with enforceCors.)
     //   - Origin present + allowedOrigins non-empty → check allowlist.
-    if (this.enforceCors) {
+    if (this.enforcesCors()) {
       const origin = req.headers.get('origin');
       if (origin !== null) {
-        if (this.allowedOrigins.length === 0) {
+        const allowedOrigins = this.allowedOrigins();
+        if (allowedOrigins.length === 0) {
           return Response.json({ error: 'CORS_NOT_CONFIGURED: no allowedOrigins set' }, { status: 403 });
         }
-        if (!this.allowedOrigins.includes(origin)) {
+        if (!allowedOrigins.includes(origin)) {
           return Response.json({ error: 'ORIGIN_NOT_ALLOWED' }, { status: 403 });
         }
       }
@@ -445,15 +485,20 @@ export class HttpListener {
         limiter: this.loginRateLimiter,
         runtimeBus: this.config.runtimeBus,
         source: 'http-listener',
-        trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
+        trustProxy: this.trustsProxy(),
       });
     }
+    // No page is served from this port: the browser origins that may use the
+    // sign-in cookie here are the control plane's own (where the web UI is served,
+    // web.publicBaseUrl, tailscale serve, controlPlane.cors.allowedOrigins).
+    const ownOrigins = (): readonly string[] => ownBrowserOrigins(this.configManager);
     // A sign-in session may end itself here as on the daemon.
     if (url.pathname === '/logout' && req.method === 'POST') {
       return handleOperatorLogout(req, {
         userAuth: this.userAuth,
         source: 'http-listener',
-        trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
+        trustProxy: this.trustsProxy(),
+        allowedBrowserOrigins: ownOrigins,
       });
     }
 
@@ -462,10 +507,26 @@ export class HttpListener {
       return Response.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } });
     }
 
+    // A request carried by the sign-in cookie (no bearer, which a browser never
+    // adds by itself) is served only for a page on one of the daemon's own
+    // origins: a page on another port of this host cannot fire the owner's hooks.
+    // A bearer caller (every real webhook sender) passes at the first test.
+    if (extractOperatorAuthToken(req) !== '') {
+      const refusedOrigin = refuseCookieWriteFromOtherOrigin(req, ownOrigins);
+      if (refusedOrigin) return refusedOrigin;
+    }
+
     const actor = this.checkAuth(req);
     if (actor === null) {
       // A request with no credential is a probe, answered 401 and not reported as a failed sign-in.
-      if (extractOperatorAuthToken(req)) this.emitAuthFailed(requestId, clientIp);
+      const presented = extractOperatorAuthToken(req);
+      if (presented) this.emitAuthFailed(requestId, clientIp);
+      // A sender still holding the operator token (what webhook senders were
+      // given before the listener had its own token) is told which token to send.
+      if (presented && this.config.isOperatorToken?.(presented) === true) {
+        this.config.onOperatorTokenRefused?.();
+        return operatorTokenNotAcceptedResponse();
+      }
       return authenticationRequiredResponse();
     }
 

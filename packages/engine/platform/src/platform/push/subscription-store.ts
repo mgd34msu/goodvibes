@@ -39,6 +39,7 @@ import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-
 import type { AuthorityKey } from '../cluster/authority-record.js';
 import { withProcessLock } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
+import { pairingTokenIdOfPrincipal } from '../pairing/principal-ids.js';
 import {
   DEFAULT_PUSH_SUBSCRIPTION_POLICY,
   endpointOriginOf,
@@ -239,7 +240,7 @@ export class PushSubscriptionStore {
           };
           if (!existing) {
             // A paired device's subscription is its child: revoking the device ends its pushes too.
-            const device = record.principalId.startsWith('pairing:') ? record.principalId.slice('pairing:'.length) : null;
+            const device = pairingTokenIdOfPrincipal(record.principalId) ?? null;
             const parent: AuthorityKey | null = device && view.entry('device-token', device) ? `device-token:${device}` : null;
             changes.push({ kind: 'issue', value: null, entries: [{ kind: 'push-endpoint', id: record.id, parent, public: fields, private: sealed }] });
           } else if (!view.isRevoked(key) && (existing.public.endpointHash !== fields.endpointHash || existing.private?.p256dh !== sealed.p256dh
@@ -493,6 +494,28 @@ export class PushSubscriptionStore {
       await this.persist(records, lastRemovals, removed);
       await this.publish([], [{ id: target.id, by: target.principalId, reason: 'turned off by its owner' }]);
       return true;
+    });
+  }
+
+  /**
+   * Revoke every endpoint `principalId` registered, here and on the authority
+   * record (so no machine of the group pushes to them again), in one write,
+   * with `reason` recorded as the principal's last removal so
+   * push.subscriptions.list says why. Resolves to how many were removed.
+   */
+  async revokePrincipal(principalId: string, evidence: string): Promise<number> {
+    return this.run(async () => {
+      const { records, lastRemovals, removed, elsewhere } = await this.loadForWrite();
+      const targets = [...records, ...elsewhere].filter((record) => record.principalId === principalId);
+      if (targets.length === 0) {
+        if (removed.length > 0) await this.persist(records, lastRemovals, removed);
+        return 0;
+      }
+      const kept = records.filter((record) => record.principalId !== principalId);
+      const now = this.now();
+      // persist() records each removal and revokes it on the authority record in its one publish.
+      await this.persist(kept, lastRemovals, [...removed, ...targets.map((record) => removalOf(record, 'access-withdrawn', evidence, now))]);
+      return targets.length;
     });
   }
 

@@ -51,6 +51,11 @@ export interface PushCompositionDeps {
    * turned off, through any machine of the group is so on every machine.
    */
   readonly authority?: AuthorityRecordFile | undefined;
+  /**
+   * The sign-in users: a user deleted or no longer an admin loses the push
+   * endpoints it registered (pushes of approvals and questions are for admins).
+   */
+  readonly users?: { onAdminWithdrawn(listener: (username: string) => void): () => void } | undefined;
 }
 
 function readNumber(deps: PushCompositionDeps, key: ConfigKey, fallback: number): number {
@@ -121,6 +126,7 @@ export function createPushService(deps: PushCompositionDeps): PushService {
     vapid: new VapidManager(deps.secretsManager, { subject: resolveVapidSubject(deps) }),
     store,
     receipts: deps.daemonReceipts,
+    users: deps.users,
     // The rejection bound the delivery path removes on, read live from the same
     // config key the store's read filter uses so the two cannot disagree about
     // when a push service has proved an endpoint dead.

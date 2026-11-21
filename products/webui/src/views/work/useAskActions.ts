@@ -7,7 +7,7 @@
  * or the person's own words. The toast says what the daemon recorded.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, isPressRefused } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { queryKeys } from '../../lib/queries';
 import { useToast } from '../../lib/toast';
@@ -51,7 +51,11 @@ export function useAskActions(approvals: ApprovalActions) {
         toast({ title: 'Answer sent', description: outcome.item?.answer?.text, tone: 'success' });
       }
     },
-    onError: (error) => toast({ title: 'The answer was not sent', description: formatError(error), tone: 'danger' }),
+    // A refusal recorded nothing. Any other failure may have recorded the answer: the inbox
+    // shows it as answered once re-read, and an answer sent again is refused as already answered.
+    onError: (error) => toast(isPressRefused(error)
+      ? { title: 'The answer was not sent', description: formatError(error), tone: 'danger' }
+      : { title: 'The answer may have been sent', description: `${formatError(error)}. The inbox is read again to show whether it was recorded; an item already answered refuses a second answer.`, tone: 'warning' }),
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.ownerInbox }); },
   });
 

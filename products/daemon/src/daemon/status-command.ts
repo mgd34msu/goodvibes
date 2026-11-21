@@ -216,6 +216,8 @@ function localStateLines(state: LocalDaemonState): string[] {
     lines.push(`  uptime:   ${formatDuration(state.uptimeMs)}`);
   } else if (state.marker?.state === 'clean-shutdown') {
     lines.push('  uptime:   the last daemon on this host shut down cleanly; this is a fresh start or none');
+  } else if (state.markerUnreadable !== undefined) {
+    lines.push(`  uptime:   the lifecycle marker could not be read (${state.markerUnreadable})`);
   } else {
     lines.push('  uptime:   not recorded yet on this host');
   }
@@ -236,6 +238,8 @@ function localStateLines(state: LocalDaemonState): string[] {
     for (const receipt of state.receipts) {
       lines.push(`    ${new Date(receipt.at).toISOString()}  ${receipt.text}`);
     }
+  } else if (state.receiptsUnreadable !== undefined) {
+    lines.push(`  receipts: could not be read (${state.receiptsUnreadable})`);
   } else {
     lines.push('  receipts: none written');
   }
@@ -418,7 +422,9 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
             ? {
               uptimeMs: local.uptimeMs,
               marker: local.marker,
+              ...(local.markerUnreadable !== undefined ? { markerUnreadable: local.markerUnreadable } : {}),
               receipts: local.receipts,
+              ...(local.receiptsUnreadable !== undefined ? { receiptsUnreadable: local.receiptsUnreadable } : {}),
               rolledBack: local.rolledBack,
             }
             : { available: false, reason: local.unavailableReason },
@@ -452,13 +458,21 @@ export interface RunUpdateCommandInput extends RemoteCommandDeps {
 /** The receipts block alone; the daemon's own answer covers the rest of the history. */
 function receiptLines(state: LocalDaemonState): string[] {
   if (!state.available) return [`  receipts: ${state.unavailableReason}`];
+  if (state.receiptsUnreadable !== undefined) return [`  receipts: could not be read (${state.receiptsUnreadable})`];
   if (state.receipts.length === 0) return ['  receipts: none written'];
   return ['  receipts:', ...state.receipts.map((receipt) => `    ${new Date(receipt.at).toISOString()}  ${receipt.text}`)];
 }
 
 function localJson(local: LocalDaemonState): Record<string, unknown> {
   return local.available
-    ? { marker: local.marker, receipts: local.receipts, rejectedVersion: local.marker?.rejectedVersion, rolledBack: local.rolledBack }
+    ? {
+      marker: local.marker,
+      ...(local.markerUnreadable !== undefined ? { markerUnreadable: local.markerUnreadable } : {}),
+      receipts: local.receipts,
+      ...(local.receiptsUnreadable !== undefined ? { receiptsUnreadable: local.receiptsUnreadable } : {}),
+      rejectedVersion: local.marker?.rejectedVersion,
+      rolledBack: local.rolledBack,
+    }
     : { available: false, reason: local.unavailableReason };
 }
 

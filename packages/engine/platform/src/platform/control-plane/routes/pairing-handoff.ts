@@ -20,7 +20,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError, PairingMinterRevokedError, pairingPrincipalId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError } from '../../pairing/pairing-token-store.js';
+import { pairingPrincipalId, pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
 import type { StepUpGatewayService } from './stepup.js';
 import type { PushGatewayService } from './push.js';
 import {

@@ -63,9 +63,32 @@
  * Filesystem and clock are injectable so the contract is provable in tests.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, writeFileAtomic, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { processStartTime } from '../config/process-start-time.js';
+
+/**
+ * The `.goodvibes/<segment>/` directory the daemon keeps its control-plane
+ * state under (its ConfigManager's config dir). It is `tui` for a historical
+ * reason the daemon product's surface.ts records; that constant reads this one.
+ */
+export const DAEMON_STATE_SURFACE_ROOT = 'tui';
+
+/** The lifecycle marker under a daemon's control-plane config dir: the one place its path is spelled. */
+export function daemonLifecycleMarkerPath(controlPlaneConfigDir: string): string {
+  return join(controlPlaneConfigDir, 'control-plane', 'daemon-lifecycle.json');
+}
+
+/**
+ * The lifecycle marker of the daemon whose home tree is `homeDirectory`, for a
+ * process outside the daemon (a terminal app waiting for it to be ready): the
+ * daemon stamps it `running` once it is fully started and accepting.
+ */
+export function daemonLifecycleMarkerPathForHome(homeDirectory: string): string {
+  return daemonLifecycleMarkerPath(resolveSurfaceDirectory(homeDirectory, DAEMON_STATE_SURFACE_ROOT));
+}
 
 export interface LifecycleMarkerIo {
   read(path: string): string | null;

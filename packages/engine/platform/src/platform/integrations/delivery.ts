@@ -144,6 +144,17 @@ export interface DeliveryMetrics {
   readonly deadLettered: number;
   /** Total entries in the DLQ (including previously replayed). */
   readonly dlqSize: number;
+  /** Older failed notifications dropped from a full DLQ (`maxDlqSize`); they can no longer be resent. */
+  readonly droppedDeadLetters: number;
+}
+
+/** One channel's counters on a queue shared by several channels. */
+interface ChannelTally {
+  totalAttempts: number;
+  delivered: number;
+  retrying: number;
+  deadLettered: number;
+  droppedDeadLetters: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,16 +336,17 @@ export class DeliveryQueue<TPayload = string> {
   private _delivered = 0;
   private _retrying = 0;
   private _deadLettered = 0;
+  private _droppedDeadLetters = 0;
   private _closed = false;
   private _closing: Promise<void> | undefined;
   private readonly _active = new Set<Promise<unknown>>();
   /** The same counters per channel, for a queue shared by several channels. */
-  private readonly _channelTallies = new Map<string, { totalAttempts: number; delivered: number; retrying: number; deadLettered: number }>();
+  private readonly _channelTallies = new Map<string, ChannelTally>();
 
-  private _tally(channel: string): { totalAttempts: number; delivered: number; retrying: number; deadLettered: number } {
+  private _tally(channel: string): ChannelTally {
     let tally = this._channelTallies.get(channel);
     if (!tally) {
-      tally = { totalAttempts: 0, delivered: 0, retrying: 0, deadLettered: 0 };
+      tally = { totalAttempts: 0, delivered: 0, retrying: 0, deadLettered: 0, droppedDeadLetters: 0 };
       this._channelTallies.set(channel, tally);
     }
     return tally;
@@ -543,6 +555,7 @@ export class DeliveryQueue<TPayload = string> {
         retrying: tally?.retrying ?? 0,
         deadLettered: tally?.deadLettered ?? 0,
         dlqSize: this._dlq.filter((entry) => entry.channel === channel).length,
+        droppedDeadLetters: tally?.droppedDeadLetters ?? 0,
       };
     }
     return {
@@ -551,6 +564,7 @@ export class DeliveryQueue<TPayload = string> {
       retrying: this._retrying,
       deadLettered: this._deadLettered,
       dlqSize: this._dlq.length,
+      droppedDeadLetters: this._droppedDeadLetters,
     };
   }
 
@@ -796,10 +810,20 @@ export class DeliveryQueue<TPayload = string> {
       this._dlq[existing] = entry;
     } else {
       // Bounded DLQ: evict oldest entry when limit exceeded.
+      // The dead-lettered count keeps counting what happened; the drop is counted and logged.
       if (this._dlq.length >= this._config.maxDlqSize) {
         const evicted = this._dlq.shift();
-        this._deadLettered = Math.max(0, this._deadLettered - 1);
-        if (evicted) this._tally(evicted.channel).deadLettered = Math.max(0, this._tally(evicted.channel).deadLettered - 1);
+        if (evicted) {
+          this._droppedDeadLetters += 1;
+          this._tally(evicted.channel).droppedDeadLetters += 1;
+          logger.warn('DeliveryQueue: the failed-notification list is full; its oldest entry was dropped and can no longer be resent', {
+            id: evicted.id,
+            channel: evicted.channel,
+            event: evicted.event,
+            deadAt: evicted.deadAt,
+            maxDlqSize: this._config.maxDlqSize,
+          });
+        }
       }
       this._dlq.push(entry);
       this._deadLettered += 1;

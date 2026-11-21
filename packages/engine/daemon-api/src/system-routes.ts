@@ -9,7 +9,7 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
-import { requestActor, systemActor } from './http-policy.js';
+import { actorHoldsScope, requestActor, systemActor } from './http-policy.js';
 import type {
   ApprovalActionResultLike,
   ApprovalRememberTier,
@@ -986,7 +986,11 @@ async function ownerActResponse(
       next: ['Make the change from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
     }, { status: 403 }));
   }
-  const requestedBy = context.resolveAuthenticatedPrincipal?.(req)?.principalId ?? 'a caller who is not the owner';
+  const caller = context.resolveAuthenticatedPrincipal?.(req) ?? null;
+  const requestedBy = caller?.principalId ?? 'a caller who is not the owner';
+  // Whether the caller may read the approval (approvals.list, read:approvals) and so follow it to its outcome.
+  const actor = caller?.actor;
+  const followable = actor === undefined || (actor.class !== 'guest' && actor.class !== 'peer' && actorHoldsScope(actor, 'read:approvals'));
   const { approvalId } = await context.putToOwner({
     summary: `${requestedBy} asks to change ${keys.join(', ')}`,
     reasons, tool, args, requestedBy, apply,
@@ -995,6 +999,7 @@ async function ownerActResponse(
     success: false,
     code: 'OWNER_APPROVAL_PENDING',
     approvalId,
+    followable,
     ...(keys.length === 1 ? { key: keys[0] } : {}),
     keys,
     reasons,

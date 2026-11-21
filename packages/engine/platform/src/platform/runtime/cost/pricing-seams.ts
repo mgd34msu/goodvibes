@@ -14,7 +14,7 @@
  *   with, stamped at pricing time so every priced value can say where its
  *   rates came from (costSource) and how fresh dated sources are (as-of).
  */
-import { computeUsageCostUsd, type ResolvedModelPricing, type UsageTokenCounts } from '../../providers/model-pricing.js';
+import { computeUsageCostUsd, type CacheRatio, type ResolvedModelPricing, type UsageTokenCounts } from '../../providers/model-pricing.js';
 
 export interface PricingSeams {
   readonly priceUsage: (model: string | undefined, usage: UsageTokenCounts, provider?: string | undefined) => number | null;
@@ -22,10 +22,15 @@ export interface PricingSeams {
 }
 
 export function buildPricingSeams(
-  registry: { resolveModelPricing(model: string, provider?: string): ResolvedModelPricing },
+  registry: {
+    resolveModelPricing(model: string, provider?: string): ResolvedModelPricing;
+    cacheRatios(provider: string): Partial<CacheRatio> | undefined;
+  },
 ): PricingSeams {
   return {
-    priceUsage: (model, usage, provider) => (model ? computeUsageCostUsd(registry.resolveModelPricing(model, provider), usage, provider) : null),
+    priceUsage: (model, usage, provider) => (model
+      ? computeUsageCostUsd(registry.resolveModelPricing(model, provider), usage, provider, provider ? registry.cacheRatios(provider) : undefined)
+      : null),
     priceProvenance: (model, provider) => {
       if (!model) return null;
       const resolved = registry.resolveModelPricing(model, provider);

@@ -11,7 +11,7 @@ import {
 } from './model-benchmarks.js';
 import type { CatalogModelPricing, MinimalModelDefinition, SyntheticModelInfo } from './model-catalog.js';
 import type { ProviderModelPricing } from './model-limits.js';
-import type { ResolvedModelPricing } from './model-pricing.js';
+import type { CacheRatio, ResolvedModelPricing } from './model-pricing.js';
 import type { LiveModelDiscoveryResult } from './live-model-discovery.js';
 import { resolveModelReference } from './model-id-resolution.js';
 import type { FavoritesData, FavoritesStore, FavoritesUsageRestriction } from './favorites.js';
@@ -190,6 +190,8 @@ export interface ProviderApiRegistry {
   getCostFromCatalog(modelId: string): CatalogModelPricing | null;
   getPricingForModel(modelId: string, provider: string): ProviderModelPricing | null;
   resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing;
+  /** A provider's published cache rates over its input rate, passed to computeUsageCostUsd for a price with none of its own. */
+  cacheRatios(provider: string): Partial<CacheRatio> | undefined;
   getCatalogModelDefinitions(): readonly MinimalModelDefinition[];
   has(id: string): boolean;
   get?(id: string): LLMProvider | undefined;

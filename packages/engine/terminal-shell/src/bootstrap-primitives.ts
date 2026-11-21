@@ -1,4 +1,3 @@
-import type { SessionEvent } from '@goodvibes/engine/platform/events';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { createFeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/feature-flags/manager';
 import { deriveFeatureStates, bindFeatureSettingsBridge } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
@@ -10,12 +9,10 @@ import {
 import { createRuntimeStore, createDomainDispatch } from '@goodvibes/engine/platform/platform/runtime/store';
 import type { DomainDispatch } from '@goodvibes/engine/platform/platform/runtime/state';
 import { attachSessionRecoveryState } from '@goodvibes/engine/platform/platform/runtime/emitters';
-import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { Notifier } from '@goodvibes/engine/platform/platform/integrations';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes/engine/platform/platform/utils';
-import { companionMessageToOrchestratorInputOptions } from './companion-input.js';
 const featureFlagBridgeTeardowns = new WeakMap<object, () => void>();
 export function createTerminalFeatureFlags(config: ConfigManager) {
   const flags = createFeatureFlagManager();
@@ -50,31 +47,6 @@ export async function initializeTerminalMemory(
       await store.save();
     } finally {
       store.close();
-    }
-  });
-}
-export function attachTerminalCompanionInput(
-  bus: Pick<RuntimeEventBus, 'on'>,
-  handler: { value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null },
-  conversation: { addUserMessage(text: string): unknown },
-  render: () => void,
-  narrate?: (payload: Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>) => void,
-  options: {
-    /** The session this terminal is running. When given, a message addressed to any other session is ignored. */
-    readonly activeSessionId?: (() => string | undefined) | undefined;
-    /** Told when a message arrives before the orchestrator is ready and so is recorded but not answered. */
-    readonly notice?: ((text: string) => void) | undefined;
-  } = {},
-): () => void {
-  return bus.on<Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>>('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
-    const active = options.activeSessionId?.();
-    if (active !== undefined && payload.sessionId !== active) return;
-    narrate?.(payload);
-    if (handler.value) handler.value(payload.body, companionMessageToOrchestratorInputOptions(payload));
-    else {
-      conversation.addUserMessage(payload.body);
-      options.notice?.('A companion message arrived before the assistant was ready. It is shown in the conversation but no turn was started; send it again to get an answer.');
-      render();
     }
   });
 }
@@ -151,6 +123,7 @@ export function syncTerminalNotifierQueues(
             retrying: queue.metrics.retrying,
             deadLetters: queue.metrics.deadLettered,
             dlqSize: queue.metrics.dlqSize,
+            droppedDeadLetters: queue.metrics.droppedDeadLetters,
             sloEnforced: queue.sloEnforced,
           },
         },

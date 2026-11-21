@@ -56,7 +56,6 @@ export const EVENT_SEVERITY: Readonly<Record<AnyRuntimeEvent['type'], TelemetryS
   COMPACTION_MICROCOMPACT: 'info',
   COMPACTION_REACTIVE: 'info',
   COMPACTION_RECEIPT: 'info',
-  COMPANION_MESSAGE_RECEIVED: 'info',
   COMPANION_PAIR_REQUESTED: 'info',
   COMPANION_PAIR_VERIFIED: 'info',
   COMPANION_TOKEN_REVOKED: 'info',

@@ -26,6 +26,7 @@
  */
 import net from 'node:net';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { daemonLifecycleMarkerPathForHome } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import {
   ConfigManager,
   DEFAULT_CONTROL_PLANE_PORT,
@@ -126,6 +127,8 @@ export function createStandaloneDaemonHost(options: {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Ends the wait for a daemon still starting (the process is exiting). */
   readonly signal?: AbortSignal;
+  /** The daemon's lifecycle marker (`daemonLifecycleMarkerPathForHome`), whose ready record a still-starting unit is waited on. */
+  readonly markerPath: string;
 }): DaemonHost {
   const isReachable = options.isReachable ?? tcpReachability(options.config);
   return {
@@ -145,11 +148,10 @@ export function createStandaloneDaemonHost(options: {
         const serviceName = outcome.serviceName;
         const waited = await waitForStartingDaemon({
           control: options.control,
-          isReachable,
           serviceName,
+          since: outcome.since,
+          markerPath: options.markerPath,
           signal: options.signal ?? new AbortController().signal,
-          pollIntervalMs: options.pollIntervalMs,
-          sleep: options.sleep,
         });
         outcome = waited === 'online'
           ? { action: 'came-online', serviceName }
@@ -186,11 +188,13 @@ export function createStandaloneDaemonHost(options: {
 function defaultDaemonHost(config: DaemonRepairConfig): DaemonHost | null {
   if (!(config instanceof ConfigManager)) return null;
   const workingDirectory = config.getWorkingDirectory();
-  if (!workingDirectory) return null;
+  const homeDirectory = config.getHomeDirectory();
+  if (!workingDirectory || !homeDirectory) return null;
   return createStandaloneDaemonHost({
     config,
     // The service's unit lives under the login home, not this config's tree home.
     control: createDaemonServiceControl({ configManager: config, workingDirectory }),
+    markerPath: daemonLifecycleMarkerPathForHome(homeDirectory),
   });
 }
 

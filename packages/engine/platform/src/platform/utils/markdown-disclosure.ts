@@ -164,13 +164,16 @@ export function readMarkdownDisclosure(filePath: string): MarkdownDisclosure {
  * model reads; a refused include is replaced by a visible marker. A line naming
  * a file that does not exist is kept as written, since it is text such as
  * `@mention`.
+ *
+ * `included`, when given, is filled with the real path of every file expanded
+ * into the result, so a cache of the result can tell when one of them changed.
  */
-export function materializeMarkdownBody(filePath: string, body?: string): string {
+export function materializeMarkdownBody(filePath: string, body?: string, included?: Set<string>): string {
   const resolvedPath = resolve(filePath);
   const sourceBody = body ?? readMarkdownDisclosure(resolvedPath).body;
   let root: string;
   try { root = realpathSync(dirname(resolvedPath)); } catch { root = dirname(resolvedPath); }
-  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>(), root, 0, { expanded: 0, chars: 0 });
+  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>(), root, 0, { expanded: 0, chars: 0, ...(included ? { included } : {}) });
 }
 
 // Nesting and total expansions are bounded: without the bounds a few small
@@ -211,7 +214,7 @@ function resolveMarkdownIncludes(
   chain: Set<string>,
   root: string,
   depth: number,
-  budget: { expanded: number; chars: number },
+  budget: { expanded: number; chars: number; readonly included?: Set<string> },
 ): string {
 
   const resolvedSourcePath = resolve(sourcePath);
@@ -260,6 +263,9 @@ function resolveMarkdownIncludes(
     }
     budget.expanded += 1;
     budget.chars += included.body.length;
+    if (budget.included) {
+      try { budget.included.add(realpathSync(includePath)); } catch { budget.included.add(includePath); }
+    }
     const materialized = resolveMarkdownIncludes(includePath, included.body, chain, root, depth + 1, budget);
     if (!materialized) continue;
     result.push(materialized);

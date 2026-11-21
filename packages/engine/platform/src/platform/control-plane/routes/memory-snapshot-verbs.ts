@@ -3,10 +3,10 @@
  *
  * memory.snapshots.list and memory.snapshots.restore over the daemon's
  * canonical MemoryRegistry, for the web UI and an attached terminal app. The
- * restore is the owner's act: the host-handler confirmation gate admits it only
- * with `confirm: true` on an explicit request the transport established as the
- * owner's (a login session, a paired device, or an app on this machine); an
- * agent's call is refused before the handler runs.
+ * restore is the owner's act: its descriptor declares `confirmation:
+ * 'owner-request'`, so it runs only with `confirm: true` on a request the
+ * transport established as a person's (a login session, a paired device, or an
+ * app on this machine); an agent's call is refused before the handler runs.
  *
  * Registered from register-gateway-verb-groups.ts beside the other memory
  * verbs; a missing descriptor is a silent no-op, as for those.
@@ -30,6 +30,6 @@ export function registerMemorySnapshotGatewayMethods(catalog: GatewayMethodCatal
         throw new GatewayVerbError('Name the copy to restore (`snapshot`: a name from memory.snapshots.list, or latest); nothing was changed.', 'INVALID_ARGUMENT', 400, 'snapshot');
       }
       return source.restoreSnapshot(snapshot, context.signal ? { signal: context.signal } : undefined);
-    }, { confirm: true });
+    });
   }
 }

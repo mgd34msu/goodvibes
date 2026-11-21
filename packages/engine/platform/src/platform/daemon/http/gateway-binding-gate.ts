@@ -5,11 +5,12 @@ import { EngineErrorCodes } from '@goodvibes/engine/errors';
 import { actorHoldsScope, type Actor } from '../http-policy.js';
 import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectRule } from '../../security/effect-authority.js';
 import { declaredRouteDescriptor } from './route-manifest.js';
+import { pairingGrant } from '../../security/http-auth.js';
 
 type GatewayRefusal = { status: number; ok: false; body: Record<string, unknown> };
 
 /** The rules a method is held to: the effects it declares, or for a plugin's method the access and scopes it declares. */
-export function gatewayMethodRules(descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'ownerOnly' | 'effects'>): readonly EffectRule[] {
+export function gatewayMethodRules(descriptor: Pick<GatewayMethodDescriptor, 'id' | 'access' | 'scopes' | 'ownerOnly' | 'effects'> & Partial<Pick<GatewayMethodDescriptor, 'modelRefused'>>): readonly EffectRule[] {
   return descriptor.effects !== undefined ? descriptor.effects.map((id) => EFFECTS[id]) : declaredAccessRules(descriptor);
 }
 
@@ -122,13 +123,6 @@ export function catalogGrantedScopes(
   return typeof catalog.grantedScopes === 'function' ? catalog.grantedScopes(includeWrite) : grantedGatewayScopes(catalog, includeWrite);
 }
 
-/** The default grant, narrowed to a stored list. A stored list never widens it. */
-export function narrowGatewayGrant(defaults: readonly string[], stored: readonly string[] | undefined): readonly string[] {
-  if (stored === undefined || stored.includes('*')) return defaults;
-  const allowed = new Set(stored);
-  return Object.freeze(defaults.filter(scope => allowed.has(scope)));
-}
-
 /**
  * What a pairing-token caller holds: full operator authority (admin, and the
  * catalog's whole read and write grant) unless its pairing stores a narrower
@@ -140,11 +134,7 @@ export function pairingTokenCaller(
   catalog: Parameters<typeof catalogGrantedScopes>[0],
   stored?: readonly string[] | undefined,
 ): { readonly principalKind: 'token'; readonly admin: boolean; readonly scopes: readonly string[] } {
-  return {
-    principalKind: 'token',
-    admin: stored === undefined || stored.includes('*'),
-    scopes: narrowGatewayGrant(catalogGrantedScopes(catalog, true), stored),
-  };
+  return pairingGrant(catalogGrantedScopes(catalog, true), stored);
 }
 
 interface GatewayBindingGateDeps {

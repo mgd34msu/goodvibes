@@ -431,6 +431,22 @@ goodvibes-daemon cluster status|create|join|key|nodes|forget|rotate|leave|rename
 Talks to a running daemon over the same `--host`/`--port`/`--token` convention
 `status` uses; `--json` gives a scriptable answer.
 
+### `listener`
+
+```
+goodvibes-daemon listener token [--show] [--json]
+```
+
+The webhook listener (`danger.httpListener`) accepts its own bearer token and refuses
+the operator token (`401` `OPERATOR_TOKEN_NOT_ACCEPTED`). The token is
+`GOODVIBES_HTTP_TOKEN` when the daemon's environment sets it, otherwise the one the
+daemon keeps in `<daemon home>/http-listener-token.json`, created the first time it
+starts with the listener on. `listener token` says whether the listener is on and
+where the token is; `--show` also prints the token, to give a webhook sender. It reads
+only: it creates no token and contacts no daemon. `--json` prints `listenerEnabled`,
+`source` (`file` or `environment`), `tokenFile`, `tokenStored` and, with `--show`,
+`token`. With `--show` and no token yet it exits `1` (`LISTENER_TOKEN_MISSING`).
+
 ### `webui`
 
 ```

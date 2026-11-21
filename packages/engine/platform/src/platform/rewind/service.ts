@@ -266,7 +266,8 @@ export class UnifiedRewindService {
     // Turns after the anchor are gone from the conversation; their anchors
     // would otherwise cut the new branch at an unrelated message.
     if (conversation?.rewound && anchor.turnId !== undefined) {
-      discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, this.anchorSurface ?? undefined, conversation.undoSnapshotId ?? undefined);
+      const { saved } = discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, this.anchorSurface ?? undefined, conversation.undoSnapshotId ?? undefined);
+      if (!saved) warnings.push('the list of rewind points could not be saved; after a restart it may offer turns that were rewound away');
     }
 
     const receipt = {

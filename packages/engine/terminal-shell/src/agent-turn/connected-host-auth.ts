@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
+import { pairingPrincipalId } from '@goodvibes/engine/platform/platform/pairing/principal-ids';
 import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { isThisMachineHost } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 
@@ -145,7 +146,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
   if (environment) return selected(environment);
   if (hostUrl !== undefined) {
     const pairing = readPairing(homeDirectory, hostUrl);
-    if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
+    if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: pairingPrincipalId(pairing.tokenId) }, pairing);
     if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The reply to this Agent\'s pairing request was lost. Run goodvibes-agent setup pair to repeat the same request; the host answers it with the credential it made, or makes it now.' }, pairing);
     if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: describeUnreadableAgentHostPairing(pairing) }, pairing);
   }

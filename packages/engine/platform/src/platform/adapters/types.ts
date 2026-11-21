@@ -4,7 +4,6 @@ import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { AutomationSurfaceKind } from '../automation/types.js';
 import type { ChannelConversationKind, ChannelPolicyDecision, RouteBindingManager } from '../channels/index.js';
 import type { SharedSessionBroker } from '../control-plane/index.js';
-import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 
@@ -59,14 +58,6 @@ export interface QueueSurfaceReplyInput {
   readonly agentTask?: string | undefined;
   readonly contractId?: string | undefined;
   readonly sessionId?: string | undefined;
-}
-
-export interface QueueNtfyChatReplyInput {
-  readonly sessionId: string;
-  readonly topic: string;
-  readonly body: string;
-  readonly title?: string | undefined;
-  readonly messageId: string;
 }
 
 export interface NtfyRemoteChatResult {
@@ -159,11 +150,6 @@ export interface SurfaceAdapterContext {
     binding: AutomationRouteBinding | undefined,
     input: QueueSurfaceReplyInput,
   ) => void;
-  readonly publishConversationFollowup?: (
-    sessionId: string,
-    envelope: Omit<ConversationMessageEnvelope, 'sessionId'>,
-  ) => void;
-  readonly queueNtfyChatReply?: ((input: QueueNtfyChatReplyInput) => void) | undefined;
   readonly postNtfyRemoteChatMessage?: (input: {
     readonly topic: string;
     readonly body: string;

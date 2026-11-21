@@ -19,8 +19,10 @@ import {
   type OwnerAnswerOutcome,
   type OwnerInbox,
   type OwnerInboxListFilter,
+  type OwnerInboxListReport,
   type OwnerItem,
 } from '../../control-plane/owner-inbox.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { ownerInboxStorePath } from '../../control-plane/question-store.js';
 import { terminalSessionPresence } from '../../control-plane/owner-session-presence.js';
 import { ownerAnswerReader, useOwnerAnswerReader } from '../../agents/agent-inlets.js';
@@ -51,6 +53,7 @@ export function homeInboxClient(inbox: OwnerInbox, surface: string): OwnerInboxC
   const by = { actor: 'owner', surface };
   return {
     list: async (filter?: OwnerInboxListFilter) => inbox.listNow(filter),
+    listReport: async (filter?: OwnerInboxListFilter) => ({ items: inbox.listNow(filter) }),
     find: async (id: string) => inbox.get(id),
     answer: async (id: string, answer: OwnerAnswer) => await inbox.answer(id, answer, by),
     post: async (item) => inbox.postNow(item),
@@ -72,6 +75,8 @@ export function routeOwnerInbox(options: {
   readonly daemon: OwnerInboxClient;
   readonly home: OwnerInboxClient;
   readonly daemonReachable: () => boolean;
+  /** The daemon `daemon` calls, as the address a person reads; named when it did not answer. */
+  readonly daemonAddress: () => string | undefined;
 }): OwnerInboxClient {
   const { daemon, home } = options;
   // The daemon first, so its pushes and live updates follow. Only an item the daemon does not know (asked here
@@ -87,25 +92,37 @@ export function routeOwnerInbox(options: {
       throw error;
     }
   };
+  const listReport = async (filter: OwnerInboxListFilter = {}): Promise<OwnerInboxListReport> => {
+    if (!options.daemonReachable()) return { items: await home.list(filter) };
+    let remote: readonly OwnerItem[];
+    try {
+      remote = await daemon.list(filter);
+    } catch (error) {
+      // The daemon went away between the probe and the call: the store it keeps is read here,
+      // and the list says it is missing the daemon's approvals and what a host elsewhere holds.
+      const address = options.daemonAddress();
+      return { items: await home.list(filter), unreachable: summarizeError(error), ...(address !== undefined ? { daemon: address } : {}) };
+    }
+    const seen = new Set(remote.map((item) => item.id));
+    const onlyHere = (await home.list(filter)).filter((item) => !seen.has(item.id));
+    if (onlyHere.length === 0) return { items: remote };
+    const merged = [...remote, ...onlyHere].sort(newestFirst);
+    return { items: filter.limit !== undefined && merged.length > filter.limit ? merged.slice(0, filter.limit) : merged };
+  };
   return {
+    listReport,
     async list(filter: OwnerInboxListFilter = {}) {
-      if (!options.daemonReachable()) return await home.list(filter);
-      let remote: readonly OwnerItem[];
-      try {
-        remote = await daemon.list(filter);
-      } catch {
-        // The daemon went away between the probe and the call; the store it keeps is read here.
-        return await home.list(filter);
-      }
-      const seen = new Set(remote.map((item) => item.id));
-      const onlyHere = (await home.list(filter)).filter((item) => !seen.has(item.id));
-      if (onlyHere.length === 0) return remote;
-      const merged = [...remote, ...onlyHere].sort(newestFirst);
-      return filter.limit !== undefined && merged.length > filter.limit ? merged.slice(0, filter.limit) : merged;
+      return (await listReport(filter)).items;
     },
     async find(id: string) {
       if (!options.daemonReachable()) return await home.find(id);
-      return (await daemon.find(id).catch(() => undefined)) ?? await home.find(id);
+      let failure: unknown;
+      const remote = await daemon.find(id).catch((error: unknown) => { failure = error; return undefined; });
+      if (remote !== undefined) return remote;
+      const local = await home.find(id);
+      // A daemon that did not answer is not "no such item": its error stands unless this machine holds the item.
+      if (local === undefined && failure !== undefined) throw failure;
+      return local;
     },
     async answer(id: string, answer: OwnerAnswer) {
       // A decision this process's gate made is carried out here, where its session and rules are.

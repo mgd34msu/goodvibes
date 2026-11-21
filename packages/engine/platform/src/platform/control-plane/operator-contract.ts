@@ -169,6 +169,8 @@ function toMethodContract(d: GatewayMethodDescriptor): OperatorMethodContract {
     ...(d.dangerous !== undefined ? { dangerous: d.dangerous } : {}),
     ...(d.effect !== undefined ? { effect: d.effect } : {}),
     ...(d.ownerOnly !== undefined ? { ownerOnly: d.ownerOnly } : {}),
+    ...(d.modelRefused !== undefined ? { modelRefused: d.modelRefused } : {}),
+    ...(d.confirmation !== undefined ? { confirmation: d.confirmation } : {}),
     ...(d.irreversible !== undefined ? { irreversible: d.irreversible } : {}),
     ...(d.changesContract !== undefined ? { changesContract: d.changesContract } : {}),
     ...(d.recipients !== undefined ? { recipients: d.recipients } : {}),

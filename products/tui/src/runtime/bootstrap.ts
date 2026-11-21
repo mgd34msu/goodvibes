@@ -23,6 +23,7 @@ import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input'
 import { join } from 'node:path';
 import { bearerFor } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
 import { resolveDaemonTargetProven } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { daemonLifecycleMarkerPathForHome } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
@@ -263,10 +264,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       void refreshMemoryRecallSnapshot(services);
     },
   );
-  orchestratorHandleUserInputRef.value = (text, inputOptions) => {
+  orchestratorHandleUserInputRef.value = (text, inputOptions, answered) => {
     const route = ownerInputFor(orchestrator);
-    if (route) route(text, inputOptions);
-    else localCompanionInput(text, inputOptions);
+    if (route) route(text, inputOptions, answered);
+    else localCompanionInput(text, inputOptions, answered);
   };
   // Shared payload (single source of truth, includes the memoryRegistry,
   // see orchestrator-core-services.ts) plus this site's cacheHitTracker.
@@ -536,11 +537,19 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender();
   };
   // A daemon still starting when the boot-time wait ended is waited for off the
-  // interactive path until it answers or its unit stops; exit ends the wait.
+  // interactive path, on its lifecycle marker turning ready or its unit
+  // stopping; nothing waits on it, and exit ends the wait. On ready it is
+  // adopted and the status bar redraws.
   const startingDaemonWait = new AbortController();
   bootstrapUnsubs.push(() => startingDaemonWait.abort());
-  const adoptWhenStarted = (control: DaemonServiceControl, serviceName: string, isReachable: () => Promise<boolean>): void => {
-    void waitForStartingDaemon({ control, isReachable, serviceName, signal: startingDaemonWait.signal })
+  const adoptWhenStarted = (control: DaemonServiceControl, serviceName: string, since: number): void => {
+    void waitForStartingDaemon({
+      control,
+      serviceName,
+      since,
+      markerPath: daemonLifecycleMarkerPathForHome(services.homeDirectory),
+      signal: startingDaemonWait.signal,
+    })
       .then(async (result) => {
         if (result === 'online') {
           await adoptStartedDaemon();
@@ -573,7 +582,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         isReachable,
       });
       if (outcome.action === 'started' || outcome.action === 'came-online') await adoptStartedDaemon();
-      if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, isReachable);
+      if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, outcome.since);
       announceAutostart(outcome);
     } catch (error) {
       logger.debug('Boot-time daemon start check failed', { error: summarizeError(error) });

@@ -12,6 +12,8 @@ import { researchCheckpointRoute, researchRouteString } from './agent-harness-re
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, SnapshotReader } from './agent-harness-autonomy-queue-types.ts';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { readAgentHostPairing } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
+import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 export interface AutonomyLiveRecordBundle {
   readonly tasks: readonly AutonomyQueueLiveRecord[];
   readonly approvals: readonly AutonomyQueueLiveRecord[];
@@ -132,7 +134,7 @@ export async function captureAutonomyLiveRecords(context: CommandContext, option
   const mask = (records: readonly AutonomyQueueLiveRecord[]) => records.map(maskRecord);
   return {
     tasks: mask(taskLiveRecords(data.tasks)),
-    approvals: mask(approvalLiveRecords(data.approvals)),
+    approvals: mask(approvalLiveRecords(data.approvals, ownHostPrincipal(context))),
     automationRuns: mask(automationRunLiveRecords(data.automation)),
     watcherReceipts: mask(watcherReceiptLiveRecords(data.artifacts)),
     schedules: mask(scheduleLiveRecords(data.automation)),
@@ -498,7 +500,20 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
   });
 }
 
-function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly AutonomyQueueLiveRecord[] {
+/**
+ * The principal this Agent's paired credential is on its host (`pairing:<token id>`), or undefined
+ * when it is not paired. The host lets that credential cancel only the asks it raised itself.
+ */
+function ownHostPrincipal(context: CommandContext): string | undefined {
+  const home = context.workspace.shellPaths?.homeDirectory;
+  if (!home) return undefined;
+  try {
+    const pairing = readAgentHostPairing(home, resolveConnectedHostAddress(context.platform.configManager).baseUrl);
+    return pairing.status === 'paired' ? `pairing:${pairing.tokenId}` : undefined;
+  } catch { return undefined; }
+}
+
+function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null, ownPrincipal: string | undefined): readonly AutonomyQueueLiveRecord[] {
   const statusRank = new Map([
     ['pending', 0],
     ['claimed', 1],
@@ -516,6 +531,9 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
     .slice(0, LIVE_RECORD_LIMIT)
     .map((approval) => {
       const active = isOpenApprovalStatus(approval.status);
+      // The host refuses this Agent's cancel of an ask it did not raise, so the route is shown only for its own.
+      const raisedHere = ownPrincipal !== undefined && approval.metadata['raisedByPrincipal'] === ownPrincipal;
+      const cancellable = active && raisedHere;
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
       // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
       const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /questions answer, or the web UI`;
@@ -537,12 +555,12 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           compactUnknown(approval.request.args),
         ].filter(Boolean).join(' | '),
         inspectRoute: commandRoute('/approval kinds'),
-        ...(active ? {
+        ...(cancellable ? {
           cancelRoute,
         } : {}),
         nextSteps: active ? [
           `tell the owner: ${ownerAnswers}`,
-          cancelRoute,
+          ...(cancellable ? [cancelRoute] : []),
         ] : [commandRoute('/approval kinds')],
         sourceIds: [
           approval.callId,
@@ -564,9 +582,11 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           active
             ? unavailableControl('deny', 'Deny approval', `It was put to the owner; ${ownerAnswers}.`)
             : unavailableControl('deny', 'Deny approval', `Approval is ${approval.status}; only pending or claimed approvals can be denied.`),
-          active
+          cancellable
             ? availableControl('cancel', 'Cancel approval', 'confirmed-effect', cancelRoute)
-            : unavailableControl('cancel', 'Cancel approval', `Approval is ${approval.status}; only pending or claimed approvals can be cancelled.`),
+            : active
+              ? unavailableControl('cancel', 'Cancel approval', `It was raised by someone else; only the asks this Agent raised can be withdrawn here, and ${ownerAnswers}.`)
+              : unavailableControl('cancel', 'Cancel approval', `Approval is ${approval.status}; only pending or claimed approvals can be cancelled.`),
         ],
       };
     });

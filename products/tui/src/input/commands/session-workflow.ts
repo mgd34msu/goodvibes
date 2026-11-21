@@ -17,10 +17,27 @@ import {
 import { requireProviderApi, requireSessionManager, requireShellPaths, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { isSessionOpenElsewhere } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { createSessionInputChangeSubscriber } from '@goodvibes/engine/platform/platform/runtime/client';
+import { requestSessionHandover } from '@goodvibes/engine/terminal-shell/session-handover';
+import { createDaemonVerbCaller, resolveDaemonEndpoint } from '../../runtime/client/operator-endpoint.ts';
 import { moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';
 import { redactSensitiveDataAsync, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
+
+/**
+ * `--force`: ask the terminal that has `sessionId` open, through the daemon both
+ * are attached to, to save it and let go; resolves once it has.
+ */
+async function requestHandoverThroughDaemon(ctx: CommandContext, sessionId: string): Promise<void> {
+  const configManager = ctx.platform.configManager;
+  const homeDirectory = (): string => requireShellPaths(ctx).homeDirectory;
+  const endpoint = await resolveDaemonEndpoint({ configManager, homeDirectory, mode: 'read-only' });
+  const subscribe = endpoint.available
+    ? createSessionInputChangeSubscriber({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token })
+    : (_onChange: (sessionId: string) => void, handlers?: { readonly onEnd?: () => void }) => { queueMicrotask(() => handlers?.onEnd?.()); return () => {}; };
+  await requestSessionHandover({ sessionId, verbs: createDaemonVerbCaller({ configManager, homeDirectory }), subscribeInputChanges: subscribe });
+}
 
 function copySessionSidecars(ctx: CommandContext, destination: string): void {
   const source = ctx.session.runtime.sessionId;
@@ -173,15 +190,23 @@ export async function resumeSavedSession(ctx: CommandContext, input: { readonly 
         );
       }
 
-      // Multi-instance safety: refuse (and require --force) when another
-      // running terminal holds this session open right now; resuming it here
-      // would fork its live state out from under that terminal. This process's
-      // own hold (re-resuming the session already active here) never blocks.
-      if (!force && isSessionOpenElsewhere(requireSurface(ctx), found.name)) {
-        throw commandRefusal(
-          'The session is open in another running terminal: resuming it here would fork its live state.',
-          `Close it there, or run /resume ${found.name} --force to go ahead anyway.`,
-        );
+      // Multi-instance safety: one terminal writes a session. When another
+      // running terminal holds it, it is refused, or with --force that terminal
+      // is asked to save it and let go, and the resume goes on only once it has.
+      // This process's own hold (re-resuming the session already active here) never blocks.
+      if (isSessionOpenElsewhere(requireSurface(ctx), found.name)) {
+        if (!force) {
+          throw commandRefusal(
+            'The session is open in another running terminal: resuming it here would fork its live state.',
+            `Continue it there, or run /resume ${found.name} --force to have that terminal save it and hand it over to this one.`,
+          );
+        }
+        ctx.print(`Asking the terminal that has ${found.name} open to save it and hand it over…`);
+        try {
+          await requestHandoverThroughDaemon(ctx, found.name);
+        } catch (error) {
+          throw commandRefusal(`Not resumed: ${summarizeError(error)}`);
+        }
       }
 
       try {

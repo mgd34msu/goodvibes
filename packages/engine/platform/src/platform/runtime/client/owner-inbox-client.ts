@@ -66,7 +66,11 @@ export function createOwnerInboxClient(verbs: Pick<DaemonVerbCaller, 'probe' | '
     const probe = verbs.probe();
     if (!probe.available) throw new Error(`The owner inbox lives in the daemon, which is not reachable: ${probe.reason}`);
   };
-  return {
+  const client: OwnerInboxClient = {
+    /** The daemon's list is the whole inbox; a daemon that does not answer throws. */
+    async listReport(filter: OwnerInboxListFilter = {}) {
+      return { items: await client.list(filter) };
+    },
     async list(filter: OwnerInboxListFilter = {}) {
       reachable();
       return readItems(await verbs.invoke('inbox.list', {
@@ -110,4 +114,5 @@ export function createOwnerInboxClient(verbs: Pick<DaemonVerbCaller, 'probe' | '
       }));
     },
   };
+  return client;
 }

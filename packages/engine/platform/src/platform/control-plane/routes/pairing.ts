@@ -15,9 +15,14 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError, PairingMinterRevokedError, SharedTokenNotReplaceableError, isPairingAttemptId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, SharedTokenNotReplaceableError, isPairingAttemptId } from '../../pairing/pairing-token-store.js';
+import { pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { admitEffects } from '../../security/effect-authority.js';
+import type { ApprovalBroker } from '../approval-broker.js';
+import { putToOwner } from '../owner-act.js';
 
 /** The narrow slice of PairingTokenManager these verbs need. */
 export type PairingGatewayService = Pick<
@@ -155,18 +160,51 @@ function createRenameHandler(service: PairingGatewayService): GatewayMethodHandl
 /** Told after a paired-device token was really revoked. */
 export type PairingRevokedListener = (event: { readonly id: string; readonly principalId: string | undefined }) => void;
 
-function createRevokeHandler(service: PairingGatewayService, onRevoked?: PairingRevokedListener): GatewayMethodHandler {
+/** The approval broker a withdrawal of access is put to the owner through. */
+export type PairingOwnerApprovals = Pick<ApprovalBroker, 'raiseApproval' | 'onApproved'>;
+
+function createRevokeHandler(service: PairingGatewayService, onRevoked?: PairingRevokedListener, ownerApprovals?: PairingOwnerApprovals): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const id = requireStringValue(params.id, 'id');
-    // On every machine of the group: the revocation is an authority record entry.
-    const outcome = service.revokeEverywhere ? await service.revokeEverywhere(id) : service.revokeWithMinted(id);
-    if (!outcome.revoked) {
-      throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
+    const revoke = async (): Promise<{ id: string; revoked: true; alsoRevoked: string[] }> => {
+      // On every machine of the group: the revocation is an authority record entry.
+      const outcome = service.revokeEverywhere ? await service.revokeEverywhere(id) : service.revokeWithMinted(id);
+      if (!outcome.revoked) {
+        throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
+      }
+      for (const revokedId of [id, ...outcome.alsoRevoked]) onRevoked?.({ id: revokedId, principalId: invocation.context.principalId });
+      return { id, revoked: true, alsoRevoked: [...outcome.alsoRevoked] };
+    };
+    const token = service.list().find((entry) => entry.id === id);
+    if (!token) throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
+    // A token the caller holds or minted is the caller's to revoke (control-plane.write, checked by the catalog).
+    const callerTokenId = pairingTokenIdOfPrincipal(invocation.context.principalId);
+    if (callerTokenId !== undefined && (token.id === callerTokenId || token.mintedBy === callerTokenId)) return revoke();
+    // Any other token is access the owner granted: withdrawing it is his own act.
+    const admission = admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']);
+    if (admission.kind === 'allowed') return revoke();
+    if (admission.kind === 'refused' || !ownerApprovals) {
+      throw new GatewayVerbError(`Revoking ${token.name} (${id}) withdraws access only the owner withdraws; this credential neither holds nor minted it. Nothing was revoked.`, 'OWNER_ONLY', 403, 'id');
     }
-    for (const revokedId of [id, ...outcome.alsoRevoked]) onRevoked?.({ id: revokedId, principalId: invocation.context.principalId });
-    return { id, revoked: true, alsoRevoked: [...outcome.alsoRevoked] };
+    const requestedBy = invocation.context.principalId ?? 'a caller who is not the owner';
+    const { approvalId } = await putToOwner(ownerApprovals, {
+      summary: `${requestedBy} asks to revoke the paired device ${token.name}`,
+      reasons: [`Revoking ${token.name} (${id}) ends that device's access, and the access of every device it paired.`],
+      tool: 'pairing.tokens.delete',
+      args: { id },
+      requestedBy,
+      apply: revoke,
+    });
+    return Response.json({
+      id,
+      code: 'OWNER_APPROVAL_PENDING',
+      approvalId,
+      followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
+      state: `nothing was revoked yet; revoking ${token.name} withdraws access only the owner withdraws, so it was put to him and is done when he approves it`,
+      next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
+    }, { status: 202 });
   };
 }
 
@@ -189,7 +227,7 @@ function createRevokeSharedHandler(service: PairingGatewayService): GatewayMetho
   };
 }
 
-const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewayService, onRevoked?: PairingRevokedListener) => GatewayMethodHandler>> = {
+const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewayService, onRevoked?: PairingRevokedListener, ownerApprovals?: PairingOwnerApprovals) => GatewayMethodHandler>> = {
   'pairing.tokens.list': createListHandler,
   'pairing.tokens.create': createMintHandler,
   'pairing.tokens.migrate': createMigrateHandler,
@@ -204,11 +242,11 @@ const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewa
  * never fail because one verb failed to register; the operator-contract gates
  * catch a real drift.
  */
-export function registerPairingGatewayMethods(catalog: GatewayMethodCatalog, service: PairingGatewayService, onRevoked?: PairingRevokedListener): void {
+export function registerPairingGatewayMethods(catalog: GatewayMethodCatalog, service: PairingGatewayService, onRevoked?: PairingRevokedListener, ownerApprovals?: PairingOwnerApprovals): void {
   for (const [methodId, factory] of Object.entries(PAIRING_HANDLER_FACTORIES)) {
     const descriptor = catalog.get(methodId);
     if (descriptor) {
-      catalog.register(descriptor, factory(service, onRevoked), { replace: true });
+      catalog.register(descriptor, factory(service, onRevoked, ownerApprovals), { replace: true });
     }
   }
 }

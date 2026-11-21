@@ -111,7 +111,7 @@ export interface GatewayVerbRefusal {
  *
  * The shape is deliberately narrow: an integer HTTP error status and a
  * machine code in the platform's own spelling (upper snake case, like
- * `REQUIRE_CONFIRM`). Both together are a statement that the thrower meant this
+ * `CONFIRMATION_REQUIRED`). Both together are a statement that the thrower meant this
  * to be a wire refusal; a plain `Error` carries neither and still collapses to
  * 500. An upstream HTTP or provider error also carries a status and a code, but
  * spells it `invalid_api_key` or `card_declined`; forwarding that would turn a

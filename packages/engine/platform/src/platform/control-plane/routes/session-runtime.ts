@@ -263,6 +263,8 @@ export function createSessionPermissionModeSetHandler(
         sessionId,
         code: 'OWNER_APPROVAL_PENDING',
         approvalId,
+        // Whether this caller may read the approval (approvals.list) and so follow it to its outcome.
+        followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
         mode: previousMode,
         requestedMode: toOperatorPermissionMode(nextMode),
         state: `nothing was changed yet; setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode, which only the owner does, so it was put to him and changes when he approves it`,

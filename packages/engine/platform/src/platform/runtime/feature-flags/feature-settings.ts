@@ -25,6 +25,7 @@
  */
 import type { ConfigKey } from '../../config/schema-types.js';
 import type { ConfigManager } from '../../config/manager.js';
+import { CONFIG_SCHEMA } from '../../config/schema.js';
 import { logger } from '../../utils/logger.js';
 import { FEATURE_FLAGS, FEATURE_FLAG_MAP } from './flags.js';
 import type { FeatureFlagManager } from './manager.js';
@@ -88,10 +89,25 @@ export function deriveFeatureState(binding: FeatureSettingsBinding, value: unkno
   }
 }
 
+/** Each settings key's schema default, read once on first use. */
+let schemaDefaults: ReadonlyMap<string, unknown> | null = null;
+
+/**
+ * A feature's default state: its binding applied to its settings key's schema
+ * default. The settings schema is the one owner of every default; the gate
+ * registry states none of its own.
+ */
+export function featureDefaultState(featureId: string): FlagState {
+  const binding = BINDINGS_BY_ID.get(featureId);
+  if (!binding) return 'disabled';
+  schemaDefaults ??= new Map(CONFIG_SCHEMA.map((setting) => [setting.key, setting.default] as const));
+  return deriveFeatureState(binding, schemaDefaults.get(binding.key));
+}
+
 /**
  * Derive every feature's desired state from the live config. Used at boot to
- * seed the gate manager; because each settings default matches the registry
- * default (enforced by test), deriving on a fresh config is a no-op.
+ * seed the gate manager; each feature's default state is derived from the same
+ * settings defaults (featureDefaultState), so deriving on a fresh config is a no-op.
  */
 export function deriveFeatureStates(
   configManager: Pick<ConfigManager, 'get'>,
@@ -198,7 +214,7 @@ function buildFeatureSetting(binding: FeatureSettingsBinding): FeatureSetting {
     },
     settings,
     restartRequired: !flag.runtimeToggleable,
-    defaultEnabled: flag.defaultState === 'enabled',
+    defaultEnabled: featureDefaultState(flag.id) === 'enabled',
     operable: flag.notOperable === undefined,
     inoperableDetail: flag.notOperable?.detail ?? null,
   };

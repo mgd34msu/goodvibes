@@ -54,7 +54,6 @@ import type { DomainDispatch, RuntimeStore } from '../../runtime/store/index.js'
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { DaemonBatchManager } from '../../batch/index.js';
 import type { CloudflareTunnelConnector } from '../../cloudflare/tunnel-connector.js';
-import { emitCompanionMessageReceived } from '../../runtime/emitters/session.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from '../auth-failure-audit.js';
 import { emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
 import { clientAddressOf, resolveClientAddress } from '../client-address.js';
@@ -93,6 +92,7 @@ import { missingScopeRefusal } from '@goodvibes/engine/daemon-api/error-response
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
 import { principalHasScope, type RequestContext, type RequestPrincipal } from '../http-policy.js';
+import { admitEffects } from '../../security/effect-authority.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
@@ -665,6 +665,18 @@ export class DaemonHttpRouter {
   }
 
   /**
+   * Whether the request's caller may read a shared session: any session but a
+   * hosted one, and a hosted one only as its owners and admins
+   * (session.transcript.read on its owners, as sessions.hosted.list decides).
+   */
+  private mayReadSession(req: Request, session: { readonly id: string; readonly kind?: unknown }): boolean {
+    if (session.kind !== 'hosted') return true;
+    const actor = this.principalOf(req)?.actor;
+    if (actor === undefined) return false;
+    return admitEffects(actor, ['session.transcript.read'], { owners: this.context.sessionOwners?.(session.id) ?? [] }).kind === 'allowed';
+  }
+
+  /**
    * Who an event stream belongs to and whether its credential still holds,
    * so a revoked credential's streams close: by `closeClientsOf` at once, or
    * at the next frame after a single session ended.
@@ -873,6 +885,7 @@ export class DaemonHttpRouter {
         },
         requireAdmin: (request) => this.context.requireAdmin(request),
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
+        mayReadSession: (request, session) => this.mayReadSession(request, session),
         userAuth: this.context.userAuth,
       },
       telemetry: {
@@ -928,6 +941,7 @@ export class DaemonHttpRouter {
         recordApiResponse: (request, path, response) => this.recordApiResponse(request, path, response),
         requireAdmin: (request) => this.context.requireAdmin(request),
         sessionBroker: buildRouterSessionBrokerAdapter(this.context.sessionBroker),
+        mayReadSession: (request, session) => this.mayReadSession(request, session),
         agentManager: { getStatus: (agentId) => this.context.agentManager.getStatus(agentId), cancel: (agentId) => this.context.agentManager.cancel(agentId) },
         // platform-owned empty-state copy, served while automation is enabled with zero routines (see feature-announcements).
         automationEmptyState: () => buildAutomationEmptyState({ enabled: this.getConfigValue('automation.enabled') === true, routineCount: this.context.automationManager.listJobs().length }),
@@ -979,23 +993,6 @@ export class DaemonHttpRouter {
         configManager: this.context.configManager,
         runtimeStore: this.context.runtimeStore,
         runtimeDispatch: this.context.runtimeDispatch,
-        publishConversationFollowup: (sessionId, envelope) => {
-          // Scope the event to TUI-kind clients only: non-TUI clients (web, companion
-          // app, etc.) must not receive raw operator conversation follow-ups. Using
-          // clientKind:'tui' ensures only the TUI surface receives this event.
-          this.context.controlPlaneGateway.publishEvent(
-            'conversation.followup.companion',
-            { sessionId, ...envelope },
-            { clientKind: 'tui' },
-          );
-          // Also emit on the runtime bus so the in-process TUI surface can
-          // subscribe and render the companion message in the conversation view.
-          emitCompanionMessageReceived(
-            this.context.runtimeBus,
-            { sessionId, traceId: `companion:${envelope.messageId}`, source: 'companion-followup' },
-            { sessionId, ...envelope },
-          );
-        },
         // `GET /api/sessions/:id/events`, see http/session-event-stream.ts.
         openSessionEventStream: (req, sessionId) => openScopedSessionEventStream(
           this.context.controlPlaneGateway,

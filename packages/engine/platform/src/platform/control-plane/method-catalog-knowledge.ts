@@ -702,13 +702,33 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     outputSchema: KNOWLEDGE_GRAPHQL_SCHEMA_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
-    id: 'knowledge.graphql.execute',
-    replay: IDEMPOTENCY_KEY_REPLAY,
-    effects: ['knowledge-content.read', 'outward.send'],
-    title: 'Execute Knowledge GraphQL',
-    description: 'Execute a GraphQL query or mutation against the dedicated knowledge domain endpoint.',
+    id: 'knowledge.graphql.query',
+    title: 'Query Knowledge GraphQL',
+    description: 'Run a GraphQL query against the dedicated knowledge domain endpoint (POST, or GET with the query in the URL). A read: it changes nothing. A mutation is refused 400 GRAPHQL_MUTATION_NOT_ALLOWED naming knowledge.graphql.mutate.',
     category: 'knowledge',
+    effects: ['knowledge-content.read'],
     http: { method: 'POST', path: '/api/knowledge/graphql' },
+    errorCodes: [
+      { code: 'GRAPHQL_MUTATION_NOT_ALLOWED', status: 400, meaning: 'The operation is a mutation; send it to knowledge.graphql.mutate. Nothing ran.' },
+    ],
+    inputSchema: bodyEnvelopeSchema({
+      query: STRING_SCHEMA,
+      operationName: STRING_SCHEMA,
+      variables: GRAPHQL_VARIABLES_SCHEMA,
+    }, ['query']),
+    outputSchema: KNOWLEDGE_GRAPHQL_EXECUTE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'knowledge.graphql.mutate',
+    replay: IDEMPOTENCY_KEY_REPLAY,
+    title: 'Run a Knowledge GraphQL Mutation',
+    description: 'Run a GraphQL mutation against the dedicated knowledge domain endpoint (ingest a URL, run a job, change a schedule, materialize a projection...). Admin, and it may fetch from the network, so over the relay with relay.requireStepUpForMutations on it needs a passkey confirmation. A query is refused 400 GRAPHQL_QUERY_NOT_ALLOWED naming knowledge.graphql.query.',
+    category: 'knowledge',
+    effects: ['knowledge.administer', 'outward.send'],
+    http: { method: 'POST', path: '/api/knowledge/graphql/mutate' },
+    errorCodes: [
+      { code: 'GRAPHQL_QUERY_NOT_ALLOWED', status: 400, meaning: 'The operation is a query; send it to knowledge.graphql.query. Nothing ran.' },
+    ],
     inputSchema: bodyEnvelopeSchema({
       query: STRING_SCHEMA,
       operationName: STRING_SCHEMA,

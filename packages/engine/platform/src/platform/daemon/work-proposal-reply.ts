@@ -34,7 +34,8 @@ export interface WorkProposalReplyDeps {
    * when ingress asked it with the message's other questions.
    */
   readonly reading?: { readonly target: WorkProposalRecord; readonly answer: InboundReading['proposal'] } | undefined;
-  readonly proposals?: (Pick<WorkProposalStore, 'listPending' | 'resolve'> & Partial<Pick<WorkProposalStore, 'get' | 'markStarted'>>) | undefined;
+  readonly proposals?: (Pick<WorkProposalStore, 'listPending' | 'resolve'>
+    & Partial<Pick<WorkProposalStore, 'get' | 'markStarting' | 'releaseStart' | 'markStarted'>>) | undefined;
   /**
    * Start the agreed work. Called only after an affirmative reply resolved a
    * pending proposal, so the run is pre-authorized by construction and must
@@ -184,9 +185,13 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
     proposalId: resolved.id,
     steered: Boolean(reply.note),
   });
+  let started: 'started' | 'held' | 'not-started';
   try {
-    // Started (or settled as not started): a restart from here on does not start it again.
-    if (await deps.startAgreedWork(resolved, reply.note) !== 'held') store.markStarted?.(resolved.id);
+    // The start is claimed, and the claim saved, before the agent is started:
+    // a restart from here on never starts the same agreed work a second time.
+    // Null: a start already under way in this process (the boot or reopen pass) took it.
+    if (store.markStarting && await store.markStarting(resolved.id) === null) return { consumed: true, action: 'accepted' };
+    started = await deps.startAgreedWork(resolved, reply.note);
   } catch (error) {
     // The proposal is already terminal, so a throw here would otherwise leave
     // the owner's "yes" answered by nothing.
@@ -195,10 +200,19 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
     await deps.settleUnstartedWork?.(resolved, 'The agreed work could not be started. Send the message again.').catch((settleError: unknown) => {
       logger.warn('Work proposal start-failure settlement failed', { proposalId: resolved.id, error: summarizeError(settleError) });
     });
+    // Settled and the owner told below: it is no longer owed work.
+    await store.markStarted?.(resolved.id).catch((markError: unknown) => {
+      logger.warn('Work proposal start-failure could not be recorded', { proposalId: resolved.id, error: summarizeError(markError) });
+    });
     await deps.replyOnChannel(resolved, `Could not start: ${resolved.summary}. Please send the request again.`).catch((noticeError: unknown) => {
       logger.warn('Work proposal start-failure notice failed', { error: summarizeError(noticeError) });
     });
     return { consumed: true, action: 'start-failed' };
   }
+  // Started (or settled as not started) is saved with an awaited write; held gives the claim back for after
+  // the restart. A failed save leaves the claim, so a restart settles it as interrupted and never runs it twice.
+  await (started === 'held' ? store.releaseStart?.(resolved.id) : store.markStarted?.(resolved.id))?.catch((markError: unknown) => {
+    logger.warn('Agreed work start could not be recorded', { proposalId: resolved.id, error: summarizeError(markError) });
+  });
   return { consumed: true, action: 'accepted' };
 }

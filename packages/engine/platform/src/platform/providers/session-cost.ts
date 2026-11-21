@@ -6,30 +6,37 @@
 // surface applies when it has only a model id, the honest unpriced state, the
 // session total, and the budget-alert policy that total is compared against.
 //
+// Every function here takes the `SessionPricing` it prices with: the
+// ProviderRegistry the caller's runtime holds. There is no process-wide
+// pricing state, so the terminal app, the Agent and the daemon price the same
+// usage the same way.
+//
 // Pricing resolution order (resolvePricing):
-//   1. `:free` suffix (the free-tier id convention), always priced at $0.
-//   2. The registry's resolveModelPricing, when wired via
-//      setModelPricingResolver()/wireCostPricing(): manual `pricing.modelPrices`
+//   1. The registry's resolveModelPricing: manual `pricing.modelPrices`
 //      -> registration -> provider-served -> catalog -> honest unknown.
-//   3. The live model catalog, when a source has been wired via
-//      setPricingSource(): an exact ID or published canonical identity.
-//   4. STATIC_FALLBACK_PRICING, a small hand-maintained safety net for common
+//   2. The registry's live model catalog: an exact ID or published canonical
+//      identity.
+//   3. STATIC_FALLBACK_PRICING, a small hand-maintained safety net for common
 //      frontier models: exact keys only. Unmatched IDs remain unpriced.
-//   5. Unpriced: the model is genuinely unknown to every source above. This is
+//   4. Unpriced: the model is genuinely unknown to every source above. This is
 //      reported explicitly via `priced: false` so consumers can render an
 //      honest "unpriced" state instead of a silent $0.
 //
-// Money is computed in exactly one place: every price, wired resolver or not,
-// goes through computeUsageCostUsd, which applies the source's explicit cache
-// rates (or the provider's published cache ratios) rather than billing cache
-// traffic at the full input rate. The provider is the one the model id names
-// (`provider:model`), so the session total agrees with the per-request costs
-// the turn loop sums.
+// Money is computed in exactly one place: every price goes through
+// computeUsageCostUsd, which applies the source's explicit cache rates (or the
+// provider's published cache ratios from the registry) rather than billing
+// cache traffic at the full input rate. The provider is the one the model id
+// names (`provider:model`), so the session total agrees with the per-request
+// costs the turn loop sums.
 // ---------------------------------------------------------------------------
 
-import { cacheRatiosFromCatalog, computeUsageCostUsd, setProviderCacheRatios, type ResolvedModelPricing } from './model-pricing.js';
+import { computeUsageCostUsd, type ResolvedModelPricing } from './model-pricing.js';
 import type { CatalogModel } from './model-catalog.js';
+import type { ProviderRegistry } from './registry.js';
 import { ModelIdentityResolver, type IdentityCandidate } from '../routing/model-identity.js';
+
+/** What a session cost is priced with: the caller's ProviderRegistry. */
+export type SessionPricing = Pick<ProviderRegistry, 'resolveModelPricing' | 'getRawCatalogModels' | 'cacheRatios'>;
 
 export interface ModelPricing {
   input: number;
@@ -55,8 +62,8 @@ export interface PricingResult {
   asOf?: string;
 }
 
-// Hand-maintained safety net, used only when the live catalog has no source
-// wired or does not recognize the model. NOT the primary pricing source,
+// Hand-maintained safety net, used only when neither the registry's resolver
+// nor its live catalog recognizes the model. NOT the primary pricing source,
 // see resolvePricing() below.
 const STATIC_FALLBACK_PRICING: Record<string, ModelPricing> = {
   // Free tier
@@ -85,82 +92,25 @@ const STATIC_FALLBACK_PRICING: Record<string, ModelPricing> = {
   'gemini-2.5-pro':        { input: 1.25,  output: 5 },
 };
 
-// Module-level injection point. A bare singleton rather than a threaded
-// parameter because the consumers are pure formatting functions with no
-// ProviderRegistry in scope. Tests that never call setPricingSource() fall
-// through to the static-fallback path, which keeps them isolated from catalog
-// state by default.
-let pricingSource: (() => readonly CatalogModel[]) | null = null;
-
-/** Wire (or clear, with null) the live catalog as the primary pricing source. */
-export function setPricingSource(source: (() => readonly CatalogModel[]) | null): void {
-  pricingSource = source;
-}
-
-// The ONE model pricing resolver (manual pricing.modelPrices -> registration
-// -> provider-served -> catalog -> honest unknown), wired at bootstrap as
-// ProviderRegistry.resolveModelPricing once the runtime exists. When set, it is
-// consulted FIRST so a manual price the user sets is visible to every cost
-// surface immediately; the catalog/static chain below remains the fallback for
-// resolver-unknown models and for surfaces (tests, headless) that never wire a
-// registry.
-let modelPricingResolver: ((modelId: string, providerId?: string) => ResolvedModelPricing) | null = null;
-
-/** Wire (or clear, with null) the registry's resolveModelPricing as the primary pricing source. */
-export function setModelPricingResolver(resolver: ((modelId: string, providerId?: string) => ResolvedModelPricing) | null): void {
-  modelPricingResolver = resolver;
-}
-
-/**
- * One-call bootstrap wiring: the live catalog as the legacy source AND the
- * registry's ONE pricing resolver (manual pricing.modelPrices -> registration
- * -> provider-served -> catalog -> honest unknown) as the primary, so every
- * cost surface sees a manually-set price immediately and can name its source.
- */
-export function wireCostPricing(registry: {
-  getRawCatalogModels(): readonly CatalogModel[];
-  resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing;
-}): void {
-  setPricingSource(() => registry.getRawCatalogModels());
-  setModelPricingResolver((modelId, providerId) => registry.resolveModelPricing(modelId, providerId));
-  let ratiosFrom: readonly CatalogModel[] | undefined;
-  let ratios: ReturnType<typeof cacheRatiosFromCatalog> = () => undefined;
-  setProviderCacheRatios((provider) => {
-    const models = registry.getRawCatalogModels();
-    if (models !== ratiosFrom) {
-      ratiosFrom = models;
-      ratios = cacheRatiosFromCatalog(models);
-    }
-    return ratios(provider);
-  });
-}
-
-let catalogCandidatesFrom: readonly CatalogModel[] | undefined;
-let catalogCandidates: readonly IdentityCandidate[] = [];
-
-/** The live catalog as identity candidates, rebuilt only when the catalog array changes. */
-function currentCatalogCandidates(): readonly IdentityCandidate[] {
-  const models = pricingSource?.() ?? [];
-  if (models !== catalogCandidatesFrom) {
-    catalogCandidatesFrom = models;
-    catalogCandidates = models.map((m) => ({ key: m.id, id: m.id, name: m.name, provider: m.providerId, canonicalModelId: m.canonicalModelId }));
-  }
-  return catalogCandidates;
-}
-
 const STATIC_CANDIDATES: readonly IdentityCandidate[] = Object.keys(STATIC_FALLBACK_PRICING).map((key) => ({ key, id: key }));
 
-const catalogIdentity = new ModelIdentityResolver({ candidates: currentCatalogCandidates });
 const staticIdentity = new ModelIdentityResolver({ candidates: () => STATIC_CANDIDATES });
 
 function catalogPricing(model: CatalogModel): ModelPricing | null {
   return model.tier === 'free' ? { input: 0, output: 0 } : model.pricing;
 }
 
+/**
+ * The catalog's price for a model id: an exact id, else the entry with the
+ * same published identity. Reached only when the registry's resolver priced
+ * nothing, so the identity table is built here, for this catalog.
+ */
 function findInCatalog(modelId: string, models: readonly CatalogModel[]): ModelPricing | null {
   const exact = models.find((m) => m.id === modelId);
   if (exact) return catalogPricing(exact);
   if (models.length === 0) return null;
+  const candidates: readonly IdentityCandidate[] = models.map((m) => ({ key: m.id, id: m.id, name: m.name, provider: m.providerId, canonicalModelId: m.canonicalModelId }));
+  const catalogIdentity = new ModelIdentityResolver({ candidates: () => candidates });
   const same = catalogIdentity.lookup({ id: modelId }, 'providers.session-cost.catalog-identity');
   const match = same === null ? undefined : models.find((m) => m.id === same);
   return match ? catalogPricing(match) : null;
@@ -185,9 +135,9 @@ function providerOfModelId(modelId: string): string | undefined {
 }
 
 /** Resolve once so an amount and its provenance always describe the same quote. */
-function resolvePricingQuote(modelId: string, providerId?: string): PricingQuote {
-  const resolved = modelPricingResolver?.(modelId, providerId);
-  if (resolved?.status === 'priced') {
+function resolvePricingQuote(pricing: SessionPricing, modelId: string, providerId?: string): PricingQuote {
+  const resolved = pricing.resolveModelPricing(modelId, providerId);
+  if (resolved.status === 'priced') {
     return {
       metadata: {
         pricing: { input: resolved.rates.inputPerMTok, output: resolved.rates.outputPerMTok },
@@ -198,8 +148,7 @@ function resolvePricingQuote(modelId: string, providerId?: string): PricingQuote
       resolved,
     };
   }
-  const models = pricingSource?.() ?? [];
-  const catalogHit = findInCatalog(modelId, models);
+  const catalogHit = findInCatalog(modelId, pricing.getRawCatalogModels());
   if (catalogHit) return { metadata: { pricing: catalogHit, priced: true, source: 'catalog' } };
   const fallbackHit = findInStaticFallback(modelId);
   if (fallbackHit) return { metadata: { pricing: fallbackHit, priced: true, source: 'fallback' } };
@@ -211,8 +160,8 @@ function resolvePricingQuote(modelId: string, providerId?: string): PricingQuote
  * whether that pricing is real (vs. an unpriced placeholder). See the module
  * header for the full resolution order.
  */
-export function resolvePricing(modelId: string): PricingResult {
-  return resolvePricingQuote(modelId).metadata;
+export function resolvePricing(pricing: SessionPricing, modelId: string): PricingResult {
+  return resolvePricingQuote(pricing, modelId).metadata;
 }
 
 /** The amount and provenance of one session-usage pricing lookup. */
@@ -229,6 +178,7 @@ export interface SessionCostResult {
  * provider-qualified model id names is used.
  */
 export function resolveSessionCost(
+  pricing: SessionPricing,
   inputTokens: number,
   outputTokens: number,
   cacheRead: number,
@@ -236,7 +186,7 @@ export function resolveSessionCost(
   modelId: string,
   providerId?: string,
 ): SessionCostResult {
-  const { metadata, resolved } = resolvePricingQuote(modelId, providerId);
+  const { metadata, resolved } = resolvePricingQuote(pricing, modelId, providerId);
   const billedBy = providerId ?? providerOfModelId(modelId);
   // A price from the catalog or the built-in table carries no cache rates of
   // its own; it is priced by the same function with the provider's ratios.
@@ -245,7 +195,8 @@ export function resolveSessionCost(
     source: 'catalog',
     rates: { inputPerMTok: metadata.pricing.input, outputPerMTok: metadata.pricing.output },
   };
-  const cost = computeUsageCostUsd(priced, { inputTokens, outputTokens, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite }, billedBy) ?? 0;
+  const cost = computeUsageCostUsd(priced, { inputTokens, outputTokens, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite }, billedBy,
+    billedBy ? pricing.cacheRatios(billedBy) : undefined) ?? 0;
   return {
     cost,
     priced: metadata.priced,
@@ -260,8 +211,8 @@ export function resolveSessionCost(
  * provider-served/built-in equivalents) otherwise. Null when the model is
  * unpriced, callers render the explicit "price unknown" marker instead.
  */
-export function describePricingSource(modelId: string): string | null {
-  const result = resolvePricing(modelId);
+export function describePricingSource(pricing: SessionPricing, modelId: string): string | null {
+  const result = resolvePricing(pricing, modelId);
   if (!result.priced) return null;
   switch (result.source) {
     case 'user':
@@ -277,19 +228,9 @@ export function describePricingSource(modelId: string): string | null {
   }
 }
 
-/**
- * getPricing, resolve USD-per-1M-token pricing for a model ID.
- * Back-compat wrapper over resolvePricing(); returns zero for both genuinely
- * free and genuinely unknown models (use resolvePricing/isModelPriced to
- * distinguish the two).
- */
-export function getPricing(modelId: string): ModelPricing {
-  return resolvePricing(modelId).pricing;
-}
-
 /** True when `modelId` resolves to a real price (free or paid), false when it's an unpriced placeholder. */
-export function isModelPriced(modelId: string): boolean {
-  return resolvePricing(modelId).priced;
+export function isModelPriced(pricing: SessionPricing, modelId: string): boolean {
+  return resolvePricing(pricing, modelId).priced;
 }
 
 /**
@@ -306,6 +247,7 @@ export function isModelPriced(modelId: string): boolean {
  * distinguishes "genuinely free/priced" from "unpriced".
  */
 export function calcSessionCost(
+  pricing: SessionPricing,
   inputTokens: number,
   outputTokens: number,
   cacheRead: number,
@@ -313,7 +255,7 @@ export function calcSessionCost(
   modelId: string,
   providerId?: string,
 ): number {
-  return resolveSessionCost(inputTokens, outputTokens, cacheRead, cacheWrite, modelId, providerId).cost;
+  return resolveSessionCost(pricing, inputTokens, outputTokens, cacheRead, cacheWrite, modelId, providerId).cost;
 }
 
 /**

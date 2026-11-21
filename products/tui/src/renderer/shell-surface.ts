@@ -178,7 +178,7 @@ export { promptCursorOffset, type WrappedPromptCursorInfo } from '@goodvibes/eng
 export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
   blankRow,
   renderStatusLine,
-  cost: (options) => statusCostText(options.usage, options.model),
+  cost: (options) => statusCostText(options.usage, options.model, options.pricing),
   decorateStatus: (line) => tagFooterLine(line, 'usage'),
   hints(options) {
     const t = activeTokens();

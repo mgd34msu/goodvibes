@@ -1,7 +1,7 @@
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import type { ContractErrorCode, ContractReplayKey } from '../types/foundation-contract.js';
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
-import type { Actor, CredentialKind } from '../daemon/http-policy.js';
+import type { Actor, CredentialKind, PrincipalKind } from '../daemon/http-policy.js';
 import { effectFacts, type EffectId } from '../security/effect-authority.js';
 export type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
 
@@ -57,11 +57,20 @@ export interface GatewayMethodDescriptor {
   readonly effect?: GatewayMethodEffect | undefined;
   /**
    * The owner's own act (answering a purchase window or the owner inbox, typing
-   * a card security code): the daemon takes it only from the owner's authority
-   * as the transport established it, and an agent is refused and told how the
-   * owner does it.
+   * a card security code, withdrawing access he granted): only the owner's
+   * credential makes it; another is refused, or its call put to the owner. For
+   * a plugin's method, a declared `ownerOnly` means a model never calls it.
    */
   readonly ownerOnly?: boolean | undefined;
+  /** A model never makes the call, whoever it acts for; an agent is refused and told how the owner does it. */
+  readonly modelRefused?: boolean | undefined;
+  /**
+   * The confirmation the call needs before it runs (control-plane/confirmation-gate.ts):
+   * `confirm` (input `confirm: true`, not declared a non-person request),
+   * `owner-request` (`confirm: true` from a credential that states a person
+   * asked), or `not-declined`. Refused with one body, CONFIRMATION_REQUIRED.
+   */
+  readonly confirmation?: 'confirm' | 'owner-request' | 'not-declined' | undefined;
   /**
    * The call cannot be undone (it deletes what nothing restores, or ends work
    * for good): an agent's call is the owner's to decide, and Jev is never
@@ -139,7 +148,7 @@ export interface GatewayEventDescriptor {
 
 export interface GatewayMethodInvocationContext {
   readonly principalId?: string | undefined;
-  readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
+  readonly principalKind?: PrincipalKind | undefined;
   readonly admin?: boolean | undefined;
   readonly scopes?: readonly string[] | undefined;
   readonly clientKind?: string | undefined;
@@ -258,6 +267,8 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   effects: arraySchema(STRING_SCHEMA),
   effect: stringEnumSchema(['read', 'write', 'outward']),
   ownerOnly: BOOLEAN_SCHEMA,
+  modelRefused: BOOLEAN_SCHEMA,
+  confirmation: stringEnumSchema(['confirm', 'owner-request', 'not-declined']),
   irreversible: BOOLEAN_SCHEMA,
   changesContract: BOOLEAN_SCHEMA,
   recipients: arraySchema(STRING_SCHEMA),
@@ -476,7 +487,7 @@ export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
 const ACCESS_AND_SETTINGS_WRITE_SCOPES: ReadonlySet<string> = new Set(['write:auth', 'write:config']);
 
 /** The fields a builtin method's effects decide; a builtin descriptor states its effects instead. */
-type EffectDerivedField = 'access' | 'scopes' | 'ownerOnly' | 'irreversible' | 'changesContract' | 'effect' | 'effects';
+type EffectDerivedField = 'access' | 'scopes' | 'ownerOnly' | 'modelRefused' | 'irreversible' | 'changesContract' | 'effect' | 'effects';
 
 /** What a builtin method states: its effects (at least one), never the fields computed from them. */
 export type BuiltinMethodInput = Omit<GatewayMethodDescriptor, 'source' | 'transport' | EffectDerivedField>
@@ -511,6 +522,7 @@ export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescri
     effects: [...input.effects],
     ...(dangerous === undefined ? {} : { dangerous }),
     ...(facts.ownerOnly ? { ownerOnly: true } : {}),
+    ...(facts.modelRefused ? { modelRefused: true } : {}),
     ...(facts.irreversible ? { irreversible: true } : {}),
     ...(facts.changesContract ? { changesContract: true } : {}),
     effect,

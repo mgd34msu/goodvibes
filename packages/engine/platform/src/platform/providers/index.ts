@@ -229,6 +229,7 @@ export {
   UNKNOWN_MODEL_PRICING,
 } from './model-pricing.js';
 export type {
+  CacheRatio,
   ManualModelPrice,
   ModelPricingDeps,
   ModelPricingRates,
@@ -252,18 +253,15 @@ export {
   calcSessionCost,
   computeBudgetBreach,
   describePricingSource,
-  getPricing,
   isModelPriced,
   MODEL_PRICES_CONFIG_KEY,
   readBudgetAlertUsd,
   resolvePricing,
-  setModelPricingResolver,
-  setPricingSource,
-  wireCostPricing,
   writeManualModelPrice,
 } from './session-cost.js';
 export type {
   BudgetAlertConfigAccess,
+  SessionPricing,
   ModelPricing,
   PricingResult,
   PricingSourceKind,

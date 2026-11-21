@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { actorFromPrincipal, type Actor, type OwnerIdentity } from '@goodvibes/engine/daemon-api/http-policy';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority, NativeCredential } from '../pairing/pairing-token-store.js';
+import { LOCAL_OWNER_PRINCIPAL, pairingPrincipalId } from '../pairing/principal-ids.js';
 import type { RevisionSource } from '../utils/revision.js';
 
 export const OPERATOR_SESSION_COOKIE_NAME = 'goodvibes_session';
@@ -272,25 +273,81 @@ export function isOperatorAdmin(authenticated: AuthenticatedOperatorRequest | nu
   return authenticated.roles.includes('admin');
 }
 
+/** The default grant, narrowed to a stored list. A stored list never widens it. */
+export function narrowGatewayGrant(defaults: readonly string[], stored: readonly string[] | undefined): readonly string[] {
+  if (stored === undefined || stored.includes('*')) return defaults;
+  const allowed = new Set(stored);
+  return Object.freeze(defaults.filter(scope => allowed.has(scope)));
+}
+
+/**
+ * What a paired device holds: full operator authority (admin, and the whole
+ * default grant) unless its pairing stores a narrower list.
+ */
+export function pairingGrant(defaults: readonly string[], stored: readonly string[] | undefined): { readonly principalKind: 'token'; readonly admin: boolean; readonly scopes: readonly string[] } {
+  return { principalKind: 'token', admin: stored === undefined || stored.includes('*'), scopes: narrowGatewayGrant(defaults, stored) };
+}
+
+/** Who an authenticated operator credential is, and what it holds. */
+export interface OperatorPrincipalGrant {
+  readonly principalId: string;
+  readonly principalKind: 'token' | 'user';
+  readonly admin: boolean;
+  readonly scopes: readonly string[];
+  /** A device the owner paired himself (no client named): it acts as the owner. */
+  readonly ownerDevice?: true | undefined;
+}
+
+/**
+ * The one decision of who a credential is and what it holds, for every
+ * listener: the operator token is the owner with the whole grant; a paired
+ * device holds the whole grant unless its pairing stores a narrower list, and
+ * is the owner's own device when the owner paired it for no named client; a
+ * sign-in holds its role's default set (`grantedScopes(true)` for an admin,
+ * `grantedScopes(false)` otherwise), narrowed to its stored list. The caller
+ * passes its catalog's default sets, so the control plane and the webhook
+ * listener judge one credential the same way.
+ */
+export function operatorPrincipalGrant(
+  authenticated: AuthenticatedOperatorRequest,
+  grantedScopes: (includeWrite: boolean) => readonly string[],
+): OperatorPrincipalGrant {
+  if (authenticated.kind === 'shared-token') {
+    return { principalId: LOCAL_OWNER_PRINCIPAL, principalKind: 'token', admin: true, scopes: grantedScopes(true) };
+  }
+  const stored = authenticated.scopes;
+  if (authenticated.kind === 'pairing-token') {
+    const ownerDevice = authenticated.ownerDevice === true && authenticated.client === undefined;
+    return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingGrant(grantedScopes(true), stored), ...(ownerDevice ? { ownerDevice: true as const } : {}) };
+  }
+  const adminRole = authenticated.roles.includes('admin');
+  return {
+    principalId: authenticated.username,
+    principalKind: 'user',
+    // A narrowed list is the whole grant: admin-only routes would bypass it.
+    admin: adminRole && (stored === undefined || stored.includes('*')),
+    scopes: narrowGatewayGrant(grantedScopes(adminRole), stored),
+  };
+}
+
 /**
  * The actor an authenticated operator request is (daemon-api/src/actor.ts), for
- * a listener that has no method catalog of its own (the webhook listener): the
- * operator token is the owner; a pairing or sign-in with full authority is the
- * owner or an admin as the control plane decides it; a narrowed credential
- * holds its stored list. What it may cause is then the effect table's answer.
+ * a listener that has no method catalog of its own (the webhook listener),
+ * judged by {@link operatorPrincipalGrant} with the default sets the caller
+ * passes (the http listener passes the catalog grant). What it may cause is
+ * then the effect table's answer.
  */
-export function operatorRequestActor(authenticated: AuthenticatedOperatorRequest, owner: OwnerIdentity, loopback = false): Actor {
-  const admin = isOperatorAdmin(authenticated);
-  const principalId = authenticated.kind === 'shared-token' ? 'shared-token'
-    : authenticated.kind === 'pairing-token' ? `pairing:${authenticated.tokenId}` : authenticated.username;
-  const stored = authenticated.kind === 'shared-token' ? undefined : authenticated.scopes;
+export function operatorRequestActor(
+  authenticated: AuthenticatedOperatorRequest,
+  owner: OwnerIdentity,
+  grantedScopes: (includeWrite: boolean) => readonly string[],
+  loopback = false,
+): Actor {
+  const grant = operatorPrincipalGrant(authenticated, grantedScopes);
   return actorFromPrincipal({
-    principalId,
-    principalKind: authenticated.kind === 'session' ? 'user' : 'token',
+    ...grant,
     credentialKind: credentialKindOf(authenticated, loopback),
-    ownerDevice: authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined,
-    admin,
-    ...(stored !== undefined ? { scopes: stored } : {}),
+    ownerDevice: grant.ownerDevice === true,
   }, owner);
 }
 

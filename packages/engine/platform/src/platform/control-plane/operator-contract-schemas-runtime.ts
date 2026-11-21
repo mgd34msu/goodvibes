@@ -347,11 +347,18 @@ export const SHARED_SESSION_REGISTER_OUTPUT_SCHEMA = objectSchema({
   conflict: objectSchema({ status: enumSchema(['closed']) }, ['status']),
 }, ['session', 'reopened']);
 
+/**
+ * A companion main-chat message (kind 'message') queued as the session's next
+ * follow-up: the input that holds it and what became of it (`queued-for-surface`
+ * when a terminal running the session collects it, `queued-follow-up` or
+ * `continued-live` behind a running turn). `messageId` echoes the caller's id.
+ */
 export const SHARED_SESSION_CONVERSATION_ROUTE_OUTPUT_SCHEMA = objectSchema({
   messageId: STRING_SCHEMA,
-  routedTo: STRING_SCHEMA,
   sessionId: STRING_SCHEMA,
-}, ['messageId', 'routedTo', 'sessionId']);
+  inputId: STRING_SCHEMA,
+  mode: SHARED_SESSION_MESSAGE_MODE_SCHEMA,
+}, ['sessionId', 'inputId', 'mode']);
 
 export const SHARED_SESSION_MESSAGE_CREATE_OUTPUT_SCHEMA = objectSchema({
   session: nullableSchema(SHARED_SESSION_RECORD_SCHEMA),

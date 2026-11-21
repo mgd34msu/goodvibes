@@ -31,6 +31,7 @@ export { dispatchDaemonApiRoutes } from './api-router.js';
 export type { DaemonApiRouteExtension } from './api-router.js';
 export { dispatchGatewayRestRoutes } from './gateway-rest-routes.js';
 export {
+  AUTHENTICATED_PRINCIPAL_KINDS,
   NO_OWNER_USER,
   actorFromChannelSender,
   actorFromPrincipal,
@@ -43,7 +44,7 @@ export {
   systemActor,
 } from './http-policy.js';
 export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './http-policy.js';
-export type { AuthenticatedPrincipal, AuthenticatedPrincipalKind, AuthenticatedPrincipalResolver, CredentialKind, ElevatedPrivateHostFetchConfig, PrivateHostFetchConfig, RequestContext, RequestPrincipal } from './http-policy.js';
+export type { AuthenticatedPrincipal, AuthenticatedPrincipalKind, AuthenticatedPrincipalResolver, CredentialKind, PrincipalKind, ElevatedPrivateHostFetchConfig, PrivateHostFetchConfig, RequestContext, RequestPrincipal } from './http-policy.js';
 export {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,

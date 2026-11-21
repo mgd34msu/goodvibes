@@ -25,7 +25,7 @@
  *
  * `explicitUserRequest` is deliberately NOT sent, and that is not the same call as
  * authority. It lives in an invocation context no transport populates, and
- * refuseNonUserRequest() refuses only an explicit `false`, so sending one would assert
+ * the confirmation gate's not-declined level refuses only an explicit `false`, so sending one would assert
  * something this surface cannot know, and sending `false` would refuse the owner's own
  * click. Authority is a body parameter every caller is already constructing, which is
  * exactly why stating it costs one word and closes a hole.

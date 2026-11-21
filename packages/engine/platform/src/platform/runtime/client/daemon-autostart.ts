@@ -37,7 +37,10 @@
  * - Every failure is reported and none of them break boot. Discovery failing is
  *   a reason to say so, not a reason to refuse to start.
  */
+import { mkdirSync, readFileSync, watch } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import { PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
+import { readLifecycleMarker } from '../../daemon/lifecycle-marker.js';
 import { logger, summarizeError } from '../../utils/index.js';
 import type { ConfigManager } from '../../config/manager.js';
 
@@ -186,8 +189,12 @@ export type DaemonAutostartOutcome =
   | { readonly action: 'not-installed' }
   | { readonly action: 'started'; readonly serviceName: string }
   | { readonly action: 'came-online'; readonly serviceName: string }
-  /** The service manager still reports the unit running but the daemon has not answered yet: wait with {@link waitForStartingDaemon}. */
-  | { readonly action: 'starting'; readonly serviceName: string }
+  /**
+   * The service manager still reports the unit running but the daemon has not
+   * answered yet: wait with {@link waitForStartingDaemon}. `since` is when this
+   * start began (epoch ms); the daemon's ready record stamped at or after it is this start's.
+   */
+  | { readonly action: 'starting'; readonly serviceName: string; readonly since: number }
   | { readonly action: 'start-failed'; readonly serviceName: string; readonly reason: string };
 
 export interface DaemonAutostartOptions {
@@ -205,24 +212,6 @@ export interface DaemonAutostartOptions {
 const DEFAULT_WAIT_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 400;
 
-/** A pause between probes that ends early when `signal` fires. */
-function pause(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-    const done = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    signal?.addEventListener('abort', done, { once: true });
-  });
-}
-
 /** Whether the service manager reports `serviceName` running now. */
 function unitRunning(control: DaemonServiceControl, serviceName: string): boolean {
   try {
@@ -234,8 +223,8 @@ function unitRunning(control: DaemonServiceControl, serviceName: string): boolea
 }
 
 /** What the foreground wait says once it ends unanswered: the service manager's state decides, not the time spent. */
-function unansweredOutcome(control: DaemonServiceControl, serviceName: string): DaemonAutostartOutcome {
-  if (unitRunning(control, serviceName)) return { action: 'starting', serviceName };
+function unansweredOutcome(control: DaemonServiceControl, serviceName: string, since: number): DaemonAutostartOutcome {
+  if (unitRunning(control, serviceName)) return { action: 'starting', serviceName, since };
   return {
     action: 'start-failed',
     serviceName,
@@ -243,38 +232,91 @@ function unansweredOutcome(control: DaemonServiceControl, serviceName: string): 
   };
 }
 
+/** A watch on one directory's entries; `close` ends it. */
+export type DirectoryWatch = (directory: string, onChange: (filename: string | null) => void) => { close(): void };
+
+const watchDirectory: DirectoryWatch = (directory, onChange) => {
+  const watcher = watch(directory, { persistent: false }, (_event, filename) => onChange(filename === null ? null : String(filename)));
+  return { close: () => watcher.close() };
+};
+
+/** The marker as it stands, read only: an unreadable file is "not ready yet", never moved aside from under the daemon. */
+function readMarkerReadOnly(markerPath: string): ReturnType<typeof readLifecycleMarker> {
+  return readLifecycleMarker(markerPath, {
+    read: (path) => { try { return readFileSync(path, 'utf-8'); } catch { return null; } },
+    write: () => { throw new Error('the daemon lifecycle marker is read-only here'); },
+  });
+}
+
 export interface WaitForStartingDaemonOptions {
   readonly control: DaemonServiceControl;
-  readonly isReachable: () => Promise<boolean>;
   readonly serviceName: string;
+  /** The daemon's lifecycle marker (`daemonLifecycleMarkerPathForHome`). */
+  readonly markerPath: string;
+  /** When this start began (the `starting` outcome's `since`). */
+  readonly since: number;
   /** Ends the wait (the app is shutting down); the wait then resolves `aborted`. */
   readonly signal: AbortSignal;
-  readonly pollIntervalMs?: number | undefined;
-  /** Injectable so tests drive the wait loop deterministically. */
-  readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /** Injectable directory watch (tests); defaults to `fs.watch`. */
+  readonly watch?: DirectoryWatch | undefined;
 }
 
 /**
  * Wait for a daemon whose unit the service manager reports running but which
- * has not answered yet ({@link DaemonAutostartOutcome} `starting`). The same
- * probe at the same interval as the boot-time wait; `online` on the first
- * answer, `stopped` once the service manager reports the unit not running,
- * `aborted` when `signal` fires. Never throws.
+ * has not answered yet ({@link DaemonAutostartOutcome} `starting`), on real
+ * signals only: a watch on the daemon's lifecycle marker, which the daemon
+ * stamps `running` once it is fully started and accepting (`online`), and
+ * which it rewrites at every start attempt, so a restart after a failed start
+ * is seen; on each such change the service manager is asked once whether the
+ * unit still runs (`stopped` when not). `aborted` when `signal` fires. No
+ * timer and no time limit. The watch is closed on every path. Never throws.
+ *
+ * What it cannot see: a unit that ends without writing the marker again (it
+ * died before its first start attempt and is not restarted) stays waited on
+ * until `signal` fires; the app's start-up never waits on this.
  */
-export async function waitForStartingDaemon(options: WaitForStartingDaemonOptions): Promise<'online' | 'stopped' | 'aborted'> {
-  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-  const sleep = options.sleep ?? ((ms: number) => pause(ms, options.signal));
-  for (;;) {
-    if (options.signal.aborted) return 'aborted';
+export function waitForStartingDaemon(options: WaitForStartingDaemonOptions): Promise<'online' | 'stopped' | 'aborted'> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let watcher: { close(): void } | null = null;
+    const finish = (result: 'online' | 'stopped' | 'aborted'): void => {
+      if (settled) return;
+      settled = true;
+      options.signal.removeEventListener('abort', onAbort);
+      try { watcher?.close(); } catch { /* already closed */ }
+      watcher = null;
+      resolve(result);
+    };
+    const onAbort = (): void => finish('aborted');
+    const ready = (): boolean => {
+      const marker = readMarkerReadOnly(options.markerPath);
+      return marker !== null && marker.state === 'running' && marker.at >= options.since;
+    };
+    const check = (): void => {
+      if (settled) return;
+      if (ready()) { finish('online'); return; }
+      if (!unitRunning(options.control, options.serviceName)) finish('stopped');
+    };
+    if (options.signal.aborted) { finish('aborted'); return; }
+    options.signal.addEventListener('abort', onAbort, { once: true });
+    const directory = dirname(options.markerPath);
+    const name = basename(options.markerPath);
     try {
-      if (await options.isReachable()) return 'online';
+      // The daemon creates this directory with its state; making it here only lets the watch start first.
+      mkdirSync(directory, { recursive: true });
+      watcher = (options.watch ?? watchDirectory)(directory, (filename) => {
+        // The marker is replaced by rename from `<name>.tmp-...`, so the directory is
+        // watched; some platforms name only the staging file in the event.
+        if (filename === null || filename === name || filename.startsWith(`${name}.`)) check();
+      });
     } catch (error) {
-      logger.debug('[startup] re-probing the starting daemon failed', { error: summarizeError(error) });
+      logger.warn('[startup] the daemon\'s lifecycle marker cannot be watched; it is connected once it answers a later request', { error: summarizeError(error) });
+      finish('aborted');
+      return;
     }
-    if (options.signal.aborted) return 'aborted';
-    if (!unitRunning(options.control, options.serviceName)) return 'stopped';
-    await sleep(pollIntervalMs);
-  }
+    // A ready record written before the watch began, or a unit already gone.
+    check();
+  });
 }
 
 function classifyMode(daemonMode: string): DaemonAutostartInactionReason | 'recoverable' {
@@ -308,6 +350,8 @@ function classifyMode(daemonMode: string): DaemonAutostartInactionReason | 'reco
 export async function autostartInstalledDaemon(options: DaemonAutostartOptions): Promise<DaemonAutostartOutcome> {
   const classification = classifyMode(options.daemonMode);
   if (classification !== 'recoverable') return { action: 'none', reason: classification };
+  // A ready record the daemon stamps from here on belongs to this start.
+  const since = Date.now();
 
   const waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
   const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
@@ -344,7 +388,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     // The service manager already reports the unit active, it may be mid-start
     // or mid-restart. Wait for it, but never issue another start underneath it.
     if (await waitForAnswer()) return { action: 'came-online', serviceName: target.serviceName };
-    return unansweredOutcome(options.control, target.serviceName);
+    return unansweredOutcome(options.control, target.serviceName, since);
   }
 
   if (!target.startSupported) {
@@ -364,7 +408,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     };
   }
   if (await waitForAnswer()) return { action: 'started', serviceName: target.serviceName };
-  return unansweredOutcome(options.control, target.serviceName);
+  return unansweredOutcome(options.control, target.serviceName, since);
 }
 
 /** What a surface says when no daemon answers and no daemon service is installed to start. */
@@ -388,7 +432,7 @@ export function describeDaemonAutostart(
     case 'came-online':
       return { level: 'low', text: `[Startup] The GoodVibes daemon was already starting; GoodVibes connected once it answered${suffix}.` };
     case 'starting':
-      return { level: 'low', text: '[Startup] The GoodVibes daemon is starting; GoodVibes connects when it answers.' };
+      return { level: 'low', text: '[Startup] The GoodVibes daemon is starting; shared sessions, the web UI, phone access and the other things that need it work once it is ready.' };
     case 'start-failed':
       return { level: 'high', text: `[Startup] The daemon is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start` };
     case 'not-installed':

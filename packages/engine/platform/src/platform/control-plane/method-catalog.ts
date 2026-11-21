@@ -121,6 +121,8 @@ import {
   builtinGatewayStepUpMethodDescriptors,
 } from './method-catalog-stepup.js';
 import { GatewayVerbError } from './routes/gateway-verb-error.js';
+import { requireConfirmation } from './confirmation-gate.js';
+import { readInvocationParams } from './routes/invocation-params.js';
 import { EngineErrorCodes } from '@goodvibes/engine/errors';
 
 export type {
@@ -622,6 +624,9 @@ export class GatewayMethodCatalog {
       }
       throw new Error(`Gateway method has no internal handler: ${id}`);
     }
+    // The one confirmation gate: what the method declares, before its handler runs, on every path.
+    const confirmation = entry.descriptor.confirmation;
+    if (confirmation !== undefined) requireConfirmation(confirmation, id, readInvocationParams(invocation), invocation.context);
     return entry.handler(invocation);
   }
 }

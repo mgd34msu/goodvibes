@@ -23,14 +23,15 @@
  * The platform owns the writers (`platform/daemon/lifecycle-marker.ts`,
  * `platform/daemon/receipts.ts`). The marker is read with the platform's own
  * `readLifecycleMarker`, given a read-only io so a marker it cannot parse is
- * reported as absent rather than moved aside from under the daemon. The
+ * reported as unreadable, with why, rather than moved aside from under the
+ * daemon; a missing file is told apart from one that cannot be read. The
  * receipts reader stays here: the platform's receipt store is a writer whose
  * constructor sets an unreadable file aside and rewrites the file, which a
  * status command must never do.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readLifecycleMarker } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
+import { daemonLifecycleMarkerPath, readLifecycleMarker } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 
 /** Enough receipts to explain a restart; a status page is not a log viewer. */
 const MAX_REPORTED_RECEIPTS = 10;
@@ -62,7 +63,7 @@ export interface LocalDaemonStatePaths {
 /** The two paths, derived the same way the daemon facade derives them. */
 export function localDaemonStatePaths(controlPlaneConfigDir: string): LocalDaemonStatePaths {
   return {
-    markerPath: join(controlPlaneConfigDir, 'control-plane', 'daemon-lifecycle.json'),
+    markerPath: daemonLifecycleMarkerPath(controlPlaneConfigDir),
     receiptsPath: join(controlPlaneConfigDir, 'control-plane', 'daemon-receipts.json'),
   };
 }
@@ -171,7 +172,7 @@ export function readDaemonReceipts(
       deliveredAt: finiteNumber(record['deliveredAt']),
     });
   }
-  return receipts.slice(-MAX_REPORTED_RECEIPTS);
+  return { receipts: receipts.slice(-MAX_REPORTED_RECEIPTS) };
 }
 
 export interface LocalDaemonState {
@@ -180,7 +181,11 @@ export interface LocalDaemonState {
   /** Why it is unavailable, when it is. */
   readonly unavailableReason: string | undefined;
   readonly marker: DaemonLifecycleMarker | null;
+  /** Why the lifecycle marker is there but could not be read, when it could not. */
+  readonly markerUnreadable?: string | undefined;
   readonly receipts: readonly DaemonReceipt[];
+  /** Why the receipts file is there but could not be read, when it could not. */
+  readonly receiptsUnreadable?: string | undefined;
   /** Milliseconds since the marker said the daemon started, when it says it is running. */
   readonly uptimeMs: number | undefined;
   /** True when an automatic rollback is in force and no clean start has cleared it. */
@@ -216,15 +221,17 @@ export function describeLocalDaemonState(input: DescribeLocalDaemonStateInput): 
   }
   const io = input.io ?? realLocalStateIo;
   const paths = localDaemonStatePaths(input.controlPlaneConfigDir);
-  const marker = readDaemonLifecycleMarker(paths.markerPath, io);
-  const receipts = readDaemonReceipts(paths.receiptsPath, io);
+  const { marker, unreadable: markerUnreadable } = readDaemonLifecycleMarker(paths.markerPath, io);
+  const { receipts, unreadable: receiptsUnreadable } = readDaemonReceipts(paths.receiptsPath, io);
   const now = input.now?.() ?? Date.now();
   const uptimeMs = marker && marker.state === 'running' && marker.at <= now ? now - marker.at : undefined;
   return {
     available: true,
     unavailableReason: undefined,
     marker,
+    ...(markerUnreadable !== undefined ? { markerUnreadable } : {}),
     receipts,
+    ...(receiptsUnreadable !== undefined ? { receiptsUnreadable } : {}),
     uptimeMs,
     rolledBack: marker?.autoRollbackAt !== undefined,
   };

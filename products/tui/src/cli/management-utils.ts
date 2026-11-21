@@ -19,7 +19,7 @@ export {
 } from '@goodvibes/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { createDaemonConfigClient } from '@goodvibes/engine/platform/platform/runtime/client';
-import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
+import { createDaemonVerbCaller, resolveControlPlaneBaseUrl } from '../runtime/client/operator-endpoint.ts';
 /**
  * management-utils.ts, shared CLI utility functions.
  *
@@ -92,8 +92,11 @@ export async function withDaemonSettingsRoute<T>(
 ): Promise<{ readonly result: T; readonly refused: readonly { readonly key: string; readonly error: unknown }[] }> {
   const config = runtime.configManager;
   const daemonConfig = createDaemonConfigClient(createDaemonVerbCaller({ configManager: config, homeDirectory: runtime.homeDirectory }));
+  // A daemon on another machine takes its settings only from itself: a write it cannot take is refused.
   const detach = config.attachDaemonRoute({
     reachable: () => daemonConfig.reachable(),
+    thisMachine: () => daemonConfig.thisMachine(),
+    describe: () => `the daemon at ${resolveControlPlaneBaseUrl(config) ?? 'the connected address'}`,
     write: (key, value) => daemonConfig.set(key, value),
     writeMany: (changes) => daemonConfig.setMany(changes),
     ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),

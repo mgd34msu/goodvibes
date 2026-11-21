@@ -379,29 +379,59 @@ export function HostedTurnStop({ sessionId, attachment }: { sessionId: string; a
 export function HostedSessionShare({ sessionId }: { sessionId: string }) {
   const { toast } = useToast();
   const [principal, setPrincipal] = useState('');
+  // The owners as the daemon last reported them (each share or removal answers with the list).
+  const [owners, setOwners] = useState<readonly string[] | null>(null);
   const share = useMutation({
     mutationFn: (principalId: string) => platformClient.operator.sessions.hosted.share(sessionId, principalId),
     onSuccess: (result, principalId) => {
       setPrincipal('');
+      setOwners(result.owners);
       toast({ title: result.added ? `Shared with ${principalId}` : `${principalId} already shares this session`, tone: 'info' });
     },
     onError: (error: unknown) => {
       toast({ title: 'Could not share the session', description: formatError(error), tone: 'danger' });
     },
   });
+  const unshare = useMutation({
+    mutationFn: (principalId: string) => platformClient.operator.sessions.hosted.unshare(sessionId, principalId),
+    onSuccess: (result, principalId) => {
+      setOwners(result.owners);
+      toast({ title: result.removed ? `${principalId} no longer shares this session` : `${principalId} did not share this session`, tone: 'info' });
+    },
+    onError: (error: unknown) => {
+      toast({ title: 'Could not stop sharing', description: formatError(error), tone: 'danger' });
+    },
+  });
   const trimmed = principal.trim();
   return (
-    <form
-      className="work-share"
-      onSubmit={(event) => { event.preventDefault(); if (trimmed) share.mutate(trimmed); }}
-    >
-      <Field label="Share with" help="A user name, or pairing:<id> for a paired device. They can then open this session, read it and watch it live.">
-        <Input value={principal} onChange={(event) => setPrincipal(event.target.value)} autoComplete="off" spellCheck={false} />
-      </Field>
-      <Button size="sm" type="submit" icon={<Share2 aria-hidden="true" />} disabled={!trimmed || share.isPending}>
-        {share.isPending ? 'Sharing…' : 'Share'}
-      </Button>
-    </form>
+    <div className="work-share">
+      <form onSubmit={(event) => { event.preventDefault(); if (trimmed) share.mutate(trimmed); }}>
+        <Field label="Share with" help="A user name, or pairing:<id> for a paired device. They can then open this session, read it and watch it live.">
+          <Input value={principal} onChange={(event) => setPrincipal(event.target.value)} autoComplete="off" spellCheck={false} />
+        </Field>
+        <Button size="sm" type="submit" icon={<Share2 aria-hidden="true" />} disabled={!trimmed || share.isPending}>
+          {share.isPending ? 'Sharing…' : 'Share'}
+        </Button>
+      </form>
+      {owners !== null && owners.length > 0 && (
+        <ul className="work-share-owners" aria-label="Shared with">
+          {owners.map((owner) => (
+            <li key={owner}>
+              <span>{owner}</span>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={owners.length < 2 || unshare.isPending}
+                title={owners.length < 2 ? 'The only owner cannot be removed' : undefined}
+                onClick={() => unshare.mutate(owner)}
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

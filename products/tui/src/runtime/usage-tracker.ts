@@ -22,6 +22,7 @@ import {
   readBudgetAlertUsd,
   writeManualModelPrice,
   type BudgetAlertConfigAccess,
+  type SessionPricing,
 } from '@goodvibes/engine/platform/platform/providers';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { AgentEvent, TurnEvent } from '@goodvibes/engine/platform/events';
@@ -79,6 +80,8 @@ export interface UsageTrackerDeps {
   readonly getContextWindow: () => number;
   /** The current model id (for pricing). */
   readonly getModelId: () => string;
+  /** What usage is priced with: the runtime's ProviderRegistry. */
+  readonly pricing: SessionPricing;
   /** An agent's live record, for its usage and model. */
   readonly getAgentStatus?: (agentId: string) => AgentRecord | null;
   /** The fleet's priced total (every agent, chain and workflow), or null when nothing is priced. */
@@ -225,7 +228,7 @@ export class UsageTracker {
     if (!rec?.usage) return false;
     const input = rec.usage.inputTokens + (rec.usage.cacheReadTokens ?? 0) + (rec.usage.cacheWriteTokens ?? 0);
     const model = rec.model && rec.model !== 'unknown' ? rec.model : entry.model;
-    const cost = calcSessionCost(rec.usage.inputTokens, rec.usage.outputTokens, rec.usage.cacheReadTokens ?? 0, rec.usage.cacheWriteTokens ?? 0, model);
+    const cost = calcSessionCost(this.deps.pricing, rec.usage.inputTokens, rec.usage.outputTokens, rec.usage.cacheReadTokens ?? 0, rec.usage.cacheWriteTokens ?? 0, model);
     const changed = input !== entry.inputTokens || rec.usage.outputTokens !== entry.outputTokens || cost !== entry.cost || model !== entry.model;
     entry.inputTokens = input;
     entry.outputTokens = rec.usage.outputTokens;
@@ -322,11 +325,12 @@ export class UsageTracker {
     }
     const u = this.totals();
     const model = this.modelId();
-    const priced = this.available() && isModelPriced(model);
+    const pricing = this.deps.pricing;
+    const priced = this.available() && isModelPriced(pricing, model);
     return {
-      usd: calcSessionCost(u.input, u.output, u.cacheRead, u.cacheWrite, model),
+      usd: calcSessionCost(pricing, u.input, u.output, u.cacheRead, u.cacheWrite, model),
       priced,
-      source: priced ? describePricingSource(model) : null,
+      source: priced ? describePricingSource(pricing, model) : null,
     };
   }
 
@@ -341,8 +345,9 @@ export class UsageTracker {
   /** True when some spend has no known price (so totals undercount it). */
   hasUnpricedSpend(): boolean {
     const u = this.totals();
-    if (!isModelPriced(this.modelId()) && (u.input + u.output + u.cacheRead + u.cacheWrite) > 0) return true;
-    return [...this.agentMap.values()].some((a) => a.inputTokens > 0 && !isModelPriced(a.model));
+    const pricing = this.deps.pricing;
+    if (!isModelPriced(pricing, this.modelId()) && (u.input + u.output + u.cacheRead + u.cacheWrite) > 0) return true;
+    return [...this.agentMap.values()].some((a) => a.inputTokens > 0 && !isModelPriced(pricing, a.model));
   }
 
   // ── Budget and price ───────────────────────────────────────────────────────

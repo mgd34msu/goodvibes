@@ -207,7 +207,12 @@ export function hostedSessionConversations(storage: HostedRewindStorage): Hosted
   return {
     opened(sessionId, conversation, save) {
       // Boundaries recorded before a restart or a rebuild, so earlier turns stay rewindable.
-      restoreTurnAnchors(sessionId, storage.anchorSurface);
+      try {
+        restoreTurnAnchors(sessionId, storage.anchorSurface);
+      } catch (error) {
+        // The unreadable list was set aside; the session opens, and earlier turns cannot be rewound to.
+        logger.warn('A hosted session\'s rewind points could not be read', { sessionId, error: summarizeError(error) });
+      }
       hostedConversations.set(sessionId, conversation);
       registerSessionConversation(sessionId, rewindableHosted(sessionId, conversation, save));
     },

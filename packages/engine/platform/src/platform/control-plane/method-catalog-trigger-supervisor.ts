@@ -65,9 +65,9 @@ export const builtinTriggerOperationMethodDescriptors = [
     category: 'watchers', transport: ['ws'], effects: ['watchers.inspect'], inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: objectSchema({ grants: arraySchema(GRANT) }, ['grants']) }),
   methodDescriptor({ id: 'watchers.triggers.grant.register', title: 'Approve a command for triggers',
-    repeat: 'safe',
+    repeat: 'safe', confirmation: 'not-declined',
     description: 'The owner approves one command (argv, optional working directory) that a trigger may run when it fires. Only the owner registers a grant; a caller that declares it is not a user request is refused. Re-registering the same command keeps its digest.',
-    category: 'watchers', transport: ['ws'], effects: ['watchers.administer', 'owner.act'], dangerous: true,
+    category: 'watchers', transport: ['ws'], effects: ['watchers.administer', 'model.refused'], dangerous: true,
     inputSchema: objectSchema({ id: STRING_SCHEMA, description: STRING_SCHEMA, command: STRING_SCHEMA, args: arraySchema(STRING_SCHEMA), cwd: STRING_SCHEMA }, ['id', 'description', 'command']),
     outputSchema: objectSchema({ grant: GRANT }, ['grant']), errorCodes: TRIGGER_ERRORS }),
 ] as const;

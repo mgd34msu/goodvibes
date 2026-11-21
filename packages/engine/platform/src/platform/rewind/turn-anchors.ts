@@ -239,14 +239,15 @@ export function discardTurnAnchorsAfter(
   turnId: string,
   surface?: SessionSurface,
   undoSnapshotId?: string,
-): readonly TurnAnchor[] {
+): { readonly discarded: readonly TurnAnchor[]; readonly saved: boolean } {
   const list = registry.get(sessionId);
   const index = list?.findIndex((a) => a.turnId === turnId) ?? -1;
-  if (!list || index < 0) return [];
+  if (!list || index < 0) return { discarded: [], saved: true };
   const discarded = list.splice(index + 1);
   if (undoSnapshotId && discarded.length > 0) rememberDiscarded(sessionId, { undoSnapshotId, turnId, anchors: discarded });
-  if (surface && discarded.length > 0) persistTurnAnchors(sessionId, surface);
-  return discarded;
+  // `saved` is false when the session's list of rewind points on disk still holds the discarded ones.
+  const saved = surface && discarded.length > 0 ? persistTurnAnchors(sessionId, surface) : true;
+  return { discarded, saved };
 }
 
 function rememberDiscarded(sessionId: string, entry: DiscardedAnchors): void {
@@ -370,30 +371,43 @@ export function persistTurnAnchors(sessionId: string, surface: SessionSurface): 
 
 /**
  * Reload a session's persisted anchors into the in-memory registry on resume.
- * Returns the number of anchors restored (0 when no sidecar exists or it is
- * unreadable). Idempotent via `recordTurnAnchor`'s per-turnId dedup, so a resume
- * that later re-records the same turn keeps a single entry.
+ * Returns the number of anchors restored (0 when no sidecar exists).
+ * Idempotent via `recordTurnAnchor`'s per-turnId dedup, so a resume that later
+ * re-records the same turn keeps a single entry.
+ *
+ * Throws when a sidecar exists but cannot be read or parsed, after renaming it
+ * aside as `<path>.corrupt-<time>`, so the next persist does not write over the
+ * earlier rewind points it may still hold.
  */
 export function restoreTurnAnchors(sessionId: string, surface: SessionSurface): number {
   const path = anchorSidecarPath(sessionId, surface);
   if (!path || !existsSync(path)) return 0;
+  let anchors: unknown[];
+  let discardedEntries: unknown;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { anchors?: unknown; discarded?: unknown };
-    if (!parsed || !Array.isArray(parsed.anchors)) return 0;
-    let restored = 0;
-    for (const candidate of parsed.anchors) {
-      if (isTurnAnchor(candidate)) {
-        recordTurnAnchor(sessionId, candidate);
-        restored++;
-      }
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { anchors?: unknown; discarded?: unknown } | null;
+    if (!parsed || !Array.isArray(parsed.anchors)) throw new Error('it holds no list of rewind points');
+    anchors = parsed.anchors;
+    discardedEntries = parsed.discarded;
+  } catch (error) {
+    const aside = `${path}.corrupt-${Date.now()}`;
+    let kept = '';
+    try { renameSync(path, aside); kept = `; it was kept as ${aside}`; } catch (renameError) {
+      logger.warn('rewind turn-anchor sidecar could not be set aside', { sessionId, error: summarizeError(renameError) });
     }
-    if (Array.isArray(parsed.discarded)) {
-      for (const candidate of parsed.discarded) if (isDiscardedAnchors(candidate)) rememberDiscarded(sessionId, candidate);
-    }
-    return restored;
-  } catch {
-    return 0;
+    throw new Error(`The list of rewind points for this session could not be read (${summarizeError(error)})${kept}; turns before this resume cannot be rewound to.`);
   }
+  let restored = 0;
+  for (const candidate of anchors) {
+    if (isTurnAnchor(candidate)) {
+      recordTurnAnchor(sessionId, candidate);
+      restored++;
+    }
+  }
+  if (Array.isArray(discardedEntries)) {
+    for (const candidate of discardedEntries) if (isDiscardedAnchors(candidate)) rememberDiscarded(sessionId, candidate);
+  }
+  return restored;
 }
 
 // ─── Reaping orphaned sidecars ────────────────────────────────────────────────

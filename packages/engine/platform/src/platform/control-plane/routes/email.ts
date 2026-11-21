@@ -46,7 +46,6 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { evaluateOutwardEffect } from '../../security/untrusted-content.js';
 import { isSendToOwnerOnly } from '../../security/owner-identity.js';
-import { refuseNonUserRequest } from './explicit-user-request.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 
@@ -384,7 +383,6 @@ export function createEmailInboxUpdateHandler(service: EmailGatewayService): Gat
       );
     }
     const uidValidity = readUidValidity(params.uidValidity);
-    refuseNonUserRequest(invocation, 'email.inbox.update');
     if (!service.updateMessage) return unsupported('changing a message');
     return service.updateMessage({ uid, action: action as EmailGatewayMessageAction, uidValidity });
   };
@@ -439,7 +437,6 @@ export function createEmailDraftUpdateHandler(service: EmailGatewayService): Gat
       inReplyTo: readOptionalString(params.inReplyTo),
       references: readOptionalString(params.references),
     };
-    refuseNonUserRequest(invocation, 'email.draft.update');
     if (!service.updateDraft) return unsupported('replacing a saved draft');
     return service.updateDraft(input);
   };
@@ -586,16 +583,8 @@ export function createEmailSendHandler(
 ): GatewayMethodHandler {
   const recent = new Map<string, { readonly fingerprint: string; readonly at: number; readonly result: Promise<unknown> }>();
   return async (invocation) => {
+    // Its descriptor's confirmation (`confirm`) was checked by the catalog before this handler ran.
     const params = readInvocationParams(invocation);
-    if (params.confirm !== true) {
-      throw new GatewayVerbError(
-        'email.send puts a message on the internet and cannot be recalled. Re-issue with confirm: true once the recipients and body have been reviewed.',
-        'CONFIRMATION_REQUIRED',
-        400,
-        'confirm',
-      );
-    }
-    refuseNonUserRequest(invocation, 'email.send');
     const to = requireStringValue(params.to, 'to');
     const subject = requireStringValue(params.subject, 'subject');
     const body = requireStringValue(params.body, 'body');

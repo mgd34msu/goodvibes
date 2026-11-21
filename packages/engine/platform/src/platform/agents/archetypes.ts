@@ -168,9 +168,6 @@ function validateArchetype(archetype: Omit<AgentArchetype, 'validationIssues'>):
 // ArchetypeLoader
 // ---------------------------------------------------------------------------
 
-/** What the directory looked like at the last scan: one entry per stat'd path. */
-type DirectorySignature = ReadonlyMap<string, string>;
-
 function statSignature(path: string): string {
   try {
     const stat = statSync(path, { bigint: true });
@@ -187,9 +184,10 @@ function statSignature(path: string): string {
  *    full body (system_prompt) is populated on first call to `loadArchetype()`.
  *  - Built-in archetypes are available when no local .md file is found.
  *
- * Freshness: every list or load stats the directory and the files of the last
- * scan (one `stat` each) and scans again when any of them changed, so a file
- * added or edited in a running app is what the next spawn and listing use.
+ * Freshness: every list or load stats the directory, the files of the last
+ * scan and the files their prompts included (one `stat` each) and scans again
+ * when any of them changed, so a file added or edited in a running app,
+ * included files too, is what the next spawn and listing use.
  */
 export class ArchetypeLoader {
   /** Map from archetype name -> AgentArchetype (may be partially loaded) */
@@ -202,8 +200,8 @@ export class ArchetypeLoader {
    * text as written. Cleared with the scan that would change it.
    */
   private resolvedCache = new Map<string, string>();
-  /** The stat signature of the last scan; null before the first. */
-  private signature: DirectorySignature | null = null;
+  /** The stat signature of the last scan and of the files its prompts included; null before the first. */
+  private signature: Map<string, string> | null = null;
   /** Directory to scan for .md files */
   private dir: string;
 
@@ -366,8 +364,14 @@ export class ArchetypeLoader {
       let resolved = this.resolvedCache.get(name);
       if (resolved === undefined) {
         const body = this.bodyCache.get(name)!;
-        resolved = archetype.sourcePath ? materializeMarkdownBody(archetype.sourcePath, body) : body;
+        const included = new Set<string>();
+        resolved = archetype.sourcePath ? materializeMarkdownBody(archetype.sourcePath, body, included) : body;
         this.resolvedCache.set(name, resolved);
+        // Each file the prompt includes joins the scan's signature, so an edit to
+        // one of them (an `@shared/rules.md` include) makes the next load read it again.
+        for (const path of included) {
+          if (!this.signature?.has(path)) this.signature?.set(path, statSignature(path));
+        }
       }
       owned.systemPrompt = resolved;
     }

@@ -29,7 +29,7 @@ import { hostedSessionPresence } from '../agents/agent-owner-questions.js';
  */
 
 import { existsSync, statSync } from 'node:fs';
-import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../pairing/pairing-token-store.js';
+import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../pairing/principal-ids.js';
 import { allowedWorkspaceRoots } from '../hosted-sessions/workspace-roots.js';
 import { sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { logger } from '../utils/logger.js';

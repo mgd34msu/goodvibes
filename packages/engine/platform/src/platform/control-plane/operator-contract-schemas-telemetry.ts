@@ -14,6 +14,7 @@ import {
   nullableSchema,
   recordSchema,
 } from './operator-contract-schemas-shared.js';
+import { AUTHENTICATED_PRINCIPAL_KINDS } from '../daemon/http-policy.js';
 
 const ERROR_CATEGORY_SCHEMA = enumSchema([
   'authentication',
@@ -45,7 +46,7 @@ const ERROR_SOURCE_SCHEMA = enumSchema([
   'unknown',
 ]);
 
-const AUTHENTICATED_PRINCIPAL_KIND_SCHEMA = enumSchema(['user', 'bot', 'service', 'token']);
+const AUTHENTICATED_PRINCIPAL_KIND_SCHEMA = enumSchema(AUTHENTICATED_PRINCIPAL_KINDS);
 
 export const CONTROL_AUTH_CURRENT_MODE_SCHEMA = enumSchema(['anonymous', 'invalid', 'session', 'shared-token']);
 /** Which credential the caller presented, as the daemon's authenticator read it; null when none authenticated. */

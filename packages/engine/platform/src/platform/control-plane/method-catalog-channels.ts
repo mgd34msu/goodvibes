@@ -316,7 +316,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.allowlist.edit',
     repeat: 'safe',
-    effects: ['channels.administer', 'owner.act'],
+    effects: ['channels.administer', 'model.refused'],
     title: 'Edit Channel Allowlist',
     description: 'Apply allowlist additions or removals for a channel surface.',
     category: 'channels',
@@ -346,7 +346,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.policies.update',
     repeat: 'safe',
-    effects: ['channels.administer', 'owner.act'],
+    effects: ['channels.administer', 'model.refused'],
     title: 'Update Channel Policy',
     description: 'Update ingress policy configuration for a channel surface. `open` makes it a shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised (off by default, so the first unknown sender raises a claim the owner accepts or declines). Anyone admitted who is not the channel\'s owner talks as a guest: their turn may read and answer, and every change it asks for is put to the owner.',
     category: 'channels',

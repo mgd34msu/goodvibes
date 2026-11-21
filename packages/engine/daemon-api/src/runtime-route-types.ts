@@ -282,13 +282,6 @@ export interface DaemonRuntimeRouteContext {
     /** Mark a queued/delivered input failed with the reason; hosts without it fall back to cancelInput. */
     failInput?(sessionId: string, inputId: string, error: string): Promise<unknown | null>;
     completeAgent(sessionId: string, agentId: string, message: string, meta: { status: string; routeId?: string }): Promise<void>;
-    appendCompanionMessage(sessionId: string, input: {
-      readonly messageId: string;
-      readonly body: string;
-      readonly timestamp: number;
-      readonly source: string;
-      readonly metadata?: Readonly<Record<string, unknown>> | undefined;
-    }): Promise<unknown>;
   };
   readonly agentManager: {
     getStatus(agentId: string): AgentRecordLike | null;
@@ -363,8 +356,6 @@ export interface DaemonRuntimeRouteContext {
     /** Whether the task's current status allows an explicit retry (canRetry). */
     canRetryRuntimeTask?(taskId: string): boolean;
   } | null;
-  /** Publish a conversation follow-up event scoped to a shared session. */
-  readonly publishConversationFollowup: (sessionId: string, envelope: Omit<ConversationMessageEnvelope, 'sessionId'>) => void;
   /** Open a shared-session SSE stream for turn and agent events. */
   readonly openSessionEventStream: (req: Request, sessionId: string) => Response;
 }

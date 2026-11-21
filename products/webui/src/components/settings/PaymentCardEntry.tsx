@@ -63,7 +63,7 @@ import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { describeCardEntryRefusal, describeCardTransportRefusal, mayCrossWithCardDetails } from '@goodvibes/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
@@ -157,7 +157,11 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
       // own create handler refuses to forward its underlying error for the same
       // reason (the failing call had the card in its arguments).
       setError(formatError(problem));
-      toast({ title: 'Failed to store the card', description: formatError(problem), tone: 'danger' });
+      // A refusal stored nothing. Any other failure may have stored it: the daemon
+      // answers the same card sent again with the card it already holds, so pressing
+      // again with the same details never stores a second copy.
+      if (isPressRefused(problem)) toast({ title: 'Failed to store the card', description: formatError(problem), tone: 'danger' });
+      else toast({ title: 'The card may have been stored', description: `${formatError(problem)}. ${MAY_HAVE_BEEN_DONE}`, tone: 'warning' });
     } finally {
       setSaving(false);
     }

@@ -24,6 +24,8 @@ import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, ty
 export interface OwnerApprovalPendingAnswer {
   readonly code: 'OWNER_APPROVAL_PENDING';
   readonly approvalId: string;
+  /** False when this credential may not read the approval: the tab cannot follow it, so it shows no notice for it. */
+  readonly followable?: boolean;
   readonly keys?: readonly string[];
   readonly sessionId?: string;
   readonly requestedMode?: string;
@@ -92,8 +94,14 @@ function leaveRetiredChanges(): void {
   )));
 }
 
-/** Record a change the daemon put to the owner. */
+/**
+ * Record a change the daemon put to the owner. A change this credential may
+ * not read the approval of (`followable: false`) is not recorded: its outcome
+ * would never reach this tab, so no notice is shown for it; the write still
+ * rejects with {@link OwnerApprovalPendingError}, which says it waits.
+ */
 export function trackOwnerApproval(answer: OwnerApprovalPendingAnswer): void {
+  if (answer.followable === false) return;
   if (!watchingLifetime) {
     watchingLifetime = true;
     subscribeClientLifetime(leaveRetiredChanges);

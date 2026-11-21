@@ -326,7 +326,10 @@ export interface DaemonKnowledgeRouteHandlers extends DaemonKnowledgeRefinementR
   postKnowledgeSetScheduleEnabled(id: string, req: Request): MaybeResponse;
   postKnowledgeRenderProjection(req: Request): MaybeResponse;
   postKnowledgeMaterializeProjection(req: Request): MaybeResponse;
+  /** A GraphQL query (knowledge.graphql.query); a mutation is refused naming knowledge.graphql.mutate. */
   executeKnowledgeGraphql(req: Request): MaybeResponse;
+  /** A GraphQL mutation (knowledge.graphql.mutate); a query is refused naming knowledge.graphql.query. */
+  executeKnowledgeGraphqlMutation(req: Request): MaybeResponse;
 }
 
 /** Route handlers for knowledge refinement task management. */

@@ -9,7 +9,8 @@ import { dirname } from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { assertConfirmed, type HandlerContextEnvelope } from './host-handlers.js';
+import type { HandlerContextEnvelope } from './host-handlers.js';
+import { requireConfirmation } from './confirmation-gate.js';
 import { GatewayVerbError } from './routes/gateway-verb-error.js';
 import type { MutationPublication } from '../utils/file-mutation.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
@@ -93,7 +94,7 @@ export async function runNativeMutation<T>(input: {
 }): Promise<T> {
   const { body, context } = input;
   if (!isDelegatedCaller(context)) {
-    if (input.confirmation !== 'none') assertConfirmed(body, context);
+    if (input.confirmation !== 'none') requireConfirmation('owner-request', input.method, body, context);
     const current = () => { context.signal?.throwIfAborted(); };
     current(); return input.mutate(current);
   }

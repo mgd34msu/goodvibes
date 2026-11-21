@@ -20,7 +20,8 @@
  * over: when the daemon runs under the service manager, a non-blocking service
  * restart; when it runs unsupervised, the service manager first ADOPTS it,
  * installs the unit and enqueues a service start. Only an acknowledged
- * adoption request lets the old process exit. An incomplete handover leaves
+ * restart or adoption request lets the old process exit, and it then exits at
+ * once with status 0 rather than waiting to be stopped. An incomplete handover leaves
  * the disk update and previous binary intact, reports what happened, and
  * pauses this process's updater so it cannot install the same release twice.
  * When the orderly stop had already run, a host that owns the process
@@ -1043,7 +1044,14 @@ export class DaemonAutoUpdater {
       versionOnDisk: this.appliedVersion,
       supervised,
     });
-    if (supervised && !prepared?.exitRequired) return;
+    // An accepted handover ends this process now, supervised or not. The
+    // runtime has stopped and its listener is closed; a supervised restart
+    // would stop the process anyway (systemd runs the queued restart as a start
+    // once the unit has exited). Idling until then is not harmless on Bun
+    // 1.3.14: with the entry module's top-level await still pending
+    // (products/daemon/src/cli/entrypoint.ts awaits runDaemonCli) and nothing
+    // referenced left in the event loop, Bun's waitForPromise loop ticks
+    // without sleeping and holds a full core until the process ends.
     // The handover record has to be on disk before this process stops being
     // one. Without it an update that goes wrong reads, in the log, as a daemon
     // that simply vanished mid-sentence.

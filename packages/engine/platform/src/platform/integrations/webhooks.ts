@@ -233,6 +233,11 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
     return describeDeadLetters(this.queue.getDlq(), (payload) => this.queuedEnvelope(payload).describe());
   }
 
+  /** Older failed notifications dropped from a full list since this process started; they cannot be resent. */
+  droppedDeadLetters(): number {
+    return this.queue.getMetrics().droppedDeadLetters;
+  }
+
   /**
    * Resend failed notifications: all of them, or those named in `ids`. A
    * notification whose URL was removed since is not sent there.

@@ -731,7 +731,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     ),
   );
   // Companion messages and an activated plan take the composer's path as sent; one refused is held (shell/owner-turn-sender.ts).
-  bindOwnerInput(orchestrator, (text, turnOptions) => ownerTurns.receiveOwnerInput(text, turnOptions));
+  bindOwnerInput(orchestrator, (text, turnOptions, answered) => ownerTurns.receiveOwnerInput(text, turnOptions, answered));
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
   commandContext.beginPlainInput = (request) => input.beginPlainInput(request);
@@ -1085,6 +1085,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
       model: runtime.model, // prices the cost
+      pricing: providerRegistry,
       modelLabel: currentModel.displayName || currentModel.id,
       // '?' is the git read's "no repository here (or no answer yet)": no branch segment.
       branch: gitInfo && gitInfo.branch !== '?' ? gitInfo.branch : undefined,

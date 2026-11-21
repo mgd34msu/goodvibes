@@ -36,7 +36,7 @@ export const builtinGatewayPermissionRuleMethodDescriptors: readonly GatewayMeth
   methodDescriptor({
     id: 'permissions.rules.delete',
     repeat: 'safe',
-    effects: ['approvals.write', 'owner.act'],
+    effects: ['approvals.write', 'model.refused'],
     title: 'Delete a Durable Permission Rule',
     description: 'Delete one durable user-origin permission rule by id. The matching asks prompt again afterwards, deleting a grant is how a remembered decision is revoked. deleted:false when no rule with that id exists (an honest miss, not an error).',
     category: 'permissions',

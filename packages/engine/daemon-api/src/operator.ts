@@ -298,6 +298,7 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/knowledge/map' && method === 'GET') return handlers.getKnowledgeMap(url, req);
   if (pathname === '/api/knowledge/graphql/schema' && method === 'GET') return handlers.getKnowledgeGraphqlSchema();
   if (pathname === '/api/knowledge/graphql' && (method === 'GET' || method === 'POST')) return handlers.executeKnowledgeGraphql(req);
+  if (pathname === '/api/knowledge/graphql/mutate' && method === 'POST') return handlers.executeKnowledgeGraphqlMutation(req);
   if (pathname === '/api/knowledge/ingest/url' && method === 'POST') return handlers.postKnowledgeIngestUrl(req);
   if (pathname === '/api/knowledge/ingest/artifact' && method === 'POST') return handlers.postKnowledgeIngestArtifact(req);
   if (pathname === '/api/knowledge/ingest/browser-history' && method === 'POST') return handlers.postKnowledgeSyncBrowserHistory(req);

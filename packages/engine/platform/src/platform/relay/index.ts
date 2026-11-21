@@ -15,6 +15,7 @@ export {
   type RelayReachability,
   type RelayReachabilityOptions,
   type RelayReachabilityConfig,
+  type RelayReachabilityStatus,
   type RelayIdentityStore,
 } from './reachability.js';
 
@@ -27,6 +28,7 @@ export {
   evaluateStepUp,
   isMutatingMethod,
   stepUpNextAction,
+  type RelayMethodFacts,
   type StepUpDecision,
   type StepUpEvaluationInput,
   type StepUpAssertionVerifier,

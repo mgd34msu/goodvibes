@@ -47,6 +47,7 @@ export type DaemonCommand =
   | 'send'
   | 'cluster'
   | 'webui'
+  | 'listener'
   | 'provision-wake-model'
   | 'check-install-reader'
   | 'completion'
@@ -797,6 +798,32 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     passthrough: true,
     subcommands: ['enable', 'disable', 'status'],
     machineQueries: [WEBUI_BINDING_QUERY],
+  },
+  {
+    name: 'listener',
+    aliases: [],
+    summary: 'Show the webhook listener\'s own token, for webhook senders.',
+    usage: 'goodvibes-daemon listener token [--show] [--json]',
+    detail: [
+      'The webhook listener (danger.httpListener) accepts its own bearer token and',
+      'refuses the operator token. The token is GOODVIBES_HTTP_TOKEN when the',
+      'daemon\'s environment sets it, otherwise the one the daemon keeps in',
+      'http-listener-token.json in the daemon home (created the first time it',
+      'starts with the listener on).',
+      '',
+      '  token          whether the listener is on and where its token is',
+      '  token --show   also print the token, to give a webhook sender',
+      '',
+      'It reads only: it creates no token and contacts no daemon.',
+    ],
+    flags: [],
+    passthroughFlags: [
+      { tokens: ['--show'], takesValue: false, summary: 'Print the token itself.' },
+      { tokens: ['--json'], takesValue: false, summary: 'Print one JSON document instead of prose.' },
+      { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
+    ],
+    passthrough: true,
+    subcommands: ['token'],
   },
   {
     name: 'provision-wake-model',

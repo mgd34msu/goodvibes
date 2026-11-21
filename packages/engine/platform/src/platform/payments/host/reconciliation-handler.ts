@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { assertConfirmed, type TypedHandler } from './handler-plumbing.js';
+import type { TypedHandler } from './handler-plumbing.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
 import { PaymentOperationStoreError } from './operation-store.js';
@@ -10,7 +10,7 @@ import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
  * this handler never invokes a decision model or grants another checkout. */
 export function purchaseReconciliationHandler(owner: PurchaseReconciliations): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
-    assertConfirmed(body, context);
+    // Its descriptor's confirmation (owner-request) was checked before this handler ran.
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new GatewayVerbError('Select the original purchase operation.', 'INVALID_ARGUMENT', 400);
     const input = body as Record<string, unknown>;
     const purchaseId = input['purchaseId'], operationId = input['operationId'], outcome = input['outcome'];

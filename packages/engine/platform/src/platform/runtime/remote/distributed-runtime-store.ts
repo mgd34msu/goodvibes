@@ -1,4 +1,5 @@
 import type { PersistentStore } from '../../state/persistent-store.js';
+import { DISTRIBUTED_WORK_TYPES } from '@goodvibes/engine/contracts';
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import type {
@@ -53,14 +54,7 @@ const PAIR_REQUEST_STATUSES = new Set<DistributedRuntimePairRequest['status']>([
 ]);
 const PAIR_REQUEST_ACTORS = new Set<DistributedRuntimePairRequest['requestedBy']>(['remote', 'operator']);
 const PEER_STATUSES = new Set<DistributedPeerRecord['status']>(['paired', 'connected', 'idle', 'disconnected', 'revoked']);
-const WORK_TYPES = new Set<DistributedPendingWork['type']>([
-  'invoke',
-  'status.request',
-  'location.request',
-  'session.message',
-  'automation.run',
-  'device.capability',
-]);
+const WORK_TYPES = new Set<DistributedPendingWork['type']>(DISTRIBUTED_WORK_TYPES);
 const WORK_PRIORITIES = new Set<DistributedPendingWork['priority']>(['default', 'normal', 'high']);
 const WORK_STATUSES = new Set<DistributedPendingWork['status']>(['queued', 'claimed', 'completed', 'failed', 'cancelled', 'expired']);
 const AUDIT_ACTIONS = new Set<DistributedRuntimeAuditRecord['action']>([

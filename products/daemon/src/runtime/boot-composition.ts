@@ -151,7 +151,8 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
             ...(queue.dlqEntries[0]?.deadAt ? { lastErrorAt: queue.dlqEntries[0].deadAt } : {}),
             ...(queue.dlqEntries[0]?.finalError ? { lastError: queue.dlqEntries[0].finalError } : {}),
             meta: { attempts: queue.metrics.totalAttempts, retrying: queue.metrics.retrying,
-              deadLetters: queue.metrics.deadLettered, dlqSize: queue.metrics.dlqSize, sloEnforced: queue.sloEnforced },
+              deadLetters: queue.metrics.deadLettered, dlqSize: queue.metrics.dlqSize,
+              droppedDeadLetters: queue.metrics.droppedDeadLetters, sloEnforced: queue.sloEnforced },
           }, 'boot.notifier');
         }
         // Announcing runtime events only while a channel exists keeps a

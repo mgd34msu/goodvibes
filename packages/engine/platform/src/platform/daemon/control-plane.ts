@@ -7,13 +7,14 @@ import { withUntrustedContentScope } from '../security/untrusted-content.js';
 import type { UserAuthManager, SettingsSessionAuthority } from '../security/user-auth.js';
 import type { SettingsPairingAuthority } from '../pairing/pairing-token-store.js';
 import { PairingStoreFaultedError, SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
-import { LOCAL_OWNER_CREDENTIAL, isPairingTokenShape, pairingPrincipalId, type NativeCredential } from '../pairing/pairing-token-store.js';
+import { LOCAL_OWNER_CREDENTIAL, isPairingTokenShape, type NativeCredential } from '../pairing/pairing-token-store.js';
 import {
   authenticateOperatorToken,
   credentialKindOf,
   extractOperatorAuthToken,
   extractRemotePeerToken,
   matchesSharedToken,
+  operatorPrincipalGrant,
   type AuthenticatedOperatorRequest,
   type PairingTokenAuthenticator,
   type NativeExecutionAuthority,
@@ -24,7 +25,7 @@ import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
 import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
-import { isRuntimeEventDomain, RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
+import { RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
 import { readRequestedDomains } from '../control-plane/gateway-utils.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
@@ -32,7 +33,7 @@ import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-a
 import { requestTransport } from '../runtime/network/request-transport.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../payments/entry-policy.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
-import { catalogGrantedScopes, narrowGatewayGrant, pairingTokenCaller, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
+import { catalogGrantedScopes, refuseGatewayInvocation } from './http/gateway-binding-gate.js';
 import { browserOriginAllowed, originNotAllowedResponse } from './http/browser-origin.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -60,13 +61,18 @@ import {
  * hands every socket the same payload object for one event, so the event is
  * serialised once, not once per connected client.
  */
-const socketEventFrames = new WeakMap<object, { readonly event: string; readonly frame: string }>();
-function socketEventFrame(event: string, payload: unknown): string {
-  if (payload === null || typeof payload !== 'object') return JSON.stringify({ type: 'event', event, payload });
+const socketEventFrames = new WeakMap<object, { readonly event: string; readonly id: string | undefined; readonly frame: string }>();
+/**
+ * An event frame carries the record's id, the position a client presents as
+ * `lastEventId` when it connects again, so the gateway replays what it missed.
+ */
+function socketEventFrame(event: string, payload: unknown, id?: string): string {
+  const body = { type: 'event', event, ...(id ? { id } : {}), payload };
+  if (payload === null || typeof payload !== 'object') return JSON.stringify(body);
   const kept = socketEventFrames.get(payload);
-  if (kept && kept.event === event) return kept.frame;
-  const frame = JSON.stringify({ type: 'event', event, payload });
-  socketEventFrames.set(payload, { event, frame });
+  if (kept && kept.event === event && kept.id === id) return kept.frame;
+  const frame = JSON.stringify(body);
+  socketEventFrames.set(payload, { event, id, frame });
   return frame;
 }
 
@@ -92,6 +98,8 @@ export interface ControlPlaneWebSocketData {
   readonly domains: readonly RuntimeEventDomain[];
   /** `?domains=` names that are not runtime event domains; the `ready` frame names them back. */
   readonly unrecognisedDomains?: readonly string[] | undefined;
+  /** `?lastEventId=`: the id of the last event the client holds; the gateway replays what came after it. */
+  readonly lastEventId?: string | undefined;
   readonly clientKind:
     | 'tui'
     | 'web'
@@ -256,9 +264,8 @@ interface GatewayMethodCallInput {
     /**
      * True when a person asked for this, now. Set ONLY by transports that
      * can honestly claim it; scheduled work and triggers leave it unset
-     * because they cannot. It gates the explicit-user-request refusal and
-     * starts a new untrusted-content turn, see
-     * control-plane/routes/explicit-user-request.ts and
+     * because they cannot. The confirmation gate reads it and it starts a
+     * new untrusted-content turn, see control-plane/confirmation-gate.ts and
      * security/turn-boundary.ts.
      */
     readonly explicitUserRequest?: boolean | undefined;
@@ -610,7 +617,7 @@ export class DaemonControlPlaneHelper {
     // Read after the credential stores were consulted: this is the state the principal was checked against.
     const authRevision = this.authRevision();
     const credentialKind = credentialKindOf(authenticated, loopback);
-    const ownerDevice = authenticated.kind === 'pairing-token' && authenticated.ownerDevice === true && authenticated.client === undefined;
+    const ownerDevice = base.ownerDevice === true;
     return Object.freeze({
       ...base,
       credentialKind,
@@ -651,30 +658,11 @@ export class DaemonControlPlaneHelper {
    * pairing token or a user that stores its own scope list is granted that
    * list, never more than the default set for its role.
    */
-  private principalFor(authenticated: AuthenticatedOperatorRequest): AuthenticatedPrincipal {
-    if (authenticated.kind === 'shared-token') {
-      return {
-        principalId: 'shared-token',
-        principalKind: 'token',
-        admin: true,
-        scopes: this.getGrantedGatewayScopes(true),
-      };
-    }
-    const stored = storedScopesOf(authenticated);
-    if (authenticated.kind === 'pairing-token') {
-      // A paired device is a distinct, per-token principal (`pairing:<id>`) with
-      // full operator authority unless its pairing stores a narrower list, so
-      // step-up credentials key per token and a revoked device drops out cleanly.
-      return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingTokenCaller(this.context.gatewayMethods, stored) };
-    }
-    const adminRole = authenticated.roles.includes('admin');
-    return {
-      principalId: authenticated.username,
-      principalKind: 'user',
-      // A narrowed list is the whole grant: admin-only routes would bypass it.
-      admin: adminRole && (stored === undefined || stored.includes('*')),
-      scopes: narrowGatewayGrant(this.getGrantedGatewayScopes(adminRole), stored),
-    };
+  private principalFor(authenticated: AuthenticatedOperatorRequest): AuthenticatedPrincipal & { readonly ownerDevice?: true | undefined } {
+    // A paired device is a distinct, per-token principal (`pairing:<id>`), so
+    // step-up credentials key per token and a revoked device drops out cleanly.
+    // The rule is the one every listener uses (security/http-auth.ts).
+    return operatorPrincipalGrant(authenticated, (includeWrite) => this.getGrantedGatewayScopes(includeWrite));
   }
 
   /**
@@ -804,6 +792,7 @@ export class DaemonControlPlaneHelper {
     const requested = parseRuntimeDomains(rawDomains);
     if (requested instanceof Response) return requested;
     const { domains, unrecognised } = requested;
+    const lastEventId = url.searchParams.get('lastEventId')?.trim() || undefined;
     const requestedKind = url.searchParams.get('clientKind');
     const clientKind = requestedKind === 'tui'
       || requestedKind === 'web'
@@ -828,6 +817,7 @@ export class DaemonControlPlaneHelper {
         admin: principal.admin,
         domains,
         ...(unrecognised.length > 0 ? { unrecognisedDomains: unrecognised } : {}),
+        ...(lastEventId ? { lastEventId } : {}),
         clientKind,
         remoteAddress: this.clientAddress(req),
         localOrigin: isLocalOrigin(req),
@@ -851,15 +841,16 @@ export class DaemonControlPlaneHelper {
       transport: 'ws',
       domains: ws.data.authenticated ? ws.data.domains : [],
       ...(ws.data.authenticated && ws.data.unrecognisedDomains ? { unrecognisedDomains: ws.data.unrecognisedDomains } : {}),
+      ...(ws.data.authenticated && ws.data.lastEventId ? { lastEventId: ws.data.lastEventId } : {}),
       ...(ws.data.principalId ? { principalId: ws.data.principalId } : {}),
       ...(ws.data.principalKind ? { principalKind: ws.data.principalKind } : {}),
       scopes: ws.data.scopes,
       admin: ws.data.admin,
       remoteAddress: ws.data.remoteAddress,
-    }, (event, payload) => {
+    }, (event, payload, id) => {
       // The gateway asked `current` (below) before filtering this frame with the grant in force now.
       if (!ws.data.authenticated || this.socketSignal(ws).aborted) return;
-      this.sendFrame(ws, socketEventFrame(event, payload));
+      this.sendFrame(ws, socketEventFrame(event, payload, id));
     }, () => this.closeRevokedSocket(ws), () => {
       // Nothing is delivered before the socket authenticates, and a revoked socket is served nothing.
       if (!ws.data.authenticated || this.socketSignal(ws).aborted) return false;
@@ -987,10 +978,12 @@ export class DaemonControlPlaneHelper {
         this.closeRefusedAuth(ws, 'Authentication required');
         return;
       }
-      const domains = Array.isArray(frame.domains) ? normalizeFrameDomains(frame.domains) : undefined;
-      if (domains instanceof Response) {
-        this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Invalid runtime event domain' }));
-        this.closeRefusedAuth(ws, 'Invalid runtime event domain');
+      // The upgrade already subscribed its `?domains=`; names here are added. Known names are
+      // subscribed and the others named back; only a list with no known name is refused.
+      const asked = readFrameDomains(frame.domains);
+      if (asked && asked.domains.length === 0 && asked.unrecognised.length > 0) {
+        this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, ...unknownDomainsRefusal(asked.unrecognised) }));
+        this.closeRefusedAuth(ws, 'Unknown runtime event domain');
         return;
       }
       ws.data.authToken = token;
@@ -1013,13 +1006,14 @@ export class DaemonControlPlaneHelper {
         ...(typeof frame.label === 'string' ? { label: frame.label } : {}),
         ...(Array.isArray(frame.capabilities) ? { capabilities: frame.capabilities.filter((value): value is string => typeof value === 'string') } : {}),
       });
-      if (domains) {
-        this.context.controlPlaneGateway.subscribeWebSocketClient(
-          clientId,
-          domains,
-        );
-      }
-      this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: true, clientId, principalId: principal.principalId }));
+      const added = asked && asked.domains.length > 0
+        ? this.context.controlPlaneGateway.subscribeWebSocketClient(clientId, asked.domains)
+        : undefined;
+      this.sendFrame(ws, JSON.stringify({
+        type: 'auth', ok: true, clientId, principalId: principal.principalId,
+        ...(added && added.withheld.length > 0 ? { withheldDomains: added.withheld } : {}),
+        ...(asked && asked.unrecognised.length > 0 ? { unrecognisedDomains: asked.unrecognised } : {}),
+      }));
       return;
     }
 
@@ -1028,28 +1022,33 @@ export class DaemonControlPlaneHelper {
         this.sendFrame(ws, JSON.stringify({ type: 'error', error: 'Authenticate before subscribing' }));
         return;
       }
-      const domains = Array.isArray(frame.domains)
-        ? normalizeFrameDomains(frame.domains)
-        : [];
-      if (domains instanceof Response) {
-        this.sendFrame(ws, JSON.stringify({ type: 'error', error: 'Invalid runtime event domain' }));
+      const asked = readFrameDomains(frame.domains) ?? { domains: [], unrecognised: [] };
+      if (asked.domains.length === 0 && asked.unrecognised.length > 0) {
+        this.sendFrame(ws, JSON.stringify({ type: 'error', ...unknownDomainsRefusal(asked.unrecognised) }));
         return;
       }
-      this.context.controlPlaneGateway.subscribeWebSocketClient(clientId, domains);
-      this.sendFrame(ws, JSON.stringify({ type: 'subscribed', clientId, domains }));
+      // Answered with what is actually delivered now: a domain the credential may not read is named as withheld.
+      const result = this.context.controlPlaneGateway.subscribeWebSocketClient(clientId, asked.domains);
+      this.sendFrame(ws, JSON.stringify({
+        type: 'subscribed', clientId, domains: result?.subscribed ?? [],
+        ...(result && result.withheld.length > 0 ? { withheldDomains: result.withheld } : {}),
+        ...(asked.unrecognised.length > 0 ? { unrecognisedDomains: asked.unrecognised } : {}),
+      }));
       return;
     }
 
     if (frame.type === 'unsubscribe') {
-      const domains = Array.isArray(frame.domains)
-        ? normalizeFrameDomains(frame.domains)
-        : undefined;
-      if (domains instanceof Response) {
-        this.sendFrame(ws, JSON.stringify({ type: 'error', error: 'Invalid runtime event domain' }));
+      const asked = readFrameDomains(frame.domains);
+      // A list naming no known domain is refused: an empty selection here would end every domain.
+      if (asked && asked.domains.length === 0 && asked.unrecognised.length > 0) {
+        this.sendFrame(ws, JSON.stringify({ type: 'error', ...unknownDomainsRefusal(asked.unrecognised) }));
         return;
       }
-      this.context.controlPlaneGateway.unsubscribeWebSocketClient(clientId, domains);
-      this.sendFrame(ws, JSON.stringify({ type: 'unsubscribed', clientId, domains: domains ?? [] }));
+      this.context.controlPlaneGateway.unsubscribeWebSocketClient(clientId, asked?.domains);
+      this.sendFrame(ws, JSON.stringify({
+        type: 'unsubscribed', clientId, domains: asked?.domains ?? [],
+        ...(asked && asked.unrecognised.length > 0 ? { unrecognisedDomains: asked.unrecognised } : {}),
+      }));
       return;
     }
 
@@ -1540,37 +1539,25 @@ function parseRuntimeDomains(rawDomains: string | null): { readonly domains: Run
   return requested;
 }
 
-function normalizeFrameDomains(values: readonly unknown[]): RuntimeEventDomain[] | Response {
-  const domains: RuntimeEventDomain[] = [];
-  const invalid: string[] = [];
-  for (const value of values) {
-    if (typeof value !== 'string') {
-      invalid.push(String(value));
-      continue;
-    }
-    const trimmed = value.trim();
-    if (!isRuntimeEventDomain(trimmed)) {
-      invalid.push(trimmed);
-      continue;
-    }
-    domains.push(trimmed);
-  }
-  if (invalid.length > 0) {
-    return Response.json({
-      error: 'Invalid runtime event domain',
-      invalid,
-    }, { status: 400 });
-  }
-  return [...new Set(domains)];
+/**
+ * A socket frame's `domains`, read by the same rule as the upgrade's
+ * `?domains=` (a non-string entry is no domain name). Undefined when the frame
+ * carries no list.
+ */
+function readFrameDomains(value: unknown): { readonly domains: RuntimeEventDomain[]; readonly unrecognised: string[] } | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return readRequestedDomains(value.map((entry: unknown) => (typeof entry === 'string' ? entry : String(entry))));
 }
 
-/**
- * A scope list the credential stores for itself, when it carries one: a
- * pairing token or a user issued a narrower list (pairing.tokens.create,
- * local_auth.users.create / local_auth.users.scopes.set). Without one the
- * role's default set applies.
- */
-function storedScopesOf(authenticated: AuthenticatedOperatorRequest): readonly string[] | undefined {
-  return authenticated.kind === 'shared-token' ? undefined : authenticated.scopes;
+/** The refusal of a domain list in which no name is a runtime event domain. */
+function unknownDomainsRefusal(unrecognised: readonly string[]): Record<string, unknown> {
+  return {
+    error: `No runtime event domain is named ${unrecognised.join(', ')}.`,
+    code: 'UNKNOWN_EVENT_DOMAIN',
+    category: 'bad_request',
+    unrecognisedDomains: unrecognised,
+    next: [`Use domains from: ${RUNTIME_EVENT_DOMAINS.join(', ')}.`],
+  };
 }
+
 

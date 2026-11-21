@@ -5,6 +5,7 @@ import {
   type OrchestratorUserInputOptions,
 } from '@goodvibes/engine/platform/platform/core';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { OwnerInputAnswered } from './companion-input.js';
 import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 /** Mutable UI callbacks remain owned by each shell instance. */
 export function createTerminalOrchestrator(
@@ -29,9 +30,13 @@ export function terminalCompanionInputHandler(
   onError: (error: unknown) => void,
   beforeInput?: (() => void) | undefined,
 ) {
-  return (text: string, options?: OrchestratorUserInputOptions): void => {
+  return (text: string, options?: OrchestratorUserInputOptions, answered?: OwnerInputAnswered): void => {
     beforeInput?.();
-    void orchestrator.handleUserInput(text, undefined, options).catch(onError);
+    // A turn that ran is answered from its own turn events; one that failed to start is answered here.
+    void orchestrator.handleUserInput(text, undefined, options).catch((error: unknown) => {
+      answered?.({ answer: `This message could not be answered: ${error instanceof Error ? error.message : String(error)}`, status: 'failed' });
+      onError(error);
+    });
   };
 }
 /** Common mechanical services only; memory and code-injection authority is supplied separately. */

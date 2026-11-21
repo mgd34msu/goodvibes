@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
-import { assertConfirmed, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
+import type { HandlerContextEnvelope, TypedHandler } from './handler-plumbing.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
@@ -65,7 +65,7 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
  * pairing authority, live scopes and exact window ownership still decide in code. */
 export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, action: 'approve' | 'deny' | 'cancel', operations?: Pick<CheckoutOperations, 'cancel'> & Partial<Pick<CheckoutOperations, 'recordOwnerStop'>>): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
-    assertConfirmed(body, context);
+    // Its descriptor's confirmation (owner-request) was checked before this handler ran.
     const input = record(body);
     const purchaseId = field(input['purchaseId'], 'purchaseId');
     const operationId = input['operationId'] === undefined ? undefined : field(input['operationId'], 'operationId');
@@ -152,7 +152,6 @@ export function purchaseSecurityCodeHandler(deps: PaymentWindowHandlerDeps): Typ
   return async ({ body, context }) => {
     // A security code is card material: it crosses only this machine, TLS or the tailnet.
     if (!mayCrossWithCardDetails(context.transport)) throw new GatewayVerbError(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403);
-    assertConfirmed(body, context);
     const input = record(body);
     const purchaseId = field(input['purchaseId'], 'purchaseId');
     const windowId = field(input['windowId'], 'windowId');

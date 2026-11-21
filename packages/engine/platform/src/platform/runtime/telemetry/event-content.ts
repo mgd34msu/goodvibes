@@ -276,8 +276,6 @@ const EVENT_FIELD_OVERRIDES = {
   FLEET_NODE_FINISHED: { label: 'content' },
   FLEET_NODE_BLOCKED_ON_USER: { label: 'content' },
   FLEET_NODE_UNBLOCKED: { label: 'content' },
-  // A companion message's metadata comes from the sender.
-  COMPANION_MESSAGE_RECEIVED: { metadata: 'content' },
   // The quarantine detail names the schema problem, not content.
   MCP_SCHEMA_QUARANTINED: { detail: 'shown' },
   // Work-plan task records: ids and status are shown, the owner's words are not.

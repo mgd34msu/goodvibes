@@ -12,12 +12,10 @@ export function initializeTerminalCatalog(
   provider: ProviderRegistry,
   benchmarks: BenchmarkStore,
   loadKeybindings: () => void,
-  wirePricing?: ((provider: ProviderRegistry) => void) | undefined,
 ): void {
   provider.initModelLimits();
   benchmarks.initBenchmarks();
   provider.initCatalog();
-  wirePricing?.(provider);
   loadKeybindings();
 }
 /**

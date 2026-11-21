@@ -20,7 +20,7 @@
  * `occasions.update` and `occasions.plans.update` rewrite one. Each takes
  * `authority` as a required body parameter and goes through `OwnerProfileStore`,
  * which runs the profile's own write gate before a line lands.
- * `refuseNonUserRequest` runs first on each, for the same reason it does on
+ * `refuseDeclinedRequest` runs first on each, for the same reason it does on
  * `profile.set`: "you told
  * me this was not a user request" deserves its own answer rather than being
  * folded into a trust refusal naming a surface the caller never claimed.
@@ -30,7 +30,7 @@ import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-ca
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
-import { refuseNonUserRequest } from './explicit-user-request.js';
+import { refuseDeclinedRequest } from '../confirmation-gate.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import { isProfileSurface, type ProfileSurface } from '../../owner-profile/index.js';
 import {
@@ -223,7 +223,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.confirm', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.confirm');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.confirm');
     const params = readInvocationParams(invocation);
     return service.confirmOccasion({
       title: requireStringValue(params.title, 'title'),
@@ -240,7 +240,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.remove', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.remove');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.remove');
     const params = readInvocationParams(invocation);
     return service.removeOccasion({
       occasionId: requireStringValue(params.occasionId, 'occasionId'),
@@ -250,7 +250,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.update', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.update');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.update');
     const params = readInvocationParams(invocation);
     return service.updateOccasion({
       occasionId: requireStringValue(params.occasionId, 'occasionId'),
@@ -326,7 +326,7 @@ export function registerOccasionsGatewayMethods(
     // Naming a date removes the other lines from the owner's profile, so it is
     // a profile write with the same admission as a removal. Without one, the
     // call changes nothing and answers with the dates to choose from.
-    if (keep !== undefined && !profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.conflict.resolve');
+    if (keep !== undefined && !profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.conflict.resolve');
     return service.resolveConflict({
       occasionId,
       ...(keep === undefined ? {} : { keep, authority: readAuthority(params.authority, invocation) }),
@@ -348,7 +348,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.plans.confirm', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.confirm');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.plans.confirm');
     const params = readInvocationParams(invocation);
     return service.confirmPlan({
       title: requireStringValue(params.title, 'title'),
@@ -366,7 +366,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.plans.update', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.update');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.plans.update');
     const params = readInvocationParams(invocation);
     return service.updatePlan({
       planId: requireStringValue(params.planId, 'planId'),
@@ -385,7 +385,7 @@ export function registerOccasionsGatewayMethods(
   });
 
   attach('occasions.plans.remove', (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'occasions.plans.remove');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'occasions.plans.remove');
     const params = readInvocationParams(invocation);
     return service.removePlan({
       planId: requireStringValue(params.planId, 'planId'),

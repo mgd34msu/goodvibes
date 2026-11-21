@@ -45,7 +45,7 @@ import {
 } from '@goodvibes/engine/transport-core';
 import type { DomainEventConnector } from './domain-events.js';
 import { readEventEnvelope } from './envelope.js';
-import { createSharedDomainConnector } from './shared-connection.js';
+import { createSharedDomainConnector, endUnservedDomains } from './shared-connection.js';
 import {
   createTurnLifecycleGate,
   readTurnLifecycleFrame,
@@ -163,7 +163,12 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
       invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'sse' }), observer?.onObserverError);
       const close = await openServerSentEventStream(fetchImpl, url, {
         onEventId: (id) => { if (live()) position = id; },
-        onReady: (ready) => { if (live()) handleResume(ready); },
+        onReady: (ready) => {
+          if (!live()) return;
+          handleResume(ready);
+          // The domains the daemon named as withheld or unknown end; the other feeds keep running.
+          endUnservedDomains(ready, sink);
+        },
         onGap: (gap) => { if (live()) onLostFrames(gap.dropped); },
         onEvent: ({ name: eventName, payload }) => {
           if (!live()) return;

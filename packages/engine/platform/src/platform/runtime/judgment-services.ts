@@ -260,6 +260,12 @@ export interface JudgmentServices {
    * Absent for a composition that hands the browser route its own port.
    */
   readonly browserPort?: JudgmentPort;
+  /**
+   * Where the ports' primary reading goes now: the endpoint each reading of
+   * `port` and `browserPort` resolves (requestedDecisionEndpoint over the live
+   * settings), so a label of the route cannot differ from the port it describes.
+   */
+  primaryEndpoint(): string;
   readonly decisionLog: SqliteDecisionLog;
   /** Set when the previous log could not be read: it was kept aside and this one is new. */
   readonly decisionLogNotice?: string;
@@ -390,5 +396,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   });
   const volumeMonitor = composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
   return { port, browserPort, decisionLog, volumeMonitor, unrecordedNotes: () => unrecordedNotes,
+    primaryEndpoint: () => requestedDecisionEndpoint(input.config.get('judgment.endpoint'), input.env),
     ...(decisionLogNotice === undefined ? {} : { decisionLogNotice }) };
 }

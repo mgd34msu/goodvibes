@@ -16,7 +16,7 @@
  * needed. The named rows above them say more than a scope can (the owner
  * himself, a question to the owner instead of a refusal, a subject the actor
  * must own); the flag rows mark what a method also does (cannot be undone,
- * sends outward, changes a contract, is the owner's own act).
+ * sends outward, changes a contract, is never made by a model).
  *
  * Cost: a table lookup and a set membership per effect; no I/O.
  */
@@ -75,6 +75,13 @@ const ROWS = [
   { id: 'stepup.credential.register', least: 'admin', scope: 'write:relay', subject: 'any', modelRefused: true },
   { id: 'hook.fire', least: 'admin', scope: 'write:hooks', subject: 'any' },
   { id: 'settings.write', least: 'admin', scope: 'write:config', subject: 'any' },
+  /**
+   * Withdrawing access the caller neither minted nor holds (a device the owner
+   * paired, another principal's token, the shared operator token): the owner's
+   * own act; an admin's is put to the owner. A token the caller minted or holds
+   * is revoked under control-plane.write alone (routes/pairing.ts).
+   */
+  { id: 'access.withdraw', least: 'owner', scope: 'write:control-plane', subject: 'any', ask: { kind: 'loosen-security', floor: 'admin' }, modelRefused: true },
   /** A settings change that loosens a security, permission, judgment or payment setting: an admin's is put to the owner. */
   { id: 'settings.loosen', least: 'owner', scope: 'write:config', subject: 'any', ask: { kind: 'loosen-security', floor: 'admin' } },
   { id: 'secret.write', least: 'admin', scope: 'write:config', subject: 'any', modelRefused: true },
@@ -115,8 +122,8 @@ const ROWS = [
   { id: 'events.fleet', least: 'admin', scope: 'read:events', subject: 'any' },
   { id: 'events.config', least: 'admin', scope: 'read:events', subject: 'any' },
   // ── What a method also does ────────────────────────────────────────────
-  /** The owner's own act (granting or withdrawing access, restoring what he keeps): a model never makes it. */
-  { id: 'owner.act', least: 'guest', scope: '', subject: 'any', modelRefused: true },
+  /** A model never makes it, whoever it acts for (granting access, restoring what the owner keeps). Who may make it is the other rows' answer. */
+  { id: 'model.refused', least: 'guest', scope: '', subject: 'any', modelRefused: true },
   { id: 'record.destroy', least: 'guest', scope: '', subject: 'any', irreversible: true },
   { id: 'contract.change', least: 'guest', scope: '', subject: 'any', changesContract: true },
   { id: 'outward.send', least: 'guest', scope: '', subject: 'any', outward: true },
@@ -351,7 +358,10 @@ export function admitRules(actor: Actor, rules: readonly EffectRule[],
 export interface EffectFacts {
   readonly access: 'public' | 'authenticated' | 'admin' | 'remote-peer';
   readonly scopes: readonly string[];
+  /** Only the owner causes it without asking (a row whose least class is the owner). */
   readonly ownerOnly: boolean;
+  /** A model never causes it, whoever it acts for. */
+  readonly modelRefused: boolean;
   readonly irreversible: boolean;
   readonly changesContract: boolean;
   readonly outward: boolean;
@@ -366,7 +376,8 @@ export function effectFacts(effects: readonly EffectId[]): EffectFacts {
   return {
     access,
     scopes,
-    ownerOnly: rules.some((rule) => rule.modelRefused === true),
+    ownerOnly: rules.some((rule) => rule.least === 'owner'),
+    modelRefused: rules.some((rule) => rule.modelRefused === true),
     irreversible: rules.some((rule) => rule.irreversible === true),
     changesContract: rules.some((rule) => rule.changesContract === true),
     outward: rules.some((rule) => rule.outward === true),
@@ -378,12 +389,13 @@ export function effectFacts(effects: readonly EffectId[]): EffectFacts {
  * registered with its own access and scopes): one row per scope at its access
  * level, the same as the mechanical rows of the table.
  */
-export function declaredAccessRules(descriptor: { readonly id: string; readonly access: EffectFacts['access']; readonly scopes: readonly string[]; readonly ownerOnly?: boolean | undefined }): readonly EffectRule[] {
+export function declaredAccessRules(descriptor: { readonly id: string; readonly access: EffectFacts['access']; readonly scopes: readonly string[]; readonly ownerOnly?: boolean | undefined; readonly modelRefused?: boolean | undefined }): readonly EffectRule[] {
   const least: EffectClass = descriptor.access === 'admin' ? 'admin' : descriptor.access === 'remote-peer' ? 'peer' : 'device';
   const base = { id: 'plugin.call' as const, subject: 'any' as const };
   if (descriptor.access === 'public') return [{ ...base, least: 'guest', scope: '', public: true }];
   const rules: EffectRule[] = descriptor.scopes.map((scope) => ({ ...base, least, scope }));
   if (rules.length === 0) rules.push({ ...base, least, scope: '' });
-  if (descriptor.ownerOnly === true) rules.push(EFFECTS['owner.act']);
+  // A plugin's `ownerOnly` says a model never calls the method.
+  if (descriptor.ownerOnly === true || descriptor.modelRefused === true) rules.push(EFFECTS['model.refused']);
   return rules;
 }

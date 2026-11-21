@@ -1268,6 +1268,11 @@
       "types": "./platform/dist/platform/pairing/companion-token.d.ts",
       "import": "./platform/dist/platform/pairing/companion-token.js"
     },
+    "./platform/platform/pairing/principal-ids": {
+      "bun": "./platform/src/platform/pairing/principal-ids.ts",
+      "types": "./platform/dist/platform/pairing/principal-ids.d.ts",
+      "import": "./platform/dist/platform/pairing/principal-ids.js"
+    },
     "./platform/platform/config/goodvibes-home": {
       "bun": "./platform/src/platform/config/goodvibes-home.ts",
       "types": "./platform/dist/platform/config/goodvibes-home.d.ts",
@@ -3242,6 +3247,16 @@
       "bun": "./terminal-shell/src/companion-input.ts",
       "types": "./terminal-shell/dist/companion-input.d.ts",
       "import": "./terminal-shell/dist/companion-input.js"
+    },
+    "./terminal-shell/session-handover": {
+      "bun": "./terminal-shell/src/session-handover.ts",
+      "types": "./terminal-shell/dist/session-handover.d.ts",
+      "import": "./terminal-shell/dist/session-handover.js"
+    },
+    "./terminal-shell/session-inbound-inputs": {
+      "bun": "./terminal-shell/src/session-inbound-inputs.ts",
+      "types": "./terminal-shell/dist/session-inbound-inputs.d.ts",
+      "import": "./terminal-shell/dist/session-inbound-inputs.js"
     },
     "./terminal-shell/knowledge-labels": {
       "bun": "./terminal-shell/src/knowledge-labels.ts",

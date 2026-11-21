@@ -18,12 +18,14 @@ export {
   getOrCreateCompanionToken,
   getOrCreateHttpListenerToken,
   httpListenerTokenPath,
+  readHttpListenerTokenValue,
   regenerateCompanionToken,
   pruneStaleOperatorTokens,
 } from './companion-token.js';
 export type { PruneStaleOperatorTokensOptions, PruneStaleOperatorTokensResult } from './companion-token.js';
 
-export { PairingLimitReachedError, PairingTokenManager, pairingPrincipalId, readLegacySharedRevoked } from './pairing-token-store.js';
+export { PairingLimitReachedError, PairingTokenManager, readLegacySharedRevoked } from './pairing-token-store.js';
+export { LOCAL_OWNER_PRINCIPAL, pairingPrincipalId, pairingTokenIdOfPrincipal } from './principal-ids.js';
 export type {
   PublicPairingToken,
   PairingTokenOrigin,

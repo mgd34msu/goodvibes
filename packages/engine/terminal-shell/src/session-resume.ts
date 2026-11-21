@@ -35,7 +35,6 @@ import {
   findSessionCrashSnapshot,
   isSessionOpenElsewhere,
   moveSessionHere,
-  takeSessionOverHere,
   type SessionCrashSnapshot,
 } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { crashSnapshotHandlerFor, type CrashSnapshotHandler, type CrashSnapshotHandling } from './session-crash-offer.js';
@@ -480,6 +479,12 @@ export interface LoadSavedSessionDeps {
    * restore the saved session (the error is rethrown after it). Refusals do not call it.
    */
   readonly recoveryFailed?: ((sessionId: string, error: unknown) => void) | undefined;
+  /**
+   * `--force`: ask the terminal that has the session open to save it and let go,
+   * resolving once it has (session-handover.ts `requestSessionHandover`).
+   * Absent where this terminal has no daemon to ask through; a forced load is refused then.
+   */
+  readonly requestHandover?: ((sessionId: string) => Promise<void>) | undefined;
 }
 
 export interface LoadedSavedSession extends SessionResumeOutcome {
@@ -490,15 +495,15 @@ export interface LoadedSavedSession extends SessionResumeOutcome {
 
 /** Options of {@link loadSavedSessionIntoLive}. */
 export interface LoadSavedSessionOptions {
-  /** Take over a session another running terminal has open (`/session resume <id> --force`). */
+  /** Have the terminal that has the session open save it and hand it over (`/session resume <id> --force`). */
   readonly force?: boolean | undefined;
 }
 
 /**
  * `resumeSessionCore` behind the refusals a command needs (`/session resume`, `/load`,
  * the `/sessions` list, the session picker). It refuses while a turn runs and refuses a
- * session another running terminal has open (`/session resume <name> --force` is
- * the explicit way to take it over); the routine then reads and validates the saved
+ * session another running terminal has open (`/session resume <name> --force` has
+ * that terminal save it and hand it over first); the routine then reads and validates the saved
  * messages before touching the live conversation and switches the session identity, so
  * later autosaves go to the loaded session. The session lock moves with the identity
  * (moveLiveSessionArtifacts) so a second terminal sees the new session as open right away.
@@ -517,19 +522,23 @@ export async function loadSavedSessionIntoLive(
   const surface = deps.surface;
   const openElsewhere = (): Error => new Error(
     `Session ${name} is open in another running terminal: loading it here would fork its live state. `
-      + `Close it there, or run \`/session resume ${name} --force\` to take it over anyway.`,
+      + `Continue it there, or run \`/session resume ${name} --force\` to have that terminal save it and hand it over to this one.`,
   );
   // Two terminals saving one session overwrite each other's turns. The quick probe refuses without waiting; the
   // claim then takes the session's lock before anything is installed, so two terminals loading it at once cannot
-  // both get it (the probe alone left the load window open). A forced load takes it over instead.
+  // both get it (the probe alone left the load window open). A forced load first asks the terminal holding the
+  // session to save it and let go (session-handover.ts), and claims it only once it is free: one writer at a time.
   let claimed = false;
   if (surface && name !== deps.runtime.sessionId) {
-    if (options.force) takeSessionOverHere(surface, name);
-    else {
-      if (isSessionOpenElsewhere(surface, name)) throw openElsewhere();
-      if (!(await claimSessionHere(surface, name))) throw openElsewhere();
-      claimed = true;
+    if (isSessionOpenElsewhere(surface, name)) {
+      if (!options.force) throw openElsewhere();
+      if (!deps.requestHandover) {
+        throw new Error(`Session ${name} is open in another running terminal, and this terminal cannot ask it to let go. Close it there, then resume it here.`);
+      }
+      await deps.requestHandover(name);
     }
+    if (!(await claimSessionHere(surface, name))) throw openElsewhere();
+    claimed = true;
   }
   let outcome: SessionResumeOutcome;
   try {
@@ -545,7 +554,7 @@ export async function loadSavedSessionIntoLive(
     });
   } catch (error) {
     // The load did not happen: the claim taken for it is given back (the live session keeps its own).
-    if (surface && (claimed || options.force) && deps.runtime.sessionId !== name) closeSessionHere(surface, name);
+    if (surface && claimed && deps.runtime.sessionId !== name) closeSessionHere(surface, name);
     deps.recoveryFailed?.(name, error);
     throw error;
   }

@@ -1,25 +1,28 @@
 # Companion message routing
 
-This document describes how TUI clients must handle companion main-chat
-messages surfaced through `conversation.followup.companion` and the runtime
-`COMPANION_MESSAGE_RECEIVED` event.
+This document describes how a companion main-chat message, and a message on
+the ntfy chat topic, reach the conversation a terminal program is running and
+how their answers come back.
 
 ## Background
 
-A companion process may inject a message into the operator's live session
+A companion process may put a message into the operator's live session
 without spawning agent work or starting a contract. This is called a companion main-chat
 message. The platform routes these through `POST /api/sessions/:sessionId/messages`
-with `kind: 'message'` in the request body. If `kind` is omitted, the platform now
+with `kind: 'message'` in the request body. If `kind` is omitted, the platform
 uses the same conversation route. Callers that want agent/task behavior must
 send `kind: 'task'` explicitly.
 
-The message is not an agent task. It is appended to the target session and
-emitted as `COMPANION_MESSAGE_RECEIVED`; a TUI that wants live companion chat
-delegates that event into `Orchestrator.handleUserInput()`, which starts a
-normal LLM turn in the same path as terminal input. Like terminal input,
-that turn is read once by the contract intake, which starts a contract only
-when Jev reads the text as work (see
-[Runtime orchestration](./runtime-orchestration.md#turn-loop)).
+The message is queued in the session's inputs as a follow-up
+(`sessionBroker.followUpMessage`). A terminal program (the terminal app or the
+Agent) running that session collects it from `sessions.inputs.list`, claims it,
+runs it as its next turn in the same path as typed input (with the message's
+origin, so it is not taken for the owner typing at that terminal), and reports
+it done with `sessions.inputs.deliver`. Like terminal input, that turn is read
+once by the contract intake, which starts a contract only when Jev reads the
+text as work (see [Runtime orchestration](./runtime-orchestration.md#turn-loop)).
+With no terminal on the session, the daemon starts an agent for it, as for any
+follow-up.
 
 ## API
 
@@ -33,21 +36,22 @@ Content-Type: application/json
 Response (`202 Accepted`):
 
 ```json
-{ "messageId": "companion-<uuid>", "routedTo": "conversation", "sessionId": "<sessionId>" }
+{ "messageId": "<your id, when you sent one>", "sessionId": "<sessionId>", "inputId": "<input id>", "mode": "queued-for-surface" }
 ```
 
-`messageId` identifies this message, the same value carried in the
-`ConversationMessageEnvelope` published for it (see "Control-plane event"
-below). The daemon makes it `companion-<uuid>` unless the request names one.
+`inputId` is the session input that holds the message; `mode` is what became
+of it: `queued-for-surface` when a terminal running the session collects it,
+`queued-follow-up` or `continued-live` when it waits behind a running turn.
+With no terminal on the session the daemon starts an agent for it and answers
+as the follow-up route does (`session`, `message`, `input`, `mode`, `agentId`);
+a session that refused it answers `409` with the same fields.
 
 To make a retry safe, send your own `messageId` (1 to 128 characters of letters,
-digits, `.`, `_`, `:` or `-`; anything else is a `400 INVALID_MESSAGE_ID`). If a
-message with that id is already stored in the session, the daemon answers the
-same `202` and does not add a second turn.
+digits, `.`, `_`, `:` or `-`; anything else is a `400 INVALID_MESSAGE_ID`). A
+message already recorded under that id is answered with its first submission
+and does not add a second turn.
 
-- No agent is spawned.
-- The live TUI should treat the event as operator chat and start a normal LLM
-  turn.
+- The terminal running the session answers it as a normal turn.
 - The `kind` field defaults to `'message'` when omitted.
 - `kind: 'task'` explicitly routes through the session broker and can spawn an
   agent continuation or start a contract.
@@ -61,77 +65,16 @@ same `202` and does not add a second turn.
 To steer an already-running session instead of starting a new task, use the
 dedicated steer route, `POST /api/sessions/:id/steer`.
 
-## Control-plane event
-
-The daemon publishes a `conversation.followup.companion` event via the gateway. The event
-payload is a `ConversationMessageEnvelope`:
-
-```ts
-{
-  sessionId: string;        // target operator session
-  messageId: string;        // `companion-<uuid>`, or the id the request named
-  body: string;             // message text
-  source: 'companion-followup';
-  timestamp: number;        // epoch ms
-  attachments?: readonly (ArtifactDescriptor & { artifactId: string; label?: string })[]; // optional artifact attachments
-  metadata?: Record<string, unknown>;
-}
-```
-
-The same payload is also emitted on the runtime bus as
-`COMPANION_MESSAGE_RECEIVED`. The runtime event includes the envelope fields
-above plus `metadata` when the surface supplied it.
-
-## TUI client integration
-
-The TUI client should subscribe to `COMPANION_MESSAGE_RECEIVED` on the runtime
-bus and handle it as follows:
-
-1. Filter events: only process events where `envelope.sessionId` matches the active session.
-2. Delegate to the active orchestrator instead of spawning an agent or starting a contract.
-
-```ts
-// NOTE: runtimeBus and orchestrator are TUI host internals; this pattern applies to
-// embedders running the full daemon surface. Companion apps receive messages through
-// the realtime event feed (platformClient.realtime); they do not subscribe to runtimeBus directly.
-runtimeBus.on('COMPANION_MESSAGE_RECEIVED', ({ payload }) => {
-  if (payload.sessionId !== activeSessionId) return;
-  void orchestrator.handleUserInput(payload.body, undefined, {
-    origin: {
-      source: payload.source,
-      messageId: payload.messageId,
-      metadata: payload.metadata,
-    },
-  });
-});
-```
-
-`handleUserInput()` appends the user message to the conversation view and emits
-the resulting turn events. Clients should not separately append the message
-before calling the orchestrator, or the message will render twice.
-
-For clients that construct `Orchestrator` directly, pass the shared session id
-in `OrchestratorOptions.sessionId` when the orchestrator should emit turn events
-under that same session id. If omitted, the orchestrator generates a private
-runtime session id.
-
 ## ntfy chat replies
 
-The ntfy chat topic (`surfaces.ntfy.chatTopic`) uses this same companion message path. The platform
-queues a one-shot ntfy reply target before emitting `COMPANION_MESSAGE_RECEIVED`.
-To make reply correlation durable, TUI clients should pass
-`payload.messageId` into `handleUserInput()` as `origin.messageId`; the platform then
-matches `TURN_SUBMITTED` and `TURN_COMPLETED` by message id and publishes only
-the matching model response back to the originating ntfy topic.
-
-Clients should pass origin metadata so reply correlation uses the stable message
-id instead of prompt text. Without a message id, a turn in another session is matched
-by identical prompt text only within two minutes of the ntfy message, and only when no
-second message waits on the same text; a later identical prompt is never taken for it.
-
-A queued ntfy message waits ten minutes for its turn to start. Once a turn is matched,
-the reply stays pending for up to six hours so a long turn still answers. A turn that
-is cancelled publishes a short "cancelled" notice to the topic instead of nothing.
+A message on the ntfy chat topic (`surfaces.ntfy.chatTopic`) takes the same
+path: it is queued as a follow-up in the terminal's session, on the topic's
+route binding. The terminal that runs it binds the input to its turn while the
+turn runs and reports the answer with it (`sessions.inputs.deliver` with
+`consumed`, `agentId` and `answer`); the daemon writes the answer into the
+shared session and sends it back to the topic through the route's reply
+pipeline. A turn that fails or is cancelled sends a short notice saying so
+instead of nothing.
 
 The ntfy provider runtime subscribes to route topics as live ingress. It starts
 from the current Unix timestamp rather than `since=latest`, because ntfy uses
@@ -145,10 +88,9 @@ The `ConversationMessageEnvelope` shape is shared between chat-mode events (`tur
 - `source: 'companion-chat-user'` for user messages
 - `source: 'companion-chat-assistant'` for assistant replies
 
-Session-message follow-ups use `source: 'companion-followup'`. ntfy chat uses
-`source: 'ntfy-chat'`. The TUI client can discriminate on the `source` field or
-metadata to render surface-specific styling, but both paths should use the same
-orchestrator turn entry point when the user-facing behavior is live chat.
+A companion main-chat message carries `source: 'companion-followup'` on its
+session input, and a channel message its surface (`ntfy`); the terminal passes
+it as the turn's origin.
 
 ## Related session routes
 
@@ -156,7 +98,7 @@ Other session routes cover adjacent use cases. Use the one that matches your int
 
 | Route | Purpose | Triggers agent turn? |
 |---|---|---|
-| `POST /api/sessions/:id/messages` | Inject a companion main-chat message visible to the operator | Yes, when the live TUI delegates `COMPANION_MESSAGE_RECEIVED` to `handleUserInput()` |
+| `POST /api/sessions/:id/messages` | Put a companion main-chat message into the session's conversation | Yes: the terminal running the session answers it, or the daemon when none does |
 | `GET  /api/sessions/:id/inputs` | List pending inputs awaiting a response on the active turn | No |
 | `POST /api/sessions/:id/steer` | Steer the active turn with new guidance | Yes |
 | `POST /api/sessions/:id/follow-up` | Queue a follow-up for delivery after the current agent completes; on an idle session an agent is started for it immediately (`mode: "spawn"`). A rejected input answers `409` | Yes, on delivery |

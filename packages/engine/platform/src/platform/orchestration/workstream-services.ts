@@ -51,7 +51,8 @@ import { createAgentManagerDecompositionRunner } from '../agents/planner-decompo
 import type { ConfigManager } from '../config/manager.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
-import { calcSessionCost, isModelPriced } from '../providers/session-cost.js';
+import { calcSessionCost, isModelPriced, type SessionPricing } from '../providers/session-cost.js';
+import { buildPricingSeams } from '../runtime/cost/pricing-seams.js';
 import { editItemBrief, moveItemInSpec, removeItemFromSpec } from './workstream-draft-edits.js';
 import { createWorkstreamDraftStore, formatWorkstreamDraftReclaim } from './workstream-draft-store.js';
 import { validateAttempts } from './workstream-attempts-validation.js';
@@ -80,6 +81,8 @@ export interface WorkstreamServicesDeps {
   readonly remoteSupervisor: Pick<RemoteSupervisor, 'getSnapshot'>;
   /** The runtime store the remote supervisor reads its connections from. */
   readonly runtimeStore: RuntimeStore;
+  /** What planning and workstream usage is priced with: the runtime's ProviderRegistry. */
+  readonly pricing: SessionPricing;
 }
 
 // WorkstreamDraft + WorkstreamDraftProvenance live in workstream-draft-types.ts
@@ -213,12 +216,12 @@ function readDecompositionConfig(configManager: Pick<ConfigManager, 'get'>): Dec
 /** Honest cost estimator: prices the planning agent's tokens only when the
  *  session's default model is one we actually have pricing for; otherwise the
  *  render falls back to a raw token count. Never throws. */
-function makeCostEstimator(configManager: Pick<ConfigManager, 'get'>): (usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number | undefined; cacheWriteTokens?: number | undefined }) => number | undefined {
+function makeCostEstimator(configManager: Pick<ConfigManager, 'get'>, pricing: SessionPricing): (usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number | undefined; cacheWriteTokens?: number | undefined }) => number | undefined {
   return (usage) => {
     try {
       const model = configManager.get('provider.model') as unknown as string | undefined;
-      if (!model || !isModelPriced(model)) return undefined;
-      return calcSessionCost(usage.inputTokens, usage.outputTokens, usage.cacheReadTokens ?? 0, usage.cacheWriteTokens ?? 0, model);
+      if (!model || !isModelPriced(pricing, model)) return undefined;
+      return calcSessionCost(pricing, usage.inputTokens, usage.outputTokens, usage.cacheReadTokens ?? 0, usage.cacheWriteTokens ?? 0, model);
     } catch {
       return undefined;
     }
@@ -275,6 +278,7 @@ function createDraftFacade(
   contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'> & Partial<Pick<ContractRunner, 'startIdempotent' | 'startFromPlanIdempotent'>>,
   sessionId: string | (() => string),
   plannerSources: PlannerInputSources,
+  pricing: SessionPricing,
 ): WorkstreamDraftService {
   const drafts = new Map<string, WorkstreamDraft>();
   const launching = new Map<string, Promise<{ contractId: string; ownerAgentId: string } | null>>();
@@ -330,7 +334,7 @@ function createDraftFacade(
         await buildPlannerInputs(task, plannerSources),
         readDecompositionConfig(configManager),
         runner,
-        { estimateCostUsd: makeCostEstimator(configManager) },
+        { estimateCostUsd: makeCostEstimator(configManager, pricing) },
       );
     });
   }
@@ -557,11 +561,8 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
     projectRoot: deps.projectRoot,
     sessionId: deps.sessionId,
     onFleetSlotReleased: deps.agentManager.onFleetSlotReleased?.bind(deps.agentManager),
-    priceUsage: (model, usage) => {
-      const modelId = model ?? 'unknown';
-      if (!isModelPriced(modelId)) return null;
-      return calcSessionCost(usage.inputTokens, usage.outputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, modelId);
-    },
+    // The same seam the fleet and contracts price with, so a workstream's cost agrees with theirs.
+    ...buildPricingSeams(deps.pricing),
   });
   // Honest resume: a prior process's still-in-flight workstreams pick back up
   // (and reappear in the fleet tree) instead of silently vanishing on
@@ -582,5 +583,6 @@ export function createWorkstreamDraftService(deps: WorkstreamDraftServiceDeps): 
     deps.contractRunner,
     deps.sessionId,
     { remoteSupervisor: deps.remoteSupervisor, runtimeStore: deps.runtimeStore },
+    deps.pricing,
   );
 }

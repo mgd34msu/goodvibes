@@ -443,6 +443,11 @@ export class Notifier implements NotificationDeadLetterSource {
     return describeDeadLetters(this._queue.getDlq(), (payload) => this.queuedEnvelope(payload).describe());
   }
 
+  /** Older failed notifications dropped from a full list since this process started; they cannot be resent. */
+  droppedDeadLetters(): number {
+    return this._queue.getMetrics().droppedDeadLetters;
+  }
+
   /**
    * Resend failed notifications: all of them, or those named in `ids`. Each is
    * queued again with a fresh retry budget; an id that is not in the list is

@@ -193,6 +193,21 @@ function storageFailureName(error: unknown): string {
   return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code) ? code : 'a storage error';
 }
 
+/** How a message is posted into a chat (send, steer, a channel's turn). */
+interface CompanionPostOptions {
+  readonly pendingReply?: PendingReply | undefined;
+  readonly attachments?: readonly CompanionChatMessageAttachmentInput[] | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+  readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
+  /** Steer: jump the pending queue (the caller cancels the active turn). */
+  readonly steer?: boolean | undefined;
+  readonly ownerDirect?: boolean | undefined;
+  /** Idempotency key chosen by the sender: a second post with the same key returns the first message's id and starts nothing. */
+  readonly clientMessageId?: string | undefined;
+  /** Called synchronously as the message joins the queue, with the turn running at that instant. */
+  readonly onEnqueued?: ((activeTurn: ActiveCompanionTurn | null) => void) | undefined;
+}
+
 interface InternalSession {
   meta: CompanionChatSession;
   /** The transcript; null while it is only on disk (an idle or closed chat). */
@@ -206,6 +221,10 @@ interface InternalSession {
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
   pendingTurns?: QueuedCompanionTurn[];
   preparingTurns?: number;
+  /** Sends being prepared or saved that have not joined `pendingTurns` yet. */
+  acceptingSends?: number;
+  /** Stops that landed with no turn running while a send was accepting: such a send is saved and its turn never starts. */
+  stopsBeforeStart?: number;
   /**
    * Client-chosen send ids already accepted (clientMessageId -> message id), so
    * a re-sent request answers with the first message instead of a second turn.
@@ -788,6 +807,22 @@ export class CompanionChatManager {
     if (!session) {
       throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
     }
+    if (!session.activeTurn && input.turnId === undefined) {
+      // No turn runs yet, but one is on its way: a send still being prepared or
+      // saved, or a queued message about to start. The stop cancels that turn.
+      const queuedNext = session.pendingTurns?.[0]?.userMessageId;
+      if ((session.acceptingSends ?? 0) > 0 || queuedNext !== undefined) {
+        if ((session.acceptingSends ?? 0) > 0) session.stopsBeforeStart = (session.stopsBeforeStart ?? 0) + 1;
+        if (queuedNext !== undefined) this.deleteQueuedMessage(sessionId, queuedNext);
+        return {
+          sessionId,
+          cancelled: true,
+          stoppedBeforeStart: true,
+          ...(queuedNext !== undefined ? { messageIds: [queuedNext] } : {}),
+          partialPersisted: false,
+        };
+      }
+    }
     return cancelActiveTurn(sessionId, session.activeTurn ?? null, input);
   }
 
@@ -870,19 +905,7 @@ export class CompanionChatManager {
     sessionId: string,
     content: string,
     clientId: string,
-    options: {
-      readonly pendingReply?: PendingReply | undefined;
-      readonly attachments?: readonly CompanionChatMessageAttachmentInput[] | undefined;
-      readonly metadata?: Record<string, unknown> | undefined;
-      readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
-      /** Steer: jump the pending queue (the caller cancels the active turn). */
-      readonly steer?: boolean | undefined;
-      readonly ownerDirect?: boolean | undefined;
-      /** Idempotency key chosen by the sender: a second post with the same key returns the first message's id and starts nothing. */
-      readonly clientMessageId?: string | undefined;
-      /** Called synchronously as the message joins the queue, with the turn running at that instant. */
-      readonly onEnqueued?: ((activeTurn: ActiveCompanionTurn | null) => void) | undefined;
-    } = {},
+    options: CompanionPostOptions = {},
   ): Promise<string> {
     const session = this._requireOpenSession(sessionId);
 
@@ -910,6 +933,31 @@ export class CompanionChatManager {
     // queued message into the active turn's later tool rounds, which re-read
     // the conversation every round.
     session.preparingTurns = (session.preparingTurns ?? 0) + 1;
+    // Until it joins the queue this send counts as accepting, so a Stop that
+    // lands meanwhile stops its turn instead of answering that nothing runs.
+    session.acceptingSends = (session.acceptingSends ?? 0) + 1;
+    const stopsAtEntry = session.stopsBeforeStart ?? 0;
+    let accepting = true;
+    const doneAccepting = (): void => { if (accepting) { accepting = false; session.acceptingSends = (session.acceptingSends ?? 1) - 1; } };
+    try {
+      return await this.acceptPreparedMessage(session, sessionId, content, options, attachments, route, messageId, stopsAtEntry, doneAccepting);
+    } finally {
+      doneAccepting();
+    }
+  }
+
+  /** The rest of {@link _postMessageInternal}, once the send counts as accepting: prepare, save, then queue or stop its turn. */
+  private async acceptPreparedMessage(
+    session: InternalSession,
+    sessionId: string,
+    content: string,
+    options: CompanionPostOptions,
+    attachments: ReturnType<typeof resolveAttachments>,
+    route: QueuedCompanionTurn['route'],
+    messageId: string,
+    stopsAtEntry: number,
+    doneAccepting: () => void,
+  ): Promise<string> {
     let providerContent: QueuedCompanionTurn['providerContent'];
     const preparation = buildProviderUserContent(content, attachments, this.artifactStore);
     this.activeWork.add(preparation);
@@ -992,6 +1040,23 @@ export class CompanionChatManager {
       this.pendingReplies.set(messageId, options.pendingReply);
     }
 
+    // A Stop landed while this send was being prepared or saved: the message is
+    // kept, its turn never starts (as a queued message removed before its turn,
+    // it stays `unanswered`), and its waiter is told.
+    if ((session.stopsBeforeStart ?? 0) !== stopsAtEntry) {
+      doneAccepting();
+      if (session.turnStartMarked === messageId) { delete session.turnStartMarked; this.markTurn(session, messageId, 'ended'); }
+      const at = messages.findIndex((message) => message.id === messageId);
+      if (at >= 0) {
+        const stopped = this.normalizeMessage({ ...messages[at]!, deliveryState: 'unanswered' });
+        messages[at] = stopped;
+        this.saveInBackground(session, [stopped], false);
+      }
+      this.resolvePendingReply(messageId, { messageId, error: 'The chat was stopped before this message\'s turn started; it was not answered.' });
+      return messageId;
+    }
+
+    doneAccepting();
     const entry: QueuedCompanionTurn = {
       userMessageId: messageId,
       route,
@@ -1092,12 +1157,13 @@ export class CompanionChatManager {
     if (!running) cancelledTurnId = this.sessions.get(sessionId)?.steerCancelled?.get(messageId);
     if (running) {
       try {
-        const result = await this.cancelTurn(sessionId, { turnId: running.turnId });
-        cancelledTurnId = result.turnId;
+        // Guarded by the running turn's id, so the answer is about that turn.
+        await this.cancelTurn(sessionId, { turnId: running.turnId });
+        cancelledTurnId = running.turnId;
         const live = this.sessions.get(sessionId);
         if (live) {
           const cancelled = (live.steerCancelled ??= new Map());
-          cancelled.set(messageId, result.turnId);
+          cancelled.set(messageId, running.turnId);
           if (cancelled.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) cancelled.delete(cancelled.keys().next().value!);
         }
       } catch (err: unknown) {

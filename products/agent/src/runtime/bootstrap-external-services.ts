@@ -27,6 +27,7 @@ import {
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { SpineReachability } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import { daemonLifecycleMarkerPathForHome } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import type {
   DeferredStartupCoordinator,
   ExternalServicesHandle,
@@ -170,6 +171,8 @@ export function wireAgentExternalServices(options: {
     }
     const previous = externalServices;
     externalServices = handle;
+    // The host answers again: a host on another machine's settings are read from it once more.
+    if (handle.daemonStatus.mode === 'external') void services.configManager.refreshDaemonSettings();
     if (previous !== handle && !replaceOptions.previousAlreadyStopped) await stopQuietly(previous);
     return handle;
   };
@@ -191,19 +194,17 @@ export function wireAgentExternalServices(options: {
   // Start of an installed-but-stopped host: when discovery found nothing on
   // the configured port, start the installed service entry once, wait a
   // bounded time, and re-probe. Every skip/failure path is reported.
-  // A daemon still starting when the boot-time wait ended is waited for until it
-  // answers or its unit stops; stopping this controller (app exit) ends the wait.
+  // A daemon still starting when the boot-time wait ended is waited for on its
+  // lifecycle marker turning ready or its unit stopping; nothing at start-up
+  // waits on it, and stopping this controller (app exit) ends the wait.
   const startingDaemonWait = new AbortController();
-  const adoptOnceAnswered = async (serviceName: string): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
-    const seams = options.connectedHostAutostart ?? {};
-    const probeReachability = seams.probeReachability ?? (() => services.sessionSpineClient.probeReachability());
+  const adoptOnceAnswered = async (serviceName: string, since: number): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
     const result = await waitForStartingDaemon({
       control: daemonServiceControl(),
-      isReachable: async () => (await probeReachability()) === 'online',
       serviceName,
+      since,
+      markerPath: daemonLifecycleMarkerPathForHome(services.homeDirectory),
       signal: startingDaemonWait.signal,
-      pollIntervalMs: seams.pollIntervalMs,
-      sleep: seams.sleep,
     });
     if (result === 'online') return adoptStarted({ action: 'came-online', serviceName });
     if (result === 'aborted') return { answered: false, level: null, detail: 'Stopped waiting for the connected host: GoodVibes Agent is exiting' };
@@ -260,11 +261,11 @@ export function wireAgentExternalServices(options: {
       case 'came-online':
         return adoptStarted(outcome);
       case 'starting':
-        if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName);
-        void adoptOnceAnswered(outcome.serviceName)
+        if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName, outcome.since);
+        void adoptOnceAnswered(outcome.serviceName, outcome.since)
           .then(reportBringUp)
           .catch((error: unknown) => logger.warn('Adopting the connected host once it answered failed', { error: summarizeError(error) }));
-        return { answered: false, level: 'low', detail: 'The GoodVibes daemon is starting; GoodVibes connects when it answers' };
+        return { answered: false, level: 'low', detail: 'The GoodVibes daemon is starting; shared sessions, phone access and the other things that need it work once it is ready' };
       case 'start-failed':
         return {
           answered: false,

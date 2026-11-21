@@ -125,6 +125,7 @@ export type {
   DaemonServiceSnapshot,
   DaemonServiceStartResult,
   WaitForStartingDaemonOptions,
+  DirectoryWatch,
 } from './daemon-autostart.js';
 
 export {

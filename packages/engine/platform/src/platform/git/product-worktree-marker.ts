@@ -76,6 +76,26 @@ export function kindOfProductWorktree(root: string, path: string): ProductWorktr
   return first.startsWith(LEGACY_AGENT_PREFIX) && first.length > LEGACY_AGENT_PREFIX.length ? 'agent' : null;
 }
 
+/** The kinds a contract owns: its own tree, its fix planner's views and its captured input. */
+export const CONTRACT_WORKTREE_KINDS = ['contract', 'contract-planner', 'contract-input'] as const satisfies readonly ProductWorktreeCreatedKind[];
+
+/**
+ * Whether `path` is, or lies inside, a product worktree of one of `kinds`
+ * under any project root (`.../.goodvibes/.worktrees/<kind>[/...]`), for a
+ * check that has no project root to ask about: read from the path alone.
+ */
+export function liesInProductWorktreeOfKind(path: string, kinds: readonly ProductWorktreeKind[]): boolean {
+  const [product, worktrees] = PRODUCT_WORKTREE_DIR_SEGMENTS;
+  const parts = path.split(/[/\\]/);
+  for (let index = 1; index + 1 < parts.length; index += 1) {
+    if (parts[index - 1] !== product || parts[index] !== worktrees) continue;
+    const kind = parts[index + 1]!;
+    if (isProductWorktreeKind(kind) && kinds.includes(kind)) return true;
+    if (kinds.includes('agent') && kind.startsWith(LEGACY_AGENT_PREFIX) && kind.length > LEGACY_AGENT_PREFIX.length) return true;
+  }
+  return false;
+}
+
 /** True when `path` lies under `<root>/.goodvibes/.worktrees`. */
 export function isInsideProductWorktreeDirectory(root: string, path: string): boolean {
   return productWorktreeSegments(root, path) !== null;

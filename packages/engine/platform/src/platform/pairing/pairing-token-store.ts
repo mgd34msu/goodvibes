@@ -74,6 +74,7 @@ import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeO
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { matchesSharedToken, type CredentialRefusal } from '../security/http-auth.js';
+import { LOCAL_OWNER_PRINCIPAL, pairingPrincipalId } from './principal-ids.js';
 
 const TOKEN_PREFIX = 'gvp_';
 /** How a shared operator token begins (pairing/companion-token.ts mints them). */
@@ -89,8 +90,6 @@ const ABSENT_FILE = 'absent';
 export const LOCAL_OWNER_CREDENTIAL: unique symbol = Symbol('goodvibes.local-owner-credential');
 /** A pairing token, or the owner's own machine. */
 export type NativeCredential = string | typeof LOCAL_OWNER_CREDENTIAL;
-/** The principal the owner's own machine authenticates as: the one its operator token already is. */
-export const LOCAL_OWNER_PRINCIPAL = 'shared-token';
 const LOCAL_OWNER_ID_PATTERN = /^local-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Whether a presented credential has the pairing-token shape (not whether it is valid). */
@@ -514,16 +513,6 @@ function lastSeenField(written: number | undefined, pending: number | undefined)
 
 function generateTokenValue(): string {
   return TOKEN_PREFIX + randomBytes(24).toString('base64url');
-}
-
-/** The `pairing:<id>` principal id a pairing-token request authenticates as. */
-export function pairingPrincipalId(tokenId: string): string {
-  return `pairing:${tokenId}`;
-}
-
-/** The pairing id behind a `pairing:<id>` principal, or undefined for any other principal. */
-export function pairingTokenIdOfPrincipal(principalId: string | undefined): string | undefined {
-  return principalId?.startsWith('pairing:') ? principalId.slice('pairing:'.length) : undefined;
 }
 
 /** `id` and every pairing minted, directly or through another, by it. */

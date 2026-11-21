@@ -9,7 +9,7 @@ import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOption
 import { observeNativeStartupPhase } from './startup-observation.js';
 import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
-import { defineLifecycle, logger } from '@goodvibes/engine/platform/platform/utils';
+import { defineLifecycle, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 /** The fewest milliseconds between two local model server scans that a model list read starts. */
@@ -46,7 +46,8 @@ export interface DaemonHostOptions {
   readonly onIncompleteHandover?: () => void;
 }
 
-export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>;
+export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>
+  & Partial<Pick<DaemonServer, 'servesOperatorToken'>>;
 export type DaemonHostListener = Pick<HttpListener, 'enable' | 'start' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning'>;
 
 /** Narrow construction seams also permit held-acquisition lifecycle tests. */
@@ -326,12 +327,35 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         phase = 'HTTP listener construction';
         observeNativeStartupPhase('secondary-listener-construction');
         const http = options.httpListener;
+        const serving = daemon;
+        // The first sender refused this run for presenting the operator token is
+        // put in the owner's inbox once, so he learns a webhook sender needs the
+        // listener token; later refusals answer the sender only.
+        let operatorTokenReported = false;
         listener = (factories.createListener ?? ((config) => new HttpListener(config)))({
           host: http.host, port: http.port, configManager: runtime.configManager,
           userAuth: runtime.localUserAuthManager, hookDispatcher: runtime.hookDispatcher,
           pairingTokens: runtime.pairingTokens, runtimeBus: runtime.runtimeBus,
+          // The catalog's default grant: a credential is judged here as the control plane judges it.
+          grantedScopes: (includeWrite) => runtime.gatewayMethods.grantedScopes(includeWrite),
           workAdmission: runtime.workAdmission,
           serveFactory: createSafeHostServeFactory('Configured HTTP listener', http.serveFactory),
+          isOperatorToken: (token) => serving.servesOperatorToken?.(token) === true,
+          onOperatorTokenRefused: () => {
+            if (operatorTokenReported) return;
+            operatorTokenReported = true;
+            void runtime.ownerInbox?.post({
+              kind: 'report',
+              title: 'A webhook sender is still sending the operator token',
+              detail: 'The webhook listener refused a request that presented the operator token. The listener accepts only its own token now, so that sender\'s webhooks are not fired. '
+                + 'Give the sender the listener token: on this machine, goodvibes-daemon listener token --show prints it (it is kept in http-listener-token.json in the daemon home, or is GOODVIBES_HTTP_TOKEN when that is set).',
+              options: ['read'],
+              key: 'http-listener-operator-token',
+              askedBy: 'webhook listener',
+            }, 'http-listener').catch((error: unknown) => {
+              logger.warn('The webhook listener\'s operator-token refusal could not be put in the owner inbox', { error: summarizeError(error) });
+            });
+          },
         });
         ownListener('HTTP listener', listener);
         // The listener's own secret (GOODVIBES_HTTP_TOKEN or its token file), never the operator token.

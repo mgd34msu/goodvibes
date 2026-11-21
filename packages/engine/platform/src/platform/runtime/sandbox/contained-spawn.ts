@@ -17,6 +17,7 @@
  */
 import { homedir } from 'node:os';
 import { hostSandboxAvailability } from '../../tools/exec/sandbox.js';
+import { hiddenHomePathHint, sandboxHomeView } from '../../tools/exec/sandbox-home.js';
 import { containedArgv } from './backend.js';
 
 /** Who chose the program: one the project, a model or a plugin picks must be contained. */
@@ -33,6 +34,8 @@ export interface Containment {
   readonly readOnly?: readonly string[] | undefined;
   /** Why the caller contains it, named in a refusal. */
   readonly reason: string;
+  /** True when `writable` includes sandbox.workspaceWritable, so a missing-path hint may name that setting. */
+  readonly honorsExtraPaths?: boolean | undefined;
 }
 
 export interface ContainedSpawn {
@@ -52,6 +55,12 @@ export interface ContainedResult {
   readonly stderr: string;
   /** What actually applied; a result is trusted only as far as this says. */
   readonly applied: { readonly backend: 'bubblewrap' | 'host'; readonly network: 'off' | 'on' };
+  /**
+   * When a contained program failed naming a missing path in the hidden home
+   * directory: one sentence saying the path is outside what the boundary shows
+   * and which setting shows it (exec/sandbox-home.ts, the exec tool's own words).
+   */
+  readonly hint?: string | undefined;
 }
 
 export class ContainmentUnavailableError extends Error {
@@ -167,7 +176,12 @@ export async function runContained(spawn: ContainedSpawn): Promise<ContainedResu
   try {
     if (spawn.signal?.aborted) stop();
     const [out, err, exitCode] = await Promise.all([stdout.text, stderr.text, child.exited]);
-    return Object.freeze({ exitCode: stopped || child.signalCode !== null ? null : exitCode, stdout: out, stderr: err, applied: Object.freeze(applied) });
+    const code = stopped || child.signalCode !== null ? null : exitCode;
+    const home = homedir();
+    const hint = applied.backend === 'bubblewrap' && code !== 0
+      ? hiddenHomePathHint(`${err}\n${out}`, home, sandboxHomeView(home), spawn.containment.writable, spawn.containment.honorsExtraPaths === true)
+      : undefined;
+    return Object.freeze({ exitCode: code, stdout: out, stderr: err, applied: Object.freeze(applied), ...(hint === undefined ? {} : { hint }) });
   } finally {
     spawn.signal?.removeEventListener('abort', stop);
   }

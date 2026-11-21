@@ -37,9 +37,9 @@ import {
   writeRawDotPath,
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
-import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
+import { CARRIED_TO_DAEMON_TIER_KEYS, isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
+import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
 import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
@@ -224,6 +224,17 @@ export interface ConfigSetOptions {
 export interface DaemonWriteRoute {
   /** Whether the daemon can take a write now; no request is made. */
   reachable(): boolean;
+  /**
+   * Whether that daemon runs on this machine, so the daemon's settings file
+   * this process knows is the one it reads; no request is made. For a daemon on
+   * another machine, daemon-owned settings are read from it (`snapshot`) and
+   * written only through it: this machine's file is never read or written for it.
+   */
+  thisMachine(): boolean;
+  /** The daemon named in a refusal ("the daemon at https://10.0.0.7:3421"). */
+  describe?(): string;
+  /** The daemon's resolved settings (`config.get`), or null when it could not answer. */
+  snapshot?(): Promise<Record<string, unknown> | null>;
   write(key: string, value: unknown): Promise<void>;
   /**
    * Several keys as one request the daemon admits whole (`config.setMany`):
@@ -325,6 +336,11 @@ function shippedDefaultsDigest(): string {
 }
 
 /** Refused write of a daemon-owned setting from a process that does not own the daemon's file. */
+/** A daemon-owned write for a daemon on another machine that cannot be reached: nothing is written anywhere. */
+function remoteDaemonUnreachableRefusal(key: string, route: DaemonWriteRoute): ConfigError {
+  return new ConfigError(`${key} was not changed: ${route.describe?.() ?? 'the connected daemon'} is not reachable, and its settings are kept on that machine, so nothing was changed. Try again once it answers.`);
+}
+
 function daemonOwnedRefusal(key: string): ConfigError {
   return new ConfigError(`${key} is a daemon setting, and only the daemon writes its settings file. `
     + `Change it with \`goodvibes-daemon config set ${key} <value>\`, or with /settings or the settings screen in a terminal app, `
@@ -1366,11 +1382,55 @@ export class ConfigManager {
    * settings file) and this process's view takes the value at once; a refusal
    * puts the previous value back and is reported through `route.refused`.
    * With no daemon reachable, the daemon's settings file is written for it to
-   * read when it starts. Returns a detach function.
+   * read when it starts, when that daemon is this machine's. A daemon on
+   * another machine is the one source of its settings: they are read from it
+   * on attach (and on {@link refreshDaemonSettings}), never from this
+   * machine's file, and a write it cannot take is refused. Returns a detach function.
    */
   attachDaemonRoute(route: DaemonWriteRoute | null): () => void {
     this.#daemonRoute = route;
-    return () => { if (this.#daemonRoute === route) this.#daemonRoute = null; };
+    this.#remoteDaemonSettings = null;
+    if (route !== null && !route.thisMachine()) void this.refreshDaemonSettings();
+    return () => {
+      if (this.#daemonRoute !== route) return;
+      this.#daemonRoute = null;
+      this.#remoteDaemonSettings = null;
+    };
+  }
+
+  /** The daemon-owned settings of an attached daemon on another machine, as it last answered; null for this machine's. */
+  #remoteDaemonSettings: Record<string, unknown> | null = null;
+
+  /** Whether the attached daemon runs on another machine, so this machine's daemon file is not its settings. */
+  #daemonIsRemote(): boolean {
+    const route = this.#daemonRoute;
+    return route !== null && !route.thisMachine();
+  }
+
+  /**
+   * Read the daemon-owned settings from an attached daemon on another machine
+   * (one `config.get`) and show them in this process, in place of this
+   * machine's daemon file. Call on attach and whenever the connection to it is
+   * made again; a daemon on this machine, or one that does not answer, changes nothing.
+   */
+  async refreshDaemonSettings(): Promise<void> {
+    const route = this.#daemonRoute;
+    if (route === null || route.thisMachine() || !route.snapshot) return;
+    let snapshot: Record<string, unknown> | null;
+    try { snapshot = await route.snapshot(); } catch { snapshot = null; }
+    if (snapshot === null || this.#daemonRoute !== route || route.thisMachine()) return;
+    this.#remoteDaemonSettings = snapshot;
+    const entries = collectDaemonOwnedEntries(snapshot);
+    const previous = entries.map(entry => readDotPath(this.#config, entry.key).value);
+    const staged = this.runtimeState.fork();
+    for (const entry of entries) {
+      const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, entry.key);
+      parent[field] = structuredClone(entry.value);
+      staged.retire(entry.key as ConfigKey);
+      staged.mark(entry.key as ConfigKey, 'daemon');
+    }
+    this.publishState(staged, staged.compose());
+    entries.forEach((entry, index) => this.notifyPersistedChange(entry.key as ConfigKey, previous[index]));
   }
 
   /** The route a daemon-owned write takes from this process instead of the daemon's file, or null for a file write. */
@@ -1388,14 +1448,19 @@ export class ConfigManager {
    * route cannot tell a running daemon from none, so it may not.
    */
   #mayWriteDaemonFile(options: ConfigSetOptions): boolean {
-    if (this.daemonTierOwner || options.daemonNotRunning === true) return true;
+    if (this.daemonTierOwner) return true;
+    // This machine's file is never the settings of a daemon on another machine.
+    if (this.#daemonIsRemote()) return false;
+    if (options.daemonNotRunning === true) return true;
     const route = this.#daemonRoute;
     return route !== null && !route.reachable();
   }
 
   /** Refuses a daemon-owned write this process may not put in the daemon's file (see {@link #mayWriteDaemonFile}). */
   #refuseDaemonFileWrite(key: string, options: ConfigSetOptions): void {
-    if (this.daemonTierPath !== null && isDaemonOwnedConfigKey(key) && !this.#mayWriteDaemonFile(options)) throw daemonOwnedRefusal(key);
+    if (this.daemonTierPath === null || !isDaemonOwnedConfigKey(key) || this.#mayWriteDaemonFile(options)) return;
+    const route = this.#daemonRoute;
+    throw route !== null && !route.thisMachine() ? remoteDaemonUnreachableRefusal(key, route) : daemonOwnedRefusal(key);
   }
 
   /**
@@ -1808,10 +1873,13 @@ export class ConfigManager {
     const route = daemonChange ? this.#routedDaemonWrite(daemonChange.key, options) : null;
     // A person's write lands in the daemon's file when none runs; a model's or the program's waits for the daemon.
     const byPerson = by.agentFor === undefined && by.class !== 'system';
-    const fileWritable = this.daemonTierOwner || options.daemonNotRunning === true || (byPerson && this.#mayWriteDaemonFile(options));
+    const fileWritable = this.daemonTierOwner
+      || (!this.#daemonIsRemote() && (options.daemonNotRunning === true || (byPerson && this.#mayWriteDaemonFile(options))));
     if (daemonChange && !route && !fileWritable) {
-      return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
-        next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
+      const remote = this.#daemonIsRemote() ? this.#daemonRoute : null;
+      return refuse({ code: 'CONFIG_DAEMON_OWNED',
+        reason: remote ? remoteDaemonUnreachableRefusal(daemonChange.key, remote).message : daemonOwnedRefusal(daemonChange.key).message,
+        next: remote ? ['try again once the connected daemon answers'] : [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
     }
     this.invalidateLifetimes();
     const forwarded: ConfigKey[] = [];
@@ -2293,6 +2361,8 @@ export class ConfigManager {
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
         try {
           const document = JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>;
+          this.#carryToDaemonTier(document);
+          this.#dropCopiedConnectedHost(document);
           this.#fileBaselines.set(this.configPath, structuredClone(document));
           const migrated = this.ingest(document, this.configPath);
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
@@ -2335,9 +2405,96 @@ export class ConfigManager {
     } finally { this.hostLoadValues = null; this.hostLoadSources = null; }
   }
 
-  /** Overlay only daemon-owned keys into the local candidate. */
+  /**
+   * The daemon's own settings file began, in 3.3.4 and before, as a copy of the
+   * terminal app's, `daemon.connectedHost.*` included: which daemon the terminal
+   * dials, a fact the terminal owns, which in the daemon's file aims every
+   * flag-less daemon command at that other daemon. The daemon (the one manager
+   * that owns its files) removes them from its own settings file at load, once,
+   * and the owner is told once. A new install's copy never has them.
+   */
+  #dropCopiedConnectedHost(document: Record<string, unknown>): void {
+    if (this.readOnly || !this.daemonTierOwner) return;
+    const daemon = document['daemon'];
+    const nested = daemon !== null && typeof daemon === 'object' && !Array.isArray(daemon)
+      && Object.hasOwn(daemon as Record<string, unknown>, 'connectedHost');
+    const dotted = Object.keys(document).filter((key) => key === 'daemon.connectedHost' || key.startsWith('daemon.connectedHost.'));
+    if (!nested && dotted.length === 0) return;
+    const remaining = structuredClone(document);
+    if (nested) {
+      const section = remaining['daemon'] as Record<string, unknown>;
+      delete section['connectedHost'];
+      if (Object.keys(section).length === 0) delete remaining['daemon'];
+    }
+    for (const key of dotted) delete remaining[key];
+    try {
+      writeJsonFileAtomic(this.configPath, remaining, { durable: true });
+    } catch (error) {
+      logger.warn('The terminal app\'s connection settings copied into the daemon\'s settings could not be removed; they are left where they are', { file: this.configPath, error: summarizeError(error) });
+      return;
+    }
+    for (const key of Object.keys(document)) delete document[key];
+    Object.assign(document, remaining);
+    this.migrationReceipt(`dropped-copied-connected-host:${this.configPath}`,
+      `Removed daemon.connectedHost from the daemon's own settings (${this.configPath}): it was copied there from the terminal app's settings and says which daemon the terminal app dials, not anything about this daemon. Daemon commands without --host now reach this machine's daemon; the terminal app keeps its own setting.`);
+  }
+
+  /**
+   * Carry a daemon-owned key an earlier release kept in this surface's own
+   * settings file (CARRIED_TO_DAEMON_TIER_KEYS) into this machine's daemon
+   * settings file: moved when the daemon's file does not set it, dropped when it
+   * does (that value is in effect), then removed from `document` and the surface
+   * file, and the owner told once. Only the owner's own settings file, never a
+   * project's; nothing while the daemon this process works with is on another
+   * machine. A failed write leaves both files as they were and says so in the log.
+   */
+  #carryToDaemonTier(document: Record<string, unknown>): void {
+    if (this.readOnly || this.daemonTierPath === null || this.#daemonIsRemote()) return;
+    const held = CARRIED_TO_DAEMON_TIER_KEYS
+      .map((key) => ({ key, found: readDotPath(document, key) }))
+      .filter((entry) => entry.found.present);
+    if (held.length === 0) return;
+    const lines: string[] = [];
+    try {
+      const tier = readDaemonTierFile(this.daemonTierPath);
+      for (const { key, found } of held) {
+        if (readDotPath(tier, key).present) {
+          lines.push(`${key}: the daemon's own value is kept; the copy in ${this.configPath} was removed`);
+        } else {
+          persistDaemonKey(this.daemonTierPath, key, found.value);
+          lines.push(`${key} (${JSON.stringify(found.value)}) moved from ${this.configPath} to the daemon's settings (${this.daemonTierPath})`);
+        }
+      }
+      const remaining = structuredClone(document);
+      for (const { key } of held) deleteRawDotPath(remaining, key);
+      writeJsonFileAtomic(this.configPath, remaining, { durable: true });
+      for (const { key } of held) deleteRawDotPath(document, key);
+    } catch (error) {
+      logger.warn('A setting that is now the daemon\'s could not be moved to the daemon\'s settings; it is left where it is', { file: this.configPath, error: summarizeError(error) });
+      return;
+    }
+    logger.info('Settings that are now the daemon\'s were moved to its settings file', { moved: lines });
+    this.migrationReceipt(`carried-to-daemon:${this.configPath}:${held.map(({ key }) => key).join(',')}`,
+      `Now kept by the daemon for every app on this machine: ${lines.join('; ')}.`);
+  }
+
+  /**
+   * Overlay only daemon-owned keys into the local candidate: from this
+   * machine's daemon file, or, with a daemon on another machine attached, from
+   * what that daemon last answered (nothing until it has).
+   */
   private loadDaemonTier(staged: ConfigRuntimeState): void {
     if (!this.daemonTierPath) return;
+    if (this.#daemonIsRemote()) {
+      const remote = this.#remoteDaemonSettings;
+      if (remote === null) return;
+      const applied = overlayDaemonTierFrom(remote, (key, value) => {
+        const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, key);
+        parent[field] = structuredClone(value);
+      });
+      for (const key of applied) staged.sources.set(key, 'daemon');
+      return;
+    }
     try {
       const stored = this.ingest(readDaemonTierFile(this.daemonTierPath), this.daemonTierPath);
       const applied = overlayDaemonTierFrom(stored, (key, value) => {

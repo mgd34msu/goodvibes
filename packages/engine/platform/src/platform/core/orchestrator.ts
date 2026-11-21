@@ -418,7 +418,7 @@ export class Orchestrator {
   /**
    * Optional capability-gate manager: the `tool-result-reconciliation` flag is
    * consulted at each turn end (enabled = full reconciliation); null defaults
-   * to enabled, matching the flag's declared defaultState.
+   * to enabled, matching the flag's default state (its settings key's schema default).
    */
   private flagManager: FeatureFlagManager | null = null;
 
@@ -1686,7 +1686,7 @@ export class Orchestrator {
   /**
    * Returns `true` when context reconciliation is enabled.
    *
-   * Defaults to `true` (flag `defaultState: 'enabled'`) when no flag manager
+   * Defaults to `true` (the flag's default state is enabled) when no flag manager
    * has been wired in, safe for tests that omit the optional constructor arg.
    */
   /** The per-turn flag reads, and their differing defaults: ./orchestrator-turn-flags.ts. */

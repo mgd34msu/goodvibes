@@ -165,6 +165,21 @@ export interface IdempotentStartRecord {
   readonly fingerprint: string;
 }
 
+/**
+ * The contract a retry key already started in `projectRoot`, or undefined: one
+ * file read, kept across restarts. Read by the store under the key's lock, and
+ * by the dispatch adapter before it creates a session for a keyed dispatch.
+ */
+export function readIdempotentStartRecord(projectRoot: string, scope: string): IdempotentStartRecord | undefined {
+  const path = join(contractIdempotencyDir(projectRoot), `${idempotencyFileId(scope)}.json`);
+  let text: string;
+  try { text = readFileSync(path, 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  const parsed = JSON.parse(text) as Partial<IdempotentStartRecord>;
+  if (typeof parsed.contractId !== 'string' || typeof parsed.fingerprint !== 'string') throw new Error(`The retry-key record ${path} is not readable; remove it to start a new contract with that key.`);
+  return { contractId: parsed.contractId, fingerprint: parsed.fingerprint };
+}
+
 /** The file name for a retry scope: a digest, so a caller's key never becomes a path. */
 export function idempotencyFileId(scope: string): string {
   return `idem-${createHash('sha256').update(scope).digest('hex')}`;
@@ -635,13 +650,7 @@ export class ContractStore {
 
   /** The contract a retry key already started, or undefined. One file read; it survives a restart. */
   readIdempotentStart(scope: string): IdempotentStartRecord | undefined {
-    const path = join(contractIdempotencyDir(this.projectRoot), `${idempotencyFileId(scope)}.json`);
-    let text: string;
-    try { text = readFileSync(path, 'utf8'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-    const parsed = JSON.parse(text) as Partial<IdempotentStartRecord>;
-    if (typeof parsed.contractId !== 'string' || typeof parsed.fingerprint !== 'string') throw new Error(`The retry-key record ${path} is not readable; remove it to start a new contract with that key.`);
-    return { contractId: parsed.contractId, fingerprint: parsed.fingerprint };
+    return readIdempotentStartRecord(this.projectRoot, scope);
   }
 
   /** Records what a retry key started; the name is published exclusively, so the first record stands. */

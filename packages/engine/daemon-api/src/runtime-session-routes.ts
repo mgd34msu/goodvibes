@@ -7,7 +7,6 @@ import {
   handleSharedSessionLifecycle,
 } from './runtime-session-lifecycle-routes.js';
 import { withAdmin } from './auth-helpers.js';
-import { randomUUID } from 'node:crypto';
 import { jsonErrorResponse } from './error-response.js';
 import { agentRetrySpawnInput } from './tasks.js';
 import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
@@ -684,10 +683,9 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
     });
   }
 
-  // kind='message', companion main-chat send. Delegates to dedicated handler to avoid
-  // inline duplication of session-resolution with submitMessage().
+  // kind='message', companion main-chat send: the next thing said in the session's own conversation.
   if (kind === 'message') {
-    return handleCompanionMessageKind(context, sessionId, req, input, input.providerMessageId);
+    return handleCompanionMessageKind(context, sessionId, req, input);
   }
 
   const submission = await callOrSessionClosed(() => context.sessionBroker.submitMessage(input));
@@ -698,14 +696,23 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
   });
 }
 
-/** Handles kind='message' companion main-chat messages, short-circuits before
- * sessionBroker.submitMessage() so conversation messages route to the existing session instead of spawning continuation work. */
+/**
+ * Handles kind='message' companion main-chat messages. The message is queued
+ * in the session's inputs as a follow-up (sessionBroker.followUpMessage): a
+ * terminal running the session collects it, runs it as its next turn and
+ * reports the answer; with no terminal on the session the daemon answers it.
+ * Answers 202 with the input id and the broker's mode.
+ *
+ * A client that names its message (`messageId`) can retry after a timeout
+ * without adding a second turn: the broker records it once under that id and
+ * answers a repeat with the first submission. A retry that arrives while the
+ * first is still being stored waits for it and gets the same answer.
+ */
 async function handleCompanionMessageKind(
   context: DaemonRuntimeRouteContext,
   sessionId: string,
   req: Request,
   input: SharedSessionMessageInput,
-  clientMessageId?: string,
 ): Promise<Response> {
   const session = context.sessionBroker.getSession(sessionId);
   if (!session) {
@@ -714,27 +721,15 @@ async function handleCompanionMessageKind(
   if (session.status === 'closed') {
     return jsonErrorResponse({ error: 'Session is closed', code: EngineErrorCodes.SESSION_CLOSED }, { status: 409 });
   }
-  const messageId = clientMessageId ?? `companion-${randomUUID()}`;
-  const answer = (): Response => context.recordApiResponse(req, `/api/sessions/${sessionId}/messages`, Response.json({
-    messageId,
-    routedTo: 'conversation',
-    sessionId,
-  }, { status: 202 }));
-  // A client that names its message can retry after a timeout without adding a
-  // second turn: a message already stored under that id is answered as
-  // accepted and not appended again. A retry that arrives while the first is
-  // still being stored waits for it and gets its answer: accepted once the
-  // message is on disk, or the same failure, never "accepted" for a message
-  // whose save then failed.
-  if (!clientMessageId) return await appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+  const clientMessageId = input.providerMessageId;
+  if (!clientMessageId) return await submitCompanionMessage(context, sessionId, req, input);
   const inFlightKey = `${sessionId}\u0000${clientMessageId}`;
   const running = companionMessagesInFlight.get(inFlightKey);
   if (running) {
     await running;
-    return answer();
+    return await submitCompanionMessage(context, sessionId, req, input);
   }
-  if (hasStoredCompanionMessage(context, sessionId, clientMessageId)) return answer();
-  const run = appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+  const run = submitCompanionMessage(context, sessionId, req, input);
   const stored = run.then(() => undefined);
   companionMessagesInFlight.set(inFlightKey, stored);
   // A failure is carried to the waiters above; this keeps it from being unobserved when there are none.
@@ -748,7 +743,6 @@ async function handleCompanionMessageKind(
 
 /** Client-chosen message ids being stored right now, with the store's end, so a concurrent retry waits for it and answers as it does. */
 const companionMessagesInFlight = new Map<string, Promise<void>>();
-const DEDUPE_LOOKBACK_MESSAGES = 200;
 
 function readClientMessageId(value: unknown): string | undefined | Response {
   if (value === undefined || value === null) return undefined;
@@ -761,58 +755,35 @@ function readClientMessageId(value: unknown): string | undefined | Response {
   return value;
 }
 
-function hasStoredCompanionMessage(context: DaemonRuntimeRouteContext, sessionId: string, messageId: string): boolean {
-  return context.sessionBroker.getMessages(sessionId, DEDUPE_LOOKBACK_MESSAGES).some((entry) => {
-    if (!isJsonRecord(entry)) return false;
-    const metadata = entry.metadata;
-    return isJsonRecord(metadata) && metadata.messageId === messageId;
-  });
-}
-
-async function appendAndPublishCompanionMessage(
+/**
+ * Queue the companion message as the session's next follow-up. A message a
+ * terminal collects, one waiting behind a running turn, or a repeat of one
+ * already recorded is answered 202 with `{ messageId, sessionId, inputId, mode }`;
+ * one the daemon starts an agent for, or one the session refused, is answered
+ * as any other session submission.
+ */
+async function submitCompanionMessage(
   context: DaemonRuntimeRouteContext,
   sessionId: string,
+  req: Request,
   input: SharedSessionMessageInput,
-  messageId: string,
-  answer: () => Response,
 ): Promise<Response> {
-  const timestamp = Date.now();
-  const metadata = buildCompanionMessageMetadata(input);
-  // Persist the companion message to the session log so GET /api/sessions/:id/messages
-  // returns it and the TUI can render it.
-  await context.sessionBroker.appendCompanionMessage(sessionId, {
-    messageId,
-    body: input.body,
-    source: 'companion-followup',
-    timestamp,
-    ...(metadata ? { metadata } : {}),
-  });
-  // Notify in-process subscribers via the conversation follow-up event (the
-  // runtime subscriber turns it into a normal conversation turn that streams out).
-  context.publishConversationFollowup(sessionId, {
-    messageId,
-    body: input.body,
-    source: 'companion-followup',
-    timestamp,
-    ...(metadata ? { metadata } : {}),
-  });
-  // { routedTo: 'conversation' } signals the companion app the message was persisted.
-  return answer();
-}
-
-function buildCompanionMessageMetadata(input: SharedSessionMessageInput): Record<string, unknown> | undefined {
-  const metadata: Record<string, unknown> = {
-    ...(input.metadata ?? {}),
-  };
-  if (input.routing) metadata.routing = input.routing;
-  if (input.surfaceKind) metadata.surfaceKind = input.surfaceKind;
-  if (input.surfaceId) metadata.surfaceId = input.surfaceId;
-  if (input.routeId) metadata.routeId = input.routeId;
-  if (input.externalId) metadata.externalId = input.externalId;
-  if (input.threadId) metadata.threadId = input.threadId;
-  if (input.userId) metadata.userId = input.userId;
-  if (input.displayName) metadata.displayName = input.displayName;
-  return Object.keys(metadata).length > 0 ? metadata : undefined;
+  // The terminal that runs it reads `source` as where the message came from: a
+  // companion message is not the owner typing at that terminal (security/turn-boundary.ts).
+  const followUp = { ...input, metadata: { ...(input.metadata ?? {}), source: 'companion-followup' } };
+  const submission = await callOrSessionClosed(() => context.sessionBroker.followUpMessage(followUp));
+  if (submission instanceof Response) return submission;
+  if (submission.mode === 'spawn' || submission.mode === 'rejected') {
+    return await respondToSessionSubmission(context, req, submission, input.body, `/api/sessions/${sessionId}/messages`, 'DaemonServer.handleCompanionMessageKind', {
+      context: `shared-session:${submission.session.id}`,
+    });
+  }
+  return context.recordApiResponse(req, `/api/sessions/${sessionId}/messages`, Response.json({
+    ...(input.providerMessageId ? { messageId: input.providerMessageId } : {}),
+    sessionId: submission.session.id,
+    inputId: submission.input.id,
+    mode: submission.mode,
+  }, { status: 202 }));
 }
 
 /** Handle GET /api/sessions/:id/events, a session-scoped SSE stream for turn events

@@ -1,12 +1,13 @@
 /**
- * Internal registry of platform capabilities and their default dispositions.
+ * Internal registry of platform capabilities.
  *
  * Every entry here is a first-class feature configured through its own domain
  * settings: `settings` is the key that turns it on, `tuningKeys` the keys that
  * tune it, and feature-settings.ts derives FEATURE_SETTINGS (what surfaces
- * consume) from them. Each defaultState is an owner-ruled default, recorded in
- * the 2026-07-11 rulings worksheet; a disabled entry is a chosen default on a
- * configurable feature, never unreachable capability.
+ * consume) from them. A feature's default state is not stated here: it is its
+ * settings key's schema default read through its binding (featureDefaultState),
+ * so the settings schema is the one owner of every default. A feature off by
+ * default is a chosen default on a configurable feature, never unreachable capability.
  *
  * This module is implementation detail: no surface renders this registry as its own
  * category, consumers render FEATURE_SETTINGS (domain, option shapes,
@@ -54,7 +55,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Permissions Policy Engine',
     description:
       'Activates the redesigned permission model with granular tool-level and path-level rules.',
-    defaultState: 'disabled',
     tier: 2,
     runtimeToggleable: false,
     settings: { key: 'permissions.engine', kind: 'enum', enabledValues: ['policy-engine'] },
@@ -68,9 +68,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the dual-evaluator simulation pipeline for the permissions policy engine. '
       + 'Tracks divergence between actual and candidate evaluators without '
       + 'changing enforcement behaviour until switched to enforce mode. '
-      + 'On by default so divergence evidence accumulates before any stricter '
-      + 'enforcement is considered; it never blocks tool execution by itself.',
-    defaultState: 'enabled',
+      + 'Divergence evidence accumulates before any stricter enforcement is '
+      + 'considered; it never blocks tool execution by itself.',
     tier: 2,
     runtimeToggleable: false,
     settings: { key: 'permissions.simulation', kind: 'boolean' },
@@ -86,7 +85,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'notification router at startup and on mode change. '
       + 'Set behavior.hitlMode to off to keep the router on its baseline delivery policy '
       + 'and reject HITL mode changes.',
-    defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,
     settings: { key: 'behavior.hitlMode', kind: 'enum', enabledValues: ['quiet', 'balanced', 'operator'] },
@@ -97,8 +95,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'unified-runtime-task',
     name: 'Unified RuntimeTask',
     description:
-      'The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. On by default; turn runtime.unifiedTasks off to disable it.',
-    defaultState: 'enabled',
+      'The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. Turn runtime.unifiedTasks off to disable it.',
     tier: 3,
     runtimeToggleable: false,
     settings: { key: 'runtime.unifiedTasks', kind: 'boolean' },
@@ -108,8 +105,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'watcher-triggers',
     name: 'Trigger Family',
     description:
-      'Enables three unattended watcher kinds over one supervision spine: stream watchers that regex-filter and batch a long-lived command\'s output; model-free condition checks running a declarative probe/extract/rule pipeline with no LLM in the loop; and one-shot on-exit triggers where GoodVibes launches a command and fires exactly one payload when it terminates (daemon-owned, so a six-hour build does not hold an agent turn open). A firing trigger runs an agent turn or a pre-registered digest-pinned action grant, never a command composed at fire time. Off by default: a trigger launches and supervises real processes with nobody watching, so turning it on is a deliberate choice; with it on and no triggers defined the supervisor idles and consumes nothing. Tune the backoff ladder, strike breaker, retention bounds, batching and process caps via the watchers.triggers.* settings.',
-    defaultState: 'disabled',
+      'Enables three unattended watcher kinds over one supervision spine: stream watchers that regex-filter and batch a long-lived command\'s output; model-free condition checks running a declarative probe/extract/rule pipeline with no LLM in the loop; and one-shot on-exit triggers where GoodVibes launches a command and fires exactly one payload when it terminates (daemon-owned, so a six-hour build does not hold an agent turn open). A firing trigger runs an agent turn or a pre-registered digest-pinned action grant, never a command composed at fire time. A trigger launches and supervises real processes with nobody watching, so turning it on is a deliberate choice; with it on and no triggers defined the supervisor idles and consumes nothing. Tune the backoff ladder, strike breaker, retention bounds, batching and process caps via the watchers.triggers.* settings.',
     tier: 3,
     runtimeToggleable: true,
     settings: { key: 'watchers.triggers.enabled', kind: 'boolean' },
@@ -142,7 +138,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Plugin Lifecycle',
     description:
       'Publishes each plugin\'s lifecycle (loading, loaded, active, error, unloading, disabled, with the reason) as plugin events: the runtime store\'s plugin view, automation triggers on plugin loaded or failed, and tracing read them. Read at each event, so a change applies at once. Off: plugins load, run and unload the same, and nothing is reported.',
-    defaultState: 'enabled',
     tier: 4,
     runtimeToggleable: true,
     settings: { key: 'runtime.pluginLifecycle', kind: 'boolean' },
@@ -155,7 +150,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'and reports each server\'s connecting, connected, degraded, reconnecting and disconnected state to /mcp servers, the MCP workspace, '
       + 'the mcp tool and the health view. When the attempts run out the server stays disconnected and a call to it says why and to run /mcp reload. '
       + 'Read each time a server drops, so a change applies to the next drop. Off: a server that drops stays disconnected until /mcp reload.',
-    defaultState: 'enabled',
     tier: 4,
     runtimeToggleable: true,
     settings: { key: 'runtime.mcpLifecycle', kind: 'boolean' },
@@ -165,7 +159,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'OTel Foundation',
     description:
       'Enables the OpenTelemetry instrumentation foundation: platform init, span creation, and in-process export.',
-    defaultState: 'disabled',
     tier: 4,
     runtimeToggleable: false,
     settings: { key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['in-process', 'remote-export'] },
@@ -177,7 +170,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'OTel Remote Export',
     description:
       'Enables OTLP/HTTP JSON remote export of spans to a configured collector endpoint. Requires otel-foundation.',
-    defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['remote-export'] },
@@ -198,7 +190,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'to be injected and a reconciliation event to be emitted, preventing '
       + 'silent conversation corruption. Disable to keep warning-only logging '
       + 'without synthetic result injection.',
-    defaultState: 'enabled',
     tier: 7,
     runtimeToggleable: true,
     settings: { key: 'behavior.toolResultReconciliation', kind: 'enum', enabledValues: ['reconcile'] },
@@ -212,7 +203,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       'Enables HMAC-SHA256 signature validation on policy bundle load. '
       + 'When enabled, a bundle that is unsigned, altered or signed with another key is refused, '
       + 'and so is every bundle when no signing key is set (GOODVIBES_POLICY_SIGNING_KEY, hex, at least 16 bytes).',
-    defaultState: 'disabled',
     tier: 7,
     runtimeToggleable: false,
     settings: { key: 'policy.requireSignedBundles', kind: 'boolean' },
@@ -222,9 +212,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Session Compaction',
     description:
       'Activates structured session compaction with semantic chunking and relevance scoring. '
-      + 'On by default: long sessions compact at behavior.autoCompactThreshold with a receipt '
+      + 'Long sessions compact at behavior.autoCompactThreshold with a receipt '
       + 'on every compaction. Set behavior.compactionStrategy to off to run uncompacted.',
-    defaultState: 'enabled',
     tier: 6,
     runtimeToggleable: true,
     settings: { key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['structured', 'distiller'] },
@@ -251,7 +240,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'active-skill re-injection at the boundary applies to both strategies. Not the '
       + 'default: structured remains the default strategy until quality-score evidence '
       + 'earns distiller the default slot; choose it via behavior.compactionStrategy.',
-    defaultState: 'disabled',
     tier: 6,
     runtimeToggleable: true,
     settings: { key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['distiller'] },
@@ -270,7 +258,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + ' and never by redirect. Fetches to localhost dev servers'
       + ' ask once; approving saves fetch.allowLocalhost in your own settings.'
       + ' Set fetch.sanitizeMode to none to skip content sanitization for trusted flows.',
-    defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
     // Sanitization mode and localhost approval tune the fetch pipeline; host
@@ -287,7 +274,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       'Applies the per-call limits in runtime.toolBudget.* to every tool call: a call is stopped '
       + 'when it reaches its wall-clock limit, and a call that returns over its token or cost limit '
       + 'is reported to the model as failed, output kept, with a note that its action may have taken effect.',
-    defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,
     settings: { key: 'runtime.toolBudget.enforced', kind: 'boolean' },
@@ -302,7 +288,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'When enabled, spillBackend can be set to file|ledger|diagnostics via config. '
       + 'When disabled, overflow content uses the file spill backend. '
       + 'The spill handler reads the gate and the backend once when the runtime starts, so a change takes effect after a restart.',
-    defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: false,
     settings: { key: 'tools.overflowSpillBackend', kind: 'enum', enabledValues: ['ledger', 'diagnostics'] },
@@ -317,7 +302,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'Aggregates divergence by tool/prefix/mode, exposes trend history in diagnostics, '
       + 'and blocks enforce mode transitions when the divergence rate exceeds the configured '
       + 'threshold. Disable to fall back to warn mode (no gate enforcement).',
-    defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
     settings: { key: 'permissions.divergenceDashboard', kind: 'boolean' },
@@ -335,7 +319,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'parse, with this flag on or off. When the parser cannot read the command '
       + '(a parse error), the command is allowed through to run as the gate decided. '
       + 'Disable to skip the parse entirely.',
-    defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
     settings: { key: 'permissions.commandParser', kind: 'enum', enabledValues: ['ast'] },
@@ -350,7 +333,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'context window (provenance: provider_api) for token budgeting and compaction '
       + 'thresholds instead of the statically-configured contextWindow value. '
       + 'Disable to revert to explicit configured or static limits (configured_cap / fallback).',
-    defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
     settings: { key: 'provider.localContextIngestion', kind: 'boolean' },
@@ -367,7 +349,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + '(drops conventions then project context for small windows) and catches '
       + '"context size exceeded" errors from the provider with a single compaction retry. '
       + 'Disable to revert to unchecked provider.chat() calls.',
-    defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
     settings: { key: 'agents.contextWindowGuard', kind: 'boolean' },
@@ -388,7 +369,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'Default-on is safe specifically because the block is hard-budgeted and every turn '
       + 'is honestly recorded, never silently eating context. Disable or set the budget to 0 '
       + 'to revert to spawn-time-only injection (base system prompt byte-identical).',
-    defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
     settings: { key: 'agents.passiveInjection.knowledge', kind: 'boolean' },
@@ -412,7 +392,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'wrong chunk, so this first landing is opt-in, earned on by the same hard-budget + '
       + 'honest-record discipline before it becomes a default. Also respects the embedder\'s '
       + 'storage.codeIndexEnabled setting; disable either to revert to memory-only injection.',
-    defaultState: 'disabled',
     tier: 9,
     runtimeToggleable: true,
     settings: { key: 'agents.passiveInjection.code', kind: 'boolean' },
@@ -431,7 +410,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'and `_meta.schemaShapeId` (canonical mode identifier) to tool results from '
       + 'the find, analyze, and inspect tools. Enables schema drift detection and '
       + 'diagnostic fingerprint surfaces. Disable to omit fingerprint metadata.',
-    defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,
     settings: { key: 'tools.outputSchemaFingerprints', kind: 'boolean' },
@@ -446,7 +424,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'that the bundle would decide differently, and /security enforce-policy confirms them. '
       + 'Exposes /security load-policy, simulate-policy, compare-policy, enforce-policy '
       + 'and restore-policy.',
-    defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'policy.registryEnabled', kind: 'boolean' },
@@ -462,7 +439,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'on every conversation turn. No turn reads a strategy yet, so turning this on '
       + 'changes nothing today. /work planner, planner-mode, planner-override and planner-explain work '
       + 'without it: they configure the planner /workstream drafting consults.',
-    defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'planner.adaptive', kind: 'boolean' },
@@ -478,7 +454,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'routing modes with deterministic, fully-explainable route decisions. '
       + 'Exposes /provider route, /provider explain-route, /provider pin, and '
       + '/provider fallback test commands.',
-    defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'provider.optimizerMode', kind: 'enum', enabledValues: ['manual', 'auto', 'pinned'] },
@@ -494,10 +469,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + '(Slack, Discord, webhooks): failures are classified as retryable or terminal, '
       + 'retried with exponential backoff, and dead-letter events are logged at error '
       + 'level and surfaced in integration diagnostics. Failed webhook notifications are listed '
-      + 'with /notify failed and sent again with /notify resend <id|all>. Enabled by default alongside '
+      + 'with /notify failed and sent again with /notify resend <id|all>. It runs alongside '
       + 'the channel family it belongs to; disable to keep warn-level logging without '
       + 'DLQ tracking.',
-    defaultState: 'enabled',
     tier: 6,
     runtimeToggleable: true,
     settings: { key: 'integrations.delivery.sloEnforced', kind: 'boolean' },
@@ -518,7 +492,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'of one kind (same domain, level and title) in one collapse window, the rest '
       + 'are counted into that kind\'s notification-history entry without a toast. '
       + 'Disable to let every one toast as its level and the print level allow.',
-    defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,
     settings: { key: 'notifications.adaptiveSuppression', kind: 'boolean' },
@@ -535,9 +508,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'Diagnostics panel surfaces token age, scope violations, and rotation warnings. '
       + 'Emits TOKEN_SCOPE_VIOLATION, TOKEN_ROTATION_WARNING, TOKEN_ROTATION_EXPIRED, '
       + 'and TOKEN_BLOCKED events via the security event domain. '
-      + 'On by default in advisory mode (security.tokenAudit.managed false): tokens are '
+      + 'In advisory mode (security.tokenAudit.managed false) tokens are '
       + 'reported, never blocked, until managed enforcement is opted into.',
-    defaultState: 'enabled',
     tier: 7,
     runtimeToggleable: true,
     settings: { key: 'security.tokenAudit.enabled', kind: 'boolean' },
@@ -555,9 +527,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables the first-class automation job/run domain used by the shared scheduling engine. '
       + 'This is the top-level switch for durable automation records, schedule evaluation, and '
-      + 'run history. On by default: with no routines defined it idles and surfaces a '
+      + 'run history. With no routines defined it idles and surfaces a '
       + 'how-to-create-your-first-routine empty state instead of requiring setup.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'automation.enabled', kind: 'boolean' },
@@ -599,7 +570,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables the shared gateway/control-plane host that serves state snapshots, live streams, '
       + 'and authenticated automation control APIs to terminal hosts and remote clients.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'controlPlane.gateway', kind: 'boolean' },
@@ -628,7 +598,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables durable binding and resolution of external conversation routes, thread contexts, '
       + 'and reply targets across surfaces.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'integrations.routeBinding', kind: 'boolean' },
@@ -639,7 +608,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables first-class delivery tracking for automation results, retries, dead letters, and '
       + 'surface-specific delivery outcomes.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'integrations.deliveryTracking', kind: 'boolean' },
@@ -651,10 +619,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Web Surface',
     description:
       'Enables the browser-based operator surface backed by the shared control plane. '
-      + 'On by default, bound to loopback (web.hostMode local, 127.0.0.1): a stock install '
+      + 'Bound to loopback by default (web.hostMode local, 127.0.0.1): a stock install '
       + 'serves the web surface on this machine only and announces its URL once at start. '
       + 'Widen deliberately via web.hostMode network/custom.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'web.enabled', kind: 'boolean' },
@@ -672,9 +639,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Watcher Framework',
     description:
       'Enables managed watcher/listener services, checkpointing, and recovery semantics for '
-      + 'long-running external sources. On by default: with no watchers configured the '
+      + 'long-running external sources. With no watchers configured the '
       + 'framework idles and consumes nothing.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'watchers.enabled', kind: 'boolean' },
@@ -690,10 +656,9 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Service Management',
     description:
       'Enables install/start/stop/status/autostart management for running Goodvibes as a '
-      + 'durable host service. On by default: the management verbs become available, but '
+      + 'durable host service. The management verbs are available, but '
       + 'nothing is installed or started until explicitly requested (service.autostart '
       + 'stays false).',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'service.enabled', kind: 'boolean' },
@@ -712,9 +677,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'The daemon checks for a new release hourly, downloads and checksum-verifies it, swaps '
       + 'binaries at a no-active-work moment (never mid-turn), keeps the previous binary for '
-      + 'one-command rollback, and restarts via the service manager. On by default per the '
-      + 'owner directive; update.auto turns it off, update.intervalMinutes tunes the cadence.',
-    defaultState: 'enabled',
+      + 'one-command rollback, and restarts via the service manager. update.auto turns it off, '
+      + 'update.intervalMinutes tunes the cadence.',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'update.auto', kind: 'boolean' },
@@ -731,12 +695,11 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would '
       + 'otherwise prompt can auto-allow, and commands needing host access (network, host-privilege '
       + 'escalation, package installs) surface as named escalation asks. The permission '
-      + 'gate reads the catastrophic case before the call, inside the boundary as outside it. On by default where the '
+      + 'gate reads the catastrophic case before the call, inside the boundary as outside it. It applies where the '
       + 'host probe passes (Linux with bubblewrap available); the first auto-allow announces '
       + 'once that commands now run contained and escalations will ask. When bubblewrap is '
       + 'absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec '
       + 'path is byte-for-byte unchanged. Set sandbox.enabled false to revert to unsandboxed exec.',
-    defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
     settings: { key: 'sandbox.enabled', kind: 'boolean' },
@@ -756,9 +719,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'ONLY when the operator opted into sandbox.judgment auto-approve, auto-approve a looks-safe '
       + 'verdict. A flags-risk verdict never auto-denies, it annotates the ask the human still '
       + 'decides; a judgment failure degrades to a plain ask. Every judgment leaves a receipt. '
-      + 'On by default in annotate-only mode (sandbox.judgment annotate); auto-approval is a '
+      + 'In annotate-only mode (sandbox.judgment annotate) it only annotates; auto-approval is a '
       + 'separate explicit opt-in (sandbox.judgment auto-approve).',
-    defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
     settings: { key: 'sandbox.judgment', kind: 'enum', enabledValues: ['annotate', 'auto-approve'] },
@@ -778,7 +740,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'identity). No connection is made without explicit configuration: the relay.enabled config '
       + 'switch and a configured relay.url still gate every connection, leave either unset to keep '
       + 'the daemon LAN-only.',
-    defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
     settings: { key: 'relay.enabled', kind: 'boolean' },
@@ -807,7 +768,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'chooses between off, ask-every-time, and honouring grants; device.capabilities.allowAlwaysOffer '
       + 'chooses which capabilities may be granted durably; device.capture.retentionHours sets how '
       + 'long a picture lives.',
-    defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
     settings: { key: 'device.capabilities.mode', kind: 'enum', enabledValues: ['ask-every-time', 'honor-grants'] },

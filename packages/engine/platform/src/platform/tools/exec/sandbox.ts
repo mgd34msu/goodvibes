@@ -37,6 +37,7 @@ import { join } from 'node:path';
 import { decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
 import { DEFAULT_CONTROL_PLANE_PORT } from '../../config/control-plane-base-url.js';
 import type { ExecCommandResult } from './schema.js';
+import { hiddenHomePathHint, sandboxHomeBindArgs, sandboxHomeCoverArgs, sandboxHomeView } from './sandbox-home.js';
 
 // The one reading of the text an exec entry runs; an approval reader judges the same text.
 export { execCommandText } from './schema.js';
@@ -178,7 +179,9 @@ export interface BwrapArgvInput {
 }
 
 /**
- * Construct the bwrap argument vector to PREPEND to `['/bin/sh','-c',cmd]`. Pure.
+ * Construct the bwrap argument vector to PREPEND to `['/bin/sh','-c',cmd]`.
+ * With `maskHomeDir` it reads which toolchain directories exist under home
+ * (sandbox-home.ts); otherwise it is pure.
  *
  * System executables, libraries and configuration are bound read-only; host
  * runtime directories and service sockets are absent. The workspace and any
@@ -199,9 +202,13 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   argv.push('--tmpfs', '/tmp');
   argv.push('--tmpfs', '/run', '--dir', '/var', '--symlink', '/run', '/var/run', '--tmpfs', '/var/tmp');
   if (input.resolverConfigPath) argv.push('--ro-bind', input.resolverConfigPath, input.resolverConfigPath);
-  // … optionally mask $HOME so its contents are hidden, not merely read-only …
-  if (input.maskHomeDir) {
+  // … optionally mask $HOME so its contents are hidden, not merely read-only,
+  // then show its toolchain installs read-only and its caches writable
+  // (sandbox-home.ts, the one policy every boundary uses) …
+  const homeView = input.maskHomeDir ? sandboxHomeView(input.maskHomeDir) : undefined;
+  if (input.maskHomeDir && homeView) {
     argv.push('--tmpfs', input.maskHomeDir);
+    argv.push(...sandboxHomeBindArgs(homeView));
   }
   for (const extra of input.readOnlyExtras ?? []) {
     argv.push('--ro-bind-try', extra, extra);
@@ -211,6 +218,8 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   for (const extra of input.writableExtras) {
     argv.push('--bind', extra, extra);
   }
+  // … and cover the secrets inside any shown home folder again, last, so no bind above exposes them.
+  if (homeView) argv.push(...sandboxHomeCoverArgs(homeView));
   if (!input.networkEnabled) {
     argv.push('--unshare-net');
   }
@@ -261,6 +270,9 @@ export interface ExecSandboxPlan {
    * absent is read as "not masked", which is the claim-nothing default.
    */
   readonly homeMasked?: boolean | undefined;
+  /** The home directory masked, and the extra paths shown (sandbox.workspaceWritable), for the missing-path hint. */
+  readonly homeDir?: string | undefined;
+  readonly extraShown?: readonly string[] | undefined;
   /** The daemon port the context note names; absent → the default port. */
   readonly daemonPort?: number | undefined;
   /** Present when the sandbox was requested but the host cannot provide it. */
@@ -354,6 +366,7 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
   const ignoredSettings = input.config.ignoredEntries ?? [];
   return {
     sandboxed: true, argvPrefix, boundary, network, escalationsGranted, homeMasked: input.homeDir !== undefined,
+    ...(input.homeDir === undefined ? {} : { homeDir: input.homeDir, extraShown: input.config.workspaceWritable }),
     ...(input.config.daemonPort === undefined ? {} : { daemonPort: input.config.daemonPort }),
     ...(ignoredSettings.length > 0 ? { ignoredSettings } : {}),
   };
@@ -538,7 +551,7 @@ export function buildSandboxNote(plan: ExecSandboxPlan): string {
     );
   }
   parts.push(
-    `filesystem read-only outside the workspace, /tmp isolated${plan.homeMasked ? ' and $HOME masked' : ''}, credential-bearing environment variables removed, and partial device and process visibility`,
+    `filesystem read-only outside the workspace, /tmp isolated${plan.homeMasked ? ' and $HOME masked except its toolchain installs (read-only) and caches (writable)' : ''}, credential-bearing environment variables removed, and partial device and process visibility`,
   );
   parts.push(
     'absence observed here is not absence on the host, re-check on the host before concluding something is missing',
@@ -556,11 +569,15 @@ export function buildSandboxNote(plan: ExecSandboxPlan): string {
 export function attachSandboxMeta(result: ExecCommandResult, plan: ExecSandboxPlan | null): ExecCommandResult {
   if (!plan) return result;
   if (!plan.sandboxed && !plan.unavailableReason) return result;
+  // A failure that names a missing path in the hidden home directory says so, with the setting that shows it.
+  const hint = plan.sandboxed && plan.homeDir !== undefined && result.success !== true
+    ? hiddenHomePathHint(`${result.stderr}\n${result.stdout}`, plan.homeDir, sandboxHomeView(plan.homeDir), plan.extraShown ?? [])
+    : undefined;
   return {
     ...result,
     sandboxed: plan.sandboxed,
     sandbox_boundary: plan.boundary,
-    sandbox_note: buildSandboxNote(plan),
+    sandbox_note: hint === undefined ? buildSandboxNote(plan) : `${buildSandboxNote(plan)} ${hint}`,
     ...(plan.sandboxed ? { sandbox_network: plan.network } : {}),
     ...(plan.escalationsGranted.length > 0 ? { sandbox_escalations: plan.escalationsGranted } : {}),
   };

@@ -271,6 +271,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       sessionId: () => runtime.sessionId,
       remoteSupervisor: services.remoteSupervisor,
       runtimeStore,
+      pricing: services.providerRegistry,
     }),
     codeIndexStore: services.codeIndexStore,
     codeIndexReindexScheduler: services.codeIndexReindexScheduler,

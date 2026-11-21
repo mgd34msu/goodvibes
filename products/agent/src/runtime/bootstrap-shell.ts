@@ -200,6 +200,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       sessionId: () => runtime.sessionId,
       remoteSupervisor: services.remoteSupervisor,
       runtimeStore,
+      pricing: services.providerRegistry,
     }),
     voiceSetup: services.voiceSetup,
     runtimeStore,

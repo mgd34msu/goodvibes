@@ -187,6 +187,12 @@ export interface ContractStartOptions {
 export interface IdempotentStartRequest {
   readonly principalId: string;
   readonly key: string;
+  /**
+   * `dispatch`: the key names work dispatched into a session made for it
+   * (contracts.dispatch), so the request is the ask and the workspace only;
+   * each attempt's session differs. Omitted: the whole start request.
+   */
+  readonly fingerprint?: 'start' | 'dispatch' | undefined;
 }
 
 /** A start by retry key: the contract, its owner's id, and whether it was started by an earlier call with the key. */
@@ -232,9 +238,16 @@ function idempotencyKeyInFlight(): RefusalError {
 }
 
 /** The request a retry must repeat, in a canonical form: the same fields in any order give the same text. */
-function startFingerprint(input: StartContractInput): string {
-  const fields: Record<string, unknown> = { ask: input.ask, sessionId: input.sessionId, origin: input.origin, projectRoot: input.projectRoot, isolation: input.isolation ?? null };
+function startFingerprint(input: Pick<StartContractInput, 'ask' | 'sessionId' | 'origin' | 'projectRoot' | 'isolation'>, kind: 'start' | 'dispatch' = 'start'): string {
+  const fields: Record<string, unknown> = kind === 'dispatch'
+    ? { ask: input.ask, projectRoot: input.projectRoot }
+    : { ask: input.ask, sessionId: input.sessionId, origin: input.origin, projectRoot: input.projectRoot, isolation: input.isolation ?? null };
   return JSON.stringify(Object.fromEntries(Object.keys(fields).sort().map((key) => [key, fields[key]])));
+}
+
+/** The canonical request a dispatch retry key is recorded with (ask and workspace), for a lookup before anything is created. */
+export function dispatchStartFingerprint(ask: string, projectRoot: string): string {
+  return startFingerprint({ ask, sessionId: '', origin: 'hosted', projectRoot }, 'dispatch');
 }
 
 /** The session a contract gets when an agent spawn starts it with no conversation session (AgentManager's own event session). */
@@ -1167,7 +1180,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const idempotentStarts = new Map<string, Promise<{ readonly fingerprint: string; readonly started: IdempotentStartedContract }>>();
 
   function startIdempotent(input: StartContractInput, request: IdempotentStartRequest, options: ContractStartOptions = {}): Promise<IdempotentStartedContract> {
-    return startKeyed(startFingerprint(input), request, options, (record) => start(input, options, record));
+    return startKeyed(startFingerprint(input, request.fingerprint), request, options, (record) => start(input, options, record));
   }
 
   /** A drafted plan started by retry key: the same key replays the first contract, after a restart too. */
@@ -1368,6 +1381,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       sessionId: input.sessionId,
       origin: input.origin,
       ...(input.ownerPrincipalId === undefined ? {} : { ownerPrincipalId: input.ownerPrincipalId }),
+      ...(input.sessionCreatedForDispatch === true ? { sessionCreatedForDispatch: true as const } : {}),
       ask: input.ask,
       ...(originalSource ? { originalSource, taskEvidence: [owner.task, input.taskEvidence].filter(Boolean).join('\n\n') } : input.taskEvidence === undefined ? {} : { taskEvidence: input.taskEvidence }),
       ownerAgentId: owner.id,

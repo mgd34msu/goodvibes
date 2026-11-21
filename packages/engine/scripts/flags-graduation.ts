@@ -36,7 +36,7 @@ function main(): void {
 
   if (!gate.ok) {
     console.error(`FAIL, ${gate.message}`);
-    console.error('Default each candidate on (set its defaultState) or record a dated blocker annotation.');
+    console.error('Default each candidate on (set the schema default of its settings key so the feature is on) or record a dated blocker annotation.');
     process.exit(1);
   }
   console.log(`OK, ${gate.message}`);

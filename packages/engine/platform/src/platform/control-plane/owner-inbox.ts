@@ -344,8 +344,21 @@ export type OwnerInboxApprovalSource = Pick<ApprovalBroker, 'homeNode' | 'listAp
 export const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
 
 /** What a surface needs to show and answer the inbox, in process or over the wire. */
+/** A list that can say it is incomplete: `unreachable` is why the daemon's part is missing, when it is. */
+export interface OwnerInboxListReport {
+  readonly items: readonly OwnerItem[];
+  readonly unreachable?: string | undefined;
+  /** The daemon that did not answer, as an address a person reads (`https://10.0.0.7:3421`), when `unreachable` is set. */
+  readonly daemon?: string | undefined;
+}
+
 export interface OwnerInboxPort {
   list(filter?: OwnerInboxListFilter): Promise<readonly OwnerItem[]>;
+  /**
+   * The list, saying when it holds only this machine's items because the
+   * daemon did not answer. Absent on a port whose list is always whole.
+   */
+  listReport?(filter?: OwnerInboxListFilter): Promise<OwnerInboxListReport>;
   /** One item by id, open or closed. */
   find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined>;
   answer(id: string, answer: OwnerAnswer): Promise<OwnerAnswerOutcome>;
@@ -363,16 +376,33 @@ export function ownerInboxCursorOf(item: Pick<OwnerItem, 'id' | 'createdAt' | 'c
  * move (a store that does not read `cursor` answers its first page again).
  */
 export async function listEveryOwnerItem(port: Pick<OwnerInboxPort, 'list'>, filter: Omit<OwnerInboxListFilter, 'limit' | 'cursor'> = {}): Promise<OwnerItem[]> {
+  return [...(await listEveryOwnerItemReport(port, filter)).items];
+}
+
+/**
+ * Every item, page by page, and why the daemon's part is missing when a page
+ * came back without it (the port's `listReport`; a port without one is whole).
+ */
+export async function listEveryOwnerItemReport(
+  port: Pick<OwnerInboxPort, 'list' | 'listReport'>,
+  filter: Omit<OwnerInboxListFilter, 'limit' | 'cursor'> = {},
+): Promise<OwnerInboxListReport> {
   const items: OwnerItem[] = [];
   const seen = new Set<string>();
+  let missing: Pick<OwnerInboxListReport, 'unreachable' | 'daemon'> = {};
   let cursor: string | undefined;
   for (;;) {
-    const page = await port.list({ ...filter, limit: MAX_LIST_LIMIT, ...(cursor !== undefined ? { cursor } : {}) });
+    const pageFilter = { ...filter, limit: MAX_LIST_LIMIT, ...(cursor !== undefined ? { cursor } : {}) };
+    const report: OwnerInboxListReport = port.listReport ? await port.listReport(pageFilter) : { items: await port.list(pageFilter) };
+    if (missing.unreachable === undefined && report.unreachable !== undefined) {
+      missing = { unreachable: report.unreachable, ...(report.daemon !== undefined ? { daemon: report.daemon } : {}) };
+    }
+    const page = report.items;
     for (const item of page) if (!seen.has(item.id)) { seen.add(item.id); items.push(item); }
     const last = page[page.length - 1];
-    if (page.length < MAX_LIST_LIMIT || last === undefined) return items;
+    if (page.length < MAX_LIST_LIMIT || last === undefined) return { items, ...missing };
     const next = ownerInboxCursorOf(last);
-    if (next === cursor) return items;
+    if (next === cursor) return { items, ...missing };
     cursor = next;
   }
 }

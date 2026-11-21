@@ -7,12 +7,14 @@ export type {
   AuthenticatedPrincipalKind,
   AuthenticatedPrincipalResolver,
   CredentialKind,
+  PrincipalKind,
   ElevatedPrivateHostFetchConfig,
   PrivateHostFetchConfig,
   RequestContext,
   RequestPrincipal,
 } from '@goodvibes/engine/daemon-api';
 export {
+  AUTHENTICATED_PRINCIPAL_KINDS,
   NO_OWNER_USER,
   actorFromChannelSender,
   actorFromPrincipal,

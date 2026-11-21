@@ -12,6 +12,8 @@
  */
 
 const counts = new Map<string, number>();
+/** Changes the owner must act on, each said as its own line with this start's notes. */
+const changes: string[] = [];
 let sink: ((text: string) => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -25,6 +27,18 @@ export function noteCarriedForward(noun: string, count = 1): void {
   schedule();
 }
 
+/**
+ * A change an upgrade step made that the owner has to act on, in one or two
+ * sentences that say what to do ("webhook senders must now send ..."). Said
+ * once, as its own line, through the same sink and at the same moment as the
+ * counted notes. The step calls it only on the start that made the change.
+ */
+export function noteCarriedForwardChange(text: string): void {
+  if (!text.trim() || changes.includes(text)) return;
+  changes.push(text);
+  schedule();
+}
+
 /** The daemon names where the line goes; notes made before it did are said then. */
 export function sayCarriedForwardThrough(say: ((text: string) => void) | null): void {
   sink = say;
@@ -32,7 +46,7 @@ export function sayCarriedForwardThrough(say: ((text: string) => void) | null): 
 }
 
 function schedule(): void {
-  if (sink === null || counts.size === 0 || timer !== null) return;
+  if (sink === null || (counts.size === 0 && changes.length === 0) || timer !== null) return;
   timer = setTimeout(flush, GATHER_MS);
   timer.unref?.();
 }
@@ -50,8 +64,13 @@ export function sayCarriedForwardNow(): void {
 
 function flush(): void {
   timer = null;
-  if (sink === null || counts.size === 0) return;
-  const parts = [...counts].map(([noun, count]) => `${count} ${count === 1 ? noun : `${noun}s`}`);
-  counts.clear();
-  try { sink(`Carried forward from 3.3.1: ${parts.join(', ')}.`); } catch { /* the receipt store reports its own failure */ }
+  if (sink === null) return;
+  if (counts.size > 0) {
+    const parts = [...counts].map(([noun, count]) => `${count} ${count === 1 ? noun : `${noun}s`}`);
+    counts.clear();
+    try { sink(`Carried forward from 3.3.1: ${parts.join(', ')}.`); } catch { /* the receipt store reports its own failure */ }
+  }
+  for (const change of changes.splice(0)) {
+    try { sink(change); } catch { /* the receipt store reports its own failure */ }
+  }
 }

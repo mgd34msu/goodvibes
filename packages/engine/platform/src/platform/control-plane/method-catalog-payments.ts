@@ -60,7 +60,7 @@ import {
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'payments.purchase.reconcile', title: 'Record the Merchant Order Finding', category: 'payments',
-    repeat: 'safe',
+    repeat: 'safe', confirmation: 'owner-request',
     effects: ['purchase.approve'], dangerous: true,
     description: 'After inspecting the merchant’s order history, explicitly record whether this exact uncertain or unverified checkout placed an order. Requires current paired admin authority, write:payments, confirm: true and inspectedMerchantHistory: true. The saved finding cannot be changed by a retry. Settles only original purchase/budget bookkeeping after its actual executor has drained; never submits or resumes an order. Missing local receipts never imply no charge. A no-order finding releases an original unspent hold but never credits already committed spend.',
     http: PAYMENT_PURCHASE_RECONCILE_HTTP,
@@ -68,7 +68,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   }),
   methodDescriptor({
     id: 'payments.purchase.securityCode', title: 'Type the Card Security Code', category: 'payments',
-    repeat: 'safe',
+    repeat: 'safe', confirmation: 'owner-request',
     effects: ['card.enter'], dangerous: true,
     description: 'Under payments.cvvHandling prompt, hand the card security code the owner typed to the one approved purchase waiting for it, by its exact purchaseId and windowId from payments.purchase.status. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The code is used for that purchase\'s card entry and kept nowhere. A closed or replaced request refuses; this never submits directly or overrides any budget, merchant, page or address check.',
     http: { method: 'POST', path: '/api/payments/purchase/security-code' },
@@ -84,7 +84,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Stop This Purchase',
     category: 'payments', dangerous: true,
     // A window is answered once; a repeat finds it answered and refuses, changing nothing.
-    repeat: 'safe',
+    repeat: 'safe', confirmation: 'owner-request',
     // Answering a purchase window is the owner's; stopping a purchase is open to the Agent.
     effects: action === 'cancel' ? ['payments.administer'] : ['purchase.approve'],
     description: action === 'cancel'
@@ -143,9 +143,10 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'payments.checkout.approve',
     replay: IDEMPOTENCY_KEY_REPLAY,
+    confirmation: 'owner-request',
     title: 'Approve One Purchase',
     description:
-      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
+      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon\'s machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
     category: 'payments',
     effects: ['purchase.approve'],
     http: { method: 'POST', path: '/api/payments/checkout/approve' },
@@ -180,9 +181,10 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'payments.standing.create',
     replay: IDEMPOTENCY_KEY_REPLAY,
+    confirmation: 'owner-request',
     title: 'Authorise a Purchase in Advance',
     description:
-      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments repeat sends both. The owner\'s own act: an agent cannot add one.',
+      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments repeat sends both. The owner\'s own act: an agent cannot add one.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,
@@ -193,9 +195,10 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'payments.standing.delete',
     repeat: 'safe',
+    confirmation: 'owner-request',
     title: 'Withdraw a Standing Authorisation',
     description:
-      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments stop-repeat sends both. The owner\'s own act.',
+      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments stop-repeat sends both. The owner\'s own act.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,

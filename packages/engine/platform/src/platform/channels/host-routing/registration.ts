@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import type { RoutingHostContext as HandlerContext } from './registration-types.js';
-import { assertConfirmed } from '../../control-plane/host-handlers.js';
+import { requireConfirmation } from '../../control-plane/confirmation-gate.js';
 import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
 import {
   registerCatalogHandlers,
@@ -264,7 +264,8 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
 
   const assignHandler: TypedHandler<RoutingAssignBody, RoutingAssignResult> = async ({ body, context }) => {
     const autonomous = isDelegatedCaller(context);
-    if (!autonomous) assertConfirmed(body, context);
+    // The Agent's delegated write is admitted by its native authority below instead.
+    if (!autonomous) requireConfirmation('owner-request', ASSIGN_METHOD, body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
     const profileId = optionalString(body.profileId);
@@ -326,7 +327,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
 
   const deleteHandler: TypedHandler<RoutingDeleteBody, RoutingDeleteResult> = async ({ body, context }) => {
     const autonomous = isDelegatedCaller(context);
-    if (!autonomous) assertConfirmed(body, context);
+    if (!autonomous) requireConfirmation('owner-request', DELETE_METHOD, body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
     const assignmentId = optionalString(body.assignmentId);

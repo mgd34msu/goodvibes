@@ -131,7 +131,8 @@ WebSocket or proxy callers the same policy or alter system trust.
   The optional HTTP listener never accepts the operator token: it takes
   `GOODVIBES_HTTP_TOKEN`, otherwise its own `<daemonHomeDirectory>/http-listener-token.json`
   (created at mode 0600 on first use by `getOrCreateHttpListenerToken`, printed
-  once to an interactive terminal). Overrides affect this process and do not replace the
+  once to an interactive terminal, said once in the receipts through the
+  carried-forward notice, and printed on request by `goodvibes-daemon listener token --show`). Overrides affect this process and do not replace the
   persisted companion identity. Clients using an override must use that same
   override; a different stored token does not authenticate the running server.
 - Reuse the existing token record byte-for-byte on restart. Never search another

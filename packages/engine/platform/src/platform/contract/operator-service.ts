@@ -82,6 +82,13 @@ export interface OperatorStartInput {
    * restart, instead of starting the work again.
    */
   readonly idempotencyKey?: string | undefined;
+  /**
+   * Set by the dispatch adapter (hosted-sessions/contract-work-adapter.ts): the
+   * retry key names dispatched work, matched on the ask and workspace only, and
+   * whether the session was created for this dispatch (recorded on the contract,
+   * so the session ends with it, also after a restart).
+   */
+  readonly dispatch?: { readonly sessionCreated: boolean } | undefined;
 }
 
 export interface OperatorStartedContract {
@@ -448,9 +455,11 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       projectRoot: hosted?.workspaceRoot ?? input.workspaceRoot ?? deps.workingDirectory,
       ...(input.principalId === undefined ? {} : { ownerPrincipalId: input.principalId }),
       ...(input.isolation === undefined ? {} : { isolation: input.isolation }),
+      ...(input.dispatch?.sessionCreated === true ? { sessionCreatedForDispatch: true as const } : {}),
     };
     if (input.idempotencyKey !== undefined && runner.startIdempotent !== undefined) {
-      const keyed = await runner.startIdempotent(startInput, { principalId: input.principalId ?? '', key: input.idempotencyKey });
+      const keyed = await runner.startIdempotent(startInput, { principalId: input.principalId ?? '', key: input.idempotencyKey,
+        ...(input.dispatch === undefined ? {} : { fingerprint: 'dispatch' as const }) });
       return {
         contract: projectContractOperatorView(keyed.contract),
         ownerAgentId: keyed.ownerAgentId,
@@ -592,8 +601,9 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
           ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
           // The adapter records the caller as the owner of the session it creates and of the contract.
           ...(input.principalId === undefined ? {} : { principalId: input.principalId }),
-          // Keys are per caller: another caller's key never returns this caller's work.
-          ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: `${input.principalId ?? ''}\u0000${input.idempotencyKey}` }),
+          // Keys are per caller (the adapter scopes the key by principalId, as contracts.start does):
+          // another caller's key never returns this caller's work.
+          ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
         },
       });
       const contract = holder(handle.externalTaskId).contract;

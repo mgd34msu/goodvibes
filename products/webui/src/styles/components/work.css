@@ -172,6 +172,12 @@
 /* Transcript inside a detail pane: role label over plain prose, hairlines between. */
 .work-share {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.work-share form {
+  display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-2, 8px);
@@ -180,6 +186,23 @@
 .work-share .gv-field {
   flex: 1 1 16rem;
   min-width: 0;
+}
+
+.work-share-owners {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+}
+
+.work-share-owners li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  overflow-wrap: anywhere;
 }
 
 .work-transcript {

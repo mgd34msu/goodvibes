@@ -20,6 +20,7 @@
  */
 
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { deliverToAll, deliverToSubscription, type DeliveryDeps, type PushTransport } from './delivery.js';
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { PushSubscriptionStore, toPublicSubscription, type PushSubscriptionStatus } from './subscription-store.js';
@@ -215,6 +216,12 @@ export interface PushServiceDeps {
   readonly receipts?: { record(text: string): unknown } | undefined;
   /** Clock seam so "how long has it waited" is deterministic under test. */
   readonly now?: (() => number) | undefined;
+  /**
+   * The sign-in users (UserAuthManager): a user deleted or no longer holding
+   * the admin role loses every push endpoint it registered, since approvals and
+   * owner questions are pushed to admins only. Absent: nothing is withdrawn.
+   */
+  readonly users?: { onAdminWithdrawn(listener: (username: string) => void): () => void } | undefined;
 }
 
 export interface SubscribeInput {
@@ -263,7 +270,18 @@ export class PushService {
     this.scheduler = deps.scheduler ?? defaultEscalationScheduler();
     this.now = deps.now ?? Date.now;
     this.receipts = deps.receipts;
+    this.stopWatchingUsers = deps.users?.onAdminWithdrawn((username) => {
+      void this.store.revokePrincipal(username, 'the account that registered it was deleted or no longer holds the admin role')
+        .then((removed) => {
+          if (removed > 0) logger.info('Push endpoints of a user who lost admin access were removed', { principalId: username, removed });
+        }, (error: unknown) => {
+          logger.warn('The push endpoints of a user who lost admin access could not be removed', { principalId: username, error: summarizeError(error) });
+        });
+    }) ?? null;
   }
+
+  /** Ends the subscription to users losing admin access. */
+  private readonly stopWatchingUsers: (() => void) | null;
 
   /** The public VAPID key clients subscribe with. */
   getPublicKey(): Promise<string> {
@@ -339,6 +357,7 @@ export class PushService {
    * so a stale escalation cannot fire against a torn-down graph. Idempotent.
    */
   dispose(): void {
+    this.stopWatchingUsers?.();
     for (const block of this.trackedBlocks.values()) {
       block.cancel();
     }

@@ -1,5 +1,5 @@
 import type { FeatureFlagManager } from './manager.js';
-import { assertFeatureGateIdRegistered, getFeatureSettingsBinding } from './feature-settings.js';
+import { assertFeatureGateIdRegistered, featureDefaultState, getFeatureSettingsBinding } from './feature-settings.js';
 import { FEATURE_FLAGS, FEATURE_FLAG_MAP } from './flags.js';
 import type { FeatureInoperability } from './types.js';
 
@@ -29,7 +29,7 @@ export function isFeatureGateEnabled(
   if (featureInoperability(flagId) !== null) return false;
   // With no manager wired the answer is the feature's declared default, so a
   // default-off feature stays off in a composition that passes no manager.
-  if (!featureFlags) return FEATURE_FLAG_MAP.get(flagId)?.defaultState === 'enabled';
+  if (!featureFlags) return featureDefaultState(flagId) === 'enabled';
   return featureFlags.isEnabled(flagId);
 }
 

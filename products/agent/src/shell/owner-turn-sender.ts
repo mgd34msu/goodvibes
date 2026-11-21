@@ -17,6 +17,7 @@ import type { NativeConversationInput, ProductInputContext } from '@goodvibes/en
 import type { NoticeLevel, OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { createHeldInputs } from '@goodvibes/engine/terminal-shell/held-input';
+import type { OwnerInputAnswered } from '@goodvibes/engine/terminal-shell/companion-input';
 import { withShellContext, type ShellContextHold } from '../input/shell-passthrough.ts';
 import { routeNativeConversationInput } from '../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -60,13 +61,20 @@ export interface OwnerTurnSendOptions {
    * and the composer draft, never sent again on its own.
    */
   readonly uncertain?: ((text: string) => void) | undefined;
+  /**
+   * Told how the message ended when this process sees no turn events for it:
+   * the connected host ran it (its completion's answer), or it never became a
+   * turn (failed, or may have been sent). A turn run here answers from its own
+   * events. Refused and held, it is told when the held message is sent.
+   */
+  readonly answered?: OwnerInputAnswered | undefined;
 }
 
 export interface OwnerTurnSender {
   /** Resolves true once the message was taken (its turn ran or the host has it), false when it was refused and handed to `notSent`. */
   sendTurn(text: string, options: ProductInputContext, turnOptions?: OrchestratorUserInputOptions, how?: OwnerTurnSendOptions): Promise<boolean>;
   /** The companion/plan route (bindOwnerInput): sent as given, or held when refused. */
-  receiveOwnerInput(text: string, turnOptions: OrchestratorUserInputOptions | undefined): void;
+  receiveOwnerInput(text: string, turnOptions: OrchestratorUserInputOptions | undefined, answered?: OwnerInputAnswered): void;
   /** Messages held from the phone or a plan, oldest first. */
   held(): readonly string[];
   /** Messages that may have been sent (their intake answer never came), oldest first: never sent again on their own. */
@@ -141,6 +149,8 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     };
     const mayHaveBeenSent = (): false => {
       shell?.release();
+      // Not sent again on its own, so its sender is told now rather than never.
+      how.answered?.({ answer: 'This message may not have been taken: its intake did not confirm it. Send it again if no answer follows.', status: 'failed' });
       uncertain(text);
       const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check /work intake-status before sending it again.';
       if (how.quiet) messages.activity(line);
@@ -165,6 +175,17 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         if (routed) {
           shell?.release();
           localTurnReason = undefined;
+          // The connected host runs the turn: its completion carries the answer this process never sees as turn events.
+          const answered = how.answered;
+          if (answered) {
+            void routed.completion.then(
+              (done) => answered({
+                answer: done.response || done.error || '',
+                status: done.status === 'completed' ? 'completed' : done.status === 'cancelled' ? 'cancelled' : 'failed',
+              }),
+              (error: unknown) => answered({ answer: `The connected host did not report how this message ended: ${summarizeError(error)}`, status: 'failed' }),
+            );
+          }
           return true;
         }
         const state = await routeNativeConversationInput({
@@ -190,6 +211,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         return true;
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
+        // A held message keeps its duty to answer and is answered when it is sent.
         refused();
         const line = `Your message was not sent: ${summarizeError(error)}`;
         if (how.quiet) messages.activity(line);
@@ -209,7 +231,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
   // the way clears: when a message here settles, and every few seconds while
   // something is held. Nothing from the phone or a plan's first turn is dropped,
   // and the draft is never touched.
-  const heldOwnerInput: Array<{ readonly text: string; readonly turnOptions: OrchestratorUserInputOptions | undefined }> = [];
+  const heldOwnerInput: Array<{ readonly text: string; readonly turnOptions: OrchestratorUserInputOptions | undefined; readonly answered?: OwnerInputAnswered | undefined }> = [];
   let heldOwnerTimer: ReturnType<typeof setTimeout> | null = null;
   let heldOwnerSending = false;
   let disposed = false;
@@ -235,7 +257,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
           const next = heldOwnerInput[0]!;
           let mayHaveBeenSent = false;
           const taken = await sendTurn(next.text, {}, next.turnOptions, {
-            notSent: () => {}, quiet: true,
+            notSent: () => {}, quiet: true, answered: next.answered,
             uncertain: () => { mayHaveBeenSent = true; keepUncertain(next.text, 'the intake did not answer'); },
           });
           // A message that may have been sent leaves the queue: sending it again on a timer could send it twice.
@@ -254,12 +276,13 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       }
     })());
   }
-  const receiveOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): void => {
+  const receiveOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined, answered?: OwnerInputAnswered): void => {
     const hold = (): void => {
       if (heldOwnerInput.length >= HELD_OWNER_INPUT_LIMIT) {
         messages.high(`Not sent: ${describeOwnerInput(text, turnOptions)}. ${HELD_OWNER_INPUT_LIMIT} messages are already waiting; send it again once they are taken.`, 'warning');
+        answered?.({ answer: `This message was not taken: ${HELD_OWNER_INPUT_LIMIT} messages were already waiting. Send it again once they are answered.`, status: 'failed' });
       } else {
-        heldOwnerInput.push({ text, turnOptions });
+        heldOwnerInput.push({ text, turnOptions, ...(answered ? { answered } : {}) });
         messages.high(`Held ${describeOwnerInput(text, turnOptions)}: the current message is still being taken. It is sent on its own once that clears.`, 'warning');
         scheduleHeldOwnerInput();
       }
@@ -267,7 +290,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     };
     // Behind a held message, a new one waits its turn so the order is kept.
     if (heldOwnerInput.length > 0) hold();
-    else track(sendTurn(text, {}, turnOptions, { notSent: hold, uncertain: () => keepUncertain(text, 'the intake did not answer') }));
+    else track(sendTurn(text, {}, turnOptions, { notSent: hold, uncertain: () => keepUncertain(text, 'the intake did not answer'), answered }));
   };
 
   return {
@@ -283,6 +306,10 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       disposed = true;
       if (heldOwnerTimer) clearTimeout(heldOwnerTimer);
       heldOwnerTimer = null;
+      // A held message that will now never be sent still owes its sender an answer.
+      for (const held of heldOwnerInput.splice(0)) {
+        held.answered?.({ answer: 'This message was not answered: GoodVibes Agent closed before it could be sent. Send it again.', status: 'failed' });
+      }
     },
   };
 }

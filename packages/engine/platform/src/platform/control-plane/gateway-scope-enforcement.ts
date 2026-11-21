@@ -41,6 +41,24 @@ export interface EventGrant {
    * sessions its own principal started, and of no other session.
    */
   readonly ownSessions?: true | undefined;
+  /**
+   * The client holds `read:approvals`, so it may read any approval record
+   * (`approvals.list`, effect approvals.read). With `ownSessions` it then
+   * receives `approval-update` for an approval outside its own sessions too,
+   * the same records approvals.list would show it.
+   */
+  readonly readApprovals?: true | undefined;
+}
+
+/**
+ * Whether an own-sessions client may receive an `approval-update` frame that
+ * its session ownership does not cover (one that names no session, or another
+ * session): only when it may read that approval with approvals.list, that is
+ * it holds read:approvals. Otherwise the frame is withheld, so a client is
+ * never shown the notice of an approval it could not open.
+ */
+export function ownApprovalReadable(grant: EventGrant, event: string): boolean {
+  return event === 'approval-update' && grant.readApprovals === true;
 }
 
 /**
@@ -97,7 +115,11 @@ export function resolveEventGrant(client: Omit<ScopedClientView, 'kind'>): Event
       for (const event of descriptor.wireEvents ?? []) wireEvents.add(event);
     }
   }
-  return { all: false, domains, wireEvents, ...(missingScopes(client.scopes, [OWN_SESSIONS_SCOPE]).length === 0 ? { ownSessions: true as const } : {}) };
+  return {
+    all: false, domains, wireEvents,
+    ...(missingScopes(client.scopes, [OWN_SESSIONS_SCOPE]).length === 0 ? { ownSessions: true as const } : {}),
+    ...(missingScopes(client.scopes, ['read:approvals']).length === 0 ? { readApprovals: true as const } : {}),
+  };
 }
 
 /** Whether the grant lets the client receive anything at all. */

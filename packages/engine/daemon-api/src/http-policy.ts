@@ -13,8 +13,12 @@ export {
 } from './actor.js';
 export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './actor.js';
 
+/** Every kind of authenticated principal making a daemon request. */
+export const AUTHENTICATED_PRINCIPAL_KINDS = ['user', 'bot', 'service', 'token'] as const;
 /** The kind of authenticated principal making a daemon request. */
-export type AuthenticatedPrincipalKind = 'user' | 'bot' | 'service' | 'token';
+export type AuthenticatedPrincipalKind = (typeof AUTHENTICATED_PRINCIPAL_KINDS)[number];
+/** Who a call came from: an authenticated principal, or another node of the group with its peer token. */
+export type PrincipalKind = AuthenticatedPrincipalKind | 'remote-peer';
 
 /** Describes an authenticated caller resolved from a daemon request token. */
 export interface AuthenticatedPrincipal {

@@ -989,7 +989,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       approvalBroker, watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus, sessionPresence, configManager,
       runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker,
       channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry,
-      pairingTokens: pairingTokens(), authority: authorityRecord, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
+      pairingTokens: pairingTokens(), authority: authorityRecord, users: localUserAuthManager, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
       personalCapture, clusterRoles, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
       listContracts: () => contractRunner.list({ includeInputSnapshot: false }),

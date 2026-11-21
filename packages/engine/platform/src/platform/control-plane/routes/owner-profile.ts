@@ -13,7 +13,7 @@
  * that pretends". The alternative considered and rejected was mapping a trust
  * refusal to 403 by matching its wording, which would have made the wire status
  * depend on a sentence the trust module is free to reword. What DOES throw is
- * `refuseNonUserRequest`, because that is a statement about the CALLER rather
+ * `refuseDeclinedRequest`, because that is a statement about the CALLER rather
  * than about the document.
  *
  * ## Why every verb goes through the store
@@ -28,12 +28,13 @@
  * ## The order of the two gates on a write
  *
  * `profile.set`, `profile.append` and `profile.forget` call
- * `refuseNonUserRequest()` BEFORE anything else, including before the authority
+ * `refuseDeclinedRequest()` BEFORE anything else, including before the authority
  * check. Those are two different questions and the caller-declaration one is
  * cheaper and more specific: "you told me this was not a user request" deserves
  * its own answer rather than being folded into a trust refusal that names a
- * surface the caller never claimed. See routes/explicit-user-request.ts for why
- * an ABSENT claim proceeds and only an explicit `false` refuses.
+ * surface the caller never claimed. See control-plane/confirmation-gate.ts
+ * (`not-declined`) for why an ABSENT claim proceeds and only an explicit
+ * `false` refuses.
  *
  * ## `authority` is required on every write
  *
@@ -55,7 +56,7 @@ import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-ca
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
-import { refuseNonUserRequest } from './explicit-user-request.js';
+import { refuseDeclinedRequest } from '../confirmation-gate.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import {
   describeProfilePersonRead,
@@ -108,7 +109,7 @@ function requireFieldId(value: unknown): string {
  * The authority the caller claims. REQUIRED, and never defaulted.
  *
  * An earlier version read an absent `authority` as `owner-direct`, on the same
- * reasoning `explicit-user-request.ts` uses for its own field. That reasoning
+ * reasoning the confirmation gate's `not-declined` level uses for its own field. That reasoning
  * does not transfer, and the difference matters: `explicitUserRequest` lives in
  * an invocation CONTEXT no transport populates, so requiring it would refuse
  * every real caller. `authority` is a body parameter of these verbs, any
@@ -291,7 +292,7 @@ function createProvenanceHandler(service: OwnerProfileGatewayService): GatewayMe
 
 function createSetHandler(service: OwnerProfileGatewayService): GatewayMethodHandler {
   return (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'profile.set');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'profile.set');
     const params = readInvocationParams(invocation);
     return service.set({
       fieldId: requireFieldId(params.fieldId),
@@ -305,7 +306,7 @@ function createSetHandler(service: OwnerProfileGatewayService): GatewayMethodHan
 
 function createAppendHandler(service: OwnerProfileGatewayService): GatewayMethodHandler {
   return (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'profile.append');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'profile.append');
     const params = readInvocationParams(invocation);
     return service.append({
       section: requireStringValue(params.section, 'section'),
@@ -319,7 +320,7 @@ function createAppendHandler(service: OwnerProfileGatewayService): GatewayMethod
 
 function createForgetHandler(service: OwnerProfileGatewayService): GatewayMethodHandler {
   return (invocation: GatewayMethodInvocation) => {
-    if (!profileDelegationForInvocation(invocation)) refuseNonUserRequest(invocation, 'profile.forget');
+    if (!profileDelegationForInvocation(invocation)) refuseDeclinedRequest(invocation, 'profile.forget');
     const params = readInvocationParams(invocation);
     const fieldId = params.fieldId === undefined || params.fieldId === null
       ? undefined
@@ -356,7 +357,7 @@ function createForgetHandler(service: OwnerProfileGatewayService): GatewayMethod
 }
 
 /**
- * `profile.undo` deliberately does NOT call `refuseNonUserRequest`.
+ * `profile.undo` deliberately does NOT call `refuseDeclinedRequest`.
  *
  * §11.1 names three verbs that do, set, append, forget, and undo is not one
  * of them. It is also the only mutation that cannot lose information: it

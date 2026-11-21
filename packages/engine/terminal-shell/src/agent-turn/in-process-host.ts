@@ -28,6 +28,7 @@ import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes/engine/pl
 import type { HostedDaemonRequestPath } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { readConnectedHostPairing } from './connected-host-auth.js';
+import { pairingPrincipalId } from '@goodvibes/engine/platform/platform/pairing/principal-ids';
 import { describeUnreadableAgentHostPairing } from './connected-host-pairing-store.js';
 import { createConnectedHost, type ConnectedHostConnection } from './connected-host-client.js';
 
@@ -61,7 +62,7 @@ export function createAgentInProcessHost(options: AgentInProcessHostOptions): Ag
     // The Agent's precedence: its pairing with this host first, then the operator credential.
     const pairing = readConnectedHostPairing(options.homeDirectory, options.baseUrl);
     if (pairing.status === 'paired') {
-      return { ...paired, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` };
+      return { ...paired, token: pairing.token, expectedPrincipalId: pairingPrincipalId(pairing.tokenId) };
     }
     if (pairing.status === 'unknown') {
       return { ...paired, token: null, unavailable: {

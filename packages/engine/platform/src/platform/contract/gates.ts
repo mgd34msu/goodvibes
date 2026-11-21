@@ -9,8 +9,9 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { homedir, tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getSandboxWritableExtras } from '../runtime/sandbox/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { ContainmentUnavailableError, runContained } from '../runtime/sandbox/contained-spawn.js';
 import { resolveCredentialEnvScrub, scrubCredentialEnv } from '../tools/exec/credential-env.js';
@@ -258,37 +259,25 @@ export function getSkippedGateReason(gateName: string, cwd: string, pkgScripts: 
   return null;
 }
 
-/**
- * The directories on PATH that lie in the home directory (a toolchain the
- * owner installed there, such as ~/.bun/bin), bound read-only into the
- * boundary so the gate's own scripts find their programs; the rest of the home
- * directory stays masked.
- */
+/** The daemon's environment as strings, before the credential scrub. */
 function hostEnvironment(): Record<string, string> {
   return Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
-}
-
-function homeToolchainDirectories(): string[] {
-  const home = homedir();
-  const inHome = (path: string): boolean => path.startsWith(`${home}${sep}`);
-  return [...new Set((process.env.PATH ?? '').split(delimiter)
-    .filter((entry) => isAbsolute(entry) && inHome(resolve(entry)) && existsSync(entry))
-    .map((entry) => resolve(entry)))];
 }
 
 /** What a gate command runs with: its environment, and the paths it may write beyond its working directory. */
 export interface GateCommandOptions {
   /** The scrubbed environment the command runs with (credential-bearing variables already withheld). */
   readonly environment: Readonly<Record<string, string>>;
-  /** Absolute paths the command may write besides `cwd` (its report directory). */
+  /** Absolute paths the command may write besides `cwd`: its report directory and sandbox.workspaceWritable. */
   readonly writable?: readonly string[] | undefined;
 }
 
 /**
  * Runs one gate command through `/bin/sh -c`, as a program the project chose:
- * inside the bubblewrap boundary with the network on, `cwd` and `writable`
- * writable and the home directory masked (its PATH toolchains read-only), or on
- * the host where no boundary exists, which the result's `backend` states. `cwd`
+ * inside the same bubblewrap boundary the exec tool uses (runContained: network
+ * on, `cwd` and `writable` writable, the home directory hidden except the
+ * toolchain directories every boundary shows read-only, exec/sandbox-home.ts),
+ * or on the host where no boundary exists, which the result's `backend` states. `cwd`
  * is the unit's worktree in worktree mode, so the gate sees the unit's
  * isolated changes. A positive `timeoutMs` is the contract.gateTimeoutMs
  * deadline; zero waits for completion or cancellation. An expired or cancelled
@@ -316,13 +305,13 @@ export async function executeGateCommand(
         boundary: 'host-allowed',
         network: 'on',
         writable: [cwd, ...(options.writable ?? [])],
-        readOnly: homeToolchainDirectories(),
+        honorsExtraPaths: true,
         reason: 'a contract gate runs the project\'s own scripts',
       },
     });
     signal?.throwIfAborted();
     const timedOut = deadline?.aborted === true && run.exitCode === null;
-    const output = [run.stdout, run.stderr, timedOut ? `Gate timed out after ${timeoutMs} ms and was stopped.` : '']
+    const output = [run.stdout, run.stderr, timedOut ? `Gate timed out after ${timeoutMs} ms and was stopped.` : '', run.hint ?? '']
       .filter(Boolean)
       .join('\n')
       .trim();
@@ -397,7 +386,8 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
         const scrubbed = await scrubCredentialEnv(hostEnvironment(), resolveCredentialEnvScrub(configuredCredentialEnvScrub(options.configManager)));
         const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal, {
           environment: { ...scrubbed.env, GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId },
-          writable: [directory],
+          // The owner's extra paths reach a gate as they reach every exec command.
+          writable: [directory, ...getSandboxWritableExtras(options.configManager)],
         });
         result.output = run.output;
         if (run.backend !== undefined) result.backend = run.backend;

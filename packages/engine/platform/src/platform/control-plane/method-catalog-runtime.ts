@@ -172,7 +172,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'mcp.servers.upsert',
     repeat: 'safe',
-    effects: ['mcp.administer', 'owner.act'],
+    effects: ['mcp.administer', 'model.refused'],
     title: 'Upsert MCP Server',
     description: 'Persist a project/global MCP server config and reconnect the changed runtime server without daemon restart.',
     category: 'mcp',
@@ -224,7 +224,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'remote.pair.requests.approve',
     repeat: 'safe',
-    effects: ['remote.administer', 'owner.act'],
+    effects: ['remote.administer', 'model.refused'],
     title: 'Approve Remote Pair Request',
     description: 'Approve a pending remote pair request.',
     category: 'remote',
@@ -236,7 +236,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'remote.pair.requests.reject',
     repeat: 'safe',
-    effects: ['remote.administer', 'owner.act'],
+    effects: ['remote.administer', 'model.refused'],
     title: 'Reject Remote Pair Request',
     description: 'Reject a pending remote pair request.',
     category: 'remote',
@@ -267,7 +267,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'remote.peers.token.rotate',
     repeat: 'unsafe',
-    effects: ['remote.administer', 'owner.act'],
+    effects: ['remote.administer', 'model.refused'],
     title: 'Rotate Remote Peer Token',
     description: 'Rotate the active token for a remote peer.',
     category: 'remote',
@@ -278,7 +278,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'remote.peers.token.revoke',
     repeat: 'safe',
-    effects: ['remote.administer', 'owner.act'],
+    effects: ['remote.administer', 'model.refused'],
     title: 'Revoke Remote Peer Token',
     description: 'Revoke the active token for a remote peer.',
     category: 'remote',

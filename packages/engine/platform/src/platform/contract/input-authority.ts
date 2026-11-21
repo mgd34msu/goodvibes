@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Contract } from './types.js';
+import { CONTRACT_WORKTREE_KINDS, liesInProductWorktreeOfKind } from '../git/product-worktree-marker.js';
 import {
   assertContractInputObjects,
   assertContractInputGitIdentity,
@@ -62,7 +63,10 @@ const activeInputAuthority = new AsyncLocalStorage<ContractInputAuthority>();
 // Only roots outside the product-owned layout are kept: that layout is denied by pattern alone, so
 // remembering every view and worktree of every contract would only grow the set and slow each lookup.
 const capturedRoots = new Set<string>();
-const RESERVED_VIEW_LAYOUT = /[/\\]\.goodvibes[/\\]\.worktrees[/\\](?:contract-input|contract-planner|contract)(?:[/\\]|$)/;
+/** The contract kinds of the product worktree layout (git/product-worktree-marker.ts), read from a path alone. */
+function isReservedViewPath(path: string): boolean {
+  return liesInProductWorktreeOfKind(path, CONTRACT_WORKTREE_KINDS);
+}
 
 function resolvedPath(path: string): string {
   const absolute = resolve(path);
@@ -75,7 +79,7 @@ function resolvedPath(path: string): string {
 }
 
 function rememberCapturedRoot(path: string): void {
-  if (!RESERVED_VIEW_LAYOUT.test(resolvedPath(path))) capturedRoots.add(resolve(path));
+  if (!isReservedViewPath(resolvedPath(path))) capturedRoots.add(resolve(path));
 }
 
 /** How many roots are remembered individually; the product-owned layout is not one of them. */
@@ -242,7 +246,7 @@ export function isCapturedInputPath(path: string): boolean {
   for (const root of capturedRoots) if (absolute === root || absolute.startsWith(`${root}${sep}`)) return true;
   // Reserved runtime views also fail closed before a restored lease is rebound.
   // This is only a denial check; prefixes never confer original-owner authority.
-  return RESERVED_VIEW_LAYOUT.test(absolute);
+  return isReservedViewPath(absolute);
 }
 
 /**
@@ -255,7 +259,7 @@ export function isCapturedInputPath(path: string): boolean {
  */
 export function isCapturedInputEntry(directoryRealPath: string, name: string): boolean {
   const absolute = join(directoryRealPath, name);
-  return capturedRoots.has(absolute) || RESERVED_VIEW_LAYOUT.test(absolute);
+  return capturedRoots.has(absolute) || isReservedViewPath(absolute);
 }
 
 function stateOf(token: ContractInputAuthority): Authority {

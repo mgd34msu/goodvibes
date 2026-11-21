@@ -1,5 +1,3 @@
-import {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes/engine/terminal-shell/companion-input';
-export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload} from '@goodvibes/engine/terminal-shell/companion-input';
 /**
  * bootstrap-core-helpers.ts, the pure parts of the interactive bootstrap.
  *

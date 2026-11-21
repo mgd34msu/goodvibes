@@ -1,5 +1,6 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { PairingTokenManager } from '../pairing/pairing-token-store.js';
+import { pairingPrincipalId } from '../pairing/principal-ids.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
 import type { RuntimeEventBus } from './events/index.js';
 import { ApiTokenAuditor } from '../security/token-audit.js';
@@ -13,7 +14,6 @@ export const PAIRING_TOKEN_AUDIT_POLICY_ID = 'pairing-token';
 /** How often the paired devices are re-read and their age audited. */
 export const PAIRING_TOKEN_AUDIT_INTERVAL_MS = 60 * 60 * 1000;
 
-const PAIRING_ID_PREFIX = 'pairing:';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The ids this module registered per auditor, so a revoked device can be removed again. */
@@ -74,7 +74,7 @@ function mirrorPairingTokens(pairingTokens: Pick<PairingTokenManager, 'list'>, a
   const mine = registered.get(auditor) ?? new Set<string>();
   registered.set(auditor, mine);
   for (const token of pairingTokens.list()) {
-    const id = PAIRING_ID_PREFIX + token.id;
+    const id = pairingPrincipalId(token.id);
     live.add(id);
     const known = auditor.getTokenMetadata(id);
     if (known && known.issuedAt === token.createdAt && known.label === token.name) continue;

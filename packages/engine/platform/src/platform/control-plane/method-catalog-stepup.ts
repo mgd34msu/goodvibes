@@ -103,7 +103,7 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'stepup.credentials.remove',
     repeat: 'safe',
-    effects: ['relay.administer', 'owner.act'],
+    effects: ['relay.administer', 'model.refused'],
     title: 'Remove Step-up Credential',
     description: 'Remove a registered step-up passkey so it can no longer confirm anything (a lost device). Answers 404 when no credential has that id. Admin/local-only. Mutating, so a relay call needs a step-up assertion. Removing the last passkey leaves no credential to confirm relay actions until a new one is registered.',
     category: 'relay',

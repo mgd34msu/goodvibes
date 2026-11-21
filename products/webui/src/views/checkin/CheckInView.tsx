@@ -19,7 +19,7 @@
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BellRing, RefreshCw } from 'lucide-react';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import type { OperatorMethodOutput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
@@ -202,13 +202,28 @@ export function CheckInSettings() {
     queryFn: () => platformClient.operator.checkin.receipts.list(),
   });
 
+  // One run asked for: a press repeated after a lost answer gets the first run's receipt.
+  const [runIntent] = useState(() => new IntentKey());
   const run = useMutation({
-    mutationFn: () => platformClient.operator.checkin.run(),
+    mutationFn: async () => {
+      try {
+        const result = await platformClient.operator.checkin.run(runIntent.keyFor('checkin.run'));
+        runIntent.settle();
+        return result;
+      } catch (error) {
+        runIntent.settle(error);
+        throw error;
+      }
+    },
     onSuccess: async (result) => {
       setRunResult(result);
       await queryClient.invalidateQueries({ queryKey: queryKeys.checkinReceipts });
     },
     onError: (error: unknown) => {
+      if (!isMethodUnavailableError(error) && !isPressRefused(error)) {
+        toast({ title: 'The check-in may have run', description: `${formatError(error)}. ${MAY_HAVE_BEEN_DONE}`, tone: 'warning' });
+        return;
+      }
       toast({
         title: isMethodUnavailableError(error) ? 'Check-in unavailable on this daemon' : 'Check-in run failed',
         description: isMethodUnavailableError(error) ? undefined : formatError(error),

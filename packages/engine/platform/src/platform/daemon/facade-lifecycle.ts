@@ -10,7 +10,6 @@ import { drainOwned } from '@goodvibes/judgment/decisions';
  * onStarted() after the server is accepting, onStopping() during an
  * orderly stop, and peekReceipts()/acknowledgeReceipts() for the /status payload.
  */
-import { join } from 'node:path';
 import { assertNativeReaderCompatible, parseNativeReaderCapabilities, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
 import { observeServiceCommand, runServiceCommand, serviceCommandSignal, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
@@ -26,6 +25,7 @@ import { daemonReceiptStoreAt, daemonReceiptsPath, formatReceiptTime, receiptTim
 import { writeFatalLine } from './fatal-boot-report.js';
 import { FeatureAnnouncementStore, collectStartupAnnouncements, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
 import {
+  daemonLifecycleMarkerPath,
   readLifecycleMarker,
   recordDaemonAutoRollback,
   recordDaemonCleanShutdown,
@@ -316,7 +316,7 @@ export class DaemonLifecycleRuntime {
   }
 
   private markerPath(): string {
-    return join(this.options.configManager.getControlPlaneConfigDir(), 'control-plane', 'daemon-lifecycle.json');
+    return daemonLifecycleMarkerPath(this.options.configManager.getControlPlaneConfigDir());
   }
 
   /**

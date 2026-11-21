@@ -15,14 +15,22 @@
  *
  * The external task id is the contract id.
  *
- * A session the adapter created for a dispatch ends when its contract settles,
- * on the runner's own settle event, and an idempotency key is forgotten then
- * too: a requester that never polls again leaves nothing behind. Without a
- * settle source the next status, result or cancel after settlement does it.
- * Ending the session can retire its workspace floor and with it the runner that
- * held the contract, so the settled contract's status and result are kept here
- * for a while and answered from that copy.
+ * A `metadata.idempotencyKey` is kept where contracts.start keeps its retry
+ * key: in the workspace's contract store, scoped to the caller, recorded before
+ * the contract is published and read again after a daemon restart. A keyed
+ * dispatch whose key already started a contract returns that contract and
+ * creates nothing; a session made for an attempt that turns out to repeat an
+ * earlier one is ended at once.
+ *
+ * A session the adapter created for a dispatch is recorded on its contract
+ * (`sessionCreatedForDispatch`) and ends when the contract settles: on the
+ * runner's own settle event, or on the next status, result or cancel when the
+ * contract settled while nothing was listening (a daemon restart). Ending the
+ * session can retire its workspace floor and with it the runner that held the
+ * contract, so the settled contract's status and result are kept here for a
+ * while and answered from that copy.
  */
+import { resolve } from 'node:path';
 import {
   contractWorkHandle,
   contractWorkResult,
@@ -30,6 +38,9 @@ import {
   type ContractExternalWorkAdapter,
 } from '../contract/external.js';
 import { ContractOperatorError, type ContractOperatorService } from '../contract/operator-service.js';
+import { dispatchStartFingerprint } from '../contract/runner.js';
+import { readIdempotentStartRecord } from '../contract/store.js';
+import type { ContractView } from '../contract/types.js';
 import { logger } from '../utils/logger.js';
 import { HostedSessionArgumentError } from './errors.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -72,6 +83,9 @@ export interface HostedContractWorkAdapter extends ContractExternalWorkAdapter {
 /** The reason a cancel through the adapter records when the caller gives none. */
 export const EXTERNAL_CANCEL_REASON = 'cancelled by the requester';
 
+/** The namespace a dispatch's retry key is kept under, apart from contracts.start keys of the same caller. */
+const DISPATCH_KEY_PREFIX = 'dispatch\u0000';
+
 function metadataString(metadata: Record<string, unknown> | undefined, key: string): string | undefined {
   const value = metadata?.[key];
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
@@ -90,14 +104,10 @@ interface SettledOutcome {
 }
 
 export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterDeps): HostedContractWorkAdapter {
-  /** Sessions this adapter created for a dispatch, by contract id: it ends them with the work. */
-  const createdFor = new Map<string, string>();
-  /** The handle a dispatch with an idempotency key returned, so a retry does not start a second contract. */
-  const dispatched = new Map<string, Promise<Awaited<ReturnType<ContractExternalWorkAdapter['dispatch']>>>>();
-  /** The idempotency key each keyed dispatch's contract was started under, so settlement forgets it. */
-  const keyOf = new Map<string, string>();
   /** Settled contracts whose session this adapter ended, in settle order: their runner may be gone. */
   const settledOutcomes = new Map<string, SettledOutcome>();
+  /** Contracts whose dispatch session is being ended now, so two settle notices end it once. */
+  const ending = new Set<string>();
 
   const keepOutcome = (contractId: string, outcome: SettledOutcome): void => {
     settledOutcomes.delete(contractId);
@@ -129,93 +139,92 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     return contract;
   };
 
-  /** The contract settled: forget its idempotency key and end the session made for it. */
+  /**
+   * A settled contract whose session was created for its dispatch (as its
+   * record says, also after a restart): keep its outcome, then end the session
+   * if it is still hosted. Anything else is left alone.
+   */
   const release = async (contractId: string): Promise<void> => {
-    const key = keyOf.get(contractId);
-    if (key !== undefined) {
-      keyOf.delete(contractId);
-      dispatched.delete(key);
-    }
-    const sessionId = createdFor.get(contractId);
-    if (sessionId === undefined) return;
-    createdFor.delete(contractId);
-    // Read before the session ends: ending it may retire the floor whose runner holds the contract.
     const contract = deps.runner.get(contractId);
-    if (contract !== null) keepOutcome(contractId, { snapshot: contractWorkSnapshot(contract), result: contractWorkResult(contract), at: Date.now() });
-    await endSession(sessionId);
-  };
-
-  /** The poll-time release, used only when no settle source was given. */
-  const releaseWhenSettled = async (externalTaskId: string, status: string): Promise<void> => {
-    if (deps.settled !== undefined || !SETTLED_STATUSES.has(status)) return;
-    await release(externalTaskId);
-  };
-
-  const unsubscribe = deps.settled?.((contractId) => {
-    if (!createdFor.has(contractId) && !keyOf.has(contractId)) return;
-    void release(contractId);
-  });
-
-  const dispatchOnce: ContractExternalWorkAdapter['dispatch'] = async (request) => {
-    let sessionId = metadataString(request.metadata, 'sessionId');
-    const principalId = metadataString(request.metadata, 'principalId');
-    let created = false;
-    if (sessionId !== undefined && !deps.hostedSessions.hosts(sessionId)) {
-      throw new ContractOperatorError(`This daemon hosts no live session ${sessionId}.`, 'SESSION_NOT_LIVE', 409, 'sessionId');
-    }
-    if (sessionId !== undefined && deps.ownsSession?.(sessionId, request) !== true) {
-      throw new ContractOperatorError(`This requester may not run work on hosted session ${sessionId}. Omit metadata.sessionId to run on a new session.`, 'SESSION_NOT_OWNED', 403, 'sessionId');
-    }
-    if (sessionId === undefined) {
-      const requested = metadataString(request.metadata, 'workspaceRoot');
-      const workspaceRoot = requested ?? deps.workspaceRoot;
-      if (workspaceRoot === undefined) throw new ContractOperatorError('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.', 'INVALID_ARGUMENT', 400, 'workspaceRoot');
-      try {
-        sessionId = (await deps.hostedSessions.create({ workspaceRoot, ...(principalId === undefined ? {} : { principalId }) })).id;
-      } catch (error) {
-        // The manager owns where work may run; its refusal is the caller's argument error here.
-        if (error instanceof HostedSessionArgumentError) throw new ContractOperatorError(error.message, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
-        throw error;
-      }
-      created = true;
-    }
-    let started;
+    if (contract === null || contract.sessionCreatedForDispatch !== true || !SETTLED_STATUSES.has(contract.status)) return;
+    if (ending.has(contractId) || !deps.hostedSessions.hosts(contract.sessionId)) return;
+    ending.add(contractId);
     try {
-      started = await deps.runner.start({ ask: request.task, sessionId, ...(principalId === undefined ? {} : { principalId }) });
-    } catch (error) {
-      // A session made for this dispatch would otherwise hold a slot and a workspace floor with nothing in it.
-      if (created) await endSession(sessionId);
-      throw error;
+      // Read before the session ends: ending it may retire the floor whose runner holds the contract.
+      keepOutcome(contractId, { snapshot: contractWorkSnapshot(contract), result: contractWorkResult(contract), at: Date.now() });
+      await endSession(contract.sessionId);
+    } finally {
+      ending.delete(contractId);
     }
-    if (created) {
-      createdFor.set(started.contract.id, sessionId);
-      // A contract that settled while it was being started has already sent its event.
-      const now = deps.runner.get(started.contract.id);
-      if (deps.settled !== undefined && now !== null && SETTLED_STATUSES.has(now.status)) void release(started.contract.id);
-    }
-    return contractWorkHandle(started.contract, {
-      ...(request.contractId === undefined ? {} : { requestingContractId: request.contractId }),
-      ...(request.status === undefined ? {} : { requestingStatus: request.status }),
-    });
   };
+
+  const unsubscribe = deps.settled?.((contractId) => { void release(contractId); });
+
+  /** The contract an earlier dispatch with this caller's key started in `workspaceRoot`, or null. One small file read. */
+  const recordedDispatch = (workspaceRoot: string, principalId: string | undefined, key: string, ask: string): ContractView | null => {
+    const projectRoot = resolve(workspaceRoot);
+    let record: ReturnType<typeof readIdempotentStartRecord>;
+    // An unreadable record is answered by the keyed start itself, which names it.
+    try { record = readIdempotentStartRecord(projectRoot, `${principalId ?? ''}\u0000${key}`); } catch { return null; }
+    if (record === undefined || record.fingerprint !== dispatchStartFingerprint(ask, projectRoot)) return null;
+    return deps.runner.get(record.contractId);
+  };
+
+  const handleOf = (contract: ContractView, request: Parameters<ContractExternalWorkAdapter['dispatch']>[0]) => contractWorkHandle(contract, {
+    ...(request.contractId === undefined ? {} : { requestingContractId: request.contractId }),
+    ...(request.status === undefined ? {} : { requestingStatus: request.status }),
+  });
 
   const adapter: HostedContractWorkAdapter = {
     async dispatch(request) {
-      const key = metadataString(request.metadata, 'idempotencyKey');
-      if (key === undefined) return dispatchOnce(request);
-      const previous = dispatched.get(key);
-      if (previous !== undefined) return previous;
-      const attempt = dispatchOnce(request);
-      dispatched.set(key, attempt);
-      // A failed attempt is not remembered: the retry is the point of the key.
-      attempt.then((handle) => {
-        if (dispatched.get(key) !== attempt) return;
-        keyOf.set(handle.externalTaskId, key);
-        // Settled before the handle came back: the key has nothing left to guard.
-        const contract = deps.runner.get(handle.externalTaskId);
-        if (deps.settled !== undefined && contract !== null && SETTLED_STATUSES.has(contract.status)) void release(handle.externalTaskId);
-      }, () => { if (dispatched.get(key) === attempt) dispatched.delete(key); });
-      return attempt;
+      let sessionId = metadataString(request.metadata, 'sessionId');
+      const principalId = metadataString(request.metadata, 'principalId');
+      const requestedKey = metadataString(request.metadata, 'idempotencyKey');
+      const key = requestedKey === undefined ? undefined : `${DISPATCH_KEY_PREFIX}${requestedKey}`;
+      let created = false;
+      if (sessionId !== undefined && !deps.hostedSessions.hosts(sessionId)) {
+        throw new ContractOperatorError(`This daemon hosts no live session ${sessionId}.`, 'SESSION_NOT_LIVE', 409, 'sessionId');
+      }
+      if (sessionId !== undefined && deps.ownsSession?.(sessionId, request) !== true) {
+        throw new ContractOperatorError(`This requester may not run work on hosted session ${sessionId}. Omit metadata.sessionId to run on a new session.`, 'SESSION_NOT_OWNED', 403, 'sessionId');
+      }
+      if (sessionId === undefined) {
+        const requested = metadataString(request.metadata, 'workspaceRoot');
+        const workspaceRoot = requested ?? deps.workspaceRoot;
+        if (workspaceRoot === undefined) throw new ContractOperatorError('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.', 'INVALID_ARGUMENT', 400, 'workspaceRoot');
+        // A key that already started work returns it before anything is created, also after a restart.
+        if (key !== undefined) {
+          const earlier = recordedDispatch(workspaceRoot, principalId, key, request.task);
+          if (earlier !== null) return handleOf(earlier, request);
+        }
+        try {
+          sessionId = (await deps.hostedSessions.create({ workspaceRoot, ...(principalId === undefined ? {} : { principalId }) })).id;
+        } catch (error) {
+          // The manager owns where work may run; its refusal is the caller's argument error here.
+          if (error instanceof HostedSessionArgumentError) throw new ContractOperatorError(error.message, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
+          throw error;
+        }
+        created = true;
+      }
+      let started;
+      try {
+        started = await deps.runner.start({
+          ask: request.task,
+          sessionId,
+          ...(principalId === undefined ? {} : { principalId }),
+          ...(key === undefined ? {} : { idempotencyKey: key }),
+          ...(created || key !== undefined ? { dispatch: { sessionCreated: created } } : {}),
+        });
+      } catch (error) {
+        // A session made for this dispatch would otherwise hold a slot and a workspace floor with nothing in it.
+        if (created) await endSession(sessionId);
+        throw error;
+      }
+      // The key had already started work (a concurrent or earlier attempt): that contract keeps its own session.
+      if (started.replayed === true && created) await endSession(sessionId);
+      // A contract that settled while it was being started has already sent its event.
+      else if (created) void release(started.contract.id);
+      return handleOf(started.contract, request);
     },
     close() {
       unsubscribe?.();
@@ -227,7 +236,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       if (kept !== undefined) return kept.snapshot;
       const contract = contractOf(externalTaskId, found);
       const snapshot = contractWorkSnapshot(contract);
-      await releaseWhenSettled(externalTaskId, contract.status);
+      await release(externalTaskId);
       return snapshot;
     },
     async cancel(externalTaskId, reason) {
@@ -236,8 +245,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       if (found === null && keptOutcome(externalTaskId) !== undefined) return;
       contractOf(externalTaskId, found);
       deps.runner.cancel(externalTaskId, reason ?? EXTERNAL_CANCEL_REASON);
-      const after = deps.runner.get(externalTaskId);
-      if (after !== null) await releaseWhenSettled(externalTaskId, after.status);
+      await release(externalTaskId);
     },
     async result(externalTaskId) {
       const found = deps.runner.get(externalTaskId);
@@ -245,7 +253,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       if (kept !== undefined) return kept.result;
       const contract = contractOf(externalTaskId, found);
       const result = contractWorkResult(contract);
-      await releaseWhenSettled(externalTaskId, contract.status);
+      await release(externalTaskId);
       return result;
     },
   };

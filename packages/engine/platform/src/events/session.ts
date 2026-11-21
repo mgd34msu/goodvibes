@@ -25,16 +25,6 @@ export type SessionEvent =
     action: 'enqueued' | 'edited' | 'deleted' | 'delivered';
     messageId: string;
     pendingCount: number;
-  }
-  /** A companion-app follow-up message was received for the session. */
-  | {
-    type: 'COMPANION_MESSAGE_RECEIVED';
-    sessionId: string;
-    messageId: string;
-    body: string;
-    source: string;
-    timestamp: number;
-    metadata?: Readonly<Record<string, unknown>> | undefined;
   };
 
 /** All session event type literals as a union. */

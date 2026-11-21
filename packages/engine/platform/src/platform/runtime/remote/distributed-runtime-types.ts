@@ -8,7 +8,9 @@ export type DistributedPairRequestStatus = 'pending' | 'approved' | 'verified' |
 export type DistributedPeerStatus = 'paired' | 'connected' | 'idle' | 'disconnected' | 'revoked';
 export type DistributedWorkPriority = 'default' | 'normal' | 'high';
 export type DistributedWorkStatus = 'queued' | 'claimed' | 'completed' | 'failed' | 'cancelled' | 'expired';
-export type DistributedWorkType = 'invoke' | 'status.request' | 'location.request' | 'session.message' | 'automation.run' | 'device.capability';
+/** The work types the published peer contract lists; DISTRIBUTED_WORK_TYPES there is their one list. */
+export type { DistributedWorkType } from '@goodvibes/engine/contracts';
+import type { DistributedWorkType } from '@goodvibes/engine/contracts';
 
 export interface DistributedSessionBridge {
   appendSystemMessage(sessionId: string, body: string, metadata?: Record<string, unknown>): Promise<unknown>;

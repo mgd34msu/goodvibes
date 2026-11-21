@@ -3,6 +3,7 @@ import { readFileSync, existsSync, linkSync, realpathSync, renameSync, statSync,
 import { join, resolve } from 'node:path';
 import { confirmFileDurable, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
+import { noteCarriedForwardChange } from '../state/carried-forward.js';
 
 /**
  * What was done with an operator-token file that could not be read.
@@ -231,6 +232,14 @@ export function getOrCreateHttpListenerToken(
 ): HttpListenerTokenResult {
   const path = httpListenerTokenPath(options.daemonHomeDir);
   const stored = loadOrMintTokenRecord(path, HTTP_LISTENER_TOKEN_STORE, options);
+  if (stored.created) {
+    // Releases up to 3.3.4 had the listener accept the operator token; a sender
+    // still sending it is refused from now on. Said once, on the start that made the token.
+    noteCarriedForwardChange(
+      'The webhook listener now has its own token and no longer accepts the operator token: every webhook sender must send the listener token instead. '
+      + `It is kept in ${path}; on this machine, goodvibes-daemon listener token --show prints it.`,
+    );
+  }
   return {
     token: stored.record.token,
     path,
@@ -380,6 +389,14 @@ export function regenerateCompanionToken(
  */
 export function readCompanionTokenValue(daemonHomeDir: string): string | null {
   return readTokenRecord(operatorTokenPath(daemonHomeDir)).record?.token ?? null;
+}
+
+/**
+ * The webhook listener's stored token, read without creating, moving or
+ * repairing anything. Null when the file is absent or holds no usable record.
+ */
+export function readHttpListenerTokenValue(daemonHomeDir: string): string | null {
+  return readTokenRecord(httpListenerTokenPath(daemonHomeDir)).record?.token ?? null;
 }
 
 /**

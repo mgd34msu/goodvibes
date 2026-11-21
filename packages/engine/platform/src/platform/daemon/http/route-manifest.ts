@@ -29,7 +29,7 @@ export const DAEMON_ROUTE_MANIFEST: readonly DaemonRouteDeclaration[] = [
   // ── Held to an effect ──
   { method: 'GET', path: /^\/api\/control-plane\/recent-events$/, id: 'route GET /api/control-plane/recent-events', kind: 'effects', effects: ['events.control-plane'] },
   { method: 'GET', path: /^\/api\/sessions\/[^/]+\/events$/, id: 'route GET /api/sessions/:id/events', kind: 'effects', effects: ['sessions.inspect'] },
-  { method: 'POST', path: /^\/api\/mcp\/config\/servers\/[^/]+\/tools\/[^/]+(?:\/(?:allow|deny))?$/, id: 'route POST /api/mcp/config/servers/:server/tools/:tool/(allow|deny)', kind: 'effects', effects: ['mcp.administer', 'owner.act'] },
+  { method: 'POST', path: /^\/api\/mcp\/config\/servers\/[^/]+\/tools\/[^/]+(?:\/(?:allow|deny))?$/, id: 'route POST /api/mcp/config/servers/:server/tools/:tool/(allow|deny)', kind: 'effects', effects: ['mcp.administer', 'model.refused'] },
   { method: 'GET', path: /^\/config(?:\/credentials)?$/, id: 'route GET /config', kind: 'effects', effects: ['config.inspect'] },
   { method: 'POST', path: /^\/config(?:\/many|\/reset)?$/, id: 'route POST /config', kind: 'effects', effects: ['config.administer'] },
   { method: 'GET', path: /^\/task(?:\/[^/]+)?$/, id: 'route GET /task', kind: 'effects', effects: ['tasks.read'] },

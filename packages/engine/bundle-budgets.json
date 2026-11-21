@@ -408,7 +408,7 @@
   },
   "./platform/power": {
     "gzip_bytes": 585,
-    "rationale": "the keep-awake-forward-to-adopted-daemon helper (postPowerKeepAwakeSet/forwardKeepAwakeToAdoptedDaemon) joined the barrel in the 2026-07-30 daemon/TUI split hoist lane, unifying the TUI's and the agent's parallel implementations; measured 487 B gzip; headroom max(ceil(487*1.2)=585, 487+50=537) -> 585 (1.2x dominates)"
+    "rationale": "the power barrel: PowerManager, the platform seams, the daemon power-state source and the served keep-awake readers (the keep-awake forwarder left it when power.keepAwake became a daemon setting, so the barrel only shrank); ceiling kept from the 487 B gzip measurement with headroom max(ceil(487*1.2)=585, 487+50=537) -> 585 until the next measured release lowers it"
   },
   "./platform/presentation": {
     "gzip_bytes": 956,

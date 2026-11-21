@@ -85,7 +85,7 @@ export async function answerSurfaceControl(
 
 export interface SurfaceMessageDeps extends SurfaceControlDeps {
   readonly sessionBroker: Pick<SurfaceAdapterContext['sessionBroker'], 'submitMessage' | 'bindAgent'>
-    & Partial<Pick<SurfaceAdapterContext['sessionBroker'], 'failInput' | 'holdForCapacity'>>;
+    & Partial<Pick<SurfaceAdapterContext['sessionBroker'], 'failInput' | 'holdForCapacity' | 'followUpMessage'>>;
   readonly trySpawnAgent: (...args: Parameters<SurfaceAdapterContext['trySpawnAgent']>) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
   readonly queueSurfaceReplyFromBinding?: SurfaceAdapterContext['queueSurfaceReplyFromBinding'] | undefined;
 }
@@ -119,6 +119,13 @@ export interface SurfaceMessageInput {
   readonly trackContract?: boolean | undefined;
   /** Replaces the route reply queue (the generic webhook answers through its callback). */
   readonly queueReply?: ((started: { readonly agentId: string; readonly sessionId: string; readonly submission: SharedSessionSubmission }) => void) | undefined;
+  /**
+   * `follow-up`: the message is the next thing said in the session's own
+   * conversation (a terminal's main chat): a live terminal collects it from the
+   * session's inputs, runs it as its next turn and reports the answer, which
+   * goes back down this route. Default `submit`, work for an agent.
+   */
+  readonly intent?: 'submit' | 'follow-up' | undefined;
 }
 
 export type SurfaceMessageOutcome =
@@ -198,7 +205,12 @@ export async function submitSurfaceMessage(
     if (control) return { kind: 'control', ...control };
   }
 
-  const submission = await context.sessionBroker.submitMessage({
+  const followUp = input.intent === 'follow-up' ? context.sessionBroker.followUpMessage?.bind(context.sessionBroker) : undefined;
+  if (input.intent === 'follow-up' && !followUp) {
+    const error = 'This runtime cannot queue a message into a session\'s conversation.';
+    return { kind: 'not-started', error, response: Response.json({ error }, { status: 503 }) };
+  }
+  const submission = await (followUp ?? context.sessionBroker.submitMessage.bind(context.sessionBroker))({
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     routeId: binding.id,
     ...(input.providerMessageId ? { providerMessageId: input.providerMessageId } : {}),

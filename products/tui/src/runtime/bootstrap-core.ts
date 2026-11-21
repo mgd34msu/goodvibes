@@ -6,7 +6,6 @@ import {
   disposeTerminalFeatureFlags,
   createTerminalEventState,
   initializeTerminalMemory,
-  attachTerminalCompanionInput,
   seedTerminalSession,
 } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import {
@@ -15,14 +14,6 @@ import {
   attachTerminalRuntimeBindings,
 } from '@goodvibes/engine/terminal-shell/bootstrap-runtime-bindings';
 import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/render-scheduler';
-import {
-  companionMessageToOrchestratorInputOptions,
-  type CompanionMessagePayload,
-} from '@goodvibes/engine/terminal-shell/companion-input';
-export {
-  companionMessageToOrchestratorInputOptions,
-  type CompanionMessagePayload,
-} from '@goodvibes/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
 import { terminalOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
@@ -45,7 +36,6 @@ import { activeTokens } from '../renderer/theme.ts';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { ConversationFollowUpItem } from '@goodvibes/engine/platform/platform/core';
-import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
 import type { BootstrapOptions } from './context.ts';
 import { type RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import {
@@ -62,12 +52,13 @@ import {
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { registerClientPhoneTool } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createHostPowerSeam } from '@goodvibes/engine/platform/platform/power';
-import { wireCostPricing } from '@goodvibes/engine/platform/platform/providers';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
 import type { SystemMessagePriority } from '../core/system-message-router.ts';
 import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes/engine/platform/platform/runtime/session-spine';
-import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from './session-inbound-inputs.ts';
+import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from '@goodvibes/engine/terminal-shell/session-inbound-inputs';
+import { handOverLiveSession } from '@goodvibes/engine/terminal-shell/session-handover';
+import type { OwnerInputRoute } from '@goodvibes/engine/terminal-shell/companion-input';
 import { repositoryTrustNotice, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
 import { createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
@@ -142,11 +133,11 @@ export interface BootstrapCoreState {
   readonly systemMessageRouterRef: { value: SystemMessageRouter | null };
   readonly conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null };
   /**
-   * Mutable ref patched by bootstrap.ts after the Orchestrator is constructed.
-   * When non-null, COMPANION_MESSAGE_RECEIVED fires a real LLM turn via
-   * orchestrator.handleUserInput() instead of only appending the user message.
+   * Mutable ref patched by bootstrap.ts after the Orchestrator is constructed:
+   * the path an input another surface queued for this session (the web app, the
+   * companion app, a channel) takes into the conversation as a real turn.
    */
-  readonly orchestratorHandleUserInputRef: { value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null };
+  readonly orchestratorHandleUserInputRef: { value: OwnerInputRoute | null };
   readonly requestRender: () => void;
   readonly setRenderRequest: (fn: () => void) => void;
   readonly runtimeSessionIdRef: { value: string };
@@ -158,105 +149,6 @@ export interface BootstrapCoreState {
   readonly sessionUnionCache: SessionUnionCache;
 }
 
-// --- Operator narration of inbound channel events ---
-
-/**
- * One bounded, single-line piece of sender-supplied text for an operator notice:
- * control characters (newlines, escapes) become spaces, so a remote sender cannot
- * start a second line or fake a prefix, and the length is capped.
- */
-function narrationText(value: string, max = 80): string {
-  const flat = value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
-/** Narrate an inbound channel event (GitHub, Slack, ntfy, etc.) that triggered an
- * agent turn, via the SystemMessageRouter, null for internal/companion sources. */
-export function narrateInboundEvent(event: { source: string; metadata: Readonly<Record<string, unknown>> | undefined }): string | null {
-  const { source, metadata } = event;
-  if (!source) return null;
-
-  // Derive the effective surface, prefer metadata.surface, fall back to source.
-  // An empty or blank metadata surface names nothing, so the source stands in.
-  const surface = (typeof metadata?.surface === 'string' ? metadata.surface.trim() : '') || source;
-
-  // Internal / companion sources do not need operator narration.
-  if (surface === 'companion' || source === 'companion') return null;
-  if (surface === 'internal' || source === 'internal') return null;
-
-  // Build a surface label for the log prefix.
-  const label = ((): string => {
-    switch (surface) {
-      case 'github':
-        return '[GitHub]';
-      case 'slack':
-        return '[Slack]';
-      case 'discord':
-        return '[Discord]';
-      case 'ntfy':
-        return '[ntfy]';
-      case 'homeassistant':
-        return '[HomeAssistant]';
-      case 'telegram':
-        return '[Telegram]';
-      case 'google-chat':
-        return '[Google Chat]';
-      case 'signal':
-        return '[Signal]';
-      case 'whatsapp':
-        return '[WhatsApp]';
-      case 'msteams':
-        return '[Teams]';
-      case 'imessage':
-        return '[iMessage]';
-      case 'bluebubbles':
-        return '[BlueBubbles]';
-      case 'mattermost':
-        return '[Mattermost]';
-      case 'matrix':
-        return '[Matrix]';
-      case 'webhook':
-        return '[Webhook]';
-      default:
-      {
-        // A surface this list does not know is sender-supplied: keep only name-like characters so it cannot carry a bracketed fake prefix.
-        const name = surface.replace(/[^A-Za-z0-9_.-]+/g, ' ').trim().slice(0, 24);
-        return name ? `[${name.charAt(0).toUpperCase()}${name.slice(1)}]` : '[Channel]';
-      }
-    }
-  })();
-
-  const text = (value: unknown): string | null => (typeof value === 'string' ? narrationText(value) || null : null);
-  const eventType = text(metadata?.eventType);
-  const eventAction = text(metadata?.eventAction);
-  const topic = text(metadata?.topic);
-  const prNumber = typeof metadata?.prNumber === 'number' ? metadata.prNumber : null;
-  const issueNumber = typeof metadata?.issueNumber === 'number' ? metadata.issueNumber : null;
-  const repo = text(metadata?.repo);
-
-  // Build event-specific detail for GitHub events.
-  if (surface === 'github' && eventType) {
-    const actionPart = eventAction ? ` ${eventAction}` : '';
-    let detail = `${eventType}${actionPart} → agent triggered`;
-    if (prNumber !== null) {
-      detail = `PR #${prNumber}${repo ? ` (${repo})` : ''} ${eventAction ?? eventType} → agent triggered`;
-    } else if (issueNumber !== null) {
-      detail = `Issue #${issueNumber}${repo ? ` (${repo})` : ''} ${eventAction ?? eventType} → agent triggered`;
-    } else if (repo) {
-      detail = `${eventType}${actionPart} in ${repo} → agent triggered`;
-    }
-    return `${label} ${detail}`;
-  }
-
-  // ntfy: include topic when available.
-  if (surface === 'ntfy' && topic) {
-    return `${label} inbound message on topic '${topic}' → agent triggered`;
-  }
-
-  // Generic narration for all other surfaces.
-  const eventDetail = eventType ? ` ${eventType}${eventAction ? ` ${eventAction}` : ''}` : '';
-  return `${label}${eventDetail} inbound event → agent triggered`;
-}
 
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,
@@ -296,7 +188,7 @@ export async function initializeBootstrapCore(
   await services.workspaceTrustManager.load(); // settle any already-persisted trust decision before any tool runs
   const providerRegistry = services.providerRegistry;
   let keybindingNotices: readonly string[] = [];
-  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); }, wireCostPricing);
+  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); });
   seedTerminalControlPlane(domainDispatch, configManager);
 
   const { approvalBroker, hookDispatcher, hookWorkbench, memoryStore, sessionBroker: sharedSessionBroker } = services;
@@ -449,42 +341,35 @@ export async function initializeBootstrapCore(
     }
   }
 
-  // Subscribe to companion main-chat messages received from the daemon's HTTP layer.
-  // The daemon emits COMPANION_MESSAGE_RECEIVED on the runtime bus when a companion
-  // POST /api/sessions/:id/messages with kind='message' arrives.
-  //
   // bootstrap.ts patches orchestratorHandleUserInputRef.value after the Orchestrator
-  // is constructed. When that ref is set, we delegate to orchestrator.handleUserInput()
-  // which (a) adds the user message to the conversation view and (b) fires a real LLM
-  // turn whose STREAM_DELTA / TURN_COMPLETED events flow to both TUI and companion SSE.
-  //
-  // The fallback (ref not yet set) adds the message to the conversation view only,
-  // this path is unreachable in practice because the event bus is not connected to
-  // any live HTTP traffic until after the orchestrator is wired in bootstrap.ts.
+  // is constructed. Inputs another surface queued for this session (a steer from
+  // the web app, a companion or ntfy message, sent by the daemon as follow-ups)
+  // are collected by the inbound poller and run through it as real turns.
   const orchestratorHandleUserInputRef: {
-    value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
+    value: OwnerInputRoute | null;
   } = { value: null };
-  runtimeUnsubs.push(
-    attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender, (payload) => {
-      // Narration is a courtesy to the operator: it runs before the message is handed to the agent, so it must never be able to stop delivery.
-      try {
-        const narration = narrateInboundEvent({ source: payload.source, metadata: payload.metadata });
-        if (narration) routeOrBuffer(narration, 'low');
-      } catch (error) {
-        logger.warn('Could not narrate an inbound companion message', { error: error instanceof Error ? error.message : String(error) });
-      }
-    }, {
-      activeSessionId: () => runtimeSessionIdRef.value,
-      notice: (text) => routeOrBuffer(text, 'high'),
-    }),
-  );
 
-  // Inbound steer delivery, see createBootstrapInboundInputPoller's doc comment.
-  const sessionInboundInputs = createBootstrapInboundInputPoller({
+  // Inbound steer and follow-up delivery, see createBootstrapInboundInputPoller's doc comment.
+  const inboundInputs = createBootstrapInboundInputPoller({
     runtimeSessionIdRef,
-    routeOrBuffer,
+    narrate: (text) => routeOrBuffer(text, 'low'),
     orchestratorHandleUserInputRef,
+    runtimeBus,
+    // Another terminal ran `/session resume <id> --force` for this session: save it, let go, say so.
+    onHandover: (sessionId) => {
+      handOverLiveSession({
+        sessionId,
+        liveSessionId: () => runtime.sessionId,
+        conversation,
+        sessionManager: services.sessionManager,
+        runtime,
+        surface: services.surface,
+        notify: (text) => routeOrBuffer(text, 'high'),
+      });
+    },
   });
+  const sessionInboundInputs = inboundInputs.poller;
+  runtimeUnsubs.push(inboundInputs.dispose);
 
   providerRegistry.startWatching(runtimeBus);
 

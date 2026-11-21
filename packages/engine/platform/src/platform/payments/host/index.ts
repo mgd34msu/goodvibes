@@ -53,8 +53,6 @@ export { createLimitOffers, limitOfferKey } from './limit-offer.js';
 export type { LimitOfferInbox, LimitOfferSettings, LimitOffers, OfferableLimitSetting } from './limit-offer.js';
 
 export {
-  REQUIRE_CONFIRM,
-  assertConfirmed,
   normalizeContext,
   registerCatalogHandler,
   registerCatalogHandlers,
@@ -63,7 +61,6 @@ export type {
   CatalogHandlerEntry,
   HandlerContextEnvelope,
   HandlerInvocation,
-  RegisterHandlerOptions,
   TypedHandler,
   Unregister,
 } from './handler-plumbing.js';

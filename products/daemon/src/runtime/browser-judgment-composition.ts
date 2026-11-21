@@ -1,12 +1,10 @@
-import { endpointKind, HOSTED_BASE_URL, validEndpointURL } from '@goodvibes/judgment';
+import { endpointKind, validEndpointURL } from '@goodvibes/judgment';
 import { BrowserJudgmentError } from '@goodvibes/engine/daemon-api';
 import { captureJudgmentFallbackSettings, type ConfigManager, type SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 import { createWebuiBrowserJudgment, type BrowserJudgmentRoute } from '@goodvibes/engine/platform/platform/judgment-browser';
 import { createJudgmentSourceLifetime, type JudgmentServices } from '@goodvibes/engine/platform/platform/runtime/operations';
-
-const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 /**
  * The daemon's configured Jev service owns this fixed WebUI purpose:
@@ -43,7 +41,8 @@ export function composeBrowserJudgment(input: {
     try { frame = sourceLifetime.capture(); }
     catch { throw new BrowserJudgmentError('JUDGMENT_PERMISSION_HELD'); }
     const fallbacks = captureJudgmentFallbackSettings(input.config.get('judgment.fallbacks'));
-    const endpoint = text(input.config.get('judgment.endpoint')) || text(input.env['TYPESAFE_BASE_URL']) || HOSTED_BASE_URL;
+    // Where the port this route hands over sends its primary reading, as that port resolves it.
+    const endpoint = input.judgment.primaryEndpoint();
     if (!validEndpointURL(endpoint)) return undefined;
     const kind = endpointKind(endpoint);
     const endpointKinds = Object.freeze([...new Set([kind, ...fallbacks.map(target => endpointKind(target.endpoint))])]);

@@ -21,8 +21,10 @@ import {
   STEP_UP_ASSERTION_HEADER,
   callNeedsStepUp,
   evaluateStepUp,
+  type RelayMethodFacts,
   type StepUpAssertionVerifier,
 } from './step-up-policy.js';
+import type { GatewayMethodDescriptor } from '../control-plane/method-catalog-shared.js';
 
 /** What the gate reads on every request, so a setting changed while the daemon runs applies to the next call. */
 export interface StepUpGateState {
@@ -44,8 +46,8 @@ export interface StepUpGateState {
  * scopes of the catalog method it addresses and who it authenticates as.
  */
 export interface RelayRequestFacts {
-  /** Scopes of the catalog method the request addresses, or null when it addresses none. */
-  methodScopes(req: Request): readonly string[] | null;
+  /** The effect and scopes of the catalog method the request addresses, or null when it addresses none. */
+  methodFacts(req: Request): RelayMethodFacts | null;
   /** The principal the request authenticates as, or null when it carries no valid credential. */
   principalId(req: Request): string | null;
 }
@@ -63,9 +65,10 @@ export function relayRequestFactsFrom(
   authenticate: (req: Request) => { readonly principal: { readonly principalId: string } } | null,
 ): RelayRequestFacts {
   return {
-    methodScopes(req) {
+    methodFacts(req) {
       const pathname = new URL(req.url).pathname;
       const invoke = req.method.toUpperCase() === 'POST' ? GENERIC_INVOKE_PATH.exec(pathname) : null;
+      let descriptor: Pick<GatewayMethodDescriptor, 'effect' | 'scopes'> | null | undefined;
       if (invoke) {
         let id: string;
         try {
@@ -73,9 +76,12 @@ export function relayRequestFactsFrom(
         } catch {
           return null;
         }
-        return catalog.get(id)?.scopes ?? null;
+        descriptor = catalog.get(id);
+      } else {
+        descriptor = catalog.findByHttpBinding(req.method, pathname);
       }
-      return catalog.findByHttpBinding(req.method, pathname)?.scopes ?? null;
+      if (!descriptor) return null;
+      return { scopes: descriptor.scopes, ...(descriptor.effect !== undefined ? { effect: descriptor.effect } : {}) };
     },
     principalId: (req) => authenticate(req)?.principal.principalId ?? null,
   };
@@ -146,7 +152,7 @@ export function wrapDispatchWithStepUp(
     // cannot itself require one. Its catalog method is a read; this covers a
     // host with no catalog.
     if (!facts && pathname === STEP_UP_CHALLENGE_MINT_PATH) return dispatch(req);
-    const mutating = callNeedsStepUp(facts ? facts.methodScopes(req) : null, req.method);
+    const mutating = callNeedsStepUp(facts ? facts.methodFacts(req) : null, req.method);
     if (!mutating) return dispatch(req);
     const rendezvousId = gate.rendezvousId() ?? undefined;
     const sessionId = sessionIdOfPath(pathname);

@@ -15,8 +15,8 @@
  * answers it: the owner's answer is the owner's.
  */
 import { formatRefusal } from '@goodvibes/engine/errors';
-import { listEveryOwnerItem } from '@goodvibes/engine/platform/platform/control-plane';
-import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes/engine/platform/platform/control-plane';
+import { listEveryOwnerItem, listEveryOwnerItemReport } from '@goodvibes/engine/platform/platform/control-plane';
+import type { OwnerAnswerDelivery, OwnerInboxListReport, OwnerInboxPort, OwnerItem } from '@goodvibes/engine/platform/platform/control-plane';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { commandRefusal } from './command-confirmation.js';
@@ -181,6 +181,12 @@ function inboxOf(context: unknown): OwnerInboxPort {
   if ('unavailable' in inbox) throw commandRefusal(inbox.unavailable);
   return inbox;
 }
+/** The lines above a list that holds only this machine's items because the daemon did not answer. */
+function unreachableNotice(report: Pick<OwnerInboxListReport, 'unreachable' | 'daemon'>): string[] {
+  if (report.unreachable === undefined) return [];
+  const which = report.daemon !== undefined ? `The daemon at ${report.daemon}` : 'The daemon';
+  return [`${which} did not answer (${report.unreachable}); showing only what is held on this machine, so its approvals and questions are missing.`, ''];
+}
 function failed(what: string, error: unknown): never {
   throw commandRefusal(`Could not ${what}: ${error instanceof Error ? error.message : String(error)}.`, 'Check the daemon with /status, then retry.');
 }
@@ -269,20 +275,22 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
         sentence: 'Lists every open question, ask, claim and purchase window, with its answers.',
         async rowValue(ctx) { try { const open = await listEveryOwnerItem(inboxOf(ctx), { status: 'open' }); return open.length === 0 ? 'nothing waiting' : `${open.length} waiting`; } catch { return ''; } },
         async run(_values, ctx) {
-          let items: readonly OwnerItem[];
-          try { items = await listEveryOwnerItem(inboxOf(ctx), { status: 'open' }); } catch (error) { return failed('read the inbox', error); }
-          if (items.length === 0) return 'Nothing is waiting on you.';
-          return [`Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
+          let report: OwnerInboxListReport;
+          try { report = await listEveryOwnerItemReport(inboxOf(ctx), { status: 'open' }); } catch (error) { return failed('read the inbox', error); }
+          const { items } = report;
+          if (items.length === 0) return [...unreachableNotice(report), 'Nothing is waiting on you.'].join('\n');
+          return [...unreachableNotice(report), `Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
         },
       }),
       readAction<Context>({
         id: 'all', label: 'See everything ever asked of you', word: 'all',
         sentence: 'Lists every inbox item, open or answered, newest first, with who answered and where the answer went.',
         async run(_values, ctx) {
-          let items: readonly OwnerItem[];
-          try { items = await listEveryOwnerItem(inboxOf(ctx), { status: 'all' }); } catch (error) { return failed('read the inbox', error); }
-          if (items.length === 0) return 'Nothing has been asked of you yet.';
-          return [`Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
+          let report: OwnerInboxListReport;
+          try { report = await listEveryOwnerItemReport(inboxOf(ctx), { status: 'all' }); } catch (error) { return failed('read the inbox', error); }
+          const { items } = report;
+          if (items.length === 0) return [...unreachableNotice(report), 'Nothing has been asked of you yet.'].join('\n');
+          return [...unreachableNotice(report), `Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
         },
       }),
       readAction<Context>({
@@ -375,18 +383,29 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           // A period reads the whole inbox, a page at a time; a count reads as many as it asks, however far back.
           const limit = window !== undefined ? Number.POSITIVE_INFINITY : Number.isInteger(count) && count > 0 ? count : DECISIONS_LIMIT;
           const inbox = inboxOf(ctx);
-          const read = async (filter: { readonly status: 'open' | 'closed'; readonly kinds?: readonly ['decision'] }): Promise<readonly OwnerItem[]> =>
-            limit <= DECISIONS_LIMIT ? inbox.list({ ...filter, limit }) : (await listEveryOwnerItem(inbox, filter)).slice(0, limit);
+          const reach: { unreachable?: string | undefined; daemon?: string | undefined } = {};
+          const read = async (filter: { readonly status: 'open' | 'closed'; readonly kinds?: readonly ['decision'] }): Promise<readonly OwnerItem[]> => {
+            const report = limit <= DECISIONS_LIMIT
+              ? (inbox.listReport ? await inbox.listReport({ ...filter, limit }) : { items: await inbox.list({ ...filter, limit }) })
+              : await listEveryOwnerItemReport(inbox, filter);
+            if (reach.unreachable === undefined && report.unreachable !== undefined) {
+              reach.unreachable = report.unreachable;
+              reach.daemon = report.daemon;
+            }
+            return report.items.slice(0, limit);
+          };
           let allOpen: readonly OwnerItem[], allClosed: readonly OwnerItem[];
           try {
             [allOpen, allClosed] = await Promise.all([read({ status: 'open', kinds: ['decision'] }), read({ status: 'closed' })]);
           } catch (error) { return failed('read the decisions', error); }
+          const notice = unreachableNotice(reach);
           const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
           const open = allOpen.filter((item) => inWindow(item.createdAt));
           const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt));
-          if (open.length === 0 && closed.length === 0) return window === undefined ? 'Nothing has been decided yet.' : `Nothing was decided ${window.label}.`;
+          if (open.length === 0 && closed.length === 0) return [...notice, window === undefined ? 'Nothing has been decided yet.' : `Nothing was decided ${window.label}.`].join('\n');
           const period = window === undefined ? '' : ` ${window.label}`;
           return [
+            ...notice,
             ...(open.length > 0 ? [
               `Jev decided${period}, and you can still change (${open.length}, newest first):`,
               ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),

@@ -427,9 +427,12 @@ export class DaemonSurfaceDeliveryHelper {
     return this.context.channelPolicy?.getPolicy(surface as ChannelSurface).ownerId;
   }
 
-  /** Keeps an owner alert that reached no conversation, for the next attached terminal or web UI to show. */
+  /**
+   * Keeps an owner alert that reached no conversation, for the owner's next
+   * attached terminal or web UI to show: only an owner-class reader sees or takes it.
+   */
   recordOwnerReceipt(text: string): void {
-    daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).record(text);
+    daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).record(text, { audience: 'owner' });
   }
 
   /**

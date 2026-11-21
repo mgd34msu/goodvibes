@@ -10,7 +10,6 @@ import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
-import type { ConversationMessageEnvelope } from '../control-plane/conversation-message.js';
 import type { RouteBindingManager, ChannelPolicyManager } from '../channels/index.js';
 import { channelSenderActor } from '../channels/policy-manager.js';
 import { admitEffects, type EffectId } from '../security/effect-authority.js';
@@ -19,8 +18,7 @@ import type { GenericWebhookAdapterContext, SurfaceAdapterContext, SurfaceContro
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
-import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/events/index.js';
-import { emitCompanionMessageReceived } from '../runtime/emitters/index.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { NtfyIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../integrations/ntfy.js';
 import {
   postHomeAssistantSurfaceChatMessage,
@@ -79,17 +77,6 @@ export function ownerReplyBinding(
     lastSeenAt: now, createdAt: now, updatedAt: now,
     metadata: {},
   };
-}
-
-interface PendingNtfyChatReply {
-  readonly sessionId: string;
-  readonly topic: string;
-  readonly body: string;
-  readonly title?: string | undefined;
-  readonly messageId: string;
-  readonly createdAt: number;
-  turnId?: string | undefined;
-  turnSessionId?: string | undefined;
 }
 
 interface DaemonSurfaceActionContext {
@@ -178,14 +165,6 @@ export type AuthorizedIngress = ChannelPolicyDecision & SurfaceIngressDecision &
 export class DaemonSurfaceActionHelper {
   private controlAbort = new AbortController();
   private readonly controlTargets = new WeakMap<SurfaceControlReading, () => void>();
-  /** How long an ntfy message may wait for its turn to start. */
-  private static readonly NTFY_CHAT_REPLY_TTL_MS = 10 * 60_000;
-  /** How soon after an ntfy message another session's identical prompt may still be taken as its turn. */
-  private static readonly NTFY_CROSS_SESSION_MATCH_MS = 2 * 60_000;
-  /** A matched turn may run much longer than the wait to start; this only reaps turns that never finish. */
-  private static readonly NTFY_MATCHED_TURN_TTL_MS = 6 * 60 * 60_000;
-  private readonly pendingNtfyChatReplies = new Map<string, PendingNtfyChatReply[]>();
-  private ntfyChatReplyUnsubscribers: Array<() => void> = [];
   private ntfyRemoteSessionId: string | null = null;
   /**
    * Purchase windows waiting for the owner's answer over a channel, read on
@@ -331,8 +310,6 @@ export class DaemonSurfaceActionHelper {
       ...scope,
       performInteractiveSurfaceAction: (actionId, surface, request, userId) => this.performInteractiveSurfaceAction(actionId, surface, request, userId),
       queueSurfaceReplyFromBinding: (binding, input) => this.context.queueSurfaceReplyFromBinding(binding, input),
-      publishConversationFollowup: (sessionId, envelope) => this.publishConversationFollowup(sessionId, envelope),
-      queueNtfyChatReply: (input) => this.queueNtfyChatReply(input),
       postNtfyRemoteChatMessage: (input) => this.postNtfyRemoteChatMessage(input),
       postHomeAssistantChatMessage: (input) => this.postHomeAssistantChatMessage(input),
     };
@@ -361,20 +338,42 @@ export class DaemonSurfaceActionHelper {
   /** The slice of this helper's context the conversation gate consults. Public
    * so the shared-session continuation runner gates through the SAME deps. */
   /**
-   * At start-up: work the owner agreed to that never started (the daemon
-   * stopped between saving the "yes" and starting it) is started now, once,
-   * and recorded as started. Reads the proposal store once.
+   * At start-up (and when admission reopens): work the owner agreed to that
+   * never started (the daemon stopped between saving the "yes" and starting
+   * it) is started now, once. Each start is claimed with a saved write first
+   * and recorded as started after, so a restart never starts it twice. A start
+   * a previous process had claimed when it stopped is not run again (its agent
+   * died with it): the owner is told to send it again. One pass runs at a time;
+   * a second caller shares the running one.
    */
-  async resumeAgreedWork(): Promise<number> {
+  resumeAgreedWork(): Promise<number> {
+    this.resumingAgreedWork ??= this.resumeAgreedWorkOnce().finally(() => { this.resumingAgreedWork = null; });
+    return this.resumingAgreedWork;
+  }
+
+  private resumingAgreedWork: Promise<number> | null = null;
+
+  private async resumeAgreedWorkOnce(): Promise<number> {
     const store = this.context.workProposals;
     if (!store) return 0;
+    for (const interrupted of store.listInterruptedStarts()) {
+      try {
+        const deps = this.conversationGateDeps();
+        const binding = interrupted.routeId ? deps.routeBindings.getBinding(interrupted.routeId) : undefined;
+        await deliverProposalNotice(deps, binding, `The agreed work was interrupted by a restart: ${interrupted.summary}. Send the message again.`);
+        await settleUnstartedWork(deps, interrupted, 'The agreed work was interrupted by a restart. Send the message again.');
+        await store.markStarted(interrupted.id);
+      } catch (settleError) {
+        logger.error('Agreed work interrupted by a restart could not be settled', { proposalId: interrupted.id, error: summarizeError(settleError) });
+      }
+    }
     let resumed = 0;
     for (const proposal of store.listAcceptedUnstarted()) {
+      let outcome: 'started' | 'held' | 'not-started';
       try {
-        // Held again (admission closed meanwhile): it stays accepted and unstarted for the next start.
-        if (await startAgreedWork(this.conversationGateDeps(), proposal, proposal.agreedNote) === 'held') continue;
-        store.markStarted(proposal.id);
-        resumed += 1;
+        // Another start in this process (a channel reply) took it.
+        if (await store.markStarting(proposal.id) === null) continue;
+        outcome = await startAgreedWork(this.conversationGateDeps(), proposal, proposal.agreedNote);
       } catch (error) {
         logger.error('Agreed work saved before a restart could not be started', { proposalId: proposal.id, error: summarizeError(error) });
         // Settled, never silently dropped: the owner is told and its held input
@@ -384,10 +383,20 @@ export class DaemonSurfaceActionHelper {
           const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
           await deliverProposalNotice(deps, binding, `Could not start: ${proposal.summary}. Send the message again.`);
           await settleUnstartedWork(deps, proposal, 'The agreed work could not be started. Send the message again.');
-          store.markStarted(proposal.id);
+          await store.markStarted(proposal.id);
         } catch (settleError) {
           logger.error('Agreed work that could not be started could not be settled', { proposalId: proposal.id, error: summarizeError(settleError) });
         }
+        continue;
+      }
+      try {
+        // Held again (admission closed meanwhile): the claim is given back for the next start.
+        if (outcome === 'held') { await store.releaseStart(proposal.id); continue; }
+        await store.markStarted(proposal.id);
+        if (outcome === 'started') resumed += 1;
+      } catch (markError) {
+        // The claim stays saved: a restart settles it as interrupted rather than running it twice.
+        logger.error('Agreed work start could not be recorded', { proposalId: proposal.id, error: summarizeError(markError) });
       }
     }
     return resumed;
@@ -744,237 +753,6 @@ export class DaemonSurfaceActionHelper {
       return this.performRunControl(sender, { action: action as 'cancel' | 'retry', id: runId! }, undefined, 'interactive-surface-cancel');
     }
     return `No handler for ${surface} action ${actionId}`;
-  }
-
-  private publishConversationFollowup(
-    sessionId: string,
-    envelope: Omit<ConversationMessageEnvelope, 'sessionId'>,
-  ): void {
-    this.context.controlPlaneGateway.publishEvent(
-      'conversation.followup.companion',
-      { sessionId, ...envelope },
-      { clientKind: 'tui' },
-    );
-    emitCompanionMessageReceived(
-      this.context.runtimeBus,
-      { sessionId, traceId: `ntfy:${envelope.messageId}`, source: 'ntfy-chat' },
-      {
-        sessionId,
-        messageId: envelope.messageId,
-        body: envelope.body,
-        source: envelope.source,
-        timestamp: envelope.timestamp,
-        ...(envelope.metadata ? { metadata: envelope.metadata } : {}),
-      },
-    );
-  }
-
-  private queueNtfyChatReply(input: Omit<PendingNtfyChatReply, 'createdAt'>): void {
-    this.ensureNtfyChatReplyListeners();
-    this.cleanupExpiredNtfyChatReplies();
-    const bucket = this.pendingNtfyChatReplies.get(input.sessionId) ?? [];
-    bucket.push({
-      ...input,
-      createdAt: Date.now(),
-    });
-    this.pendingNtfyChatReplies.set(input.sessionId, bucket);
-  }
-
-  private ensureNtfyChatReplyListeners(): void {
-    if (this.ntfyChatReplyUnsubscribers.length > 0) return;
-    this.ntfyChatReplyUnsubscribers = [
-      this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>(
-        'TURN_SUBMITTED',
-        (envelope) => {
-          if (!envelope.sessionId) return;
-          this.matchNtfyChatReplyTurn(
-            envelope.sessionId,
-            envelope.payload.turnId,
-            envelope.payload.prompt,
-            envelope.payload.origin,
-          );
-        },
-      ),
-      this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>(
-        'TURN_COMPLETED',
-        (envelope) => {
-          if (!envelope.sessionId) return;
-          void this.deliverNtfyChatReply(
-            envelope.sessionId,
-            envelope.payload.turnId,
-            envelope.payload.response,
-          ).catch((error: unknown) => {
-            logger.warn('Daemon surface action: ntfy reply delivery failed', {
-              sessionId: envelope.sessionId,
-              turnId: envelope.payload.turnId,
-              error: summarizeError(error),
-            });
-          });
-        },
-      ),
-      this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>(
-        'TURN_CANCEL',
-        (envelope) => {
-          if (!envelope.sessionId) return;
-          void this.deliverNtfyChatReply(
-            envelope.sessionId,
-            envelope.payload.turnId,
-            'The request was cancelled before it finished.',
-          ).catch((error: unknown) => {
-            logger.warn('Daemon surface action: ntfy cancel notice delivery failed', {
-              sessionId: envelope.sessionId,
-              turnId: envelope.payload.turnId,
-              error: summarizeError(error),
-            });
-          });
-        },
-      ),
-      this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>(
-        'TURN_ERROR',
-        (envelope) => {
-          if (!envelope.sessionId) return;
-          void this.deliverNtfyChatReply(
-            envelope.sessionId,
-            envelope.payload.turnId,
-            `Error: ${envelope.payload.error}`,
-          ).catch((error: unknown) => {
-            logger.warn('Daemon surface action: ntfy error reply delivery failed', {
-              sessionId: envelope.sessionId,
-              turnId: envelope.payload.turnId,
-              error: summarizeError(error),
-            });
-          });
-        },
-      ),
-    ];
-  }
-
-  private matchNtfyChatReplyTurn(
-    sessionId: string,
-    turnId: string,
-    prompt: string,
-    origin?: TurnInputOrigin,
-  ): void {
-    this.cleanupExpiredNtfyChatReplies();
-    const originMessageId = this.readNtfyOriginMessageId(origin);
-    const matchByMessageId = originMessageId
-      ? this.findPendingNtfyChatReplyForMessageId(originMessageId)
-      : null;
-    if (matchByMessageId) {
-      matchByMessageId.pending.turnId = turnId;
-      matchByMessageId.pending.turnSessionId = sessionId;
-      return;
-    }
-    const normalizedPrompt = prompt.trim();
-    const match = this.findPendingNtfyChatReplyForPrompt(sessionId, normalizedPrompt, origin?.surface === 'ntfy');
-    if (!match) return;
-    match.pending.turnId = turnId;
-    match.pending.turnSessionId = sessionId;
-  }
-
-  private readNtfyOriginMessageId(origin?: TurnInputOrigin): string | null {
-    if (!origin) return null;
-    if (typeof origin.messageId === 'string' && origin.messageId.trim()) {
-      return origin.messageId.trim();
-    }
-    const metadataMessageId = origin.metadata?.['ntfyMessageId'] ?? origin.metadata?.['messageId'];
-    return typeof metadataMessageId === 'string' && metadataMessageId.trim()
-      ? metadataMessageId.trim()
-      : null;
-  }
-
-  private async deliverNtfyChatReply(sessionId: string, turnId: string, message: string): Promise<void> {
-    const pending = this.takeNtfyChatReply(sessionId, turnId);
-    if (!pending) return;
-    try {
-      await this.publishNtfyReply(
-        pending.topic,
-        message.trim() || '(empty response)',
-        pending.title ?? 'GoodVibes chat',
-        `ntfy:${pending.messageId}:reply`,
-      );
-    } catch (error) {
-      logger.warn('DaemonSurfaceActionHelper: failed to publish ntfy chat reply', {
-        sessionId,
-        turnId,
-        topic: pending.topic,
-        error: summarizeError(error),
-      });
-    }
-  }
-
-  private findPendingNtfyChatReplyForPrompt(
-    preferredSessionId: string,
-    normalizedPrompt: string,
-    fromNtfy: boolean,
-  ): { readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string } | null {
-    const preferredBucket = this.pendingNtfyChatReplies.get(preferredSessionId);
-    const preferred = preferredBucket?.find((entry) => !entry.turnId && entry.body.trim() === normalizedPrompt);
-    if (preferred) return { pending: preferred, bucketSessionId: preferredSessionId };
-
-    // An ntfy turn that does not carry the message id may run under another
-    // runtime session id, so the text is matched across sessions. Only for a
-    // turn that says it came from ntfy, only within a short window and only
-    // when exactly one message waits on that text: an identical prompt typed in
-    // any other session ("yes", "hi") would otherwise have its answer published
-    // to the ntfy topic. Clients that pass the message id are matched by it.
-    if (!fromNtfy) return null;
-    const now = Date.now();
-    const candidates: Array<{ readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string }> = [];
-    for (const [bucketSessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
-      if (bucketSessionId === preferredSessionId) continue;
-      for (const entry of bucket) {
-        if (!entry.turnId && entry.body.trim() === normalizedPrompt
-          && now - entry.createdAt < DaemonSurfaceActionHelper.NTFY_CROSS_SESSION_MATCH_MS) {
-          candidates.push({ pending: entry, bucketSessionId });
-        }
-      }
-    }
-    if (candidates.length !== 1) return null;
-    logger.debug('DaemonSurfaceActionHelper: matched pending ntfy chat reply in another session bucket', {
-      preferredSessionId,
-      matchedSessionId: candidates[0]!.bucketSessionId,
-      messageId: candidates[0]!.pending.messageId,
-    });
-    return candidates[0]!;
-  }
-
-  private findPendingNtfyChatReplyForMessageId(
-    messageId: string,
-  ): { readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string } | null {
-    for (const [bucketSessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
-      const pending = bucket.find((entry) => !entry.turnId && entry.messageId === messageId);
-      if (pending) return { pending, bucketSessionId };
-    }
-    return null;
-  }
-
-  private takeNtfyChatReply(sessionId: string, turnId: string): PendingNtfyChatReply | null {
-    for (const [bucketSessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
-      const index = bucket.findIndex((entry) =>
-        entry.turnId === turnId && (!entry.turnSessionId || entry.turnSessionId === sessionId)
-      );
-      if (index < 0) continue;
-      const [pending] = bucket.splice(index, 1);
-      if (bucket.length === 0) {
-        this.pendingNtfyChatReplies.delete(bucketSessionId);
-      }
-      return pending ?? null;
-    }
-    return null;
-  }
-
-  private cleanupExpiredNtfyChatReplies(now = Date.now()): void {
-    for (const [sessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
-      const fresh = bucket.filter((entry) => now - entry.createdAt < (entry.turnId
-        ? DaemonSurfaceActionHelper.NTFY_MATCHED_TURN_TTL_MS
-        : DaemonSurfaceActionHelper.NTFY_CHAT_REPLY_TTL_MS));
-      if (fresh.length === 0) {
-        this.pendingNtfyChatReplies.delete(sessionId);
-      } else if (fresh.length !== bucket.length) {
-        this.pendingNtfyChatReplies.set(sessionId, fresh);
-      }
-    }
   }
 
   private async postNtfyRemoteChatMessage(input: {

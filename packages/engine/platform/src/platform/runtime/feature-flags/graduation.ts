@@ -15,6 +15,7 @@
  * given a fabricated readiness.
  */
 import { FEATURE_FLAGS } from './flags.js';
+import { featureDefaultState } from './feature-settings.js';
 import type { FeatureFlag, FlagState } from './types.js';
 
 /**
@@ -133,7 +134,7 @@ function instrumentationFor(flagId: string): GraduationInstrumentation {
 /** Derive the graduation state from the flag default and any owner annotation. */
 function deriveState(flag: FeatureFlag, annotation: FlagGraduationAnnotation | undefined): GraduationState {
   // A flipped-on default IS graduation, it wins over any stale annotation.
-  if (flag.defaultState === 'enabled') return 'graduated';
+  if (featureDefaultState(flag.id) === 'enabled') return 'graduated';
   if (!annotation) return 'dark';
   return annotation.state;
 }
@@ -208,7 +209,7 @@ export function buildFlagGraduationReport(options: BuildFlagGraduationReportOpti
       flagId: flag.id,
       name: flag.name,
       tier: flag.tier,
-      currentDefault: flag.defaultState,
+      currentDefault: featureDefaultState(flag.id),
       runtimeToggleable: flag.runtimeToggleable,
       state,
       evidence: buildEvidence(flag, provider),

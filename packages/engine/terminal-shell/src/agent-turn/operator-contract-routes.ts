@@ -37,8 +37,10 @@ export interface OperatorContractMethodEntry {
   } | undefined;
   readonly inputSchema?: Record<string, unknown> | undefined;
   readonly invokable?: boolean | undefined;
-  /** The owner's own act: a model's call of it is refused (the catalog's `ownerOnly`). */
+  /** Only the owner's own credential makes it (the catalog's `ownerOnly`). */
   readonly ownerOnly?: boolean | undefined;
+  /** A model's call of it is refused, whoever it acts for (the catalog's `modelRefused`). */
+  readonly modelRefused?: boolean | undefined;
   /** The call cannot be undone: the owner decides a model's call (the catalog's `irreversible`). */
   readonly irreversible?: boolean | undefined;
   /** The call changes what a running contract requires: the owner decides a model's call (`changesContract`). */
@@ -95,9 +97,9 @@ export function operatorContractMethods(): readonly OperatorContractMethodEntry[
 
 let ownerOnlyIds: readonly string[] | null = null;
 
-/** The ids of the methods the contract publishes as the owner's own acts (`ownerOnly`). Built once. */
+/** The ids of the methods a model never calls (the contract's `modelRefused`). Built once. */
 export function ownerOnlyOperatorMethodIds(): readonly string[] {
-  ownerOnlyIds ??= Object.freeze(operatorContractMethods().filter((method) => method.ownerOnly === true).map((method) => method.id));
+  ownerOnlyIds ??= Object.freeze(operatorContractMethods().filter((method) => method.modelRefused === true).map((method) => method.id));
   return ownerOnlyIds;
 }
 

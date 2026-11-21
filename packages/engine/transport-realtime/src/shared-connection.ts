@@ -26,6 +26,12 @@ export interface SharedConnectionSink<TDomain extends string, TEvent extends Eve
   deliver(domain: TDomain, envelope: SerializedEventEnvelope<TEvent>): void;
   /** The connection is over and will not come back by itself; every feed on it is told. */
   ended(end: DomainEventConnectionEnd): void;
+  /**
+   * The daemon will send nothing for these domains on this connection (the
+   * credential may not read them, or no such domain exists): only their feeds
+   * are ended, with `end`, and every other feed on the connection keeps running.
+   */
+  endedDomains(domains: readonly string[], end: DomainEventConnectionEnd): void;
 }
 
 export interface SharedConnection<TDomain extends string> {
@@ -48,6 +54,35 @@ export type OpenSharedConnection<TDomain extends string, TEvent extends EventLik
   sink: SharedConnectionSink<TDomain, TEvent>,
   signal: AbortSignal,
 ) => Promise<SharedConnection<TDomain>>;
+
+/**
+ * Read the domains a daemon frame (`ready`, `subscribed`, a WebSocket `auth` ok)
+ * says it will not serve, and end exactly those feeds: `withheldDomains` (the
+ * credential may not read them) with EVENT_ACCESS_DENIED, `unrecognisedDomains`
+ * (no such domain) with UNKNOWN_EVENT_DOMAIN. One array read per frame.
+ */
+export function endUnservedDomains<TDomain extends string, TEvent extends EventLike>(
+  frame: unknown,
+  sink: SharedConnectionSink<TDomain, TEvent>,
+): void {
+  if (!frame || typeof frame !== 'object') return;
+  const names = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
+  const record = frame as { readonly withheldDomains?: unknown; readonly unrecognisedDomains?: unknown };
+  const withheld = names(record.withheldDomains);
+  const unrecognised = names(record.unrecognisedDomains);
+  if (withheld.length > 0) {
+    sink.endedDomains(withheld, {
+      final: true, code: 'EVENT_ACCESS_DENIED',
+      reason: `This credential may not receive the ${withheld.join(', ')} event domain(s), so the daemon sends nothing for them. Sign in with a credential that may, or stop listening to them.`,
+    });
+  }
+  if (unrecognised.length > 0) {
+    sink.endedDomains(unrecognised, {
+      final: true, code: 'UNKNOWN_EVENT_DOMAIN',
+      reason: `The daemon has no runtime event domain named ${unrecognised.join(', ')}, so nothing arrives for it. The daemon may be older than this client.`,
+    });
+  }
+}
 
 interface Subscriber<TEvent extends EventLike> {
   readonly onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void;
@@ -149,6 +184,27 @@ export function createSharedDomainConnector<TDomain extends string, TEvent exten
     ended(end) {
       if (owner !== generation) return;
       endAll(end);
+    },
+    endedDomains(domains, end) {
+      if (owner !== generation) return;
+      let changed = false;
+      for (const name of domains) {
+        const domain = name as TDomain;
+        const set = subscribers.get(domain);
+        if (!set) continue;
+        subscribers.delete(domain);
+        changed = true;
+        for (const subscriber of set) {
+          const waiting = subscriber.waiting;
+          subscriber.waiting = undefined;
+          subscriber.onEnded?.(end);
+          waiting?.resolve(() => {});
+        }
+      }
+      // The connection stops carrying them (a subscription change, or a reopen without them).
+      if (!changed) return;
+      if (subscribers.size === 0) letGo();
+      else scheduleSync();
     },
   });
 

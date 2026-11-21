@@ -31,6 +31,7 @@ import { sessionIdentityFile } from '@goodvibes/engine/platform/platform/runtime
 import type { RuntimeServices } from '../services.ts';
 import { findSessionConversation, onSessionConversationChange } from '../conversation-rewind-port.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './operator-endpoint.ts';
+import { configuredDaemonOrigin } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 
 /** The inbox `/questions` reads and answers: the daemon's when reachable, the home store directly otherwise. */
 export function terminalOwnerInbox(deps: {
@@ -43,6 +44,8 @@ export function terminalOwnerInbox(deps: {
     daemon: createOwnerInboxClient(verbs),
     home: homeInboxClient(homeOwnerInbox(deps.shellPaths), 'tui'),
     daemonReachable: () => verbs.probe().available,
+    // The daemon the resolver names, the one every daemon request here dials.
+    daemonAddress: () => configuredDaemonOrigin(deps.configManager)?.baseUrl,
   });
 }
 
@@ -59,7 +62,8 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
   const home = homeOwnerInbox(services.shellPaths);
   const daemonReachable = (): boolean => verbs.probe().available;
   const inbox = withAnswerDelivery(
-    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'tui'), daemonReachable }),
+    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'tui'), daemonReachable,
+      daemonAddress: () => configuredDaemonOrigin(services.configManager)?.baseUrl }),
     {
       home,
       sessionWatch: () => sessionWatches.get(services),

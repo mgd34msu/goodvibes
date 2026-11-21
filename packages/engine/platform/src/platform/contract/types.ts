@@ -177,6 +177,8 @@ export interface StartContractInput {
   readonly projectRoot: string;
   /** The identified principal that started it over the operator surface; recorded as the contract's owner. */
   readonly ownerPrincipalId?: string | undefined;
+  /** True when its hosted session was created for this contract by contracts.dispatch; recorded on the contract. */
+  readonly sessionCreatedForDispatch?: true | undefined;
   /** Units proposed by an agent-tool batch or AgentInput.proposedUnits; the planner weighs them. */
   readonly proposedUnits?: readonly { readonly task: string; readonly template?: string | undefined }[] | undefined;
   /** The conversation agent that asked, when there is one. */
@@ -520,6 +522,12 @@ export interface Contract {
    * is attached to its session later; absent, the session's owners decide.
    */
   readonly ownerPrincipalId?: string | undefined;
+  /**
+   * True when contracts.dispatch created its hosted session for it: the session
+   * ends when the contract settles, also after a daemon restart. Absent on
+   * contracts from before it was recorded (their session is kept, as then).
+   */
+  readonly sessionCreatedForDispatch?: true | undefined;
   readonly ask: string;
   readonly ownerAgentId: string;
   readonly parentAgentId?: string | undefined;

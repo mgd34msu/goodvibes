@@ -303,9 +303,13 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
         sentence: 'Lists the notifications that could not be delivered, oldest first, with why.',
         operator: { method: 'notifications.deadLetters.list', fields: {} },
         async run(_values, context) {
-          const { entries } = deadLetters(context);
-          return entries.length === 0 ? 'No failed notifications.'
-            : [`Failed notifications (${entries.length}), oldest first:`, ...entries.map(formatDeadLetter), 'Resend one with /notify resend <id>, or all with /notify resend all.'].join('\n');
+          const { sources, entries } = deadLetters(context);
+          const dropped = sources.reduce((sum, source) => sum + (source.droppedDeadLetters?.() ?? 0), 0);
+          const droppedLine = dropped > 0
+            ? [`${dropped} older failed notification${dropped === 1 ? ' was' : 's were'} dropped because the list was full (integrations.delivery.maxDlqSize); ${dropped === 1 ? 'it' : 'they'} cannot be resent.`]
+            : [];
+          return entries.length === 0 ? ['No failed notifications.', ...droppedLine].join('\n')
+            : [`Failed notifications (${entries.length}), oldest first:`, ...entries.map(formatDeadLetter), ...droppedLine, 'Resend one with /notify resend <id>, or all with /notify resend all.'].join('\n');
         },
       }),
       doAction<Context>({

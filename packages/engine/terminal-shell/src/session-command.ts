@@ -192,7 +192,7 @@ function sessionActions<Ctx extends SessionCommandContext>(policy: SessionComman
     id: 'resume', label: 'Resume a saved session', word: 'resume',
     inputs: [SAVED, {
       id: 'force', label: 'If it is open elsewhere', help: 'Another running terminal may have it open', kind: 'choice',
-      choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Resume it here anyway', help: 'That terminal\'s live state is forked.' }],
+      choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Have it handed over here', help: 'That terminal saves it and lets go first, through the daemon both are attached to.' }],
       required: { default: 'no', defaultMeans: 'stop and say so' }, typed: { flag: '--force', switchOn: 'yes' },
     }],
     sentence: 'This conversation is set aside and {session} continues here, with its messages, model and agent records.', done: '',

@@ -13,12 +13,13 @@ import {
   recordSchema,
 } from '../../control-plane/operator-contract-schemas-shared.js';
 import { AUTOMATION_RUN_TELEMETRY_SCHEMA } from '../../control-plane/operator-contract-schemas-admin.js';
+import { DISTRIBUTED_WORK_TYPES } from '@goodvibes/engine/contracts';
 
 export const DISTRIBUTED_PEER_KIND_SCHEMA = enumSchema(['node', 'device']);
 export const DISTRIBUTED_PEER_STATUS_SCHEMA = enumSchema(['paired', 'connected', 'idle', 'disconnected', 'revoked']);
 export const DISTRIBUTED_WORK_PRIORITY_SCHEMA = enumSchema(['default', 'normal', 'high']);
 export const DISTRIBUTED_WORK_STATUS_SCHEMA = enumSchema(['queued', 'claimed', 'completed', 'failed', 'cancelled', 'expired']);
-export const DISTRIBUTED_WORK_TYPE_SCHEMA = enumSchema(['invoke', 'status.request', 'location.request', 'session.message', 'automation.run', 'device.capability']);
+export const DISTRIBUTED_WORK_TYPE_SCHEMA = enumSchema([...DISTRIBUTED_WORK_TYPES]);
 export const DISTRIBUTED_AUDIT_ACTION_SCHEMA = enumSchema([
   'pair-requested',
   'pair-approved',

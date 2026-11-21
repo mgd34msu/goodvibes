@@ -20,7 +20,7 @@ export const VOICE_FEATURE_FLAGS: FeatureFlag[] = [
       + 'classifier behind a melspectrogram computed in code and Google\'s Apache-2.0 '
       + 'speech-embedding model, both on a WASM backend, so the same detector runs in a daemon '
       + 'child process and in a browser tab. '
-      + 'Disabled by default because holding a microphone open must be an explicit act; enabling '
+      + 'Holding a microphone open must be an explicit act; enabling '
       + 'it starts a supervised capture process and shows a persistent listening indicator for as '
       + 'long as it runs. '
       + 'Live on all four surfaces: the terminal and the agent through a recorder subprocess, the web UI '
@@ -30,7 +30,6 @@ export const VOICE_FEATURE_FLAGS: FeatureFlag[] = [
       + 'readily it fires, and whose supervisor rows bound how a crashing detector is retried. '
       + 'The model\'s published recall figures are measured on synthesised speech only, no human '
       + 'recording of the phrase exists, while its false-accept figures are measured on real speech.',
-    defaultState: 'disabled',
     tier: 3,
     runtimeToggleable: true,
     // `notOperable` is GONE, in the same change that wired capture up, which is

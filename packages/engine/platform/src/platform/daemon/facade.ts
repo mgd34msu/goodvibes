@@ -97,6 +97,7 @@ import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
 import { recoverGitHubReplies, resolveGitHubToken, type GitHubReplyOperation } from '../adapters/github/index.js';
+import { constantTimeEquals } from '../adapters/helpers.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
 import { existsSync } from 'node:fs';
 
@@ -517,6 +518,15 @@ export class DaemonServer {
   }
 
   /**
+   * Whether `token` is the operator token this daemon serves now (after a
+   * revocation, its replacement). Compared in constant time. The webhook
+   * listener asks it only to word a refusal: the listener never accepts it.
+   */
+  servesOperatorToken(token: string): boolean {
+    return this.authToken !== null && token !== '' && constantTimeEquals(this.authToken, token);
+  }
+
+  /**
    * Bind this daemon's shared token to the pairing store, so revoking it
    * replaces the value in `<daemon home>/operator-tokens.json`, which the apps
    * on this machine read, and here. Without a daemon home, or with a token the
@@ -899,7 +909,7 @@ export class DaemonServer {
         host: this.host,
         tlsMode: binding.tlsState.mode,
         scheme: binding.tlsState.scheme,
-        trustProxy: binding.tlsState.trustProxy,
+        trustProxy: this.trustProxyEnabled(),
       });
       if (!this.deferNativeActivationUntilHostReady) return this.completeHostStartup();
     } catch (err) {
@@ -1704,8 +1714,9 @@ export class DaemonServer {
     if (verdict.settled) this.ownWebUrlVerdict = { key, own: verdict.own };
     return verdict.own;
   }
+  /** Whether forwarded client addresses are trusted, read from the setting at each request so a change applies at once. */
   private trustProxyEnabled(): boolean {
-    return this.tlsState?.trustProxy ?? Boolean(this.configManager.get('controlPlane.trustProxy'));
+    return Boolean(this.configManager.get('controlPlane.trustProxy'));
   }
   private signWebhookPayload(body: string, secret: string): string {
     return this.surfaceDeliveryHelper.signWebhookPayload(body, secret);

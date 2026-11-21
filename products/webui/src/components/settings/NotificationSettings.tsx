@@ -44,6 +44,7 @@ const REMOVAL_REASONS: Record<string, string> = {
   'failure-threshold': 'the push service refused it too many times in a row',
   unusable: 'its stored record could never receive a push',
   malformed: 'its stored record could never receive a push',
+  'access-withdrawn': 'the account that turned it on was deleted or is no longer an admin',
 };
 
 /** The last device the daemon removed, in words: when, from which push service, and the daemon's evidence. */

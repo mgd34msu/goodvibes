@@ -25,6 +25,7 @@ import {
   grantAllowsDomain,
   grantAllowsEvent,
   grantNeedsOwnedSession,
+  ownApprovalReadable,
   isEmptyEventGrant,
   resolveEventGrant,
   type EventGrant,
@@ -78,6 +79,11 @@ export interface ControlPlaneEventStreamOptions {
   readonly requestedDomains?: readonly string[] | undefined;
   /** Requested names a caller already found are not domains; the `ready` frame names them back. */
   readonly unrecognisedDomains?: readonly string[] | undefined;
+  /**
+   * A WebSocket client's position (`?lastEventId=` on its upgrade): what came
+   * after it is replayed, and the `ready` frame's `resume` says whether it was found.
+   */
+  readonly lastEventId?: string | undefined;
   readonly principalId?: string | undefined;
   readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | undefined;
   readonly scopes?: readonly string[] | undefined;
@@ -408,7 +414,8 @@ export class ControlPlaneGateway {
       if (filter?.surfaceId && client.surfaceId !== filter.surfaceId) continue;
       if (client.current && !client.current()) continue;
       if (!grantAllowsEvent(client.grant, event, addressed)) continue;
-      if (grantNeedsOwnedSession(client.grant, event) && !this.ownsFrame(client.principalId, ownedFrameSessionId(payload))) continue;
+      if (grantNeedsOwnedSession(client.grant, event) && !this.ownsFrame(client.principalId, ownedFrameSessionId(payload))
+        && !ownApprovalReadable(client.grant, event)) continue;
       // Domain filter, AND-ed with the grant (null = deliver-all; untagged = delivered).
       if (!clientMayReceiveEventDomain(client.domains, event)) continue;
       client.send(event, payload, record.id);
@@ -522,7 +529,9 @@ export class ControlPlaneGateway {
     }
 
     const grant = resolveEventGrant({ admin: options.admin, scopes: options.scopes });
-    const selectedDomains = normalizeRuntimeDomains(options.domains).filter((domain) => grantAllowsDomain(grant, domain));
+    const requestedDomains = normalizeRuntimeDomains(options.domains);
+    const selectedDomains = requestedDomains.filter((domain) => grantAllowsDomain(grant, domain));
+    const withheldDomains = requestedDomains.filter((domain) => !grantAllowsDomain(grant, domain));
     const clientId = options.clientId ?? `cp-${randomUUID().slice(0, 8)}`;
     const label = options.label ?? `${options.clientKind ?? 'web'}:${clientId}`;
     const now = Date.now();
@@ -613,13 +622,18 @@ export class ControlPlaneGateway {
     // Initial default subscriptions retain the historical broadcast-all mode.
     // Later explicit subscription changes narrow to the live subscription set.
     if (!explicitDomains) this.liveClients.get(clientId)!.domains = null;
+    // As on the SSE stream: the client is told what its position turned into before any replay
+    // lands, and which asked-for domains this credential may not read.
+    const replayable = this.recentEventsFor(grant, options.principalId);
     send('ready', {
       clientId,
       domains: selectedDomains,
       transport: 'websocket',
+      ...(explicitDomains && withheldDomains.length > 0 ? { withheldDomains } : {}),
       ...(options.unrecognisedDomains?.length ? { unrecognisedDomains: [...options.unrecognisedDomains] } : {}),
+      resume: resolveReplayResume(replayable, options.lastEventId),
     });
-    replayRecentTraffic(this.recentEventsFor(grant, options.principalId), send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
+    replayRecentTraffic(replayable, send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null, options.lastEventId);
     return { clientId, domains: selectedDomains };
   }
 
@@ -677,14 +691,21 @@ export class ControlPlaneGateway {
     });
   }
 
-  subscribeWebSocketClient(clientId: string, domains: readonly RuntimeEventDomain[]): void {
-    if (!this.isEnabled()) return;
+  /**
+   * Subscribe a socket to `domains` its credential may read. Answers which of
+   * them are delivered now and which were withheld (the grant does not cover
+   * them); undefined when the socket is not (or no longer) served.
+   */
+  subscribeWebSocketClient(clientId: string, domains: readonly RuntimeEventDomain[]): { readonly subscribed: RuntimeEventDomain[]; readonly withheld: RuntimeEventDomain[] } | undefined {
+    if (!this.isEnabled()) return undefined;
     const wsClient = this.websocketClients.get(clientId);
-    if (!wsClient || !this.runtimeBus) return;
+    if (!wsClient || !this.runtimeBus) return undefined;
     const liveClient = this.liveClients.get(clientId);
-    if (!liveClient) return;
+    if (!liveClient) return undefined;
     liveClient.domains = wsClient.domains;
-    const nextDomains = [...new Set(domains)].filter((domain) => grantAllowsDomain(liveClient.grant, domain));
+    const asked = [...new Set(domains)];
+    const nextDomains = asked.filter((domain) => grantAllowsDomain(liveClient.grant, domain));
+    const withheld = asked.filter((domain) => !grantAllowsDomain(liveClient.grant, domain));
     for (const domain of nextDomains) {
       if (wsClient.unsubscribers.has(domain)) continue;
       const unsubscribe = this.runtimeBus.onDomain(domain, (envelope) => {
@@ -699,6 +720,7 @@ export class ControlPlaneGateway {
       wsClient.domains.add(domain);
     }
     this.touchWebSocketClient(clientId, { domains: [...wsClient.domains] });
+    return { subscribed: nextDomains, withheld };
   }
 
   unsubscribeWebSocketClient(clientId: string, domains?: readonly RuntimeEventDomain[]): void {
@@ -1055,7 +1077,8 @@ export class ControlPlaneGateway {
     const events = this.recentEvents;
     if (grant.all) return events;
     return events.filter((entry) => grantAllowsEvent(grant, entry.event, Boolean(entry.replayScope?.clientId || entry.replayScope?.clientIdPrefix))
-      && (!grantNeedsOwnedSession(grant, entry.event) || this.ownsFrame(principalId, ownedFrameSessionId(entry.payload))));
+      && (!grantNeedsOwnedSession(grant, entry.event) || this.ownsFrame(principalId, ownedFrameSessionId(entry.payload))
+        || ownApprovalReadable(grant, entry.event)));
   }
 
   renderWebUi(authTokenHint = ''): Response {

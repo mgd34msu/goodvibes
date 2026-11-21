@@ -337,6 +337,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // shared through the record.
       clusterRoles: graph.clusterRoles,
       authority: graph.authorityRecord,
+      // A user deleted or no longer an admin loses the push endpoints it registered.
+      users: graph.localUserAuthManager,
       // sessions.permissionMode.get reports the mode the gate decides by (jev-decides
       // runs as ask-me while no decision model works), why, and the same in plain words.
       modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),

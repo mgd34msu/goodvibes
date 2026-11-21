@@ -233,7 +233,8 @@ export function createDaemonKnowledgeRouteHandlers(
     postKnowledgeSetScheduleEnabled: async (id, request) => handleKnowledgeSetScheduleEnabled(context, id, request),
     postKnowledgeRenderProjection: async (request) => handleKnowledgeRenderProjection(context, request),
     postKnowledgeMaterializeProjection: async (request) => handleKnowledgeMaterializeProjection(context, request),
-    executeKnowledgeGraphql: async (request) => handleKnowledgeGraphql(context, request),
+    executeKnowledgeGraphql: async (request) => handleKnowledgeGraphql(context, request, 'query'),
+    executeKnowledgeGraphqlMutation: async (request) => handleKnowledgeGraphql(context, request, 'mutation'),
   };
 }
 
@@ -668,7 +669,14 @@ function graphqlErrorsAreRequestFaults(errors: readonly unknown[]): boolean {
   });
 }
 
-async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req: Request): Promise<Response> {
+/**
+ * One knowledge GraphQL operation. `kind` is the route's: a query on
+ * knowledge.graphql.query (a read), a mutation on knowledge.graphql.mutate (a
+ * change that also sends outward), so the method a call addresses says what
+ * it does, for admission and for the relay's step-up alike. An operation of
+ * the other kind is refused naming the method that runs it.
+ */
+async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req: Request, kind: 'query' | 'mutation'): Promise<Response> {
   const parsed = await parseKnowledgeGraphqlRequest(context, req);
   if (parsed instanceof Response) return parsed;
   const principal = context.resolveAuthenticatedPrincipal(req);
@@ -682,10 +690,18 @@ async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req:
   } catch (error) {
     return jsonErrorResponse(error, { status: 400 });
   }
-  // The operation that runs is the parsed one (operationName picks it), so a
-  // GET is refused on that, not on how the document starts.
-  if (req.method === 'GET' && access.operation === 'mutation') {
-    return jsonErrorResponse({ error: 'GraphQL mutations must use POST.' }, { status: 405 });
+  // The operation that runs is the parsed one (operationName picks it), not how the document starts.
+  if (access.operation === 'mutation' && kind === 'query') {
+    return jsonErrorResponse({
+      error: 'This is a GraphQL mutation; knowledge.graphql.query runs queries only. Send it to knowledge.graphql.mutate (POST /api/knowledge/graphql/mutate).',
+      code: 'GRAPHQL_MUTATION_NOT_ALLOWED',
+    }, { status: 400 });
+  }
+  if (access.operation !== 'mutation' && kind === 'mutation') {
+    return jsonErrorResponse({
+      error: 'This is a GraphQL query; knowledge.graphql.mutate runs mutations only. Send it to knowledge.graphql.query (POST /api/knowledge/graphql).',
+      code: 'GRAPHQL_QUERY_NOT_ALLOWED',
+    }, { status: 400 });
   }
 
   const scopeDenied = missingScopeRefusal('knowledge GraphQL operation', access.requiredScopes, principal.scopes);

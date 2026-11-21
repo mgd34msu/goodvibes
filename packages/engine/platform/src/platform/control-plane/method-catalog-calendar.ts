@@ -98,6 +98,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.create',
     replay: IDEMPOTENCY_KEY_REPLAY,
+    confirmation: 'confirm',
     recipients: ['attendees[]'],
     title: 'Create Calendar Event',
     description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
@@ -114,7 +115,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       location: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
-    }, ['title', 'start', 'end', 'confirm']),
+    }, ['title', 'start', 'end']),
     outputSchema: objectSchema({
       eventId: STRING_SCHEMA,
       uid: STRING_SCHEMA,
@@ -124,6 +125,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.update',
     replay: IDEMPOTENCY_KEY_REPLAY,
+    confirmation: 'confirm',
     recipients: ['attendees[]'],
     title: 'Update Calendar Event',
     description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. Send expectedRevision (the revision calendar.events.get returned when the event was shown) so a change made elsewhere after it was shown is refused the same way; read the event again and repeat the change. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
@@ -142,7 +144,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       calendarId: STRING_SCHEMA,
       expectedRevision: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
-    }, ['eventId', 'confirm']),
+    }, ['eventId']),
     outputSchema: objectSchema({
       eventId: STRING_SCHEMA,
       updatedAt: STRING_SCHEMA,
@@ -151,6 +153,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.delete',
     repeat: 'safe',
+    confirmation: 'confirm',
     effects: ['calendar.administer', 'record.destroy', 'outward.send'],
     title: 'Delete Calendar Event',
     description: 'Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
@@ -161,7 +164,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       eventId: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
-    }, ['eventId', 'confirm']),
+    }, ['eventId']),
     outputSchema: objectSchema({
       eventId: STRING_SCHEMA,
       deleted: BOOLEAN_SCHEMA,
@@ -183,6 +186,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.ics.import',
     replay: IDEMPOTENCY_KEY_REPLAY,
+    confirmation: 'confirm',
     title: 'Import iCalendar',
     description: 'Import raw .ics content into the configured calendar. Requires explicit confirmation (confirm: true). A series and its overrides are stored together as written; an event already on the calendar is kept unless replace: true. Guests an imported event names are not invited; they are listed in attendeesLeftOff.',
     category: 'calendar',
@@ -194,7 +198,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       calendarId: STRING_SCHEMA,
       replace: BOOLEAN_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
-    }, ['icsContent', 'confirm']),
+    }, ['icsContent']),
     outputSchema: objectSchema({
       imported: NUMBER_SCHEMA,
       eventIds: arraySchema(STRING_SCHEMA),

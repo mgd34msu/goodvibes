@@ -180,6 +180,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     startupNotices,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,
+    sessionInboundInputs,
     requestRender,
     setRenderRequest,
     runtimeSessionIdRef,
@@ -377,10 +378,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const localCompanionInput = terminalCompanionInputHandler(orchestrator, (err) => {
     logger.debug('companion handleUserInput safety catch', { error: String(err) });
   });
-  orchestratorHandleUserInputRef.value = (text, inputOptions) => {
+  orchestratorHandleUserInputRef.value = (text, inputOptions, answered) => {
     const route = ownerInputFor(orchestrator);
-    if (route) route(text, inputOptions);
-    else localCompanionInput(text, inputOptions);
+    if (route) route(text, inputOptions, answered);
+    else localCompanionInput(text, inputOptions, answered);
   };
   orchestrator.setCoreServices({
     ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
@@ -599,6 +600,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // stays receipt-neutral.
       onAttach: () => {
         services.sessionBroker.activate(sessionInputsClient);
+        // Steers and follow-ups (a companion or channel message to this session) are run here as turns.
+        sessionInboundInputs.activate(sessionInputsClient);
         // Channel drafts and routing assignments saved while the daemon was away reach it now.
         // A route the operator removed that the daemon still routes on is told at once, not only logged.
         void flushPendingChannelRows(services.shellPaths, createDaemonOperatorInvoke(() =>
@@ -612,7 +615,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         });
         return services.consumeDaemonReceipts();
       },
-      onDetach: () => services.sessionBroker.deactivate('the connected host stopped answering'),
+      onDetach: () => {
+        services.sessionBroker.deactivate('the connected host stopped answering');
+        sessionInboundInputs.deactivate('the connected host stopped answering');
+      },
     });
   deferredStartup.schedule({
     label: 'memory-spine',

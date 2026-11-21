@@ -26,7 +26,7 @@ import type { DraftHostContext as HandlerContext } from './types.js';
 import { createAtRestCipher } from '../../config/daemon-credential-store.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
-import { assertConfirmed } from '../../control-plane/host-handlers.js';
+import { requireConfirmation } from '../../control-plane/confirmation-gate.js';
 import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
 import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
@@ -360,7 +360,8 @@ export function registerDraftMethods(
 
   const saveHandler: TypedHandler<unknown, SaveResponse> = async ({ body, context }) => {
     const autonomous = isDelegatedCaller(context);
-    if (!autonomous) assertConfirmed(body, context);
+    // The Agent's delegated write is admitted by its native authority instead.
+    if (!autonomous) requireConfirmation('owner-request', SAVE_ID, body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
     // Parsed once into a value nothing downstream can change; every later step
@@ -385,7 +386,7 @@ export function registerDraftMethods(
 
   const deleteHandler: TypedHandler<unknown, DeleteResponse> = async ({ body, context }) => {
     const autonomous = isDelegatedCaller(context);
-    if (!autonomous) assertConfirmed(body, context);
+    if (!autonomous) requireConfirmation('owner-request', DELETE_ID, body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
     const requestedId = parseDraftId(body);

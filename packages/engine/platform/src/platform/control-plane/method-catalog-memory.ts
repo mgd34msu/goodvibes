@@ -122,10 +122,11 @@ export const builtinGatewayMemoryMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'memory.snapshots.restore',
     repeat: 'safe',
+    confirmation: 'owner-request',
     title: 'Restore Memory From a Copy',
-    description: 'Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner\'s act only: requires confirm: true on an explicit request from the owner\'s own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.',
+    description: 'Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner\'s act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon\'s machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.',
     category: 'memory',
-    effects: ['memory.administer', 'owner.act'],
+    effects: ['memory.administer', 'model.refused'],
     dangerous: true,
     http: { method: 'POST', path: '/api/memory/snapshots/restore' },
     inputSchema: objectSchema({ snapshot: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA }, ['snapshot', 'confirm']),

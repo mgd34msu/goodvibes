@@ -116,13 +116,14 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
         }
       }
       const sessionModel = ctx.session.runtime.model;
+      const pricing = ctx.provider.providerRegistry;
       const sessionCostUsd = calcSessionCost(
-        totalInput, totalOutput, totalCacheRead, totalCacheWrite, sessionModel,
+        pricing, totalInput, totalOutput, totalCacheRead, totalCacheWrite, sessionModel,
       );
       // The exported document has no field for "this cost is a placeholder",
       // omit `cost` entirely rather than embed a misleading 0 when the model
       // never resolved to a real price.
-      const costIsUnpriced = !isModelPriced(sessionModel);
+      const costIsUnpriced = !isModelPriced(pricing, sessionModel);
       if (costIsUnpriced) {
         ctx.print(`Note: cost omitted from export; no pricing data for model "${sessionModel}".`);
       }

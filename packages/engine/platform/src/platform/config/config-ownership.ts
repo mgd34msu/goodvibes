@@ -208,6 +208,16 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
 ];
 
 /**
+ * Daemon-owned keys that an earlier release kept in each surface's own settings
+ * file (3.3.4 kept `power.keepAwake` there). A surface's settings file that
+ * still holds one has it carried into the daemon's settings file when it is
+ * loaded (ConfigManager.load): moved when the daemon's file does not set the
+ * key, dropped when it does (the daemon's value is the one in effect), and the
+ * owner is told once.
+ */
+export const CARRIED_TO_DAEMON_TIER_KEYS: readonly string[] = ['power.keepAwake'];
+
+/**
  * Daemon-owned config paths that are not rows of the settings table.
  *
  * `listDaemonOwnedConfigKeys()` is derived from CONFIG_SCHEMA, so a daemon

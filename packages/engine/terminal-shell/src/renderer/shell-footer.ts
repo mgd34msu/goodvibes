@@ -1,5 +1,5 @@
 import type { Line } from '@goodvibes/engine/platform/platform/types';
-import { calcSessionCost, isModelPriced } from '@goodvibes/engine/platform/platform/providers';
+import { calcSessionCost, isModelPriced, type SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../voice-capture-status.js';
 import type { ShellFooterView } from '../shell-footer-view.js';
 import { formatUsd } from '../format.js';
@@ -24,6 +24,8 @@ export interface SharedShellFooterOptions {
   readonly lastCopyTime: number;
   /** The model the session cost is priced against. */
   readonly model?: string | undefined;
+  /** What the session cost is priced with when `usage.costUsd` is absent: the runtime's ProviderRegistry. */
+  readonly pricing?: SessionPricing | undefined;
   /** The serving model's display name: the status bar's `model …` segment. */
   readonly modelLabel?: string | undefined;
   /** An agent or process view is showing (session-focus.ts). */
@@ -95,14 +97,20 @@ export interface WrappedPromptCursorInfo {
   readonly visibleCursorCol: number;
 }
 
-export function statusCostText(usage: SharedShellFooterOptions['usage'], model: string | undefined, includeFleet = false): string | null {
+export function statusCostText(
+  usage: SharedShellFooterOptions['usage'],
+  model: string | undefined,
+  pricing: SessionPricing | undefined,
+  includeFleet = false,
+): string | null {
   if (usage.available === false) return 'usage unavailable';
   const inp = usage.up;
   const out = usage.down;
   // The session's cost as spent, each response at its own model's price; pricing
   // the totals at the current model is only for a caller that has no such figure.
   const main = typeof usage.costUsd === 'number' ? formatUsd(usage.costUsd, { estimated: true })
-    : model && isModelPriced(model) ? formatUsd(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model), { estimated: true }) : null;
+    : model && pricing && isModelPriced(pricing, model)
+      ? formatUsd(calcSessionCost(pricing, inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model), { estimated: true }) : null;
   const fleet = usage.fleetCostUsd;
   if (includeFleet && typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ${formatUsd(fleet, { estimated: true })}`;
   return main;

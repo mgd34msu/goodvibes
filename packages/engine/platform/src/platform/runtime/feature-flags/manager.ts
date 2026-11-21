@@ -12,6 +12,7 @@
  *   - Notifies subscribers synchronously on every state change.
  */
 import { FEATURE_FLAG_MAP } from './flags.js';
+import { featureDefaultState } from './feature-settings.js';
 import type { FlagConfig, FlagState, FlagTransition, FeatureFlag } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { revisionSource, type RevisionSource } from '../../utils/revision.js';
@@ -56,9 +57,9 @@ class FeatureFlagManagerImpl {
   private readonly _pendingRestart: Map<string, FlagState> = new Map();
 
   constructor() {
-    // Seed all flags with their declared defaults
-    for (const [id, flag] of FEATURE_FLAG_MAP) {
-      this._states.set(id, flag.defaultState);
+    // Seed all flags with their defaults, derived from their settings keys' schema defaults.
+    for (const id of FEATURE_FLAG_MAP.keys()) {
+      this._states.set(id, featureDefaultState(id));
     }
   }
 

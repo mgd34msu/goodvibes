@@ -88,9 +88,6 @@ export interface FeatureFlag {
   /** One-line description of what this gate controls */
   description: string;
 
-  /** Initial state applied on first load when no config override exists */
-  defaultState: FlagState;
-
   /** The implementation tier that introduced this flag (1-based) */
   tier: number;
 
@@ -123,10 +120,11 @@ export interface FeatureFlag {
 
 /**
  * Persisted flag overrides loaded from the user config file.
- * Overrides are applied on top of each flag's `defaultState`.
+ * Overrides are applied on top of each flag's default state, which its
+ * settings key's schema default gives (feature-settings.ts featureDefaultState).
  */
 export interface FlagConfig {
-  /** Map of flag id → desired state; missing keys fall back to `defaultState` */
+  /** Map of flag id → desired state; missing keys fall back to the flag's default state */
   flags: Record<string, FlagState>;
 }
 

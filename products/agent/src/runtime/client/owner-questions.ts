@@ -82,6 +82,8 @@ export function agentOwnerInbox(options: ConnectedHostInboxOptions & { readonly 
     daemon: connectedHostOwnerInbox(options, host),
     home: homeInboxClient(homeOwnerInbox(options.shellPaths), 'agent'),
     daemonReachable: () => hostReachable(host),
+    // The connected host this Agent's daemon requests dial.
+    daemonAddress: () => host.connection().baseUrl,
   });
 }
 
@@ -97,7 +99,8 @@ export function agentOwnerQuestions(services: OwnerQuestionServices, options: Co
   const home = homeOwnerInbox(services.shellPaths);
   const daemonReachable = (): boolean => hostReachable(host);
   const inbox = withAnswerDelivery(
-    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'agent'), daemonReachable }),
+    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'agent'), daemonReachable,
+      daemonAddress: () => host.connection().baseUrl }),
     {
       home,
       sessionWatch: () => sessionWatches.get(services),

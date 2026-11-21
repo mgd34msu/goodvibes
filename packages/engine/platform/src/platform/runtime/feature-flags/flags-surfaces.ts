@@ -17,7 +17,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Slack client adapter for interactive command ingress, threaded replies, and '
       + 'notification delivery. Inbound messages are gated by the per-surface owner allowlist '
       + '(seeded from the first identified sender; unknown senders are ignored).',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.slack.enabled', kind: 'constant' },
@@ -39,7 +38,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Discord client adapter for interaction handling, message replies, and '
       + 'notification delivery. Inbound messages are gated by the per-surface owner allowlist '
       + '(seeded from the first identified sender; unknown senders are ignored).',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.discord.enabled', kind: 'constant' },
@@ -60,7 +58,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the ntfy notification surface for push-style delivery and deep links back into the '
       + 'control-plane UI. Inbound messages are gated by the per-surface owner allowlist when the '
       + 'sender carries an identity (unknown senders are ignored).',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.ntfy.enabled', kind: 'constant' },
@@ -82,7 +79,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the generic webhook surface for machine-to-machine ingress and egress. '
       + 'Ingress requires the configured webhook verification; sender-identified messages are '
       + 'additionally gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.webhook.enabled', kind: 'constant' },
@@ -101,7 +97,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       + 'event delivery, service-call tools, and Home Assistant-originated prompts. Inbound '
       + 'prompts are gated by the per-surface owner allowlist when the sender carries an '
       + 'identity (unknown senders are ignored).',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.homeassistant.enabled', kind: 'constant' },
@@ -129,7 +124,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Telegram client adapter for command ingress, threaded replies, and '
       + 'notification delivery. Activation needs surfaces.telegram.enabled plus bot '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.telegram.enabled', kind: 'constant' },
@@ -149,7 +143,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the WhatsApp client adapter for command ingress, interactive actions, and '
       + 'notification delivery. Activation needs surfaces.whatsapp.enabled plus API '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.whatsapp.enabled', kind: 'constant' },
@@ -172,7 +165,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Signal client adapter for command ingress and notification delivery. '
       + 'Activation needs surfaces.signal.enabled plus a linked signal-cli endpoint; inbound '
       + 'messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.signal.enabled', kind: 'constant' },
@@ -191,7 +183,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Microsoft Teams client adapter for command ingress, threaded replies, and '
       + 'notification delivery. Activation needs surfaces.msteams.enabled plus bot '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.msteams.enabled', kind: 'constant' },
@@ -214,7 +205,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Matrix client adapter for command ingress, threaded replies, and '
       + 'notification delivery. Activation needs surfaces.matrix.enabled plus homeserver '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.matrix.enabled', kind: 'constant' },
@@ -234,7 +224,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Mattermost client adapter for command ingress, threaded replies, and '
       + 'notification delivery. Activation needs surfaces.mattermost.enabled plus server '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.mattermost.enabled', kind: 'constant' },
@@ -254,7 +243,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the iMessage client adapter for command ingress and notification delivery. '
       + 'Activation needs surfaces.imessage.enabled plus a bridge endpoint; inbound messages '
       + 'are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.imessage.enabled', kind: 'constant' },
@@ -273,7 +261,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the BlueBubbles client adapter for iMessage command ingress and notification '
       + 'delivery via a BlueBubbles server. Activation needs surfaces.bluebubbles.enabled '
       + 'plus server credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.bluebubbles.enabled', kind: 'constant' },
@@ -292,7 +279,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the Google Chat client adapter for command ingress, threaded replies, and '
       + 'notification delivery. Activation needs surfaces.googleChat.enabled plus app '
       + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.googleChat.enabled', kind: 'constant' },
@@ -311,7 +297,6 @@ export const CHANNEL_SURFACE_FEATURE_FLAGS: FeatureFlag[] = [
       'Enables the telephony adapter for delivery-oriented voice/SMS notification egress and '
       + 'webhook ingress. Activation needs surfaces.telephony.enabled plus provider '
       + 'credentials; inbound events are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'surfaces.telephony.enabled', kind: 'constant' },

@@ -12,7 +12,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { RelayCodeStore } from '../../relay/relay-codes.js';
-import { pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 

@@ -46,6 +46,8 @@ export interface NotificationReplayOptions {
 /** A notifier whose failed notifications can be listed and resent. */
 export interface NotificationDeadLetterSource {
   listDeadLetters(): readonly NotificationDeadLetter[];
+  /** Older failed notifications dropped because the list was full (integrations.delivery.maxDlqSize); they cannot be resent. */
+  droppedDeadLetters?(): number;
   replayDeadLetters(ids?: readonly string[], options?: NotificationReplayOptions): Promise<readonly NotificationReplayResult[]>;
 }
 

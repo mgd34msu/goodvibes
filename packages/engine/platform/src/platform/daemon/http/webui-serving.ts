@@ -29,6 +29,7 @@ import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
 import { readStringList } from '../helpers.js';
+import { logger } from '../../utils/logger.js';
 
 /** Resolved, per-request view of the two opt-in serving capabilities. */
 export interface WebuiServingPosture {
@@ -397,7 +398,7 @@ export async function serveWebuiBundle(req: Request, posture: WebuiServingPostur
   if (isReservedApiPath(pathname, posture)) return null;
 
   const root = await realpath(posture.bundleDir).catch(() => null);
-  if (!root) return new Response('Not Found', { status: 404 });
+  if (!root) return isNavigationRequest(req, pathname) ? bundleMissingResponse(posture) : new Response('Not Found', { status: 404 });
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const resolved = resolve(root, relative);
   // Reject anything that escapes the bundle root (path traversal).
@@ -418,6 +419,26 @@ export async function serveWebuiBundle(req: Request, posture: WebuiServingPostur
   if (isNavigationRequest(req, pathname)) {
     const shell = await serveFile(resolve(root, 'index.html'), true);
     if (shell) return shell;
+    // A directory without the app shell is a bundle that is not there; say so instead of a bare 404.
+    if (!await Bun.file(resolve(root, 'index.html')).exists()) return bundleMissingResponse(posture);
   }
   return new Response('Not Found', { status: 404 });
+}
+
+/**
+ * The answer to a page load while serving is on but the bundle directory holds
+ * no app shell: which setting supplied the directory and the next step. The
+ * response is unauthenticated and may reach the network, so it names the key,
+ * never the path; the path goes to the daemon log.
+ */
+function bundleMissingResponse(posture: WebuiServingPosture): Response {
+  logger.warn('DaemonServer: the web UI is set to be served but its bundle directory holds no index.html', {
+    bundleDir: posture.bundleDir,
+    source: posture.bundleDirSource,
+  });
+  return new Response(
+    `This daemon is set to serve the web UI (controlPlane.webui.serve), but the bundle directory from ${posture.bundleDirSource || 'its settings'} holds no index.html.`
+    + ' On the daemon\'s machine run goodvibes-daemon webui status, or goodvibes-daemon webui enable --bundle-dir <built bundle>.\n',
+    { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } },
+  );
 }

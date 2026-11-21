@@ -426,19 +426,56 @@ function writeMcpConfigFile(path: string, config: McpConfig, removedName?: strin
 }
 
 /**
- * loadMcpConfig - Scan multiple locations in precedence order (later wins).
+ * loadMcpConfig - Scan multiple locations in merge order (see MCP_MERGE_RANK: the
+ * owner's own file wins over other programs' files, the trusted project file wins over both).
  * Returns merged config from all found files. Returns empty config on failure.
  */
 export function loadMcpConfig(roots: McpConfigRoots): McpConfig {
   return { servers: loadMcpEffectiveConfig(roots).servers.map((entry) => entry.server) };
 }
 
+/**
+ * The order the files are merged in, later replacing earlier for a name: the
+ * other programs' files first (`~/.mcp/mcp.json`, Claude Desktop's file, the
+ * project's `.mcp/mcp.json`), then the owner's own `~/.config/mcp/mcp.json`, so
+ * his entry of a name wins outright, then the project's `.goodvibes/mcp.json`
+ * (held until the owner trusts the workspace).
+ */
+const MCP_MERGE_RANK: Readonly<Record<McpConfigLocation['kind'], number>> = {
+  'global-dotdir': 0,
+  'claude-desktop': 1,
+  'project-mcp': 2,
+  'global-xdg': 3,
+  'project-goodvibes': 4,
+};
+
+/** Trust modes from the strictest; a merged entry keeps the strictest any file of its name set. */
+const MCP_TRUST_STRICTNESS: readonly NonNullable<McpServerConfig['trustMode']>[] = ['blocked', 'constrained', 'ask-on-risk', 'allow-all'];
+
+/**
+ * A later file's entry for a name replaces the earlier one, but a denial only
+ * tightens: the denied tools of every file that named it are kept, and the
+ * stricter trust mode of the two (an unset mode counts as the default).
+ */
+function mergeServerEntry(earlier: McpServerConfig | undefined, later: McpServerConfig): McpServerConfig {
+  if (!earlier) return later;
+  const denied = [...new Set([...(earlier.deniedTools ?? []), ...(later.deniedTools ?? [])])];
+  const rank = (mode: McpServerConfig['trustMode']): number => MCP_TRUST_STRICTNESS.indexOf(mode ?? MCP_DEFAULT_TRUST_MODE);
+  const trustMode = earlier.trustMode !== undefined && rank(earlier.trustMode) < rank(later.trustMode) ? earlier.trustMode : later.trustMode;
+  return {
+    ...later,
+    ...(denied.length > 0 ? { deniedTools: denied } : {}),
+    ...(trustMode !== undefined ? { trustMode } : {}),
+  };
+}
+
 export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffectiveConfigOptions = {}): McpEffectiveConfig {
   const locations = getMcpConfigLocations(roots);
   const serversByName = new Map<string, McpServerConfigEntry>();
   const held: McpServerConfigEntry[] = [];
+  const mergeOrder = [...locations].sort((a, b) => MCP_MERGE_RANK[a.kind] - MCP_MERGE_RANK[b.kind]);
 
-  for (const location of locations) {
+  for (const location of mergeOrder) {
     try {
       if (!existsSync(location.path)) continue;
       const config = location.writable ? readMcpConfigAtPath(location.path) : readExternalMcpConfig(location.path);
@@ -465,7 +502,7 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffect
           logger.warn('[MCP] Ignored allowedTools from a project file; a per-tool allow is kept only in your own MCP config', { path: location.path, server: server.name, tools: server.allowedTools });
           server = { ...server, allowedTools: undefined };
         }
-        serversByName.set(server.name, { server, source: location });
+        serversByName.set(server.name, { server: mergeServerEntry(serversByName.get(server.name)?.server, server), source: location });
       }
     } catch (err) {
       logger.warn(`[MCP] Failed to read ${location.path}`, { error: summarizeError(err) });

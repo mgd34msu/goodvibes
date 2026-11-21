@@ -28,7 +28,7 @@ import {
 } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { createBudgetBreachNotifier, type BudgetBreachNotifier } from './budget-breach-notifier.ts';
 import { createUserTurnOwner, type UserTurnEnd, type UserTurnOwner } from './user-turn.ts';
-import { readBudgetAlertUsd } from '@goodvibes/engine/platform/platform/providers';
+import { readBudgetAlertUsd, type SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 
 /** Minimal orchestrator surface required by turn-event wiring. */
 interface TurnOrchestrator {
@@ -43,8 +43,8 @@ interface TurnOrchestrator {
   readonly turnEndNotice?: { handOff(): () => void };
 }
 
-/** Minimal provider registry surface required by turn-event wiring. */
-interface TurnProviderRegistry {
+/** Minimal provider registry surface required by turn-event wiring; it also prices the budget check. */
+interface TurnProviderRegistry extends SessionPricing {
   getCurrentModel(): { readonly contextWindow: number; readonly id?: string };
   getContextWindowForModel(model: { readonly contextWindow: number }): number;
 }
@@ -276,6 +276,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
         configGet,
         webhookNotifier: webhookNotifier ?? null,
         sessionId: runtime.sessionId,
+        pricing: providerRegistry,
         getSessionId: () => runtime.sessionId,
         getTurnName: () => lastTurnName,
         notifyDesktop,

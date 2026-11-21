@@ -157,7 +157,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         import('./configuration.js'), import('../daemon/webui-command.js'),
       ]);
       const configuration = createDaemonCliConfiguration(cli.flags, env, options.cwd, { readOnly: true, diagnosticMode: 'structural' });
-      return result(runWebuiCommand(cli.commandArgs, { configManager: configuration.config, baseDirectory: configuration.workingDirectory }));
+      return result(runWebuiCommand(cli.commandArgs, { configManager: configuration.config, baseDirectory: configuration.workingDirectory }), stdout);
     }
     const [{ createDaemonCliConfiguration }, { createDaemonCommandRemote }, { readOperatorTokenFile }] = await Promise.all([
       import('./configuration.js'), import('../daemon/remote-transport.js'),
@@ -230,7 +230,14 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const args = cli.commandArgs;
         if (!args.includes('disable') && !args.includes('--loopback')
           && (args.includes('--lan') || controlPlaneOriginUsesStableHost(config))) await refreshStableHostInputs();
-        return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
+        return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }),
+          cli.commandArgs.includes('--json') ? stdout : undefined);
+      }
+      case 'listener': {
+        const { runListenerCommand } = await import('../daemon/listener-command.js');
+        // A --json failure document goes to stdout like every other --json answer.
+        return result(runListenerCommand(cli.commandArgs, { configManager: config, daemonHomeDir: daemonHomeDirectory, env }),
+          cli.commandArgs.includes('--json') ? stdout : undefined);
       }
       case 'cluster': {
         const { runClusterCommand } = await import('@goodvibes/engine/terminal-shell/cluster-commands');

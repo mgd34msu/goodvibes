@@ -98,6 +98,7 @@ import type {
   SessionsHostedKillResult,
   SessionsHostedShareInput,
   SessionsHostedShareResult,
+  SessionsHostedUnshareResult,
 } from './contract-bridge-types';
 
 // Re-exported so consumers (lib/fleet.ts, lib/checkpoints.ts, FleetView.tsx, ...) import
@@ -1892,6 +1893,9 @@ export const client = {
         // Add a principal (a user name, or pairing:<id>) to the session's owners: it may then attach, read and watch it.
         share: (sessionId: string, principalId: string) =>
           invokeGatewayMethod<'sessions.hosted.share', SessionsHostedShareResult>('sessions.hosted.share', { sessionId, principalId }),
+        // Remove a principal from the session's owners and detach its clients; the last owner is never removed.
+        unshare: (sessionId: string, principalId: string) =>
+          invokeGatewayMethod<'sessions.hosted.unshare', SessionsHostedUnshareResult>('sessions.hosted.unshare', { sessionId, principalId }),
         workspaces: () => invokeGatewayMethod('sessions.hosted.workspaces', {}),
         // The transcript of a live or ended hosted session, read without attaching.
         history: (sessionId: string, signal?: AbortSignal) =>

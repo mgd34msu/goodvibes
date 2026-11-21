@@ -94,8 +94,13 @@ export interface PaymentsCompositionOptions {
   readonly ownerInbox?: (RestoredInboxWindow['port'] & Partial<Pick<LimitOfferInbox, 'latestByKey' | 'subscribe' | 'take' | 'confirmDelivered'>>) | undefined;
 }
 
-/** Most messages remembered so a poll that offers one again is not reported twice. */
-const REPORTED_MAIL_MEMORY = 512;
+/** The order-mail check payments attaches to the owner's mailbox, and what its close waits on. */
+export interface OrderMailObserver {
+  /** Checks one mail; resolves once the check settled, rejects (after logging why) when it should be tried again. */
+  readonly observe: OwnerMailHandler;
+  /** Resolves once every mail already admitted has been checked. Never rejects. */
+  drain(): Promise<void>;
+}
 
 /**
  * Reads each message on the owner's mailbox against the purchase ledger and, when
@@ -105,15 +110,16 @@ const REPORTED_MAIL_MEMORY = 512;
  * says so. Messages are handled one at a time, each with one reading of
  * which recent purchase it is about (without a decision model: the owner is
  * asked, see confirmation-report.ts). Nothing here can fail the mailbox poll: a
- * failed reading or send is logged, and the message is forgotten so the
- * mailbox offering it again tries again.
+ * failed reading, record or send is logged and rejects that mail's check, which
+ * keeps it in the owner-mail relay's pending list to be checked again
+ * (owner-mail-relay.ts); a check that settles resolves, and the relay drops it.
  */
 export function createOrderMailObserver(deps: {
   readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported' | 'recordConfirmed' | 'get'>>;
   readonly notifier: Pick<PaymentNotifier, 'deliver'>;
   /** Absent: an unverified purchase stays unverified whatever the shop mails. */
   readonly operations?: Pick<DurablePaymentOperations, 'get' | 'recover'> | undefined;
-}): OwnerMailHandler {
+}): OrderMailObserver {
   const { recordConfirmed, get } = deps.purchases;
   const operations = deps.operations;
   const recordConfirmation = recordConfirmed && get && operations
@@ -121,18 +127,11 @@ export function createOrderMailObserver(deps: {
       purchases: { recordConfirmed: recordConfirmed.bind(deps.purchases), get: get.bind(deps.purchases) }, operations,
     }, purchaseId, orderNumber)
     : undefined;
-  const seen = new Set<string>();
   let tail: Promise<void> = Promise.resolve();
-  return (mail) => {
+  const observe: OwnerMailHandler = (mail) => {
     // With no decision model in use the mail is still checked against the
     // ledger in code, and the owner is asked about a shop's mail nothing read.
-    if (seen.has(mail.id)) return;
-    seen.add(mail.id);
-    if (seen.size > REPORTED_MAIL_MEMORY) {
-      const oldest = seen.values().next();
-      if (!oldest.done) seen.delete(oldest.value);
-    }
-    tail = tail.then(async () => {
+    const check = tail.then(async () => {
       const { purchases } = deps.purchases.list({ limit: MAX_PURCHASE_LIST_LIMIT, dayKey: undefined });
       if (purchases.length === 0) return;
       const outcome = await reportOrderConfirmation({
@@ -153,12 +152,16 @@ export function createOrderMailObserver(deps: {
       if (outcome.kind === 'not-reported' && outcome.reason === 'ambiguous') {
         logger.info('A store mail reads as about more than one purchase; no confirmation report was sent');
       }
-    }).catch((error: unknown) => {
-      seen.delete(mail.id);
+    });
+    // The next mail waits for this one, whatever its outcome.
+    tail = check.catch(() => undefined);
+    return check.catch((error: unknown) => {
       // Fixed text and the error name only: the underlying message can carry mail text.
-      logger.warn('A store mail could not be checked against purchases', { error: error instanceof Error ? error.name : 'unknown' });
+      logger.warn('A store mail could not be checked against purchases; it is kept and checked again', { error: error instanceof Error ? error.name : 'unknown' });
+      throw error;
     });
   };
+  return { observe, drain: () => tail };
 }
 
 export interface PaymentsServices {
@@ -290,7 +293,8 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       const windows = readPaymentsServiceConfig(config);
       return kind === 'approval' ? windows.approvalMinutes : windows.vetoMinutes;
     });
-  const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier, operations }));
+  const orderMail = createOrderMailObserver({ purchases, notifier, operations });
+  const detachOwnerMail = options.ownerMail?.attach(orderMail.observe);
   const inbox = options.ownerInbox;
   const setConfig = options.configManager.set?.bind(options.configManager);
   const limitOffers = inbox?.latestByKey && inbox.subscribe && inbox.take && inbox.confirmDelivered && setConfig
@@ -363,6 +367,10 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     const errors: unknown[] = [], jobs: Promise<void>[] = [];
     detachOwnerMail?.();
+    // No new mail is queued now; the close waits for every mail already admitted
+    // (its report and the move of an unverified purchase to purchased), while the
+    // channels it sends through are still open.
+    jobs.push(orderMail.drain());
     limitOffers?.close();
     securityCodes.close();
     // Retire both owners synchronously. Attempt both even if one close fails.

@@ -16,12 +16,12 @@
  * CACHE ECONOMICS: fresh input, cache-read, and cache-write tokens are priced
  * distinctly. The catalog carries only the fresh input/output rates, so the
  * cache-read/write rates are derived from the fresh input rate via each
- * provider's published cache ratio (cacheRateMultipliers in
- * providers/model-pricing.ts, computed from the provider's own catalog cache
- * rates), NOT a guessed base price: the base rate is always the catalog's, and
+ * provider's published cache ratio (`cacheRatio` on the resolved pricing, from
+ * ProviderRegistry.cacheRatios over the provider's own catalog cache rates),
+ * NOT a guessed base price: the base rate is always the catalog's, and
  * an unknown model stays unpriced regardless.
  */
-import { computeUsageCostUsd } from '../../providers/model-pricing.js';
+import { computeUsageCostUsd, type CacheRatio } from '../../providers/model-pricing.js';
 
 /** A single usage record. Every dimension is optional, the service attributes over whatever a record carries. */
 export interface CostUsageRecord {
@@ -114,6 +114,8 @@ export type ResolvePricing = (model: string | undefined, provider?: string | und
   readonly source?: 'user' | 'provider' | 'catalog' | undefined;
   /** ISO date (YYYY-MM-DD) of the catalog/provider pricing snapshot; absent for user prices. */
   readonly asOf?: string | undefined;
+  /** The provider's published cache ratios (`ProviderRegistry.cacheRatios`), for rates with no cache rates of their own; absent prices cache tokens at the input rate. */
+  readonly cacheRatio?: Partial<CacheRatio> | undefined;
 } | null;
 
 const WINDOW_MS: Record<CostWindow, number> = {
@@ -209,7 +211,7 @@ export class CostAttributionService {
       status: 'priced',
       source: pricing.source ?? 'catalog',
       rates: { inputPerMTok: pricing.input, outputPerMTok: pricing.output, cacheReadPerMTok: pricing.cacheRead, cacheWritePerMTok: pricing.cacheWrite },
-    }, rec, rec.provider);
+    }, rec, rec.provider, pricing.cacheRatio);
     return { costUsd, state: 'priced', source: pricing.source, asOf: pricing.asOf };
   }
 

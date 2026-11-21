@@ -106,14 +106,27 @@ export function isMutatingMethod(method: string): boolean {
   return !READ_METHODS.has(method.toUpperCase());
 }
 
+/** What the catalog says about the method a relayed call addresses. */
+export interface RelayMethodFacts {
+  /**
+   * The method's effect, derived from the effects it declares, the same fact
+   * admission reads: anything but `read` changes state or sends outward.
+   * Absent for a plugin's method, which declares access and scopes instead.
+   */
+  readonly effect?: 'read' | 'write' | 'outward' | undefined;
+  readonly scopes: readonly string[];
+}
+
 /**
- * Whether a call changes state. The catalog method's scopes decide (`read:*`
- * only means it does not), so a read invoked by POST is not gated and a
- * write bound to GET is. A call with no catalog method, or one whose method
- * declares no scopes, falls back to the HTTP verb.
+ * Whether a call changes state. The catalog method's effect decides, so a
+ * read invoked by POST is not gated and a write or an outward send is,
+ * whatever scopes it names. A method with no effect (a plugin's) is judged by
+ * its scopes (`read:*` only means it does not change state); a call with no
+ * catalog method, or one whose method declares neither, by its HTTP verb.
  */
-export function callNeedsStepUp(methodScopes: readonly string[] | null, httpMethod: string): boolean {
-  if (methodScopes && methodScopes.length > 0) return methodScopes.some((scope) => !scope.startsWith('read:'));
+export function callNeedsStepUp(method: RelayMethodFacts | null, httpMethod: string): boolean {
+  if (method?.effect !== undefined) return method.effect !== 'read';
+  if (method && method.scopes.length > 0) return method.scopes.some((scope) => !scope.startsWith('read:'));
   return isMutatingMethod(httpMethod);
 }
 

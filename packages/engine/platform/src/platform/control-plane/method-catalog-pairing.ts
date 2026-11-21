@@ -17,6 +17,7 @@
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import type { EffectId } from '../security/effect-authority.js';
+import { OWNER_APPROVAL_PENDING_SCHEMA } from './operator-contract-schemas.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -31,7 +32,7 @@ import {
  * so it is held to what stepup.credentials.register is. pairing.handoff.create
  * offers only what a pairing that holds these may complete.
  */
-export const PAIRING_HANDOFF_COMPLETE_EFFECTS: readonly [EffectId, ...EffectId[]] = ['control-plane.write', 'owner.act', 'stepup.credential.register'];
+export const PAIRING_HANDOFF_COMPLETE_EFFECTS: readonly [EffectId, ...EffectId[]] = ['control-plane.write', 'model.refused', 'stepup.credential.register'];
 
 /** Browser-push subscription key material (p256dh + auth), for the notifications offer. */
 const PUSH_SUBSCRIPTION_KEYS_SCHEMA = objectSchema({
@@ -99,7 +100,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   }),
   methodDescriptor({
     id: 'pairing.tokens.create',
-    effects: ['control-plane.write', 'owner.act'],
+    effects: ['control-plane.write', 'model.refused'],
     title: 'Mint Paired Device Token',
     description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent\'s credential for the calls it makes on the owner\'s behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller\'s token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner\'s own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.',
     category: 'pairing',
@@ -122,17 +123,20 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.delete',
     repeat: 'safe',
-    effects: ['control-plane.write', 'owner.act'],
+    effects: ['control-plane.write', 'model.refused'],
     title: 'Revoke Paired Device Token',
-    description: 'Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.',
+    description: 'Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller\'s own token, is revoked at once; any other token (a device the owner paired, another principal\'s) is the owner\'s own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY.',
     category: 'pairing',
     transport: ['ws'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),
-    outputSchema: objectSchema({ id: STRING_SCHEMA, revoked: BOOLEAN_SCHEMA, alsoRevoked: arraySchema(STRING_SCHEMA) }, ['id', 'revoked', 'alsoRevoked']),
+    outputSchema: { anyOf: [
+      objectSchema({ id: STRING_SCHEMA, revoked: BOOLEAN_SCHEMA, alsoRevoked: arraySchema(STRING_SCHEMA) }, ['id', 'revoked', 'alsoRevoked']),
+      OWNER_APPROVAL_PENDING_SCHEMA,
+    ] },
   }),
   methodDescriptor({
     id: 'pairing.tokens.migrate',
-    effects: ['control-plane.write', 'owner.act'],
+    effects: ['control-plane.write', 'model.refused'],
     title: 'Migrate Off The Shared Token',
     description: 'A client currently authenticated with the legacy single shared token mints its OWN named per-device token and receives the plaintext secret once. A token minted here is automation (origin automation), for a script; the owner\'s own browser or app moves off the shared token with pairing.handoff.create and `fromSharedToken: true`, which makes it an owner device. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret instead of minting a second one. This does NOT revoke the shared token; that is a separate explicit step (pairing.tokens.revokeShared).',
     category: 'pairing',
@@ -144,9 +148,9 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.revokeShared',
     repeat: 'unsafe',
-    effects: ['control-plane.write', 'owner.act'],
+    effects: ['access.withdraw'],
     title: 'Revoke The Legacy Shared Token',
-    description: 'Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.',
+    description: 'Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner\'s own act (access.withdraw): any credential but the owner\'s own (the operator token, a device he paired himself, his sign-in) is refused 403 OWNER_ONLY, an admin\'s with the reason that it is the owner\'s to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.',
     category: 'pairing',
     transport: ['ws'],
     outputSchema: objectSchema({ legacySharedRevoked: BOOLEAN_SCHEMA }, ['legacySharedRevoked']),
@@ -154,7 +158,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.handoff.create',
     repeat: 'unsafe',
-    effects: ['control-plane.write', 'owner.act'],
+    effects: ['control-plane.write', 'model.refused'],
     title: 'Create Pairing Hand-off',
     description: 'The owner\'s pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin\'s honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner\'s own (origin owner-pairing) when the caller holds the owner\'s own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent\'s credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner\'s own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).',
     category: 'pairing',

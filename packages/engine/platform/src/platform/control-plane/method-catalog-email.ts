@@ -365,6 +365,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'email.draft.update',
     repeat: 'unsafe',
+    confirmation: 'not-declined',
     title: 'Replace an Email Draft',
     description:
       'Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A draft is never sent by this verb. Answers the new draft\'s { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.',
@@ -392,6 +393,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   }),
   methodDescriptor({
     id: 'email.send',
+    confirmation: 'confirm',
     replay: { in: 'body', name: 'clientSendId', behavior: 'A repeat with the same `clientSendId` and the same message within ten minutes returns the first answer instead of sending again; the same id with a different message is 409 CLIENT_SEND_ID_REUSED.' },
     recipients: ['to'],
     effects: ['email.administer', 'outward.send'],
@@ -407,7 +409,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       inReplyTo: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
       clientSendId: STRING_SCHEMA,
-    }, ['to', 'subject', 'body', 'confirm']),
+    }, ['to', 'subject', 'body']),
     outputSchema: objectSchema({
       messageId: STRING_SCHEMA,
       sentAt: STRING_SCHEMA,
@@ -417,6 +419,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'email.inbox.update',
     repeat: 'safe',
+    confirmation: 'not-declined',
     title: 'Mark, Archive or Delete an Email',
     description:
       'Change one inbox message by IMAP UID: action seen or unseen sets or clears its read flag; archive moves it to the folder the server marks Archive (or All Mail); delete moves it to the folder the server marks Trash, so it can be recovered there. A server with no such folder is refused and nothing changes; nothing here expunges permanently. uidValidity is required: the mailbox generation email.inbox.list or email.inbox.read returned with the uid, so a reset mailbox refuses instead of changing whichever message now holds that UID. Answers { uid, action, movedTo? }.',

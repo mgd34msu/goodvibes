@@ -26,7 +26,7 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
 import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
-import { calcSessionCost, computeBudgetBreach, isModelPriced } from '@goodvibes/engine/platform/platform/providers';
+import { calcSessionCost, computeBudgetBreach, isModelPriced, type SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
   shouldFireAlert,
@@ -50,6 +50,8 @@ export interface BudgetBreachNotifierDeps {
   readonly configGet: ConfigGet;
   readonly webhookNotifier?: WebhookNotifier | null;
   readonly sessionId: string;
+  /** What the session's totals are priced with when no spent figure is given: the runtime's ProviderRegistry. */
+  readonly pricing: SessionPricing;
   /** Read at alert time; a resumed or forked session changes the id after the notifier is built. Wins over `sessionId`. */
   readonly getSessionId?: (() => string) | undefined;
   /** The name of the turn that just ended (the one during which the budget tripped). */
@@ -87,9 +89,9 @@ export function createBudgetBreachNotifier(deps: BudgetBreachNotifierDeps): Budg
       if (![usage.input, usage.output, usage.cacheRead, usage.cacheWrite]
         .every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0)) return false;
       const spent = typeof usage.costUsd === 'number' && Number.isFinite(usage.costUsd) ? usage.costUsd : undefined;
-      if (spent === undefined && !isModelPriced(sessionModel)) return false; // cost would be a placeholder, not real
+      if (spent === undefined && !isModelPriced(deps.pricing, sessionModel)) return false; // cost would be a placeholder, not real
 
-      const sessionCost = spent ?? calcSessionCost(usage.input, usage.output, usage.cacheRead, usage.cacheWrite, sessionModel);
+      const sessionCost = spent ?? calcSessionCost(deps.pricing, usage.input, usage.output, usage.cacheRead, usage.cacheWrite, sessionModel);
       const breached = computeBudgetBreach(sessionCost, budgetThresholdUsd);
 
       if (!breached) {

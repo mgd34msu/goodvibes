@@ -189,7 +189,7 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
   blankRow,
   renderStatusLine,
   renderThrobberLine,
-  cost: (options) => statusCostText(options.usage, options.model),
+  cost: (options) => statusCostText(options.usage, options.model, options.pricing),
   barColor: (options) => composerModeStyle(options).color,
   powerNote: (options) => options.powerNote,
   compactFraction,

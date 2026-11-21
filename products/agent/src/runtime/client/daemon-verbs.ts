@@ -50,6 +50,7 @@ import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
+import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { ConnectedHostVerbError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export interface AgentDaemonVerbCallerOptions {
@@ -221,7 +222,10 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
 
   const probe = (): DaemonReachability => {
     const resolved = resolveConnection(options);
-    return 'reason' in resolved ? { available: false, reason: resolved.reason } : { available: true };
+    // Where the host is, from the configured address: settings only, no request.
+    const thisMachine = typeof (options.configManager as { get?: unknown } | null)?.get === 'function'
+      ? configuredDaemonIsThisMachine(options.configManager) : true;
+    return 'reason' in resolved ? { available: false, reason: resolved.reason, thisMachine } : { available: true, thisMachine };
   };
 
   return {

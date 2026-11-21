@@ -256,7 +256,9 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
     // reported even when this offer was withdrawn while the rewind ran.
     state.applied = true;
     // Kept under the undo id, so putting the rewind back also puts the anchors back.
-    if (anchor.turnId !== undefined) discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, options.surface, outcome.undoSnapshotId);
+    if (anchor.turnId !== undefined && !discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, options.surface, outcome.undoSnapshotId).saved) {
+      log.warn('the list of rewind points could not be saved; after a restart it may offer turns that were rewound away', { sessionId: anchor.sessionId });
+    }
     return { droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId,
       ...(outcome.undoExpiresAfter ? { undoExpiresAfter: outcome.undoExpiresAfter } : {}) };
   };

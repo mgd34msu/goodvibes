@@ -18,11 +18,10 @@
  *
  * Two things are deliberate:
  *
- *  - **`confirm: true` is enforced here, not only advertised.** `events.create`,
+ *  - **`confirm: true` is enforced, not only advertised.** `events.create`,
  *    `events.update`, `events.delete` and `ics.import` write to a real calendar.
- *    The descriptors mark them `dangerous`/`admin` and require `confirm` in their
- *    input schema; this module refuses without it as well, so the guarantee does
- *    not depend on schema validation being reached by every transport.
+ *    Their descriptors declare `confirmation: 'confirm'`, which the catalog
+ *    holds every call to before a handler here runs (confirmation-gate.ts).
  *  - **A failure carries its own fix.** The connector answers with
  *    `{ problem, fix }` rather than an exception, and both survive into the
  *    error a caller sees, because "Google refused the request because the
@@ -32,7 +31,6 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { refuseNonUserRequest } from './explicit-user-request.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 
@@ -206,21 +204,6 @@ function readOptionalStringList(value: unknown): readonly string[] | undefined {
   return entries.length > 0 ? entries : undefined;
 }
 
-/**
- * A write verb without `confirm: true` is refused before the backend is
- * touched. See the module header for why this is not left to schema
- * validation alone.
- */
-function requireConfirmation(params: Record<string, unknown>, action: string): void {
-  if (params.confirm !== true) {
-    throw new GatewayVerbError(
-      `${action} writes to a real calendar. Re-issue with confirm: true once the change has been reviewed.`,
-      'CONFIRMATION_REQUIRED',
-      400,
-    );
-  }
-}
-
 function listInputFrom(params: Record<string, unknown>): CalendarGatewayListInput {
   return {
     calendarId: readOptionalString(params.calendarId),
@@ -248,8 +231,6 @@ export function createCalendarEventsGetHandler(service: CalendarGatewayService):
 export function createCalendarEventsCreateHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    requireConfirmation(params, 'calendar.events.create');
-    refuseNonUserRequest(invocation, 'calendar.events.create');
     return service.createEvent({
       title: requireStringValue(params.title, 'title'),
       start: requireStringValue(params.start, 'start'),
@@ -274,8 +255,6 @@ export function createCalendarEventsUpdateHandler(service: CalendarGatewayServic
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const eventId = requireStringValue(params.eventId, 'eventId');
-    requireConfirmation(params, 'calendar.events.update');
-    refuseNonUserRequest(invocation, 'calendar.events.update');
     const changes: CalendarGatewayUpdateInput = {
       title: readOptionalString(params.title),
       start: readOptionalString(params.start),
@@ -301,8 +280,6 @@ export function createCalendarEventsDeleteHandler(service: CalendarGatewayServic
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const eventId = requireStringValue(params.eventId, 'eventId');
-    requireConfirmation(params, 'calendar.events.delete');
-    refuseNonUserRequest(invocation, 'calendar.events.delete');
     if (service.deleteEvent === undefined) throw unsupportedWrite('delete');
     return service.deleteEvent(eventId, readOptionalString(params.calendarId));
   };
@@ -328,8 +305,6 @@ export function createCalendarIcsExportHandler(service: CalendarGatewayService):
 export function createCalendarIcsImportHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    requireConfirmation(params, 'calendar.ics.import');
-    refuseNonUserRequest(invocation, 'calendar.ics.import');
     return service.importIcs(
       requireStringValue(params.icsContent, 'icsContent'),
       readOptionalString(params.calendarId),

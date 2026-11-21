@@ -228,7 +228,11 @@ export function useChatStream({
     const lifetime = getClientLifetime();
     turnStateRef.current = 'stopping';
     setTurnState('stopping');
-    void platformClient.chat.turns.cancel(activeSessionId).catch((error: unknown) => {
+    void platformClient.chat.turns.cancel(activeSessionId).then((result) => {
+      if (!owner || connectionOwner.current !== owner || !isClientLifetimeCurrent(lifetime)) return;
+      // The stop landed before the turn started: no turn ran, so no terminal event follows.
+      if (result.stoppedBeforeStart === true) setTurnState((current) => (current === 'stopping' ? 'idle' : current));
+    }, (error: unknown) => {
       if (!owner || connectionOwner.current !== owner || !isClientLifetimeCurrent(lifetime)) return;
       if (isNoActiveTurnError(error)) {
         // Benign: the turn finished before the stop landed. The terminal

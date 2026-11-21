@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { constantTimeEquals, declaredMention, ingressMetadata, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -198,44 +197,30 @@ async function handleNtfyChatPayload(
   }
   const control = await answerNtfyControl(body, context, topic, message);
   if (control) return control;
-  if (!context.publishConversationFollowup) {
-    return Response.json({ error: 'ntfy chat routing is unavailable in this runtime' }, { status: 503 });
-  }
   const session = await findPreferredTuiSession(context);
   if (!session) {
     return Response.json({ error: 'No active terminal TUI session is available for ntfy chat' }, { status: 409 });
   }
-  const messageId = randomUUID();
-  const timestamp = Date.now();
-  await context.sessionBroker.appendCompanionMessage(session.id, {
-    messageId,
-    body: message,
-    source: 'ntfy-chat',
-    timestamp,
-  });
-  committed();
-  context.queueNtfyChatReply?.({
+  // Queued as the next thing said in the terminal's conversation: the terminal
+  // collects it from the session's inputs, runs it as its next turn and reports
+  // the answer, which goes back to this topic through the topic's route.
+  const binding = await context.routeBindings.upsertBinding(ntfyTopicBinding(body, topic));
+  const outcome = await submitSurfaceMessage(context, binding, {
+    surface: 'ntfy',
+    intent: 'follow-up',
+    text: message,
+    logLabel: 'handleNtfyChatPayload',
+    control: false,
     sessionId: session.id,
-    topic,
-    body: message,
+    ...(typeof body.id === 'string' && body.id ? { providerMessageId: body.id } : {}),
+    externalId: topic,
+    threadId: topic,
+    channelId: topic,
     title: typeof body.title === 'string' ? body.title : 'GoodVibes chat',
-    messageId,
+    metadata: { ...ingressMetadata(body), surface: 'ntfy', topic },
+    committed,
   });
-  context.publishConversationFollowup(session.id, {
-    messageId,
-    body: message,
-    source: 'ntfy-chat',
-    timestamp,
-    metadata: { surface: 'ntfy', topic, ntfyMessageId: messageId },
-  });
-  return Response.json({
-    acknowledged: true,
-    queued: false,
-    routedTo: 'tui-chat',
-    sessionId: session.id,
-    messageId,
-    topic,
-  }, { status: 202 });
+  return surfaceOutcomeResponse(outcome, 'caller', { topic });
 }
 
 async function handleNtfyRemoteChatPayload(

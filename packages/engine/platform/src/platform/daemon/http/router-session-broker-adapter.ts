@@ -39,7 +39,5 @@ export function buildRouterSessionBrokerAdapter(
     completeAgent: async (sessionId, agentId, message, meta) => {
       await sessionBroker.completeAgent(sessionId, agentId, message, meta);
     },
-    appendCompanionMessage: (sessionId, input) =>
-      sessionBroker.appendCompanionMessage(sessionId, input),
   };
 }

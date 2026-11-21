@@ -145,9 +145,12 @@ Memory tab offers the same list and restore under "Copies and restore".
 
 ## GraphQL and projections
 
-The knowledge domain exposes a GraphQL schema and execution surface, alongside projection
+The knowledge domain exposes a GraphQL schema and two execution methods, alongside projection
 targets such as overview pages, rollups, backlinks, source-health views, and exportable markdown
-or wiki-style materializations.
+or wiki-style materializations. `knowledge.graphql.query` (`POST /api/knowledge/graphql`) runs
+queries and changes nothing; `knowledge.graphql.mutate` (`POST /api/knowledge/graphql/mutate`,
+admin) runs mutations, and over the relay with `relay.requireStepUpForMutations` on it needs a
+passkey confirmation. Each refuses an operation of the other kind, naming the method that runs it.
 
 The canonical store is the structured knowledge database. GraphQL and projections are query and presentation surfaces on top of it.
 

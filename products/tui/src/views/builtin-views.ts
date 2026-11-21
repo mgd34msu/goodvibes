@@ -71,6 +71,7 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
     getContextTokens: () => deps.orchestrator?.lastInputTokens ?? 0,
     getContextWindow: () => deps.getCtxWindow?.() ?? 0,
     getModelId: () => deps.providerRegistry.getCurrentModel().id,
+    pricing: deps.providerRegistry,
     getAgentStatus: (id) => ui.agents.agentManager.getStatus(id),
     getFleetCost: () => fleetReadModel.getSnapshot().totalCost,
     configManager: resolved.configManager,

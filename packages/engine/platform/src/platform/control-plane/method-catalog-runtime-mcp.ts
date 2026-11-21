@@ -207,7 +207,7 @@ export const MCP_ACTION_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] =
   methodDescriptor({
     id: 'mcp.servers.tools.unblock',
     repeat: 'safe',
-    effects: ['mcp.administer', 'owner.act'],
+    effects: ['mcp.administer', 'model.refused'],
     title: 'Stop Blocking an MCP Tool',
     description: 'Drop the block kept for one tool with its MCP server\'s entry, and this daemon\'s block of it for its session, and apply it at once, so the server\'s trust level and limits decide the tool again. A kept exemption of the tool stays. Refused when the tool is not blocked. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp unblock <server> <tool>.',
     category: 'mcp',
@@ -219,7 +219,7 @@ export const MCP_ACTION_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] =
   methodDescriptor({
     id: 'mcp.servers.tools.exempt',
     repeat: 'safe',
-    effects: ['mcp.administer', 'owner.act'],
+    effects: ['mcp.administer', 'model.refused'],
     title: 'Let an MCP Tool Go Beyond Its Server\'s Limits',
     description: 'Keep an exemption of one tool with its MCP server\'s entry in the owner\'s global MCP config and apply it at once: calls to the tool pass the server\'s folder and site limits. A blocked server, held-back tools and a block of the same tool still refuse. Loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model and for a server kept in a project file. The same as /mcp exempt <server> <tool>.',
     category: 'mcp',
@@ -243,7 +243,7 @@ export const MCP_ACTION_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] =
   methodDescriptor({
     id: 'mcp.servers.trust.set',
     repeat: 'safe',
-    effects: ['mcp.administer', 'owner.act'],
+    effects: ['mcp.administer', 'model.refused'],
     title: 'Set an MCP Server\'s Trust Level',
     description: 'Keep a server\'s trust level with its entry in the MCP config file that holds it and apply it at once, after a restart too; a level set for this daemon\'s session ends. allow-all is kept only in the owner\'s global file. A looser level loosens what the server may do, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp trust <server> <mode>.',
     category: 'mcp',
@@ -282,7 +282,7 @@ export const MCP_ACTION_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] =
   methodDescriptor({
     id: 'mcp.servers.quarantine.accept',
     repeat: 'safe',
-    effects: ['mcp.administer', 'owner.act'],
+    effects: ['mcp.administer', 'model.refused'],
     title: 'Accept an MCP Server\'s Changed Tools',
     description: 'Accept the tools of a server whose tools were held back because they changed since they were last accepted, and offer them again on this daemon. Refused when its tools are not held back. Offers tools nobody has reviewed, so it is the owner\'s own act: refused for the Agent\'s model. The same as /mcp accept-tools <server>.',
     category: 'mcp',

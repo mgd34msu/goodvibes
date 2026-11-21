@@ -126,7 +126,7 @@ export function runConfiguredDaemonCli(
         stderr(`[goodvibes-daemon] the webhook listener token file was unreadable (${stored.quarantined.reason}); a new token was created, so every webhook sender must be given it.`);
       }
       if (stored.created) {
-        pairingOutput?.(`Webhook listener token (the bearer token webhook senders use; it is kept in ${stored.path}): ${stored.token}`);
+        pairingOutput?.(`Webhook listener token (the bearer token webhook senders use; it is kept in ${stored.path}, and goodvibes-daemon listener token --show prints it again): ${stored.token}`);
       }
       return stored.token;
     };

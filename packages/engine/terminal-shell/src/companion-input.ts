@@ -1,21 +1,4 @@
-import type { SessionEvent } from '@goodvibes/engine/platform/events/session';
 import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
-export type CompanionMessagePayload = Extract<SessionEvent, { type: 'COMPANION_MESSAGE_RECEIVED' }>;
-export function companionMessageToOrchestratorInputOptions(payload: CompanionMessagePayload): OrchestratorUserInputOptions {
-  const metadata = payload.metadata;
-  const surface = typeof metadata?.surface === 'string' ? metadata.surface : undefined;
-  const topic = typeof metadata?.topic === 'string' ? metadata.topic : undefined;
-
-  return {
-    origin: {
-      source: payload.source,
-      messageId: payload.messageId,
-      ...(surface ? { surface } : {}),
-      ...(topic ? { topic } : {}),
-      ...(metadata ? { metadata } : {}),
-    },
-  };
-}
 
 /**
  * The one path by which "the owner said this" becomes a turn in a terminal app.
@@ -24,7 +7,22 @@ export function companionMessageToOrchestratorInputOptions(payload: CompanionMes
  * turn start on the same path as a typed one (in the Agent: native intake and
  * the same routing decision, the connected host's loop or this process).
  */
-export type OwnerInputRoute = (text: string, options?: OrchestratorUserInputOptions) => void;
+export type OwnerInputRoute = (text: string, options?: OrchestratorUserInputOptions, answered?: OwnerInputAnswered) => void;
+
+/** How the turn a routed message became ended: its answer text and whether it completed. */
+export interface OwnerInputAnswer {
+  readonly answer: string;
+  readonly status: 'completed' | 'failed' | 'cancelled';
+}
+
+/**
+ * Told how the message's turn ended when it ran somewhere this process sees no
+ * turn events for (the connected host's loop), or when it never became a turn
+ * (refused, failed, possibly sent): the one who passed the message owes its
+ * sender an answer either way. A turn run in this process is answered from its
+ * own turn events instead.
+ */
+export type OwnerInputAnswered = (answer: OwnerInputAnswer) => void;
 
 /** Keyed by the session's orchestrator: one route per running conversation. */
 const ownerInputRoutes = new WeakMap<object, OwnerInputRoute>();

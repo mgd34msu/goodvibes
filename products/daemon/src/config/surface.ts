@@ -21,8 +21,13 @@
  * scoped move, plus the live-install rehearsal that goes with it. Until then
  * this constant carries the reason so nobody "tidies" it. The daemon's
  * settings do not live here: see GOODVIBES_DAEMON_SETTINGS_ROOT below.
+ *
+ * The value is the engine's DAEMON_STATE_SURFACE_ROOT, so a terminal app
+ * waiting for this daemon finds its lifecycle marker where it is written.
  */
-export const GOODVIBES_DAEMON_SURFACE_ROOT = 'tui';
+import { DAEMON_STATE_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
+
+export const GOODVIBES_DAEMON_SURFACE_ROOT = DAEMON_STATE_SURFACE_ROOT;
 
 /**
  * Where the daemon keeps its own value of every client-scoped setting

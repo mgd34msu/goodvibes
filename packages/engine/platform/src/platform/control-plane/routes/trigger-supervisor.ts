@@ -8,7 +8,6 @@ import { describeWatchValues, watchDefinitionFromValues, WatchValuesError } from
 import type { TriggerManager } from '../../triggers/manager.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
-import { refuseNonUserRequest } from './explicit-user-request.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 function authenticate(invocation: GatewayMethodInvocation, scope: string): void {
@@ -75,8 +74,8 @@ export function registerTriggerSupervisorGatewayMethods(
     'watchers.triggers.cancel': async (_invocation, params) => ({ trigger: await operations.cancel(requireString(params, 'id')) }),
     'watchers.triggers.reset': async (_invocation, params) => ({ trigger: await operations.reset(requireString(params, 'id')) }),
     'watchers.triggers.grant.list': async () => ({ grants: await operations.listGrants() }),
-    'watchers.triggers.grant.register': async (invocation, params) => {
-      refuseNonUserRequest(invocation, 'watchers.triggers.grant.register');
+    'watchers.triggers.grant.register': async (_invocation, params) => {
+      // Its descriptor's confirmation (`not-declined`) was checked by the catalog before this handler ran.
       const args = optionalStrings(params['args'], 'args');
       const cwd = params['cwd'];
       if (cwd !== undefined && typeof cwd !== 'string') throw new GatewayVerbError('cwd must be a string', 'INVALID_ARGUMENT', 400, 'cwd');

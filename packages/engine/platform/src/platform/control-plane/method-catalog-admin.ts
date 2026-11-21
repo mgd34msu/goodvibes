@@ -93,7 +93,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.create',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Create Local Auth User',
     description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
     category: 'auth',
@@ -109,7 +109,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.scopes.set',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Set Local Auth User Scopes',
     description: 'Give a local auth user a narrower list of operator scopes, or return it to its role\'s default set with scopes: null. Takes effect on the user\'s next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.',
     category: 'auth',
@@ -123,7 +123,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.delete',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Delete Local Auth User',
     description: 'Delete a local auth user.',
     category: 'auth',
@@ -134,7 +134,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.password.rotate',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Rotate Local Auth Password',
     description: 'Rotate a local auth user password.',
     category: 'auth',
@@ -145,7 +145,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.sessions.delete',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Revoke Local Auth Session',
     description: 'Revoke a local auth session.',
     category: 'auth',
@@ -156,7 +156,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.bootstrap.delete',
     repeat: 'safe',
-    effects: ['auth.administer', 'owner.act'],
+    effects: ['auth.administer', 'model.refused'],
     title: 'Delete Bootstrap File',
     description: 'Delete the local-auth bootstrap credential file.',
     category: 'auth',

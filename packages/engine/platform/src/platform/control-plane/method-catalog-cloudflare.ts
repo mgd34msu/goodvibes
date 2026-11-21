@@ -121,7 +121,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.token.create',
     repeat: 'unsafe',
-    effects: ['cloudflare.administer', 'owner.act'],
+    effects: ['cloudflare.administer', 'model.refused'],
     title: 'Create Cloudflare Operational Token',
     description: 'Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. When this daemon already holds the operational token it made for the same account, zone and components, that token is returned with `reused` true and nothing is created (`reuse: false` makes a new one). A new token revokes the one it replaces; `replaced` says whether that worked. Creates run one at a time. Each create is recorded in the daemon\'s operation log before it is sent, and the new token\'s name ends in that operation\'s id: a create whose answer was lost fails with CLOUDFLARE_TOKEN_OUTCOME_UNKNOWN (the token may exist), and the next create first finds such tokens (by the id noted, or by name) and revokes them, since their values were never stored; any it cannot find or revoke are listed in `residual`. Answered 201. Creates a credential in the Cloudflare account unless one is reused.',
     category: 'cloudflare',
@@ -205,7 +205,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.provision',
     repeat: 'safe',
-    effects: ['cloudflare.administer', 'owner.act'],
+    effects: ['cloudflare.administer', 'model.refused'],
     title: 'Provision Cloudflare Platform',
     description: 'Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel and its connector on this daemon, Access application and service token, DNS records, KV for queued-job state, Durable Objects for the daily queue budget, R2 for job bodies, Secrets Store for the worker\'s credentials), answered 202 with one step per resource: `ok`, `skipped` or `warning`; `warnings` repeats the message of every warning step. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. `ok` is true, and `cloudflare.enabled` and the Cloudflare batch queue are switched on, only when that check passed (or was turned off) and Access, when asked for, protects the daemon hostname; otherwise a `switch-on` warning step says why nothing was switched. Creates and changes billable resources in the Cloudflare account.',
     category: 'cloudflare',

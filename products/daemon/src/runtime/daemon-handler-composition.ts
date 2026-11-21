@@ -16,7 +16,9 @@ import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
 import { createPaymentsServices } from './payments-composition.js';
 import { recordGroupSpend } from '@goodvibes/engine/platform/platform/payments';
-import { createOwnerMailRelay } from './owner-mail-relay.js';
+import { createOwnerMailRelay, OWNER_MAIL_PENDING_FILE } from './owner-mail-relay.js';
+import { controlPlaneStorePath } from '@goodvibes/engine/platform/platform/control-plane';
+import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { inboxPollerGate } from './cluster-composition.js';
 import type { ShellPathService } from './index.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -117,7 +119,10 @@ export async function createDaemonHandlerComposition(
     ...(options.nativeMutationHost ? { nativeMutationHost: options.nativeMutationHost } : {}),
     ...(options.hasProfile ? { hasProfile: options.hasProfile } : {}),
   };
-  const ownerMail = createOwnerMailRelay();
+  // Every screened owner mail stays in this durable list until payments has checked it against the purchases.
+  const ownerMail = createOwnerMailRelay({
+    pendingPath: controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, OWNER_MAIL_PENDING_FILE),
+  });
   return registerDaemonHandlers(handlerContext, {
     registerRouting: registerRoutingMethods,
     registerInbox: (ctx, routing) => registerOwnedMailInbox(options.inboxFactory, ctx, routing, {

@@ -6,6 +6,22 @@ import {
 } from '@goodvibes/engine/terminal-shell/session-resume';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type { CommandContext } from '../command-registry.ts';
+import { createSessionInputChangeSubscriber } from '@goodvibes/engine/platform/platform/runtime/client';
+import { requestSessionHandover } from '@goodvibes/engine/terminal-shell/session-handover';
+import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
+import { createAgentDaemonVerbCaller, resolveConnectedHostConnection } from '../../runtime/client/daemon-verbs.ts';
+
+/** Ask the terminal that has `sessionId` open, through the connected host, to save it and let go; resolves once it has. */
+async function requestHandoverThroughHost(ctx: Pick<CommandContext, 'platform' | 'workspace'>, sessionId: string): Promise<void> {
+  const configManager = ctx.platform.configManager;
+  const homeDirectory = (): string => requireShellPaths(ctx).homeDirectory;
+  const options = { configManager, homeDirectory };
+  const connection = resolveConnectedHostConnection(options);
+  const subscribe = 'reason' in connection
+    ? (_onChange: (sessionId: string) => void, handlers?: { readonly onEnd?: () => void }) => { queueMicrotask(() => handlers?.onEnd?.()); return () => {}; }
+    : createSessionInputChangeSubscriber({ baseUrl: connection.baseUrl, getAuthToken: () => connection.token });
+  await requestSessionHandover({ sessionId, verbs: createAgentDaemonVerbCaller(options), subscribeInputChanges: subscribe });
+}
 
 export interface LoadedSavedSession {
   readonly name: string;
@@ -28,7 +44,7 @@ export interface LoadedSavedSession {
  * session publishes it the same way.
  */
 export async function loadSavedSessionIntoLive(
-  ctx: Pick<CommandContext, 'isGenerating' | 'session' | 'abandonHostedSession'> & Partial<Pick<CommandContext, 'clients'>>,
+  ctx: Pick<CommandContext, 'isGenerating' | 'session' | 'abandonHostedSession' | 'platform' | 'workspace'> & Partial<Pick<CommandContext, 'clients'>>,
   sessionManager: Pick<SessionManager, 'load' | 'save' | 'openForWriting' | 'closeForWriting'>,
   name: string,
   options: LoadSavedSessionOptions = {},
@@ -46,6 +62,8 @@ export async function loadSavedSessionIntoLive(
       ctx.session.writeLastSessionPointer?.(sessionId);
     },
     recoveryFailed: (sessionId, error) => ctx.session.announceSessionRecoveryFailed?.(sessionId, summarizeError(error)),
+    // `--force`: the terminal that has the session open is asked, through the connected host, to save it and let go.
+    requestHandover: (sessionId) => requestHandoverThroughHost(ctx, sessionId),
   }, sessionManager, name, options);
   ctx.session.announceSessionResumed?.(loaded.name, loaded.messageCount);
   return {

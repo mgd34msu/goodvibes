@@ -41,7 +41,7 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/
 import { getOrCreateCompanionToken } from '@goodvibes/engine/platform/platform/pairing';
 import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision } from '@goodvibes/engine/platform/platform/runtime/client/daemon-credentials';
 import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
-import { configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
+import { configuredDaemonIsThisMachine, configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
@@ -63,6 +63,8 @@ export interface OperatorRpcAvailable {
   readonly platformClient: GoodVibesPlatform;
   /** The daemon this client calls (`DaemonTarget.origin.baseUrl`): what an attachment, a queued item or a draft records as its daemon. */
   readonly origin: string;
+  /** Whether that daemon runs on this machine (`DaemonTarget.thisMachine`). */
+  readonly thisMachine: boolean;
 }
 
 export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
@@ -182,12 +184,13 @@ export function resolveOperatorRpc(deps: {
       if (!endpoint.available) throw new GoodVibesError(endpoint.reason, { category: 'authorization', source: 'transport', code: 'CREDENTIAL_NOT_FOR_TARGET', recoverable: false });
       return endpoint.token;
     };
-    return { available: true, origin: resolution.pendingProof.baseUrl, platformClient: operatorClientFor(resolution.pendingProof.baseUrl, proven, deps.fetch) };
+    // A declared public address of this machine's daemon, still to prove itself.
+    return { available: true, origin: resolution.pendingProof.baseUrl, thisMachine: true, platformClient: operatorClientFor(resolution.pendingProof.baseUrl, proven, deps.fetch) };
   }
   const endpoint = endpointOf(resolution);
   if (!endpoint.available) return endpoint;
   const token = endpoint.token;
-  return { available: true, origin: endpoint.baseUrl, platformClient: operatorClientFor(endpoint.baseUrl, async () => token, deps.fetch) };
+  return { available: true, origin: endpoint.baseUrl, thisMachine: endpoint.target.thisMachine, platformClient: operatorClientFor(endpoint.baseUrl, async () => token, deps.fetch) };
 }
 
 function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
@@ -364,7 +367,11 @@ export function createDaemonVerbCaller(deps: {
     return rpc;
   };
   return {
-    probe: () => resolve(),
+    // An unreachable daemon still says where it is: on this machine or not, from the configured address.
+    probe: () => {
+      const rpc = resolve();
+      return rpc.available ? rpc : { ...rpc, thisMachine: configuredDaemonIsThisMachine(deps.configManager) };
+    },
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
       const rpc = resolve();
       if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);

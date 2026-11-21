@@ -517,23 +517,23 @@ export function registerPaymentsMethods(
       { id: 'payments.cards.create', handler: cardsCreate as TypedHandler<unknown, unknown> },
       { id: 'payments.cards.delete', handler: cardsDelete as TypedHandler<unknown, unknown> },
       { id: 'payments.purchases.list', handler: purchasesList as TypedHandler<unknown, unknown> },
-      // The confirmation gate (`confirm: true` AND the explicit-user-request
-      // context) is what makes this verb owner-direct: the handler then passes
-      // `surface: 'owner-direct'` from its own code path. See
-      // checkout-handlers.ts's `checkoutApproveHandler`.
-      { id: 'payments.checkout.approve', handler: checkoutApproveHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
+      // The confirmation its descriptor declares (`owner-request`: `confirm: true`
+      // from a person's credential) is what makes this verb owner-direct: the
+      // handler then passes `surface: 'owner-direct'` from its own code path.
+      // See checkout-handlers.ts's `checkoutApproveHandler`.
+      { id: 'payments.checkout.approve', handler: checkoutApproveHandler(deps) as TypedHandler<unknown, unknown> },
       { id: 'payments.checkout.begin', handler: checkoutBeginHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.budget.status', handler: budgetStatusHandler(deps, service, checkoutServiceHolder) },
       { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations,
         () => checkoutServiceHolder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) })) },
-      { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations), options: { confirm: true } },
-      { id: 'payments.purchase.securityCode', handler: purchaseSecurityCodeHandler(deps.checkout), options: { confirm: true } },
-      // Adding and withdrawing a standing authorisation are the owner's own acts, behind the same confirmation gate.
+      { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations) },
+      { id: 'payments.purchase.securityCode', handler: purchaseSecurityCodeHandler(deps.checkout) },
+      // Adding and withdrawing a standing authorisation are the owner's own acts; their descriptors declare owner-request.
       { id: 'payments.standing.list', handler: standingListHandler(deps, deps.checkout.operations) as TypedHandler<unknown, unknown> },
-      { id: 'payments.standing.create', handler: standingCreateHandler(deps, deps.checkout.operations) as TypedHandler<unknown, unknown>, options: { confirm: true } },
-      { id: 'payments.standing.delete', handler: standingDeleteHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
+      { id: 'payments.standing.create', handler: standingCreateHandler(deps, deps.checkout.operations) as TypedHandler<unknown, unknown> },
+      { id: 'payments.standing.delete', handler: standingDeleteHandler(deps) as TypedHandler<unknown, unknown> },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({
-        id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations), options: { confirm: true },
+        id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations),
       })),
     ]);
   });

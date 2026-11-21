@@ -495,6 +495,8 @@ export interface DeliveryChannelMetrics {
   readonly deadLettered: number;
   /** Current DLQ size. */
   readonly dlqSize: number;
+  /** Older failed notifications dropped because the DLQ was full; they can no longer be resent. */
+  readonly droppedDeadLetters: number;
   /** Whether SLO enforcement is active. */
   readonly sloEnforced: boolean;
 }

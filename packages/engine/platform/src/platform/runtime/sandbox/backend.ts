@@ -71,7 +71,7 @@ export function buildSandboxLaunchPlan(
     workspaceRoot: root,
     writableExtras: extras,
     network: profile.network,
-    summary: `bubblewrap: workspace ${root} writable${extras.length > 0 ? ` (and ${extras.join(', ')})` : ''}, system read-only, $HOME and /tmp private, `
+    summary: `bubblewrap: workspace ${root} writable${extras.length > 0 ? ` (and ${extras.join(', ')})` : ''}, system read-only, $HOME private except its toolchain installs (read-only) and caches (writable), /tmp private, `
       + (profile.network === 'enabled' ? 'host network shared' : 'network off'),
   });
 }

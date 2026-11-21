@@ -24,7 +24,7 @@ import { ActivityAnimation } from './core/activity-animation.ts';
 import { InputHandler } from './input/handler.ts';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
 import type { OrchestratorUserInputOptions } from '@goodvibes/engine/platform/platform/core';
-import { bindOwnerInput } from '@goodvibes/engine/terminal-shell/companion-input';
+import { bindOwnerInput, type OwnerInputAnswered } from '@goodvibes/engine/terminal-shell/companion-input';
 import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
 import {
@@ -627,7 +627,7 @@ async function main(prepared: PreparedShellCliRuntime) {
    * Chat accepts the owner's message directly. Native admission belongs to
    * explicit work submission, never to deciding whether a model may see it.
    */
-  function sendOwnerTurn(text: string, content?: ContentPart[], inputOptions?: OrchestratorUserInputOptions): void {
+  function sendOwnerTurn(text: string, content?: ContentPart[], inputOptions?: OrchestratorUserInputOptions, answered?: OwnerInputAnswered): void {
     // A fresh prompt supersedes provider recovery for the previous submission.
     streamResult.startNewTurn();
     actionOffers.retry = null;
@@ -638,6 +638,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     void orchestrator
       .handleUserInput(text, content, inputOptions)
       .catch((error) => {
+        // A turn that ran answers from its own events; one that failed to start is answered here.
+        answered?.({ answer: `This message could not be answered: ${summarizeError(error)}`, status: 'failed' });
         if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
       })
       .finally(render);
@@ -1073,6 +1075,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
       model: activeModel.footerModel, // prices the cost
+      pricing: providerRegistry,
       // The model's display name; while serving differs from the selection, the serving id (the header says why).
       modelLabel: activeModel.diverged ? activeModel.headerModel : currentModel.displayName || activeModel.headerModel,
       view: viewFrame?.footer ?? null,
@@ -1299,6 +1302,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           fleetCostUsd: footerFleetCost(() => ctx.services.processRegistry.query().nodes, true),
         },
         active.footerModel,
+        providerRegistry,
       ),
       contextTokens: orchestrator.lastInputTokens,
       contextWindow: providerRegistry.getKnownContextWindowForModel(serving) ?? 0,
@@ -1461,10 +1465,10 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   // Companion messages and an activated plan take the composer's turn path as sent
   // (no composer grammar), carrying their origin. Bound once that path's state exists.
-  unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions) => {
+  unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions, answered) => {
     transcript.toBottom();
     conversation.dismissSplash();
-    sendOwnerTurn(text, undefined, inputOptions);
+    sendOwnerTurn(text, undefined, inputOptions, answered);
   }));
 
   // Crash/termination handlers register BEFORE raw mode so a throw during setup or the initial

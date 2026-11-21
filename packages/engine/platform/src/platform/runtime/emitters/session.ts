@@ -63,22 +63,6 @@ export function emitSessionReady(
   bus.emit('session', sessionEvent('SESSION_READY', data, ctx));
 }
 
-/** Emit COMPANION_MESSAGE_RECEIVED when a companion-app follow-up message is received. */
-export function emitCompanionMessageReceived(
-  bus: RuntimeEventBus,
-  ctx: EmitterContext,
-  data: {
-    sessionId: string;
-    messageId: string;
-    body: string;
-    source: string;
-    timestamp: number;
-    metadata?: Readonly<Record<string, unknown>> | undefined;
-  }
-): void {
-  bus.emit('session', sessionEvent('COMPANION_MESSAGE_RECEIVED', data, ctx));
-}
-
 /** Emit SESSION_RECOVERY_FAILED when session recovery has failed unrecoverably. */
 export function emitSessionRecoveryFailed(
   bus: RuntimeEventBus,

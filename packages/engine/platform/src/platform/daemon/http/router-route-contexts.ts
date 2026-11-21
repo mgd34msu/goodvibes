@@ -46,10 +46,10 @@ export interface DaemonStatusProviders {
    * see ControlRouteContext.buildVersion in daemon-api/src/control-routes.ts.
    */
   readonly buildVersion?: (() => string | null) | undefined;
-  /** Undelivered daemon receipts (update, crash-restart, migration notices), left undelivered until acknowledged. */
-  readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
-  /** Marks receipts a reader has confirmed it received as delivered. */
-  readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;
+  /** Undelivered daemon receipts (update, crash-restart, migration notices), left undelivered until acknowledged; owner-only ones for an owner-class reader. */
+  readonly peekReceipts?: ((owner: boolean) => readonly { id: string; text: string; at: number }[]) | undefined;
+  /** Marks receipts a reader has confirmed it received as delivered; a non-owner cannot take an owner-only one. */
+  readonly acknowledgeReceipts?: ((ids: readonly string[], owner: boolean) => void) | undefined;
   /**
    * Which node on this network currently consumes inbound channel messages,
    * for on-request inspection. Elections are otherwise invisible: no

@@ -213,6 +213,7 @@ export type SessionsHostedKillInput = OperatorMethodInput<'sessions.hosted.kill'
 export type SessionsHostedKillResult = OperatorMethodOutput<'sessions.hosted.kill'>;
 export type SessionsHostedShareInput = OperatorMethodInput<'sessions.hosted.share'>;
 export type SessionsHostedShareResult = OperatorMethodOutput<'sessions.hosted.share'>;
+export type SessionsHostedUnshareResult = OperatorMethodOutput<'sessions.hosted.unshare'>;
 
 // Read-only contract runner inspection, directly from the generated method maps.
 // The list and the status poll read summaries; only one contract's detail reads the tree.

@@ -326,7 +326,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.trustProxy',
     label: "Trust a proxy's client addresses",
     type: 'boolean',
-    description: 'Trust proxy forwarding headers such as x-forwarded-for for the control plane',
+    description: 'Trust proxy forwarding headers such as x-forwarded-for for the control plane. Read at each request: a change applies at once, with no restart.',
   },
   {
     key: 'controlPlane.openaiCompatible.enabled',
@@ -346,7 +346,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.webui.serve',
     label: 'Serve the web UI from the daemon',
     type: 'boolean',
-    description: 'Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls.',
+    description: 'Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls. Turned on alone, it serves controlPlane.webui.bundleDir, or web.staticAssetsDir when that is empty, without checking that a bundle is there (a page load then answers 503 naming the setting); goodvibes-daemon webui enable --bundle-dir <dir> is the path that checks the bundle.',
   },
   {
     key: 'controlPlane.webui.bundleDir',
@@ -409,7 +409,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'httpListener.trustProxy',
     label: "Trust a proxy's client addresses for webhooks",
     type: 'boolean',
-    description: 'Trust proxy forwarding headers such as x-forwarded-for for the webhook listener',
+    description: 'Trust proxy forwarding headers such as x-forwarded-for for the webhook listener. Read at each request: a change applies at once, with no restart.',
   },
   {
     key: 'httpListener.trustCloudflare',

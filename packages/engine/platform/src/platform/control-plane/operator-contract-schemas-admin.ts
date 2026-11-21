@@ -120,6 +120,8 @@ export const OWNER_APPROVAL_PENDING_SCHEMA = objectSchema({
   success: { type: 'boolean', const: false },
   code: { type: 'string', const: 'OWNER_APPROVAL_PENDING' },
   approvalId: STRING_SCHEMA,
+  /** Whether this caller may read the approval (approvals.list, read:approvals) and so follow it to its outcome. */
+  followable: { type: 'boolean' },
   key: STRING_SCHEMA,
   keys: arraySchema(STRING_SCHEMA),
   reasons: arraySchema(STRING_SCHEMA),

@@ -6,7 +6,7 @@
  * artifacts/peer-contract.json from it, and `contracts:check` fails when either
  * output differs from this source.
  */
-import type { PeerContractManifest } from './types.js';
+import { DISTRIBUTED_WORK_TYPES, type PeerContractManifest } from './types.js';
 
 export const PEER_CONTRACT_SOURCE: PeerContractManifest = {
   "schemaVersion": 1,
@@ -16,14 +16,7 @@ export const PEER_CONTRACT_SOURCE: PeerContractManifest = {
     "node",
     "device"
   ],
-  "workTypes": [
-    "invoke",
-    "status.request",
-    "location.request",
-    "session.message",
-    "automation.run",
-    "device.capability"
-  ],
+  "workTypes": [...DISTRIBUTED_WORK_TYPES],
   "scopes": [
     "remote:heartbeat",
     "remote:pull",
@@ -829,14 +822,7 @@ export const PEER_CONTRACT_SOURCE: PeerContractManifest = {
                 },
                 "type": {
                   "type": "string",
-                  "enum": [
-                    "invoke",
-                    "status.request",
-                    "location.request",
-                    "session.message",
-                    "automation.run",
-                    "device.capability"
-                  ]
+                  "enum": [...DISTRIBUTED_WORK_TYPES]
                 },
                 "command": {
                   "type": "string"
@@ -1186,14 +1172,7 @@ export const PEER_CONTRACT_SOURCE: PeerContractManifest = {
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "invoke",
-                  "status.request",
-                  "location.request",
-                  "session.message",
-                  "automation.run",
-                  "device.capability"
-                ]
+                "enum": [...DISTRIBUTED_WORK_TYPES]
               },
               "command": {
                 "type": "string"
@@ -2038,14 +2017,7 @@ export const PEER_CONTRACT_SOURCE: PeerContractManifest = {
                     },
                     "type": {
                       "type": "string",
-                      "enum": [
-                        "invoke",
-                        "status.request",
-                        "location.request",
-                        "session.message",
-                        "automation.run",
-                        "device.capability"
-                      ]
+                      "enum": [...DISTRIBUTED_WORK_TYPES]
                     },
                     "command": {
                       "type": "string"

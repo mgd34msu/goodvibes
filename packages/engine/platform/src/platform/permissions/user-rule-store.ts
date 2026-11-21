@@ -23,6 +23,7 @@
  * window stops matching in the others without a restart.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { existsSync, readFileSync, rmSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
@@ -479,18 +480,25 @@ export class UserPermissionRuleStore {
    */
   async remember(record: StoredUserPermissionRule): Promise<void> {
     await this.awaitReady();
+    // A rule already stored for every project, or for this one, that decides
+    // everything the answer does (the same rule kept under another id among
+    // them): nothing new to keep.
+    const kept = (rules: readonly StoredUserPermissionRule[]): boolean => rules.some((other) => other.rule.id !== record.rule.id
+      && (other.project === undefined || other.project === record.project)
+      && (ruleCovers(other.rule, record.rule) || isDeepStrictEqual({ ...other.rule, id: record.rule.id }, record.rule)));
+    // Held here and unchanged on disk since (the approval broker keeps an answer's rule before the gate that asked
+    // gets the answer): nothing to read or write.
+    const keptHere = (): boolean => this.diskSignature !== null && this.diskSignature === this.signatureOfFile()
+      && kept([...this.records, ...this.remembered]);
     await this.mutate((disk) => {
-      // A rule already stored for every project, or for this one, that decides
-      // everything the answer does: nothing new to keep.
-      if (disk.some((other) => other.rule.id !== record.rule.id && (other.project === undefined || other.project === record.project)
-        && ruleCovers(other.rule, record.rule))) return null;
+      if (kept(disk)) return null;
       // Rules of this project the answer now covers go: the list stays one rule per decision the owner made.
       const covered = new Set(disk.filter((other) => other.rule.id !== record.rule.id && other.project === record.project
         && ruleCovers(record.rule, other.rule)).map((other) => other.rule.id));
       const next = [...disk.filter((existing) => existing.rule.id !== record.rule.id && !covered.has(existing.rule.id)), record];
       // adoptDisk keeps the written record, as a remembered rule.
       return { next, covered, publish: () => undefined };
-    });
+    }, keptHere);
   }
 
   /**
@@ -531,8 +539,10 @@ export class UserPermissionRuleStore {
     /** Rules dropped because the new one decides the same calls the same way; their removal grants or revokes nothing. */
     covered?: ReadonlySet<string>;
     publish: (revisionMoved: boolean) => void;
-  } | null): Promise<void> {
+  } | null, unchanged?: () => boolean): Promise<void> {
     return this.writes.run(async () => {
+      // Checked in the queue, after every earlier change landed.
+      if (unchanged?.()) return;
       const update = async () => {
         const disk = recordsOf(await this.store.load());
         const planned = change(disk);

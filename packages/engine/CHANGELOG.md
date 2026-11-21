@@ -7,6 +7,9 @@ The full write-up is in
 
 ### Fixed
 
+- Save the rule an "Allow and remember" answer asks for before the approval is
+  recorded as approved, on every route an approval is decided from; a rule that
+  cannot be saved leaves the ask open and returns `REMEMBER_NOT_SAVED`.
 - End the orderly stop before an update's handover after a minute, so an old
   daemon that cannot finish stopping exits and the service manager starts the
   new release; log each step of the stop as it starts.

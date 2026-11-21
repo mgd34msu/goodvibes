@@ -24657,6 +24657,7 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 | `RELAY_CODE_NOT_FOUND` | 404 | `not_found` | Unknown relay code. | no: change the request |
 | `RELAY_REQUEST_TOO_LARGE` | set where it is relayed | none | the request was not run. | as the answer says |
 | `RELAY_STREAM_NOT_REQUESTED` | set where it is relayed | none | this path answers with an event stream, which a plain request cannot carry. | as the answer says |
+| `REMEMBER_NOT_SAVED` | 500 | `service` | The answer asked to be remembered, but its rule could not be saved; nothing was decided and the ask is still waiting; answer it again, or without remembering. | yes, after a wait |
 | `REMOTE_BACKENDS_UNAVAILABLE` | 501 | `service` | This host runs no commands on registered backends. | no: change the request |
 | `REMOTE_PAYLOAD_TOO_LARGE` | 413 | `bad_request` | Remote <field> exceeds <maxBytes> bytes after JSON encoding. Reduce payload size before retrying. | no: change the request |
 | `REMOTE_PEER_NOT_FOUND` | 404 | `not_found` | No registered backend has the id '<peerId>'. | no: change the request |

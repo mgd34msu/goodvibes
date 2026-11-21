@@ -661,6 +661,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ...(seams.currentSessionId ? { currentSessionId: seams.currentSessionId } : {}),
     workAdmitted,
   });
+  // An answer that asks to be remembered saves its rule before the answer is recorded, on every surface that answers.
+  approvalBroker.keepRememberedRulesIn(userPermissionRuleStore);
   scope.ownUntilRegistered('config file watch', stopConfigWatch);
   scope.ownUntilRegistered('store snapshot scheduler', () => storeSnapshotScheduler.stop());
   scope.ownUntilRegistered('append-only retention scheduler', () => appendOnlyRetentionScheduler.stop());

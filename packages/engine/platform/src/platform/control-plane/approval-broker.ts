@@ -4,7 +4,9 @@ import { openRecordLog, type RecordLog } from '../state/record-log.js';
 import { noteCarriedForward } from '../state/carried-forward.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
-import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } from '../permissions/approval-rules.js';
+import { isDeepStrictEqual } from 'node:util';
+import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch, type RememberTier } from '../permissions/approval-rules.js';
+import { projectIdentity, type UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import type { AskPresentation } from '../permissions/ask-presentation.js';
 import { logger } from '../utils/logger.js';
@@ -495,6 +497,8 @@ export class ApprovalBroker {
   #homeNode: string | (() => string);
   /** Words each ask with the host's facts (permissions/ask-facts-host.ts); set by the composition that has them. */
   #presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null = null;
+  /** Where a remembered answer's rule is kept, inside the answer (keepRememberedRulesIn). */
+  #ruleStore: Pick<UserPermissionRuleStore, 'remember'> | undefined;
 
   constructor(
     options: {
@@ -810,6 +814,8 @@ export class ApprovalBroker {
     // answer is withheld: a surface that approved the same ask with another
     // narrowing compares it and runs this recorded decision instead of its own.
     const argsDigest = approved && approval ? contentDigest(modifiedArgs ?? approval.request.args) : undefined;
+    // The rule the answer asks to keep is saved inside its write, before the answer is recorded.
+    const keep = approval ? this.#rememberedRule(approval, input.rememberTier, approved, modifiedArgs) : undefined;
     let withheldAnswer: string | undefined;
     if (approved && approval?.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
       withheldAnswer = modifiedArgs['answer'];
@@ -838,7 +844,7 @@ export class ApprovalBroker {
           ...(proof !== undefined ? { ownerProof: proof } : {}),
           ...(input.note !== undefined ? { note: input.note } : {}),
         },
-      });
+      }, keep);
     } catch (error) {
       if (!(error instanceof OwnerDecisionStaleError)) throw error;
       // The owner's capability went stale between its check and its write: the
@@ -979,10 +985,10 @@ export class ApprovalBroker {
     });
   }
 
-  /** One transition, checked and written in one unit of the write queue. */
-  async #transition(request: TransitionRequest): Promise<TransitionOutcome> {
+  /** One transition, checked and written in one unit of the write queue; `keep` saves the rule an answer remembers first. */
+  async #transition(request: TransitionRequest, keep?: () => Promise<void>): Promise<TransitionOutcome> {
     await this.start();
-    const [outcome] = await this.#commit([request]);
+    const [outcome] = await this.#commit([request], undefined, keep);
     return outcome!;
   }
 
@@ -994,16 +1000,18 @@ export class ApprovalBroker {
    * (`OWNER_DECISION_REQUIRED`); turn an action that arrives after the
    * deadline into the expiry it is (`APPROVAL_EXPIRED`). Then write the whole
    * snapshot with the new records in place, and put them in memory only after
-   * the write landed (save, then acknowledge). The deny direction (denied,
+   * the write landed (save, then acknowledge). An answer that remembers a rule
+   * (`keep`, one request) saves that rule first, in the same unit: a rule that
+   * cannot be saved changes nothing and the approver is told. The deny direction (denied,
    * cancelled, expired) keeps the fail-closed rule: its waiters are refused
    * even when the write fails, and the error says so. After the unit, waiters
    * are answered (an approve's typed answer goes to its own waiter only) and
    * the new revision is published.
    */
-  async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause): Promise<TransitionOutcome[]> {
+  async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause, keep?: () => Promise<void>): Promise<TransitionOutcome[]> {
     const planned: PlannedTransition[] = [];
-    // Set inside the write unit: the write's failure, and an owner decision that went stale after it landed.
-    const ended: { failed?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
+    // Set inside the write unit: the write's failure, a remembered rule that was not saved, and an owner decision that went stale after it landed.
+    const ended: { failed?: { readonly error: unknown }; notKept?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
     const committed: PlannedTransition[] = [];
     await this.writes.run(async () => {
       const working = new Map<string, SharedApprovalRecord>();
@@ -1020,6 +1028,16 @@ export class ApprovalBroker {
         } catch (error) {
           this.#ownerApprovals.settle(plan.request.id);
           throw error;
+        }
+      }
+      // The answer is recorded only once the rule it remembers is saved.
+      if (keep && changing.some((plan) => plan.refusal === undefined && (plan.next!.status === 'approved' || plan.next!.status === 'denied'))) {
+        try {
+          await keep();
+        } catch (error) {
+          ended.notKept = { error };
+          for (const plan of changing) if (plan.ownerCheck) this.#ownerApprovals.settle(plan.request.id);
+          return;
         }
       }
       this.pruneTerminalApprovals();
@@ -1058,6 +1076,11 @@ export class ApprovalBroker {
       this.publish(next);
     }
     if (ended.staleOwner) throw ended.staleOwner;
+    if (ended.notKept) {
+      const failure = ended.notKept.error;
+      throw Object.assign(new Error(`Your choice to remember this answer could not be saved (${failureText(failure)}). Nothing was decided: the ask is still waiting; answer it again, or answer it without remembering.`, { cause: failure }),
+        { code: 'REMEMBER_NOT_SAVED', status: 500 });
+    }
     if (ended.failed) {
       const failure = ended.failed.error;
       const plan = planned.find((entry) => entry.next !== undefined);
@@ -1255,6 +1278,39 @@ export class ApprovalBroker {
    */
   usePresentation(presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null): void {
     this.#presenter = presenter;
+  }
+
+  /**
+   * Keep the rule an answer asks to be remembered in `store` (the owner's rule
+   * store) as part of that answer: it is saved before the answer is recorded,
+   * so whoever reads the ask as decided already finds its rule, and a rule that
+   * cannot be saved leaves the ask waiting and tells the approver why. The gate
+   * that asked then finds the rule kept and writes nothing more.
+   */
+  keepRememberedRulesIn(store: Pick<UserPermissionRuleStore, 'remember'>): void {
+    this.#ruleStore = store;
+  }
+
+  /**
+   * The rule this answer asks to keep, as the gate keeps it (PermissionManager
+   * rememberReply): a durable tier the ask offered, answered for the arguments
+   * as asked, in the project the ask was made in. A device grant is kept by
+   * the device feature, not as a rule. Undefined when there is nothing to keep
+   * here; the gate then says why, as before.
+   */
+  #rememberedRule(approval: SharedApprovalRecord, tier: RememberTier | undefined, approved: boolean,
+    answeredArgs: Record<string, unknown> | undefined): (() => Promise<void>) | undefined {
+    const store = this.#ruleStore;
+    const request = approval.request;
+    if (!store || tier === undefined || tier === 'session') return undefined;
+    if (!request.rememberOptions?.some((option) => option.tier === tier) || approval.metadata['deviceCapability'] !== undefined) return undefined;
+    if (answeredArgs !== undefined && !isDeepStrictEqual(answeredArgs, request.args)) return undefined;
+    const project = request.workingDirectory;
+    if (!project) return undefined;
+    const rule = buildDurableRuleForDecision({ toolName: request.tool, args: request.args, tier, effect: approved ? 'allow' : 'deny',
+      ...(approved && request.ownerOnly ? { ownerOnly: request.ownerOnly } : {}) });
+    if (!rule) return undefined;
+    return () => store.remember({ rule, tier, tool: request.tool, createdAt: Date.now(), project: projectIdentity(project) });
   }
 
   /**

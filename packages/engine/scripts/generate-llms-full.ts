@@ -1032,6 +1032,7 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   NOT_A_SESSION_ANSWER: 'The item has no answer to deliver, or its answer goes to an agent, which records taking it',
   RELAY_CODE_LIMIT: 'The daemon already holds 64 relay codes, so no new device can pair; revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again',
   APPROVED_NOT_APPLIED: 'The owner approved the change, but applying it failed; the approval stays recorded and the message says why; fix the cause and make the change again',
+  REMEMBER_NOT_SAVED: 'The answer asked to be remembered, but its rule could not be saved; nothing was decided and the ask is still waiting; answer it again, or without remembering',
   NOT_APPLIED: 'An approval answer relayed from another machine of the group could not be applied; the message says why; read the approval again',
   REROOT_FAILED: 'The new working directory could not be saved to the daemon settings; nothing changed',
   SET_MODEL_FAILED: 'The model could not be made current; the message is the provider registry\'s reason',

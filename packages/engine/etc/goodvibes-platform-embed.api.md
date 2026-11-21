@@ -72,6 +72,8 @@ export class ApprovalBroker {
     // (undocumented)
     getApproval(approvalId: string): SharedApprovalRecord | null;
     get homeNode(): string;
+    // Warning: (ae-forgotten-export) The symbol "UserPermissionRuleStore" needs to be exported by the entry point embed.d.ts
+    keepRememberedRulesIn(store: Pick<UserPermissionRuleStore, 'remember'>): void;
     // Warning: (ae-forgotten-export) The symbol "SharedApprovalRecord" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)
@@ -565,7 +567,7 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:752:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:756:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:247:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:247:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts

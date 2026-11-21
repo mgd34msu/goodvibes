@@ -14,6 +14,7 @@
  * weaker guarantees than a plain background command.
  */
 
+import { readFileSync } from 'node:fs';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { TriggerChildProcesses } from './host-processes.js';
 import { MANAGED_OUTPUT_WINDOW_BYTES, type ProcessManager } from '../tools/shared/process-manager.js';
@@ -25,6 +26,44 @@ import type { UnattendedRuns } from '../automation/unattended-runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { ProbeTimeoutError, type ProbeIo } from './probes.js';
+
+/**
+ * How far apart the kernel's start time of a process and the recorded launch
+ * time may be for them to be the same process: the boot time is kept in whole
+ * seconds and the launch is recorded just after the spawn.
+ */
+const SAME_PROCESS_START_TOLERANCE_MS = 3_000;
+
+/** Clock ticks per second in /proc/<pid>/stat (USER_HZ, 100 on Linux). */
+const USER_HZ = 100;
+
+/**
+ * When the process at `pid` started, in epoch milliseconds, from Linux /proc:
+ * field 22 of /proc/<pid>/stat (ticks since boot) plus btime from /proc/stat.
+ * 'gone' when /proc is there and the pid is not; undefined when /proc cannot
+ * say (another system, or a format this does not read).
+ */
+function processStartedAtMs(pid: number): number | 'gone' | undefined {
+  let bootSeconds: number;
+  try {
+    const btime = /^btime\s+(\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'));
+    if (!btime) return undefined;
+    bootSeconds = Number(btime[1]);
+  } catch {
+    return undefined;
+  }
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'gone' : undefined;
+  }
+  // The command name (field 2) is in parentheses and may hold spaces: fields are counted after its closing one.
+  const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+  const ticks = Number(fields[22 - 3]);
+  if (!Number.isFinite(ticks)) return undefined;
+  return (bootSeconds + ticks / USER_HZ) * 1000;
+}
 
 /** ProcessManager-backed on-exit host. Binds only to processes we launched. */
 export function createProcessManagerTriggerHost(processManager: ProcessManager): TriggerProcessHost {
@@ -77,13 +116,20 @@ export function createProcessManagerTriggerHost(processManager: ProcessManager):
     join: () => launched.join(),
 
     /**
-     * Reporting only, the trigger never re-binds to this pid. A pid from a
-     * previous daemon boot very likely belongs to somebody else's process by
-     * now, so this answers "is anything alive there" and nothing stronger.
+     * Whether the child launched at `startedAt` under `pid` is still running.
+     * The manager waits on the answer before it reconciles an on-exit trigger
+     * left over from an earlier boot (the trigger never re-binds to the pid).
+     * A pid is reused once its process ends, so where the kernel says when the
+     * process at `pid` started (Linux /proc) the answer is yes only for one
+     * that started when the child did; elsewhere it is whether anything this
+     * user may signal is alive there. A pid owned by another user is never
+     * the child, which this user launched.
      */
     isSameProcessAlive(pid: number, startedAt: number): boolean {
       if (!Number.isInteger(pid) || pid <= 0) return false;
-      void startedAt;
+      const started = processStartedAtMs(pid);
+      if (started === 'gone') return false;
+      if (started !== undefined) return Math.abs(started - startedAt) <= SAME_PROCESS_START_TOLERANCE_MS;
       try {
         process.kill(pid, 0);
         return true;

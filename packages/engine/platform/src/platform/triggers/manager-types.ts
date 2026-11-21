@@ -91,6 +91,11 @@ export interface TriggerManagerOptions {
    * runs on the same host. Absent: a platform-tool probe is refused at create.
    */
   readonly probeTools?: import('./probe-tools.js').ProbeToolHost | undefined;
+  /**
+   * The fetch tool's host settings an http probe is held to; a create whose
+   * URL they refuse is refused. Absent: no localhost and no private host.
+   */
+  readonly probeHostPolicy?: import('./probes.js').ProbeHostPolicy | undefined;
   readonly now?: (() => number) | undefined;
   /** Stable for the lifetime of one daemon process. Drives restart detection. */
   readonly daemonBootId?: string | undefined;

@@ -1471,8 +1471,16 @@ export class ClusterGroupRuntime {
         }
       }
       return { kind: 'many', changes, value: true };
+    }).catch(async (error: unknown) => {
+      // The write failed: unless the record took this generation anyway, local
+      // keys go back to what the record has in force.
+      if (!this.recordHoldsEpoch(material.groupId, generation, facts.keyCommitment)) await this.restoreRotatedMaterial(material, rotated);
+      throw error;
     });
-    if (!written) throw new ClusterMembershipOperationError('abandoned');
+    if (!written) {
+      await this.restoreRotatedMaterial(material, rotated);
+      throw new ClusterMembershipOperationError('abandoned');
+    }
     this.options.logger.info('cluster: the group key was replaced', {
       generation,
       cause,
@@ -1491,7 +1499,34 @@ export class ClusterGroupRuntime {
     const material = this.requireMaterial();
     const joinKey = generateJoinKey();
     const joinVerifier = await deriveJoinVerifier(joinKey, material.joinSalt);
-    return { join: { joinKey, joinVerifier }, removedUnder: joinKeyFingerprint(material.joinVerifier) };
+    // The join key the removal is made under is the one the record has in
+    // force (its newest generation), which every member admits by; local
+    // material is read only when the record names no generation yet.
+    let newest: KeyEpochFacts | undefined;
+    for (const facts of this.epochs.values()) if (!newest || facts.epoch > newest.epoch) newest = facts;
+    return { join: { joinKey, joinVerifier }, removedUnder: joinKeyFingerprint(newest?.joinVerifier ?? material.joinVerifier) };
+  }
+
+  /** Whether the record holds generation `generation` with this commitment. */
+  private recordHoldsEpoch(groupId: string, generation: number, commitment: string): boolean {
+    const view = this.record.view();
+    return !!view && keyEpochsFromRecord(view.record, groupId).get(generation)?.keyCommitment === commitment;
+  }
+
+  /**
+   * Put back the material a rotation replaced when the record did not take the
+   * rotation, so this machine never admits or shows a join key no generation
+   * in the record names. Skipped when other material was adopted meanwhile.
+   */
+  private async restoreRotatedMaterial(previous: GroupKeyMaterial, rotated: GroupKeyMaterial): Promise<void> {
+    if (this.material !== rotated) return;
+    try {
+      await this.commitMaterial(previous, rotated);
+    } catch (error) {
+      this.options.logger.warn('cluster: the previous group key could not be put back after a key replacement the group did not record', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // ── inbound: group-key-signed ─────────────────────────────────────────────

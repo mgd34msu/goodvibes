@@ -245,6 +245,7 @@ export function registerOccasionsGatewayMethods(
     return service.removeOccasion({
       occasionId: requireStringValue(params.occasionId, 'occasionId'),
       confirmed: params.confirmed === true,
+      ...(optionalString(params.line) === undefined ? {} : { line: optionalString(params.line) }),
       authority: readAuthority(params.authority, invocation),
     }, readingOptions(invocation, catalog.get('occasions.remove')?.scopes));
   });

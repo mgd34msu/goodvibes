@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'fs';
 import { join, resolve, isAbsolute } from 'path';
 import { logger } from '../utils/logger.js';
 import { createPluginAPI, type PluginAPIContext } from './api.js';
@@ -76,7 +76,10 @@ export interface PluginEntryPoint {
   init(api: ReturnType<typeof createPluginAPI>): void | Promise<void>;
   /** Optional: called when the plugin is activated (after init). */
   activate?(): void | Promise<void>;
-  /** Optional: called when the plugin is deactivated (before cleanup). */
+  /**
+   * Optional: called when the plugin is deactivated (before cleanup), and also
+   * when init completed but activate then failed, so what init started is stopped.
+   */
   deactivate?(): void | Promise<void>;
 }
 
@@ -230,16 +233,32 @@ export interface PluginLoaderDeps {
 
 /**
  * The content of one copy of a plugin, as trust is bound to it: the digest of
- * its manifest and of its entry file's bytes. Null when the entry cannot be
- * read (that copy then has no trust to apply). One read per start or trust change.
+ * the manifest and every file in the plugin directory (its node_modules
+ * included, since the entry's imports resolve there), each by its path and
+ * the digest of its bytes. A symbolic link is recorded by where it points and
+ * never followed, so nothing outside the directory is read. Null when a file
+ * cannot be read (that copy then has no trust to apply). One read of the
+ * plugin's files per start or trust change.
  */
 export function pluginContentDigest(discovered: DiscoveredPlugin): string | null {
-  const entryPath = resolve(join(discovered.pluginDir, discovered.manifest.main ?? 'index.js'));
+  const root = resolve(discovered.pluginDir);
+  const files: Array<readonly [string, string]> = [];
+  const walk = (relativeDir: string): void => {
+    for (const entry of readdirSync(join(root, relativeDir), { withFileTypes: true })) {
+      const relativePath = relativeDir === '' ? entry.name : `${relativeDir}/${entry.name}`;
+      const path = join(root, relativePath);
+      if (entry.isSymbolicLink()) files.push([relativePath, `link:${readlinkSync(path)}`]);
+      else if (entry.isDirectory()) walk(relativePath);
+      else if (entry.isFile()) files.push([relativePath, sha256Base64Url(readFileSync(path))]);
+    }
+  };
   try {
-    return contentDigest({ manifest: discovered.manifest, entry: sha256Base64Url(readFileSync(entryPath)) });
+    walk('');
   } catch {
     return null;
   }
+  files.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return contentDigest({ manifest: discovered.manifest, files });
 }
 
 /** Cleanup failures remain observable to an awaited lifetime owner. */
@@ -334,6 +353,8 @@ export async function loadPlugin(
 
   const registrations = new PluginInFlightTracker();
   registrationLifetimes.set(loaded, registrations);
+  // Once init has completed, a failure after it calls the plugin's deactivate, so what init started is stopped.
+  let initialized = false;
   try {
     // Dynamic import, Bun supports TS imports directly.
     // Append cache-bust query param on reload so Bun re-executes the module.
@@ -384,6 +405,7 @@ export async function loadPlugin(
 
     // Lifecycle: init
     await entry.init(api);
+    initialized = true;
 
     // Lifecycle: activate
     if (typeof entry.activate === 'function') {
@@ -398,6 +420,15 @@ export async function loadPlugin(
     // Stop retained APIs and drain admitted async registrations before cleanup.
     await registrations.close();
     const cleanupErrors: unknown[] = [];
+    // The same order as unloadPlugin: the plugin's own deactivate, then the host's cleanup.
+    if (initialized && typeof loaded.entry?.deactivate === 'function') {
+      try {
+        await loaded.entry.deactivate();
+      } catch (deactivateError) {
+        cleanupErrors.push(deactivateError);
+        logger.warn(`[plugins] ${manifest.name}: deactivate after failed start threw, ${summarizeError(deactivateError)}`);
+      }
+    }
     // Run cleanup for anything that was registered before the error
     for (const fn of loaded.cleanup) {
       try {

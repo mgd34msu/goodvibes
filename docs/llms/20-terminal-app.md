@@ -2059,7 +2059,7 @@ A plugin that is found is not loaded until it is enabled. `/plugin enable <name>
 
 ### The entry file
 
-The entry file is an ES module. It must export `init(api)`, called once after the plugin is loaded; it may also export `activate()` (called after `init`) and `deactivate()` (called before the plugin is unloaded). Each may be `async`.
+The entry file is an ES module. It must export `init(api)`, called once after the plugin is loaded; it may also export `activate()` (called after `init`) and `deactivate()` (called before the plugin is unloaded, and also when `init` finished but `activate()` then failed, so what `init` started is stopped). Each may be `async`.
 
 The `api` object has exactly these members:
 
@@ -2113,7 +2113,7 @@ export function init(api) {
 
 A plugin that declares a high-risk capability does not start below `trusted`.
 The tier is one decision per plugin for every GoodVibes program on the machine, kept in `~/.goodvibes/plugin-trust.json`.
-A tier is given to one copy of the plugin: the copy in the directory it was enabled from (or, when it was never enabled, the first one found), and that copy's manifest and entry file as they were then. A same-named copy in another directory (a repository's own `.goodvibes/plugins`), or the same copy after its code changed, starts `untrusted` until its trust is set again. `/plugin list`, `/plugin capabilities <plugin>`, the plugins screen and the refusal that stops such a plugin say so: its tier was set for files that have since changed (or for a copy in a different folder), so review the change, then set it again with `/plugin trust <plugin> <tier>`. The tier is not a sandbox: a plugin's code runs inside the program with its access.
+A tier is given to one copy of the plugin: the copy in the directory it was enabled from (or, when it was never enabled, the first one found), and that copy's manifest and every file in its directory (its `node_modules` included) as they were then. A same-named copy in another directory (a repository's own `.goodvibes/plugins`), or the same copy after its code changed, starts `untrusted` until its trust is set again. `/plugin list`, `/plugin capabilities <plugin>`, the plugins screen and the refusal that stops such a plugin say so: its tier was set for files that have since changed (or for a copy in a different folder), so review the change, then set it again with `/plugin trust <plugin> <tier>`. The tier is not a sandbox: a plugin's code runs inside the program with its access.
 `trusted` is set by a verified signature against the publisher's Ed25519 key (saved once with `/plugin trust-key <name> <key.pem>`), or by the owner's confirmation when it does not verify.
 
 ### `/plugin`

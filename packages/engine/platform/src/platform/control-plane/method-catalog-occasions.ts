@@ -164,6 +164,8 @@ export const OCCASION_PROPOSAL_SCHEMA = objectSchema({
   confirmation: STRING_SCHEMA,
   needsKind: BOOLEAN_SCHEMA,
   conflictsWith: arraySchema(STRING_SCHEMA),
+  /** The id the written line reads back as; present on an occasion proposal that can be confirmed. */
+  occasionId: STRING_SCHEMA,
 }, ['ok', 'reason', 'line', 'confirmation', 'needsKind', 'conflictsWith']);
 
 export const OCCASION_WRITE_OUTCOME_SCHEMA = objectSchema({
@@ -242,6 +244,8 @@ export const OCCASIONS_CONFIRM_INPUT_SCHEMA = objectSchema({
 export const OCCASIONS_REMOVE_INPUT_SCHEMA = objectSchema({
   occasionId: STRING_SCHEMA,
   confirmed: BOOLEAN_SCHEMA,
+  /** The exact line to remove: required when confirmed is true (the removedLine the unconfirmed call returned, or the occasion's text from occasions.list). */
+  line: STRING_SCHEMA,
   authority: STRING_SCHEMA,
 }, ['occasionId', 'confirmed', 'authority']);
 
@@ -495,7 +499,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     repeat: 'safe',
     effects: ['occasions.administer', 'record.destroy'],
     title: 'Remove An Important Date',
-    description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The line removed is the occasion\'s first; when other lines still declare the same occasion (stillDeclaredBy above 0) only that line goes and its records are kept, since the next line is now the occasion.',
+    description: 'Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The confirmed call names the line it removes in line (that removedLine, or the occasion\'s text from occasions.list), and only that line goes; when other lines still declare the same occasion (stillDeclaredBy above 0) its records are kept, since the next line is now the occasion. Repeating a confirmed call changes nothing: once the named line is gone it answers ok with nothing removed.',
     category: 'occasions',
     http: { method: 'POST', path: '/api/occasions/remove' },
     inputSchema: OCCASIONS_REMOVE_INPUT_SCHEMA,

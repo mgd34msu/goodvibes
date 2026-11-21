@@ -152,6 +152,7 @@ function tokenise(condition: string): string[] {
         if (condition[j] === '\\') j++; // skip escape
         j++;
       }
+      if (j >= condition.length) throw new Error('Unterminated string literal in condition');
       tokens.push(condition.slice(i, j + 1));
       i = j + 1;
       continue;

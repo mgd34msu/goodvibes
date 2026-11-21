@@ -3,7 +3,7 @@
  * extracted from engine.ts so the engine stays under its line cap. Pure but for
  * the item-state mutations and the events it emits through the injected `emit`.
  */
-import { dependencyStatus, firstPhase } from './scheduler.js';
+import { dependencyStatus, firstPhase, heldByDependencyGate } from './scheduler.js';
 import type { OrchestrationEvent, Workstream } from './types.js';
 
 /**
@@ -32,8 +32,7 @@ export function applyDependencyGates(workstream: Workstream, emit: (event: Orche
   if (!first) return;
   for (const item of workstream.items) {
     if (item.dependsOn.length === 0) continue;
-    if (item.currentPhaseId !== first.id) continue; // only gate at entry (first phase)
-    if (item.state !== 'pending' && item.state !== 'awaiting-capacity' && item.state !== 'blocked-dependency') continue;
+    if (!heldByDependencyGate(workstream, item, first)) continue; // only gate at entry (first phase, pre-claim)
     const status = dependencyStatus(workstream, item);
     if (status.ready) {
       if (item.state === 'blocked-dependency') {

@@ -190,6 +190,8 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     return pending;
   }
   const kept: KeptEntry[] = [];
+  /** Kept trees whose cap eviction is running; they stay in `kept` until it succeeds. */
+  const evicting = new Set<IsolatedWorktree>();
   let baseBranchCache: string | null = null;
   let integrationLane: Promise<void> = Promise.resolve();
 
@@ -360,20 +362,36 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   function enforceKeptCap(): void {
-    while (kept.length > keptCap) {
+    // An entry stays in `kept` while its eviction runs (marked in `evicting`),
+    // so a failed eviction leaves it counted and the next keep retries it; the
+    // success path removes it. Chosen first, then started, so an eviction that
+    // fails at once is not chosen again in the same pass.
+    const chosen: KeptEntry[] = [];
+    let counted = kept.filter((entry) => !evicting.has(entry.instance)).length;
+    for (const entry of kept) {
+      if (counted <= keptCap) break;
       // A tree whose merge conflict is still unresolved is the only place its
       // retry can run: evicting it would leave a conflicted item with no tree.
       // Over the cap, an unresolved conflict outranks the bound.
-      const index = kept.findIndex((entry) => entry.item.mergeState !== 'conflict');
-      if (index < 0) break;
-      const [oldest] = kept.splice(index, 1);
-      if (!oldest) break;
+      if (evicting.has(entry.instance) || entry.item.mergeState === 'conflict') continue;
+      evicting.add(entry.instance);
+      chosen.push(entry);
+      counted -= 1;
+    }
+    for (const oldest of chosen) {
       void ownedWork.run('remove worktree', () => removeWorktree(oldest.workstream, oldest.item, oldest.instance, true)).catch((error) => {
+        evicting.delete(oldest.instance);
         logger.error('worktree-isolation: eviction of oldest kept worktree did not complete', {
           itemId: oldest.item.id, error: summarizeError(error),
         });
       });
     }
+  }
+
+  /** An eviction that left the tree on disk: it stays kept, counted toward the cap, and is said to stay. */
+  function evictionKept(workstream: Workstream, item: WorkItem, instance: IsolatedWorktree, reason: string): void {
+    evicting.delete(instance);
+    deps.emit({ type: 'item-worktree-kept', workstreamId: workstream.id, itemId: item.id, path: instance.path, reason });
   }
 
   async function removeWorktree(workstream: Workstream, item: WorkItem, instance: IsolatedWorktree, evicted: boolean): Promise<void> {
@@ -382,6 +400,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     try { (resourceGuards.get(instance) ?? repositoryGuard)?.(); }
     catch {
       if (!evicted) keepWorktree(workstream, item, instance, 'original worktree binding is unavailable');
+      else evictionKept(workstream, item, instance, 'original worktree binding is unavailable, so the directory stays');
       return;
     }
     let preservedCommit: string | null = null;
@@ -408,6 +427,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         logger.error('worktree-isolation: eviction preservation failed; worktree left on disk', {
           itemId: item.id, path, branch: instance.branch, error: summarizeError(error),
         });
+        evictionKept(workstream, item, instance, 'its work could not be preserved, so the directory stays');
         return;
       }
     } else {
@@ -423,6 +443,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     // (a stale entry would push real kept trees out early).
     const keptIndex = kept.findIndex((entry) => entry.instance === instance);
     if (keptIndex >= 0) kept.splice(keptIndex, 1);
+    evicting.delete(instance);
     instances.delete(item);
     item.worktreePath = undefined;
     if (!evicted) {

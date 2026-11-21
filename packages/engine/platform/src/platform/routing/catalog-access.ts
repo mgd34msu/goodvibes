@@ -112,12 +112,14 @@ export class ProviderAccessReadings {
    * Reads the providers whose access is not known yet. Each reading is kept
    * as it completes and what completed is saved even when one fails; the
    * first failure is then raised so an unavailable decision model switches
-   * the operation to Classic. Under Classic nothing is asked.
+   * the operation to Classic. Under Classic nothing is asked and nothing is
+   * raised: the answer is false, so the caller knows the providers that
+   * needed a reading were not read. True when nothing was pending or they were asked.
    */
-  async readMissing(providers: readonly ProviderFacts[], site = 'providers.model-catalog.provider-access'): Promise<void> {
+  async readMissing(providers: readonly ProviderFacts[], site = 'providers.model-catalog.provider-access'): Promise<boolean> {
     const pending = providers.filter((facts) => this.#needsReading(facts));
-    if (pending.length === 0) return;
-    await decisionOrClassic(() => this.#read(pending, site), () => undefined);
+    if (pending.length === 0) return true;
+    return decisionOrClassic(async () => { await this.#read(pending, site); return true; }, () => false);
   }
 
   /** `readMissing`, then every provider's access (undefined when unsettled). */

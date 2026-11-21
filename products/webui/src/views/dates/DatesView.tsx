@@ -93,7 +93,7 @@ type Recurrence = 'annual' | 'once';
 
 type Selection = { kind: 'occasion' | 'plan' | 'interview'; id: string } | null;
 type RemovalTarget =
-  | { readonly kind: 'occasion'; readonly id: string; readonly title: string }
+  | { readonly kind: 'occasion'; readonly id: string; readonly title: string; readonly line: string }
   | { readonly kind: 'plan'; readonly id: string; readonly from: string; readonly title: string };
 
 /** The plan being changed: its id, and its start date in case two share a name. */
@@ -357,8 +357,9 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const removeOccasion = useMutation({
-    mutationFn: (occasionId: string) =>
-      platformClient.operator.occasions.remove({ occasionId, confirmed: true, authority: WEBUI_PROFILE_AUTHORITY }),
+    // The confirmed call names the line it removes, so a retried request never takes out a second line.
+    mutationFn: ({ occasionId, line }: { readonly occasionId: string; readonly line: string }) =>
+      platformClient.operator.occasions.remove({ occasionId, confirmed: true, line, authority: WEBUI_PROFILE_AUTHORITY }),
     onSuccess: async (result) => {
       await invalidateAll();
       if (result.ok) setSelection(null);
@@ -680,7 +681,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       tone: 'danger',
     });
     if (ok) {
-      if (target.kind === 'occasion') removeOccasion.mutate(target.id);
+      if (target.kind === 'occasion') removeOccasion.mutate({ occasionId: target.id, line: target.line });
       else removePlan.mutate({ id: target.id, from: target.from });
     }
   }
@@ -752,7 +753,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
                 size="sm"
                 icon={<Trash2 />}
                 disabled={removeOccasion.isPending}
-                onClick={() => void askRemove({ kind: 'occasion', id: entry.occasion.id, title: entry.occasion.title })}
+                onClick={() => void askRemove({ kind: 'occasion', id: entry.occasion.id, title: entry.occasion.title, line: entry.occasion.text })}
               >
                 Remove
               </Button>

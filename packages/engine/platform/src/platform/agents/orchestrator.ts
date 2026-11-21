@@ -55,6 +55,7 @@ import { CATALOG_PROVIDER_NAME_ALIASES, sameProviderCatalog } from '../providers
 import { resolveModelReference } from '../providers/model-id-resolution.js';
 import { readFallbackOrder } from '../providers/failover.js';
 import { runAgentTask, type AgentOrchestratorRunContext } from './orchestrator-runner.js';
+import { forgetProjectFramework } from './orchestrator-observations.js';
 export { summarizeToolArgs } from './orchestrator-utils.js';
 
 /**
@@ -335,6 +336,8 @@ export class AgentOrchestrator {
    * out of a non-default working directory releases its registry.
    */
   private cwdRunCounts = new Map<string, number>();
+  /** Runs working in each non-default directory; at none, its project-framework reading is forgotten. */
+  private readonly frameworkDirectoryRuns = new Map<string, number>();
   private fullRegistryChannelVersion = -2;
   private toolDeps: AgentOrchestratorToolDeps | null = null;
   private featureFlagManager: FeatureFlagManager | null = null;
@@ -1072,6 +1075,10 @@ export class AgentOrchestrator {
     const sharedKey = runKey === undefined ? sharedRegistryKey(cwd, surface) : undefined;
     const countedKey = sharedKey !== defaultCwd ? sharedKey : undefined;
     if (countedKey !== undefined) this.cwdRunCounts.set(countedKey, (this.cwdRunCounts.get(countedKey) ?? 0) + 1);
+    // Runs per non-default directory, whatever registry they use: the project-framework reading of a
+    // directory (a worktree) is forgotten once no run works there.
+    const frameworkDirectory = cwd !== defaultCwd ? cwd : undefined;
+    if (frameworkDirectory !== undefined) this.frameworkDirectoryRuns.set(frameworkDirectory, (this.frameworkDirectoryRuns.get(frameworkDirectory) ?? 0) + 1);
     let context: AgentOrchestratorRunContext | undefined;
     try {
       context = await this.createRunContext(
@@ -1093,6 +1100,14 @@ export class AgentOrchestrator {
         await context?.beforeRunSettlement?.();
       }
       finally {
+        if (frameworkDirectory !== undefined) {
+          const left = (this.frameworkDirectoryRuns.get(frameworkDirectory) ?? 1) - 1;
+          if (left > 0) this.frameworkDirectoryRuns.set(frameworkDirectory, left);
+          else {
+            this.frameworkDirectoryRuns.delete(frameworkDirectory);
+            forgetProjectFramework(frameworkDirectory);
+          }
+        }
         if (runKey) await this.releaseRegistry(runKey);
         else if (countedKey !== undefined) {
           const remaining = (this.cwdRunCounts.get(countedKey) ?? 1) - 1;

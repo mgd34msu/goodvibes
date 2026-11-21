@@ -53,14 +53,24 @@ function frameworkObservation(framework: string | undefined): ProjectFrameworkOb
   return framework === undefined ? NO_FRAMEWORK : Object.freeze({ framework, assertCurrent: noop });
 }
 
+/** A reading of a manifest; `cancelled` when the run whose signal it ran under was cancelled mid-reading. */
+interface FrameworkReading { readonly framework: string | undefined; readonly settled: boolean; readonly cancelled?: true }
+
 /**
  * One reading per manifest: a batch of spawns in one project shares the first
  * spawn's reading, and a later spawn reuses it until `package.json` changes
- * (device, inode, size and modification time). One map entry per project.
+ * (device, inode, size and modification time). An entry lives while its
+ * working directory has runs: the orchestrator forgets a non-default working
+ * directory's entry (forgetProjectFramework) when its last run ends.
  */
-const frameworkByManifest = new Map<string, { readonly identity: string; readonly reading: Promise<{ framework: string | undefined; settled: boolean }> }>();
+const frameworkByManifest = new Map<string, { readonly identity: string; readonly reading: Promise<FrameworkReading> }>();
 
-async function readProjectFramework(path: string, signal: AbortSignal | undefined): Promise<{ framework: string | undefined; settled: boolean }> {
+/** Forgets the reading of `workingDirectory`'s manifest, once no run works there. */
+export function forgetProjectFramework(workingDirectory: string): void {
+  frameworkByManifest.delete(join(workingDirectory, 'package.json'));
+}
+
+async function readProjectFramework(path: string, signal: AbortSignal | undefined): Promise<FrameworkReading> {
   let text: string;
   try { text = readFileSync(path, 'utf8'); } catch { return { framework: undefined, settled: true }; }
   try {
@@ -79,6 +89,8 @@ async function readProjectFramework(path: string, signal: AbortSignal | undefine
     run.recordAction('include project framework');
     return { framework: reading.choice === 'bun' ? 'bun:test' : reading.choice, settled: true };
   } catch (error) {
+    // The run this reading ran under was cancelled: say so, so a live run sharing it reads again.
+    if (signal?.aborted === true) return { framework: undefined, settled: false, cancelled: true };
     activateClassicFallback(error);
     return { framework: undefined, settled: false };
   }
@@ -91,9 +103,18 @@ export async function prepareProjectFramework(context: AgentOrchestratorRunConte
     const stats = statSync(path, { bigint: true });
     identity = [stats.dev, stats.ino, stats.size, stats.mtimeNs].join(':');
   } catch { return NO_FRAMEWORK; }
+  const signal = context.getCancellationSignal?.(record.id);
   const cached = frameworkByManifest.get(path);
-  if (cached?.identity === identity) return frameworkObservation((await cached.reading).framework);
-  const reading = readProjectFramework(path, context.getCancellationSignal?.(record.id));
+  if (cached?.identity === identity) {
+    const shared = await cached.reading;
+    if (shared.cancelled !== true || signal?.aborted === true) return frameworkObservation(shared.framework);
+    // The spawn that owned the shared reading was cancelled mid-reading, and this
+    // one is live: the entry is dropped and this spawn reads again as a fresh one
+    // would, so the first sibling to get here re-reads and the rest share that.
+    if (frameworkByManifest.get(path) === cached) frameworkByManifest.delete(path);
+    return prepareProjectFramework(context, record);
+  }
+  const reading = readProjectFramework(path, signal);
   const entry = { identity, reading };
   frameworkByManifest.set(path, entry);
   const result = await reading;

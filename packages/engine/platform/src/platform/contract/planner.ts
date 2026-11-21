@@ -328,7 +328,7 @@ class PlanningContext {
 
   move(to: ContractStatus): void {
     if (this.contract.status === to) return;
-    const change = transitionContract(this.contract, to);
+    const change = transitionContract(this.contract, to, this.now());
     this.deps.emit({ type: 'CONTRACT_STATUS_CHANGED', contractId: this.contract.id, from: change.from, to: change.to });
   }
 

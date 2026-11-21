@@ -270,6 +270,8 @@ const ESCALATION_SCHEMA = objectSchema({
   decisionIds: STRING_LIST_SCHEMA,
   // Present only on the retry-or-cancel question a failing native turn asks; not an approval.
   failurePause: { type: 'boolean', enum: [true] },
+  // Present only on the question asked after an applied change whose check could not run: approving it runs the check again.
+  recheckPending: objectSchema({ summary: STRING_SCHEMA }, ['summary']),
   resolvedAt: NUMBER_SCHEMA,
   reply: objectSchema({
     text: STRING_SCHEMA,
@@ -374,6 +376,7 @@ export const CONTRACT_VIEW_SCHEMA = objectSchema({
   error: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   completedAt: NUMBER_SCHEMA,
+  statusChangedAt: NUMBER_SCHEMA,
 } satisfies Record<keyof Contract, Record<string, unknown>>, [
   'id', 'schemaVersion', 'sessionId', 'origin', 'ask', 'ownerAgentId', 'projectRoot', 'isolation', 'goal', 'criteria',
   'groups', 'units', 'status', 'checks', 'fixRounds', 'escalations', 'decisions', 'usage', 'judgmentUsage',

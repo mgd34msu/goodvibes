@@ -19,6 +19,8 @@ import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js'
 import { describeProvisionWork } from './browser-provisioning.js';
 import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, resolveRef, snapshotCredentialEvidence, snapshotHasPasswordInput, snapshotWithheldFrames, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { assertCaptureAllowed, assertPageTextAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
   BrowserPageInfo,
@@ -70,6 +72,22 @@ function keyCanSubmit(key: string, controlSubmits: boolean): boolean {
   return controlSubmits && (final === 'space' || final === ' ');
 }
 export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget };
+
+/**
+ * The Playwright abort code for a pinned fetch that failed, from its error
+ * code (on the error or its cause): refused, unreachable, timed out, or any
+ * other failure (TLS included), so the page sees the network failure it had.
+ */
+function pinnedFailureAbortCode(error: unknown): 'connectionrefused' | 'addressunreachable' | 'timedout' | 'failed' {
+  for (const holder of [error, error instanceof Error ? error.cause : undefined]) {
+    const code = typeof holder === 'object' && holder !== null ? (holder as { readonly code?: unknown }).code : undefined;
+    if (typeof code !== 'string') continue;
+    if (code === 'ECONNREFUSED' || code === 'ConnectionRefused') return 'connectionrefused';
+    if (code === 'ENETUNREACH' || code === 'EHOSTUNREACH' || code === 'NetworkUnreachable' || code === 'HostUnreachable') return 'addressunreachable';
+    if (code === 'ETIMEDOUT' || code === 'Timeout' || code === 'TimeoutError') return 'timedout';
+  }
+  return 'failed';
+}
 
 /** Names the embedded frames a read left out because of where they point. */
 function withheldNote(origins: readonly string[]): { readonly withheldFrames?: readonly string[]; readonly withheldNote?: string } {
@@ -546,7 +564,10 @@ export class BrowserEngine {
         if (await allowed(route.request().url())) await route.continue();
         else await route.abort('blockedbyclient');
       } catch {
-        // The page or context went away while the request was held.
+        // The page or context went away while the request was held, or the
+        // request could not be handled: it is never left held. An abort that
+        // fails too means the page is gone or the request was already answered.
+        await route.abort('failed').catch(() => {});
       }
     });
     const sockets = context.routeWebSocket(/.*/, async (socket: WebSocketRoute) => {
@@ -604,14 +625,26 @@ export class BrowserEngine {
       if (!PINNED_DROPPED_REQUEST_HEADERS.has(name.toLowerCase())) headers[name] = value;
     }
     const body = request.postDataBuffer();
-    const response = await pinnedFetch(checked.url.toString(), {
-      method: request.method(), headers, redirect: 'manual', ...(body ? { body: new Uint8Array(body) } : {}),
-    }, checked.addresses);
+    let response: Response;
+    let answerBody: ArrayBuffer;
+    try {
+      response = await pinnedFetch(checked.url.toString(), {
+        method: request.method(), headers, redirect: 'manual', ...(body ? { body: new Uint8Array(body) } : {}),
+      }, checked.addresses);
+      answerBody = await response.arrayBuffer();
+    } catch (error) {
+      // The host was reached for and failed (refused, unreachable, TLS, reset):
+      // the page gets that network failure now, not a request held until it closes.
+      const code = pinnedFailureAbortCode(error);
+      logger.debug('Browser pinned request failed', { origin: this.untrusted.originOf(url), abort: code, error: summarizeError(error) });
+      await route.abort(code);
+      return true;
+    }
     const answered: Record<string, string> = {};
     response.headers.forEach((value, name) => { if (!PINNED_DROPPED_RESPONSE_HEADERS.has(name)) answered[name] = value; });
     const cookies = response.headers.getSetCookie();
     if (cookies.length > 0) answered['set-cookie'] = cookies.join('\n');
-    await route.fulfill({ status: response.status, headers: answered, body: Buffer.from(await response.arrayBuffer()) });
+    await route.fulfill({ status: response.status, headers: answered, body: Buffer.from(answerBody) });
     return true;
   }
 

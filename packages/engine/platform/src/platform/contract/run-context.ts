@@ -219,7 +219,7 @@ export class ContractRun {
 
   moveContract(to: ContractStatus): void {
     if (this.contract.status === to) return;
-    const change = transitionContract(this.contract, to);
+    const change = transitionContract(this.contract, to, this.env.now());
     this.emit({ type: 'CONTRACT_STATUS_CHANGED', contractId: this.id, from: change.from, to: change.to });
     this.env.contractMoved?.(this.contract);
   }

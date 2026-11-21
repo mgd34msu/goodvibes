@@ -51,6 +51,8 @@ import {
   type UnitCheck,
 } from './types.js';
 import { addJudgmentUsage } from './usage.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { releaseSharedTreeForOwner, retakeSharedTreeAfterOwner } from './workstreams.js';
 
 /** The decision site owner replies are logged under. */
@@ -96,11 +98,20 @@ export const NAME_AN_ATTEMPT_LINE = (candidateIds: readonly string[]): string =>
 export const PLAN_UNRUNNABLE_LINE = (problems: string): string => `The plan cannot run as it stands (${problems}); change what is required, or stop the contract.`;
 /** Said when the owner's change could not be made into criteria. */
 export const AMENDMENT_FAILED_LINE = (problems: string): string => `That change could not be applied (${problems}); say it another way, or stop the contract.`;
-/** Added when a reply was read but acting on it failed (a provider outage, no route): nothing it asked for was applied. */
+/**
+ * Added when a reply was read but acting on it failed before anything it asked
+ * for was applied (a provider outage, no route for the amendment planner).
+ */
 export const REPLY_NOT_APPLIED_LINE = (reason: string): string => `That could not be applied right now (${reason}); reply again to retry, or stop the contract.`;
+/** Added when the owner's change was applied but checking the work against it could not run. */
+export const AMENDMENT_APPLIED_CHECK_FAILED_LINE = (summary: string, reason: string): string =>
+  `Your change was applied (${summary}), but checking the work against it could not run (${reason}); reply "approve" to run the check again, "change: ..." to change more, or stop the contract.`;
+/** Said when the work an operator picked could not be merged. */
+export const OPERATOR_PICK_FAILED_LINE = (attemptId: string, reason: string): string =>
+  `The operator's pick of ${attemptId} could not be merged (${reason}); say which attempt to take, or stop the contract.`;
 
 /** Lines the runner adds under a question it asks again; they are dropped before another is added. */
-const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied', 'That could not be applied right now', NO_MODEL_REPLY_LINE, NO_MODEL_WRITING_LINE];
+const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied', 'That could not be applied right now', 'Your change was applied (', 'The operator\'s pick of ', NO_MODEL_REPLY_LINE, NO_MODEL_WRITING_LINE];
 
 const APPROVE_WORDS = new Set(['approve', 'approved', 'yes', 'y', 'ok', 'okay', 'accept', 'accepted', 'go ahead', 'lgtm']);
 const STOP_WORDS = new Set(['stop', 'cancel', 'reject', 'rejected', 'no', 'n', 'abort']);
@@ -217,6 +228,8 @@ export interface EscalationInput {
    * tree). Allowed for every contract, native ones included.
    */
   readonly retryOrCancel?: true | undefined;
+  /** The owner's change was applied but checking the work against it could not run: approval runs that check again (Escalation.recheckPending). */
+  readonly recheckPending?: { readonly summary: string } | undefined;
 }
 
 /** What publishing a checked result ran into, for the publication pause. */
@@ -487,6 +500,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       unmetCriterionIds: [...input.unmetCriterionIds],
       ...(input.decisionIds.length === 0 ? {} : { decisionIds: [...input.decisionIds] }),
       ...(input.retryOrCancel === true ? { failurePause: true as const } : {}),
+      ...(input.recheckPending === undefined ? {} : { recheckPending: { summary: input.recheckPending.summary } }),
     };
     // The contract moves first: a refused contract move must not leave a unit
     // or group waiting on an owner who was never asked.
@@ -638,8 +652,12 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     });
   }
 
-  /** Puts the escalation's question again with `line` under it, as a new open escalation. */
-  function askAgain(run: ContractRun, escalation: Escalation, line: string): Escalation {
+  /**
+   * Puts the escalation's question again with `line` under it, as a new open
+   * escalation. `recheckPending` marks it as waiting to run the check of a
+   * change already applied; without it the new question waits on nothing more.
+   */
+  function askAgain(run: ContractRun, escalation: Escalation, line: string, recheckPending?: { readonly summary: string }): Escalation {
     return raise(run, {
       scope: escalation.scope,
       targetId: escalation.targetId,
@@ -647,6 +665,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       unmetCriterionIds: escalation.unmetCriterionIds,
       decisionIds: [],
       question: `${baseQuestion(escalation.question)}\n${line}`,
+      ...(recheckPending === undefined ? {} : { recheckPending }),
     });
   }
 
@@ -721,12 +740,32 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       if (unit === undefined) return { action: 'refused' };
       resume(run);
       await context.checks().runCheck(run, unit, 'owner-amend');
-    } else if (escalation.scope === 'group') {
-      resume(run);
-      await rejudge.rejudgeGroup(run, escalation.targetId);
-    } else {
-      resume(run, 'judging');
-      await rejudge.rejudgeDeliverable(run);
+      return { action: 'amended' };
+    }
+    return recheckAmended(run, escalation, amended.summary);
+  }
+
+  /**
+   * Checks a group or the deliverable against criteria the owner's change
+   * already rewrote. A check that cannot run (a decision-model outage, a gate
+   * or correction failure) leaves the change applied and asks the owner again,
+   * marked so that approving only runs this check again: replying the same
+   * change twice would amend the amended criteria and reset the fix budget again.
+   */
+  async function recheckAmended(run: ContractRun, escalation: Escalation, summary: string): Promise<Handled> {
+    try {
+      if (escalation.scope === 'group') {
+        resume(run);
+        await rejudge.rejudgeGroup(run, escalation.targetId);
+      } else {
+        resume(run, 'judging');
+        await rejudge.rejudgeDeliverable(run);
+      }
+    } catch (error) {
+      if (run.terminal || isAbortError(error, run.abort.signal)) throw error;
+      const failure = failureFromError(error);
+      run.decide('owner-replied', escalation.targetId, `amended; the re-check could not run: ${failure.reason}`);
+      return { action: 'amended', next: askAgain(run, escalation, AMENDMENT_APPLIED_CHECK_FAILED_LINE(summary, failure.reason), { summary }) };
     }
     return { action: 'amended' };
   }
@@ -767,6 +806,11 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function approve(run: ContractRun, escalation: Escalation, decisionId: string | undefined): Promise<Handled> {
+    // The owner's change is already applied; approval runs only the check that could not run.
+    if (escalation.recheckPending !== undefined && escalation.scope !== 'unit') {
+      const handled = await recheckAmended(run, escalation, escalation.recheckPending.summary);
+      return { action: 'approved', ...(handled.next === undefined ? {} : { next: handled.next }) };
+    }
     switch (escalation.reason) {
       case 'unsettled':
         return approveUnsettled(run, escalation, decisionId);
@@ -1035,11 +1079,38 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     // finds the question answered when its reading returns and applies nothing.
     // A refused pick leaves the owner's question open.
     assertAttemptTakeable(run, unitId, attemptId);
+    const resolved: Escalation[] = [];
     for (const escalation of open(run)) {
-      if (escalation.reason === 'attempts-undecided' && escalation.targetId === unitId) escalation.resolvedAt = run.env.now();
+      if (escalation.reason === 'attempts-undecided' && escalation.targetId === unitId) {
+        escalation.resolvedAt = run.env.now();
+        resolved.push(escalation);
+      }
     }
     resume(run);
-    await acceptAttempt(run, unitId, attemptId, 'picked by the operator (fleet.attempts.pick)');
+    try {
+      await acceptAttempt(run, unitId, attemptId, 'picked by the operator (fleet.attempts.pick)');
+    } catch (error) {
+      // The pick was withdrawn and the unit waits on its owner again: it gets an
+      // open question to answer, then the operator still sees the error.
+      if (!run.terminal && !isAbortError(error, run.abort.signal)) {
+        const line = OPERATOR_PICK_FAILED_LINE(attemptId, failureFromError(error).reason);
+        const last = resolved.at(-1);
+        const selection = run.unit(unitId)?.attemptSelection;
+        try {
+          if (last !== undefined) askAgain(run, last, line);
+          else if (selection !== undefined) {
+            raise(run, {
+              scope: 'unit', targetId: unitId, reason: 'attempts-undecided', unmetCriterionIds: [],
+              decisionIds: selection.decisionId === undefined ? [] : [selection.decisionId],
+              question: `${buildAttemptsQuestion(run.contract, unitId, selection)}\n${line}`,
+            });
+          }
+        } catch (askError) {
+          logger.warn('Contract: the attempts question could not be asked again after a failed operator pick', { contractId: run.id, unitId, error: summarizeError(askError) });
+        }
+      }
+      throw error;
+    }
   }
 
   return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, pauseFailedUnit, reply, operatorPick };

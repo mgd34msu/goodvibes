@@ -259,8 +259,16 @@ export class StreamLineProcessor {
     return batch;
   }
 
-  /** Puts the lines of a batch whose action failed back at the head of the queue; the queue bound still applies. */
-  requeue(lines: readonly string[], now: number): void {
+  /**
+   * Puts a batch whose action failed back at the head of the queue, with what
+   * it said was dropped, suppressed or cut short (the lifetime totals already
+   * counted them), so the retry says the same; the queue bound still applies.
+   */
+  requeue(batch: StreamBatch, now: number): void {
+    this.droppedSinceBatch += batch.dropped;
+    this.dedupedSinceBatch += batch.deduped;
+    this.truncatedSinceBatch += batch.truncated ?? 0;
+    const lines = batch.lines;
     if (lines.length === 0) return;
     if (this.queue.length === 0) this.firstQueuedAt = now;
     this.queue = [...lines, ...this.queue];

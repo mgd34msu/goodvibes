@@ -27,8 +27,10 @@ import { isProfileSurface, type ProfileSurface } from '../owner-profile/types.js
 import type { AppendProfileProseInput, ForgetProfileInput } from '../owner-profile/store-types.js';
 import { parseOccasionDate, renderOccasionDate } from './dates.js';
 import {
+  normalizeLineField,
   normalizePlanDetail,
   occasionIdFor,
+  parseOccasionLine,
   parsePlanLine,
   renderOccasionLine,
   renderPlanLine,
@@ -71,8 +73,10 @@ export function projectOccasionProfileMutation(source: OccasionProfileSource, me
   if (authority !== 'autonomous' && authority !== 'owner-direct' && authority !== 'web-page' && authority !== 'email'
     && authority !== 'channel-message' && authority !== 'document') return undefined;
   if (method === 'occasions.remove') {
-    if (typeof request.occasionId !== 'string' || request.confirmed !== true) return undefined;
-    const occasion = readOccasionDeclarations(source).occasions.find(entry => entry.id === request.occasionId);
+    if (typeof request.occasionId !== 'string' || request.confirmed !== true || typeof request.line !== 'string') return undefined;
+    // The effect is the forget of the named line, the one removeOccasion takes out.
+    const named = request.line.trim();
+    const occasion = readOccasionDeclarations(source).declarations.find(entry => entry.id === request.occasionId && entry.text.trim() === named);
     return occasion ? { method: 'profile.forget', input: { section: OCCASIONS_SECTION, text: occasion.text, authority } } : undefined;
   }
   if (method === 'occasions.conflict.resolve') {
@@ -144,6 +148,8 @@ export interface OccasionProposal {
   readonly needsKind: boolean;
   /** Dates already recorded for this title that disagree with the new one. */
   readonly conflictsWith: readonly string[];
+  /** The id the written line reads back as (an occasion proposal that can be confirmed); absent on a plan or a refusal. */
+  readonly occasionId?: string;
 }
 
 /** The result of a confirmed capture or a removal. */
@@ -208,7 +214,9 @@ export function proposeOccasion(
   source: OccasionProfileSource,
   input: ProposeOccasionInput,
 ): OccasionProposal {
-  const title = input.title.trim();
+  // Made safe for the line grammar before anything is derived from it, so the
+  // id, the confirmation and the written line all carry the title as stored.
+  const title = normalizeLineField(input.title);
   if (title.length === 0) {
     return refuse('An occasion needs a name, what should it be called?');
   }
@@ -240,7 +248,7 @@ export function proposeOccasion(
     // will be written. When they have not chosen one, `needsKind` is true and
     // `confirm` refuses rather than writing this placeholder.
     kind: kind ?? 'remember-only',
-    person: input.self === true ? '' : (input.person ?? '').trim(),
+    person: input.self === true ? '' : normalizeLineField(input.person ?? ''),
     selfDeclared: input.self === true,
     // The proposal is not read back through the reader, so nothing here can
     // resolve a possessive title against the owner's name. `for me` is the only
@@ -256,6 +264,17 @@ export function proposeOccasion(
     text: '',
   };
 
+  const line = renderOccasionLine(occasion);
+  // The line is read back through the one grammar that defines it: a field
+  // that came back different would be written as a different occasion than
+  // the one confirmed, so nothing is proposed for writing.
+  if (!readsBackAs(line, occasion)) {
+    return refuse(
+      `I could not store ${title}${occasion.person ? ` for ${occasion.person}` : ''} on ${written} without it reading back differently, `
+      + 'so nothing is recorded. Say the name and the person in plainer words and I will record it.',
+    );
+  }
+
   const confirmation = kind === null
     ? `Noted ${title} as ${written}, right? And is that one you'll want to sort something for, `
       + 'one to just remember, or neither?'
@@ -264,11 +283,25 @@ export function proposeOccasion(
   return {
     ok: true,
     reason: null,
-    line: renderOccasionLine(occasion),
+    line,
     confirmation,
     needsKind: kind === null,
     conflictsWith,
+    occasionId: id,
   };
+}
+
+/** Whether a rendered occasion line parses back to the same title, date, recurrence, kind and person. */
+function readsBackAs(line: string, occasion: Occasion): boolean {
+  const reread = parseOccasionLine(-1, `- ${line}`);
+  if (!reread.ok) return false;
+  const back = reread.occasion;
+  return back.title === occasion.title
+    && renderOccasionDate(back.date) === renderOccasionDate(occasion.date)
+    && back.recurrence === occasion.recurrence
+    && back.kind === occasion.kind
+    && back.person === occasion.person
+    && back.selfDeclared === occasion.selfDeclared;
 }
 
 /** Write the confirmed occasion. Refuses without a kind rather than choosing one. */
@@ -281,7 +314,8 @@ export async function confirmOccasion(
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   const proposal = proposeOccasion(source, input);
-  const id = occasionIdFor(input.title);
+  // The id the written line reads back as, so the id returned is the one every reader sees.
+  const id = proposal.occasionId ?? occasionIdFor(input.title);
   if (!proposal.ok) return failed(id, proposal.reason ?? 'Refused.');
   if (proposal.needsKind) {
     return failed(
@@ -336,7 +370,8 @@ export interface ConfirmPlanInput extends ProposePlanInput {
 
 /** The same two-step capture, for a plan. Plans never prompt; they are known. */
 export function proposePlan(input: ProposePlanInput): OccasionProposal {
-  const title = input.title.trim();
+  // A separator inside the title or the destination would split the line, so both are made safe for the grammar.
+  const title = normalizeLineField(input.title);
   if (title.length === 0) return refuse('A plan needs a name.');
   const details = (input.details ?? [])
     .map((detail) => normalizePlanDetail(detail))
@@ -347,7 +382,7 @@ export function proposePlan(input: ProposePlanInput): OccasionProposal {
     from: input.from.trim(),
     to: input.to.trim(),
     away: input.away === true,
-    destination: (input.destination ?? '').trim(),
+    destination: normalizeLineField(input.destination ?? ''),
     extras: details,
     lineIndex: -1,
     text: '',
@@ -386,7 +421,8 @@ export async function confirmPlan(
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   const proposal = proposePlan(input);
-  const id = occasionIdFor(input.title);
+  // The id of the title as written, so the id returned is the one every reader sees.
+  const id = occasionIdFor(normalizeLineField(input.title));
   if (!proposal.ok) return failed(id, proposal.reason ?? 'Refused.');
   assertCurrent();
   const result = await writer.append({
@@ -422,16 +458,22 @@ export async function removeOccasion(
   source: OccasionProfileSource,
   writer: OccasionProfileWriter,
   dropState: (occasionId: string) => Promise<number>,
-  input: { readonly occasionId: string; readonly confirmed: boolean; readonly authority: AuthoritySurface | 'autonomous' },
+  input: {
+    readonly occasionId: string;
+    readonly confirmed: boolean;
+    /** The exact line a confirmed call removes (the unconfirmed call's removedLine); required when confirmed. */
+    readonly line?: string | undefined;
+    readonly authority: AuthoritySurface | 'autonomous';
+  },
   options: ProfileMutationOptions = {},
 ): Promise<OccasionWriteOutcome> {
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   const declared = readOccasionDeclarations(source).declarations.filter((entry) => entry.id === input.occasionId);
-  // The line removed is the active one (the first); the outcome names it.
-  const occasion = declared[0];
-  const others = declared.length - 1;
   if (!input.confirmed) {
+    // The line put to the owner is the active one (the first); the confirmed call names it back.
+    const occasion = declared[0];
+    const others = declared.length - 1;
     if (occasion === undefined) {
       return failed(input.occasionId, 'Removing this drops the date and everything recorded against it. Confirm to go ahead.');
     }
@@ -443,18 +485,28 @@ export async function removeOccasion(
       stillDeclaredBy: others,
     };
   }
+  if (input.line === undefined || input.line.trim().length === 0) {
+    return failed(input.occasionId, 'Say which line to remove: pass the removedLine the unconfirmed call returned, or the occasion\'s text from occasions.list. Nothing was removed.');
+  }
+  // Only the named line goes, so a repeated confirmed call (a retried lost
+  // response) never takes out the next line that declares the same occasion.
+  const named = input.line.trim();
+  const occasion = declared.find((entry) => entry.text.trim() === named);
   if (occasion === undefined) {
-    // Still drop any state, so a line the owner deleted by hand does not leave the
+    // The named line is already gone (removed by an earlier call, or by hand).
+    // What was recorded against the occasion is dropped only once no line
+    // declares it, so a line the owner deleted by hand does not leave the
     // machine holding an answer about something that is no longer there.
     assertCurrent();
-    const dropped = await dropState(input.occasionId);
+    const dropped = declared.length > 0 ? 0 : await dropState(input.occasionId);
     assertCurrent();
     return {
-      ok: dropped > 0,
-      reason: dropped > 0 ? null : 'There is no occasion by that name, so there was nothing to remove.',
+      ok: true,
+      reason: null,
       occasionId: input.occasionId,
       disclosure: '',
       droppedRecords: dropped,
+      stillDeclaredBy: declared.length,
     };
   }
   assertCurrent();

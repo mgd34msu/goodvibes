@@ -39,7 +39,7 @@ import {
   renderOnExitPrompt,
   type TriggerProcessHost,
 } from './process-triggers.js';
-import { createDefaultProbeIo, runProbe } from './probes.js';
+import { createDefaultProbeIo, probeHostRefusal, runProbe } from './probes.js';
 import { evaluateRule } from './rules.js';
 import {
   boundEventLog,
@@ -286,7 +286,7 @@ export class TriggerManager {
         process: record.process,
         now,
         note: alive
-          ? `The daemon restarted while this ran. pid ${record.process.pid} was still alive when its ${Math.round(cap / 60_000)}-minute limit passed; how it ended was not observed.`
+          ? `The daemon restarted while this ran. The same process (pid ${record.process.pid}, started at the same time) was still alive when its ${Math.round(cap / 60_000)}-minute limit passed; how it ended was not observed.`
           : 'The daemon restarted while this ran. It has since ended; its exit status was not observed.',
       });
       void this.fireOnExit(record.definition.id, termination, now).catch((error: unknown) => {
@@ -520,6 +520,11 @@ export class TriggerManager {
         : 'Platform-tool probes run on the tools of a session, and this trigger host has none; use an http, file or command probe, or create the trigger in the daemon.';
       if (refused) throw new RefusalError(refusal({ code: 'TRIGGER_PROBE_TOOL', state: `the probe's ${probe.tool} call cannot run here`, reason: refused, next: ['Probe with a tool that only reads, or with an http, file or command probe'], status: 422 }));
     }
+    if (validated.spec.kind === 'condition' && validated.spec.probe.kind === 'http') {
+      // The fetch tool's host policy, as written; every check applies it again with the DNS answers.
+      const refused = probeHostRefusal(validated.spec.probe.url, this.options.probeHostPolicy);
+      if (refused) throw new RefusalError(refusal({ code: 'TRIGGER_PROBE_HOST', state: 'the probe\'s URL may not be fetched', reason: refused, next: ['Probe a URL the fetch tool may reach, or ask the owner to change the fetch setting the refusal names'], status: 422 }));
+    }
     if (this.records.has(validated.id)) {
       throw new RefusalError(refusal({ code: 'TRIGGER_EXISTS', state: `a trigger with the id "${validated.id}" exists`, reason: `A trigger with id "${validated.id}" already exists`, next: ['Pick another id, or cancel the existing trigger first'], status: 409 }));
     }
@@ -701,7 +706,7 @@ export class TriggerManager {
     const startedAt = this.now();
     const incarnation = this.incarnationOf(id);
     try {
-      const io = this.options.probeIo ?? createDefaultProbeIo();
+      const io = this.options.probeIo ?? createDefaultProbeIo({ hostPolicy: this.options.probeHostPolicy });
       const raw = await runProbe(spec.probe, io, {
         timeoutMs: this.config.probeTimeoutMs ?? 15_000,
         ...(record.definition.ownerSessionId !== undefined ? { ownerSessionId: record.definition.ownerSessionId } : {}),

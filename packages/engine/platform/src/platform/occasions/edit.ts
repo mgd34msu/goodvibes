@@ -20,7 +20,7 @@ import type { AuthoritySurface } from '../security/untrusted-content.js';
 import type { ProfileMutationOptions } from '../owner-profile/delegation.js';
 import type { ProfileSurface } from '../owner-profile/types.js';
 import { parseOccasionDate, renderOccasionDate } from './dates.js';
-import { normalizePlanDetail, occasionIdFor, parsePlanLine, renderOccasionLine, renderPlanLine } from './grammar.js';
+import { normalizeLineField, normalizePlanDetail, occasionIdFor, parseOccasionLine, parsePlanLine, renderOccasionLine, renderPlanLine } from './grammar.js';
 import { readOccasionDeclarations, readPlans, type OccasionProfileSource } from './reader.js';
 import type { OccasionProfileWriter, OccasionWriteOutcome } from './capture.js';
 import { isOccasionKind, OCCASIONS_SECTION, PLANS_SECTION, type Occasion, type Plan } from './types.js';
@@ -85,7 +85,8 @@ export function planOccasionUpdate(
   if (lines.length > 1) {
     return refusePlan('This occasion is recorded more than once. Choose which date to keep first, then change it.');
   }
-  const title = changes.title === undefined ? current.title : changes.title.trim();
+  // A new title or person is made safe for the line grammar before the id is checked or the line rendered.
+  const title = changes.title === undefined ? current.title : normalizeLineField(changes.title);
   if (title.length === 0) return refusePlan('An occasion needs a name.');
   if (occasionIdFor(title) !== occasionId) {
     return refusePlan(
@@ -123,11 +124,18 @@ export function planOccasionUpdate(
     leadDays = Math.round(changes.leadDays);
   }
   const selfDeclared = changes.self ?? current.selfDeclared;
-  const person = selfDeclared ? '' : (changes.person ?? current.person).trim();
+  const person = selfDeclared ? '' : normalizeLineField(changes.person ?? current.person);
   const next: Occasion = { ...current, title, date, kind, recurrence, leadDays, selfDeclared, person };
   const line = renderOccasionLine(next);
   if (line === renderOccasionLine(current)) {
     return { ok: true, reason: null, line, replaces: current.text, confirmation: `${current.title} already reads that way.`, unchanged: true };
+  }
+  // The rewritten line must read back as the occasion confirmed, or the edit would write a different one.
+  const reread = parseOccasionLine(-1, `- ${line}`);
+  if (!reread.ok || reread.occasion.title !== title || renderOccasionDate(reread.occasion.date) !== renderOccasionDate(date)
+    || reread.occasion.kind !== kind || reread.occasion.recurrence !== recurrence || reread.occasion.person !== person
+    || reread.occasion.selfDeclared !== selfDeclared) {
+    return refusePlan('That change would not read back the way it was said, so nothing is changed. Say the name and the person in plainer words.');
   }
   const dateMoved = renderOccasionDate(date) !== renderOccasionDate(current.date);
   return {
@@ -177,7 +185,8 @@ export function planPlanUpdate(
 ): OccasionEditPlan {
   const current = selectPlan(source, selector);
   if (typeof current === 'string') return refusePlan(current);
-  const title = changes.title === undefined ? current.title : changes.title.trim();
+  // A separator inside the title or the destination would split the line, so both are made safe for the grammar.
+  const title = changes.title === undefined ? current.title : normalizeLineField(changes.title);
   if (title.length === 0) return refusePlan('A plan needs a name.');
   const next: Plan = {
     ...current,
@@ -186,7 +195,7 @@ export function planPlanUpdate(
     from: (changes.from ?? current.from).trim(),
     to: (changes.to ?? current.to).trim(),
     away: changes.away ?? current.away,
-    destination: (changes.destination ?? current.destination).trim(),
+    destination: changes.destination === undefined ? current.destination : normalizeLineField(changes.destination),
     extras: changes.details === undefined ? current.extras : changes.details.map((detail) => normalizePlanDetail(detail)).filter((detail) => detail.length > 0),
   };
   const line = renderPlanLine(next);

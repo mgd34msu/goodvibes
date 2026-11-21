@@ -174,6 +174,8 @@ export class AutomationManager {
   private deliveryManager: AutomationDeliveryManager | null;
   private readonly unattendedRuns: UnattendedRuns | undefined;
   private readonly deliveryInFlight = new Set<string>();
+  /** Runs whose failure or missed-run notice is being sent now, so a run's notice is never sent twice at once. */
+  private readonly noticeInFlight = new Set<string>();
   /** Run answers and failure notices being sent now; {@link deliveriesSettled} waits for them. */
   private readonly deliveries = new Set<Promise<void>>();
   // Attached post-construction by the CheckinService (attachCheckinEvaluator);
@@ -1253,17 +1255,47 @@ export class AutomationManager {
     this.deliveries.add(settled);
   }
 
+  /**
+   * Sends a failed or missed run's notice, once at a time per run. The run's
+   * `notice: owed` marker is cleared once the notice was sent or reached the
+   * owner inbox; a notice that reached no one stays owed and is sent again at
+   * the next start (deliverOwedRuns).
+   */
   private maybeDeliverFailureNotice(job: AutomationJob, run: AutomationRun): void {
-    this.trackDelivery(maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun, reason) => {
+    if (this.noticeInFlight.has(run.id)) return;
+    this.noticeInFlight.add(run.id);
+    let handedToInbox = false;
+    const sending = maybeDeliverAutomationFailureNotice(this.deliveryManager, job, run, (gapJob, gapRun, reason) => {
       // The notice reached no one: it goes to the owner inbox, so a failed or missed unattended run is never silent.
       if (!this.unattendedRuns) {
         this.warnUndeliveredNotice(gapJob, gapRun, reason ?? 'the job names no delivery target and there is no owner inbox in this process');
         return;
       }
-      this.trackDelivery(this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun), reason).then((receipt) => {
-        if (receipt.to === 'nowhere') this.warnUndeliveredNotice(gapJob, gapRun, receipt.reason);
-      }));
-    }));
+      handedToInbox = true;
+      const posting = this.unattendedRuns.postToInbox(automationFailureAnswer(gapJob, gapRun), reason).then(async (receipt) => {
+        if (receipt.to === 'nowhere') {
+          this.warnUndeliveredNotice(gapJob, gapRun, receipt.reason);
+          return;
+        }
+        await this.clearOwedNotice(gapRun.id);
+      }).finally(() => { this.noticeInFlight.delete(run.id); });
+      this.trackDelivery(posting);
+    }, () => this.clearOwedNotice(run.id));
+    this.trackDelivery(sending.finally(() => { if (!handedToInbox) this.noticeInFlight.delete(run.id); }));
+  }
+
+  /** Clears a run's owed notice once the notice landed, and saves it. Never rejects. */
+  private async clearOwedNotice(runId: string): Promise<void> {
+    const latest = this.runs.get(runId);
+    if (latest?.notice?.state !== 'owed') return;
+    const updated: AutomationRun = { ...latest, notice: undefined, updatedAt: Date.now() };
+    this.runs.set(runId, updated);
+    this.syncRunToRuntime(updated, 'automation.failure-notice');
+    try {
+      await this.saveRuns();
+    } catch (error: unknown) {
+      logger.warn('AutomationManager: a failure notice was sent, but recording that failed; it may be sent again at the next start', { runId, error: summarizeError(error) });
+    }
   }
 
   /** A failure notice that reached neither a target nor the owner inbox: logged once per job. */
@@ -1313,18 +1345,23 @@ export class AutomationManager {
   /**
    * At start: a run that ended and still owes its answer (the daemon stopped
    * between the run's end and the write that records its delivery) is
-   * delivered now, under the same identity as the first attempt. Once per
-   * start; a run whose job is gone is logged and left owed.
+   * delivered now, under the same identity as the first attempt; a failed or
+   * missed run whose notice is still owed has its notice sent now the same
+   * way. Once per start; a run whose job is gone is logged and left owed.
    */
   private deliverOwedRuns(): void {
     for (const run of [...this.runs.values()]) {
-      if (run.delivery?.state !== 'owed' || run.status === 'running' || run.status === 'queued') continue;
+      if (run.status === 'running' || run.status === 'queued') continue;
+      const owesAnswer = run.delivery?.state === 'owed';
+      const owesNotice = run.notice?.state === 'owed';
+      if (!owesAnswer && !owesNotice) continue;
       const job = this.jobs.get(run.jobId);
       if (!job) {
-        logger.warn('AutomationManager: a run owes its answer but its job is gone; it was not delivered', { runId: run.id, jobId: run.jobId });
+        logger.warn('AutomationManager: a run owes its answer or failure notice but its job is gone; it was not delivered', { runId: run.id, jobId: run.jobId });
         continue;
       }
-      this.maybeDeliverRun(job, run);
+      if (owesAnswer) this.maybeDeliverRun(job, run);
+      if (owesNotice) this.maybeDeliverFailureNotice(job, run);
     }
   }
 

@@ -46,7 +46,12 @@ export const TRIGGER_TOOL_DEFINITION: ToolDefinition = {
   category: 'execute',
   // list and history only read; create, cancel and reset change what runs.
   readModes: { field: 'action', values: ['list', 'history'] },
-  subjects: { commands: ['definition.spec.command', 'definition.spec.probe.command'] },
+  // Everything a trigger will touch, so the owner's path and host rules, managed policy and the path classifier see it.
+  subjects: {
+    commands: ['definition.spec.command', 'definition.spec.probe.command'],
+    paths: ['definition.spec.probe.path', 'definition.spec.cwd', 'definition.spec.probe.cwd'],
+    hosts: ['definition.spec.probe.url'],
+  },
   concurrency: 'serial',
 };
 

@@ -14,7 +14,18 @@
 
 import { statSync } from 'node:fs';
 import { open } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import type { TriggerProbe, TriggerValue } from './types.js';
+import { isCallerReachablePrivateAddress, pinnedFetch } from '../runtime/network/destination.js';
+import { assertHttpScheme, resolveCheckedAddresses } from '../tools/fetch/pinned-request.js';
+import {
+  ALLOWED_PRIVATE_HOSTS_SETTING,
+  classifyHostTrustTier,
+  emitSsrfDeny,
+  extractHostname,
+  writtenPrivateHostAllowed,
+  type TrustTierConfig,
+} from '../tools/fetch/trust-tiers.js';
 
 export interface ProbeCommandResult {
   readonly exitCode: number | null;
@@ -87,15 +98,140 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
 }
 
 /**
- * Default effects: fetch, file reads and stats. Command probes run only through
- * the runner the host passes (the process manager's), and platform-tool probes
- * only through the tool host it passes (probe-tools.ts); with none, such a
- * probe fails and says so.
+ * The host policy an http probe is held to: the fetch tool's own settings,
+ * read live (fetch.trustedHosts, fetch.blockedHosts, fetch.allowLocalhost,
+ * fetch.allowedPrivateHosts). One policy for the fetch tool and for probes,
+ * whoever created the trigger.
+ */
+export interface ProbeHostPolicy {
+  readonly trustedHosts: () => readonly string[] | undefined;
+  readonly blockedHosts: () => readonly string[] | undefined;
+  readonly localhostAllowed: () => boolean;
+  readonly allowedPrivateHosts: () => readonly string[];
+}
+
+/** With no host policy wired: no list, no localhost, no private host. */
+const STRICTEST_HOST_POLICY: ProbeHostPolicy = {
+  trustedHosts: () => undefined,
+  blockedHosts: () => undefined,
+  localhostAllowed: () => false,
+  allowedPrivateHosts: () => [],
+};
+
+function trustTierConfigOf(policy: ProbeHostPolicy): TrustTierConfig {
+  const trusted = policy.trustedHosts(), blocked = policy.blockedHosts();
+  return { ...(trusted ? { trustedHosts: [...trusted] } : {}), ...(blocked ? { blockedHosts: [...blocked] } : {}) };
+}
+
+/**
+ * Why an http probe of `url` may not run, worded as the fetch tool words its
+ * refusals, or undefined when it may. Judged on the host as written (no DNS):
+ * the create refuses with it, and every check refuses with it again before the
+ * pinned request resolves and checks the addresses (DNS can change).
+ */
+export function probeHostRefusal(url: string, policy: ProbeHostPolicy = STRICTEST_HOST_POLICY): string | undefined {
+  try {
+    assertHttpScheme(url);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const host = extractHostname(url);
+  if (host === null) return 'Request blocked: not a valid URL. Nothing was sent; pass an absolute http(s) URL.';
+  const trust = classifyHostTrustTier(host, trustTierConfigOf(policy));
+  if (trust.tier === 'localhost') {
+    return policy.localhostAllowed() ? undefined
+      : `Request blocked: the probe of the localhost host "${host}" cannot run, because localhost fetches are not allowed (fetch.allowLocalhost is off). `
+        + 'Ask the owner to set fetch.allowLocalhost to true, or probe a URL that is not on this machine.';
+  }
+  if (trust.tier !== 'blocked') return undefined;
+  const literal = host.replace(/^\[|\]$/g, '');
+  if (trust.isSsrf && isIP(literal) !== 0 && isCallerReachablePrivateAddress(literal)) {
+    if (writtenPrivateHostAllowed(host, { callerAdmitted: false, allowedPrivateHosts: policy.allowedPrivateHosts() })) return undefined;
+    return `Request blocked: ${trust.reason}. To reach it, the owner can add "${literal}" to ${ALLOWED_PRIVATE_HOSTS_SETTING} in their own settings (a project file cannot set it)`;
+  }
+  if (trust.isSsrf) emitSsrfDeny(host, url, trust.reason);
+  return `Request blocked: ${trust.reason}`;
+}
+
+/** Most redirects a probe follows, as many as the fetch tool follows. */
+const PROBE_MAX_REDIRECTS = 10;
+const PROBE_REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+/** Request headers not sent on after a redirect to another origin. */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'cookie', 'proxy-authorization']);
+
+/**
+ * An http probe's request, admitted as the fetch tool admits one: the written
+ * host is checked against the policy, its every DNS answer is checked and the
+ * connection pinned to a checked address (tools/fetch/pinned-request.ts), and
+ * each redirect is checked the same way, never into a private, loopback (unless
+ * the written host was an allowed loopback one) or metadata address.
+ */
+async function admittedProbeFetch(url: string, init: RequestInit, policy: ProbeHostPolicy): Promise<Response> {
+  const trustTierConfig = trustTierConfigOf(policy);
+  let current = url;
+  let method = (init.method ?? 'GET').toUpperCase();
+  let body = init.body;
+  let headers = new Headers(init.headers);
+  let writtenLoopbackAllowed = false;
+  for (let hop = 0; ; hop += 1) {
+    const host = extractHostname(current);
+    if (host === null) throw new Error('Request blocked: not a valid URL. Nothing was sent; pass an absolute http(s) URL.');
+    const trust = classifyHostTrustTier(host, trustTierConfig);
+    if (hop === 0) {
+      const refused = probeHostRefusal(current, policy);
+      if (refused) throw new Error(refused);
+      writtenLoopbackAllowed = trust.tier === 'localhost';
+    } else if (trust.tier === 'blocked' || (trust.tier === 'localhost' && !writtenLoopbackAllowed)) {
+      // A server may not choose an internal destination.
+      emitSsrfDeny(host, current, trust.reason);
+      throw new Error(`Redirect blocked: ${trust.reason}`);
+    }
+    const addresses = await resolveCheckedAddresses(current, {
+      trustTierConfig,
+      localhostApproved: trust.tier === 'localhost' && writtenLoopbackAllowed,
+      callerWroteHost: hop === 0,
+      privateAllowed: hop === 0 && writtenPrivateHostAllowed(host, { callerAdmitted: false, allowedPrivateHosts: policy.allowedPrivateHosts() }),
+    });
+    const response = await pinnedFetch(current, {
+      ...init, method, headers, body: body ?? null, redirect: 'manual',
+    }, addresses);
+    const location = PROBE_REDIRECT_STATUSES.has(response.status) ? response.headers.get('location') : null;
+    if (location === null) return response;
+    await response.body?.cancel().catch(() => undefined);
+    if (hop === PROBE_MAX_REDIRECTS) throw new Error(`Too many redirects after ${PROBE_MAX_REDIRECTS} hops`);
+    const next = new URL(location, current);
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+      throw new Error(`Redirect blocked: the server redirected to a ${next.protocol} URL; only http(s) targets are followed`);
+    }
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST')) {
+      method = 'GET';
+      body = null;
+      headers.delete('content-type');
+      headers.delete('content-length');
+    }
+    if (next.origin !== new URL(current).origin) {
+      const kept = new Headers();
+      headers.forEach((value, name) => { if (!CREDENTIAL_HEADERS.has(name.toLowerCase())) kept.set(name, value); });
+      headers = kept;
+    }
+    current = next.toString();
+  }
+}
+
+/**
+ * Default effects: fetch, file reads and stats. An http probe's request goes
+ * through the fetch tool's host admission under `hostPolicy` (with none, no
+ * localhost and no private host). Command probes run only through the runner
+ * the host passes (the process manager's), and platform-tool probes only
+ * through the tool host it passes (probe-tools.ts); with none, such a probe
+ * fails and says so.
  */
 export function createDefaultProbeIo(options: {
   readonly runCommand?: ProbeIo['runCommand'] | undefined;
   readonly callTool?: ProbeIo['callTool'] | undefined;
+  readonly hostPolicy?: ProbeHostPolicy | undefined;
 } = {}): ProbeIo {
+  const hostPolicy = options.hostPolicy ?? STRICTEST_HOST_POLICY;
   return {
     fetch: async (url, init, timeoutMs) => {
       const controller = new AbortController();
@@ -108,7 +244,7 @@ export function createDefaultProbeIo(options: {
         return controller.signal.aborted ? new ProbeTimeoutError('http', timeoutMs) : error;
       };
       try {
-        const response = await fetch(url, { ...init, signal: controller.signal });
+        const response = await admittedProbeFetch(url, { ...init, signal: controller.signal }, hostPolicy);
         return {
           status: response.status,
           ok: response.ok,
@@ -172,9 +308,10 @@ export function runProbe(
   io: ProbeIo,
   defaults: { readonly timeoutMs?: number | undefined; readonly ownerSessionId?: string | undefined } = {},
 ): Promise<TriggerValue> {
+  // A stored budget of 0 (accepted before a budget had to be positive) is no budget: it runs with the default.
   const budget = probe.kind === 'file'
     ? (defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS)
-    : (probe.timeoutMs ?? defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+    : ((probe.timeoutMs === undefined || probe.timeoutMs === 0 ? undefined : probe.timeoutMs) ?? defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
   // http and command probes keep their own deadline and report it first; a file
   // read has none, so the budget is its deadline.
   return withinBudget(probe.kind, budget, runProbeWork(probe, io, budget, defaults.ownerSessionId), probe.kind === 'file' ? 0 : PROBE_SETTLE_GRACE_MS);

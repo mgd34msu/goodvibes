@@ -79,9 +79,10 @@ const refreshesInFlight = new Map<string, Promise<void>>();
  * nothing. A changed one is published at once with every provider access
  * already known (remembered readings and local addresses); providers not yet
  * read are read after, and the catalog is published again only when a reading
- * changed a provider's access. A failed reading leaves the published catalog
- * standing; the cache is then kept without its ETag, so the next daily check
- * reads the archive in full and asks the reading again.
+ * changed a provider's access. A failed reading, or one skipped because no
+ * decision model answers (Classic), leaves the published catalog standing; the
+ * cache is then kept without its ETag, so the next daily check reads the
+ * archive in full and asks the reading again.
  */
 async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> {
   const previous = [...ctx.getCatalogModels()];
@@ -97,7 +98,11 @@ async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> 
   const known = readings.known(feed.providers);
   publishCatalog(ctx, feed, known, cachePath, tmpPath, archive);
   try {
-    await readings.readMissing(feed.providers);
+    if (!await readings.readMissing(feed.providers)) {
+      // Classic (no decision model, or a fallback from a failing one): nothing was asked, which is a normal choice.
+      logger.debug('[model-catalog] Provider access readings were not asked without a decision model; the next check reads the catalog in full and asks them');
+      saved = { etag: undefined, source: feed.source };
+    }
   } catch (error) {
     logger.warn('[model-catalog] Some provider access readings did not complete; their models keep the paid tier until the next refresh', { error: summarizeError(error) });
     saved = { etag: undefined, source: feed.source };

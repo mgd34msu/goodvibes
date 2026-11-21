@@ -205,7 +205,7 @@ const CHANNEL_VARIANTS: Readonly<Record<ChannelTask, { readonly id: string; read
   status: {
     id: 'channel-readiness-route',
     label: 'Channel readiness',
-    userOutcome: 'Send and troubleshoot external messages through configured, inspectable channel targets.',
+    userOutcome: 'Check which channels are configured and ready, without sending anything.',
   },
 };
 

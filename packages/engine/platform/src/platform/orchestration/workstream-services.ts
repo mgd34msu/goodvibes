@@ -300,6 +300,8 @@ function createDraftFacade(
         overCap: summary.overCap,
         unreadable: summary.unreadable,
       });
+      // A draft whose file was reclaimed is no longer launchable here either.
+      for (const id of summary.removedIds) drafts.delete(id);
     },
   });
   for (const persisted of store.loadAll()) drafts.set(persisted.id, persisted);

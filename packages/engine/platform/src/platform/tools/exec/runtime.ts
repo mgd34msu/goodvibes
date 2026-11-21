@@ -828,7 +828,11 @@ async function runUntil(
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
           appendCapped(isStderr ? stderrSink : stdoutSink, chunk);
-          if (!matched && await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))) {
+          if (matched) continue;
+          // A test still running when the other stream matched and handed off settles as no match.
+          const hit = await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))
+            .catch((error: unknown) => { if (relay.handoff) return false; throw error; });
+          if (hit && !matched) {
             current(); matched = true; clearTimeout(untilTimer);
             if (until.kill_after) stop();
             else startHandoff();
@@ -858,6 +862,7 @@ async function runUntil(
       active.removeEventListener('abort', onStop);
       let adoptedJob: ReturnType<ProcessManager['adoptRunning']>;
       try {
+        current(); pattern.assertCurrent();
         adoptedJob = processManager.adoptRunning({
           proc, cmd: cmdStr, stdout: handoff.readable.stdout, stderr: handoff.readable.stderr,
           stdoutSoFar: stdoutSink.text, stderrSoFar: stderrSink.text,

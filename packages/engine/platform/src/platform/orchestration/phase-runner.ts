@@ -436,6 +436,12 @@ export async function commitPhaseWork(
     }
   }
 
+  // In the shared tree an empty path list would commit every changed path
+  // (the owner's edits and sibling items' files): only scope 'all' sweeps.
+  if (paths && paths.length === 0) {
+    return { commit: { status: 'skipped', reason: 'the item recorded no changed files for this phase' } };
+  }
+
   if (paths && paths.length > 0 && deps.launchDirtySnapshot) {
     const launchSnapshot = deps.launchDirtySnapshot;
     {

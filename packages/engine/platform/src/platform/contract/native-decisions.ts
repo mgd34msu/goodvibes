@@ -425,21 +425,23 @@ async function decideNativeContractWithModel(contract: Contract, services: Nativ
     const deciding = inFlight;
     let result: AutonomousDecision;
     try {
-    result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
-      site: `contract.native.${input.stage}`, instructions: INSTRUCTIONS, actionDescription: input.action, binding,
-      state: { source: autonomousSourceEvidence(source), evidence, externalConditions: capturedConditions.map(condition => ({ description: condition.description })) } as unknown as EntryType,
-      // These references name the snapshots retained by this action. They do
-      // not need a second digest of data already guarded by their native owner.
-      evidence: [{ id: 'native-source', revision: actionRevision }, { id: 'operation-evidence', revision: actionRevision },
-        nativeCriteriaEvidence(contract), { id: 'source-revision', revision: contract.nativeSource!.sourceRevision }],
-      supportingDecisionIds: input.decisionIds,
-      continuations: input.continuations.map(continuation => ({ ref: { id: continuation.id, kind: continuation.kind, revision: actionRevision }, description: continuation.description, input: continuation.input ?? null })),
-      conditions: capturedConditions, allowAct: input.allowAct, assertCurrent: active, signal: input.signal,
-    }).finally(() => {
+    try {
+      result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
+        site: `contract.native.${input.stage}`, instructions: INSTRUCTIONS, actionDescription: input.action, binding,
+        state: { source: autonomousSourceEvidence(source), evidence, externalConditions: capturedConditions.map(condition => ({ description: condition.description })) } as unknown as EntryType,
+        // These references name the snapshots retained by this action. They do
+        // not need a second digest of data already guarded by their native owner.
+        evidence: [{ id: 'native-source', revision: actionRevision }, { id: 'operation-evidence', revision: actionRevision },
+          nativeCriteriaEvidence(contract), { id: 'source-revision', revision: contract.nativeSource!.sourceRevision }],
+        supportingDecisionIds: input.decisionIds,
+        continuations: input.continuations.map(continuation => ({ ref: { id: continuation.id, kind: continuation.kind, revision: actionRevision }, description: continuation.description, input: continuation.input ?? null })),
+        conditions: capturedConditions, allowAct: input.allowAct, assertCurrent: active, signal: input.signal,
+      });
+    } finally {
+      // A reading that threw, its arguments' construction included, leaves nothing deciding for this target.
       deciding.delete(key);
-      // A reading that threw leaves nothing deciding for this target.
       if (contract.nativeProgress?.state !== 'refused') showNativeProgress(contract);
-    });
+    }
     result.assertCurrent();
     } catch (error) {
       // A reading of a state that no longer holds is discarded and the operation read again from the

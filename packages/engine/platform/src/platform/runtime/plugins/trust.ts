@@ -90,7 +90,7 @@ export interface PluginTrustRecord {
   note?: string | undefined;
   /**
    * The copy the tier was given to: its directory and the content digest of
-   * its manifest and entry file (plugins/loader.ts pluginContentDigest). The
+   * its manifest and every file in its directory (plugins/loader.ts pluginContentDigest). The
    * tier applies to that copy only; a same-named copy elsewhere, or this copy
    * after its code changed, starts untrusted until trust is given to it.
    */
@@ -254,7 +254,7 @@ export class PluginTrustStore {
    * A tier the owner set that {@link tierFor} does not apply to this copy, and
    * why: `unbound` (a record kept from before tiers were bound to a copy),
    * `moved` (it was given to a copy in another directory) or `files-changed`
-   * (this copy's manifest or entry file changed since, or cannot be read).
+   * (this copy's manifest or a file in its directory changed since, or cannot be read).
    * Undefined when there is no such tier: no record, an untrusted one, or one
    * that applies.
    */

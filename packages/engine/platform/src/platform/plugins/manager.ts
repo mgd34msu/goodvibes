@@ -358,7 +358,7 @@ export class PluginManager {
       return { ok: false, error: this.notFoundError(name) };
     }
     const copy = copyIdentity(discovered);
-    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: its entry file in ${copy.dir} cannot be read` };
+    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: a file in ${copy.dir} cannot be read` };
 
     // Warn if trying to manually set 'trusted' without a signed manifest.
     if (tier === 'trusted') {
@@ -400,7 +400,7 @@ export class PluginManager {
       return { ok: false, error: this.notFoundError(name) };
     }
     const copy = copyIdentity(discovered);
-    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: its entry file in ${copy.dir} cannot be read` };
+    if (copy.digest === null) return { ok: false, error: `Trust for '${name}' was not set: a file in ${copy.dir} cannot be read` };
 
     const manifest = discovered.manifest as {
       name: string;

@@ -15,7 +15,7 @@
  * overwrite each other.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { acquireProcessLock } from '../utils/process-lock.js';
 import { writeFileAtomicAsync } from '../utils/atomic-json-store.js';
@@ -144,6 +144,8 @@ interface AuthoritySyncState {
 /** Most dropped keys remembered so they are never issued again; ids are never reused, so the oldest go first. */
 const MAX_FORGOTTEN = 20_000;
 
+const EMPTY_SYNC_STATE: AuthoritySyncState = { groupId: null, lastSyncAt: 0, revisionAtSync: 0, forgotten: [], forgottenHashes: [], lastDropped: null };
+
 /** The record file exists and could not be read; nothing is written over it. */
 export class AuthorityRecordUnavailableError extends Error {
   override readonly name = 'AuthorityRecordUnavailableError';
@@ -161,9 +163,18 @@ export class AuthorityRecordFile {
   private failed = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly listeners = new Set<(notice: AuthorityChangeNotice) => void>();
-  private syncState: AuthoritySyncState | null = null;
-  private forgottenKeys: Set<AuthorityKey> | null = null;
-  private forgottenHashes: Set<string> | null = null;
+  /**
+   * The sync file as last read. It follows the file the way the record does:
+   * read again whenever the record is (its identity moved; writers save the
+   * forgotten keys before the record) and at the start of every write under
+   * the writer lock, so nothing is written from a copy another process changed.
+   */
+  private syncState: AuthoritySyncState = EMPTY_SYNC_STATE;
+  private forgottenKeys: Set<AuthorityKey> = new Set();
+  private forgottenHashes: Set<string> = new Set();
+  private syncLoaded = false;
+  /** The sync file exists and could not be read: like an unreadable record, nothing authenticates and nothing is written. */
+  private syncFailed = false;
   private syncStatePersistedAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly options: AuthorityRecordFileOptions) {
@@ -175,7 +186,7 @@ export class AuthorityRecordFile {
   /** One lstat; re-reads only when the file moved. Null while the file cannot be read (fail closed). */
   view(): AuthorityView | null {
     this.refresh(true);
-    return this.failed ? null : this.current;
+    return this.failed || this.syncFailed ? null : this.current;
   }
 
   /** The head this node gossips, or null while the record cannot be read. */
@@ -265,13 +276,19 @@ export class AuthorityRecordFile {
     const revision = this.view()?.record.revision ?? state.revisionAtSync;
     const due = state.groupId !== groupId || now - this.syncStatePersistedAt >= this.retentionMs() / 10;
     this.syncState = { ...state, groupId, lastSyncAt: now, revisionAtSync: revision };
-    if (due) await this.saveSyncState();
+    if (!due) return;
+    // The save is a write like any other: under the lock, onto the sync file as it is on disk now.
+    await this.serialized(async () => {
+      if (this.syncFailed) throw new AuthorityRecordUnavailableError(this.syncStatePath());
+      this.syncState = { ...this.syncState, groupId, lastSyncAt: Math.max(now, this.syncState.groupId === groupId ? this.syncState.lastSyncAt : 0), revisionAtSync: revision };
+      await this.saveSyncState();
+    });
   }
 
   /** Whether this machine dropped `key` on returning too far behind its group. */
   isForgotten(key: AuthorityKey): boolean {
     this.readSyncState();
-    return this.forgottenKeys!.has(key);
+    return this.forgottenKeys.has(key);
   }
 
   /** The last drop made on returning too far behind, for `cluster status`. */
@@ -306,15 +323,18 @@ export class AuthorityRecordFile {
       const trimmed: AuthorityRecord = { ...before, entries: kept };
       const merged = mergeAuthority(trimmed, remote, options);
       const keys = [...changedKeys(before, merged), ...dropped];
-      const now = this.now();
-      this.syncState = {
-        ...state, groupId, lastSyncAt: now, revisionAtSync: merged.revision,
-        lastDropped: dropped.length > 0 ? { at: now, count: dropped.length, keys: dropped.slice(0, 20) } : state.lastDropped,
-      };
+      // The forgotten keys reach disk before the record stops holding them (as in write()).
       await this.forget(dropped.map((key) => before.entries.get(key)!));
-      await this.saveSyncState();
       if (keys.length > 0 || merged.revocationFloor !== before.revocationFloor || merged.revision !== before.revision) await this.persist(merged);
       else this.current = this.makeView(before);
+      // Only once the record holds the group's truth does this machine count as synced with it:
+      // a failed write above leaves it 'stale' or 'never', so the next transfer adopts again.
+      const now = this.now();
+      this.syncState = {
+        ...this.syncState, groupId, lastSyncAt: now, revisionAtSync: merged.revision,
+        lastDropped: dropped.length > 0 ? { at: now, count: dropped.length, keys: dropped.slice(0, 20) } : this.syncState.lastDropped,
+      };
+      await this.saveSyncState();
       const after = this.current!;
       if (keys.length > 0) this.notify({ keys, change: 'absorbed', rev: merged.revision, origin: this.nodeId, cascade: [], local: false });
       return { changed: keys.length > 0, head: after.head, keys, dropped };
@@ -325,11 +345,25 @@ export class AuthorityRecordFile {
     return join(dirname(this.filePath), 'authority-sync.json');
   }
 
+  /** The sync state as last read, reading the file the first time. */
   private readSyncState(): AuthoritySyncState {
-    if (this.syncState) return this.syncState;
-    let state: AuthoritySyncState = { groupId: null, lastSyncAt: 0, revisionAtSync: 0, forgotten: [], forgottenHashes: [], lastDropped: null };
+    if (!this.syncLoaded) this.loadSyncState();
+    return this.syncState;
+  }
+
+  /**
+   * Reads the sync file as it is on disk now. Absent: never synced, nothing
+   * forgotten. Present and unreadable: `syncFailed`, so the view is null and
+   * writes are refused, as for an unreadable record (a forgotten key read as
+   * live again would authenticate a credential the group revoked). A sync time
+   * this process noted for the same group and has not saved yet is kept.
+   */
+  private loadSyncState(): void {
+    let state: AuthoritySyncState = EMPTY_SYNC_STATE;
     try {
-      const raw = JSON.parse(readFileSync(this.syncStatePath(), 'utf8')) as Record<string, unknown>;
+      const parsed = JSON.parse(readFileSync(this.syncStatePath(), 'utf8')) as unknown;
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an authority sync state');
+      const raw = parsed as Record<string, unknown>;
       const lastDropped = raw['lastDropped'] as AuthorityDroppedReport | null | undefined;
       state = {
         groupId: typeof raw['groupId'] === 'string' ? raw['groupId'] : null,
@@ -339,11 +373,21 @@ export class AuthorityRecordFile {
         forgottenHashes: Array.isArray(raw['forgottenHashes']) ? raw['forgottenHashes'].filter((hash): hash is string => typeof hash === 'string') : [],
         lastDropped: lastDropped && typeof lastDropped === 'object' && typeof lastDropped.at === 'number' ? lastDropped : null,
       };
-    } catch { /* absent or unreadable: never synced, nothing forgotten */ }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.syncFailed = true;
+        return;
+      }
+    }
+    const noted = this.syncLoaded ? this.syncState : undefined;
+    if (noted !== undefined && noted.groupId !== null && noted.groupId === state.groupId && noted.lastSyncAt > state.lastSyncAt) {
+      state = { ...state, lastSyncAt: noted.lastSyncAt, revisionAtSync: noted.revisionAtSync };
+    }
+    this.syncFailed = false;
+    this.syncLoaded = true;
     this.syncState = state;
     this.forgottenKeys = new Set(state.forgotten);
     this.forgottenHashes = new Set(state.forgottenHashes);
-    return state;
   }
 
   /**
@@ -373,7 +417,7 @@ export class AuthorityRecordFile {
   /** The record's view, with what this machine forgot still answering as revoked. */
   private makeView(record: AuthorityRecord): AuthorityView {
     this.readSyncState();
-    const keys = this.forgottenKeys!, hashes = this.forgottenHashes!;
+    const keys = this.forgottenKeys, hashes = this.forgottenHashes;
     return buildAuthorityView(record, this.nodeId, keys.size === 0 && hashes.size === 0 ? undefined : { keys, hashes });
   }
 
@@ -384,9 +428,9 @@ export class AuthorityRecordFile {
 
   private withoutForgotten<T>(change: AuthorityChange<T>): AuthorityChange<T> {
     this.readSyncState();
-    if (this.forgottenKeys!.size === 0) return change;
+    if (this.forgottenKeys.size === 0) return change;
     if (change.kind === 'issue') {
-      const entries = change.entries.filter((draft) => !this.forgottenKeys!.has(keyOf(draft)));
+      const entries = change.entries.filter((draft) => !this.forgottenKeys.has(keyOf(draft)));
       return entries.length === change.entries.length ? change : entries.length === 0 ? { kind: 'none', value: change.value } : { ...change, entries };
     }
     if (change.kind === 'many') return { ...change, changes: change.changes.map((part) => this.withoutForgotten(part)) };
@@ -407,7 +451,11 @@ export class AuthorityRecordFile {
   private serialized<T>(work: () => Promise<T>): Promise<T> {
     const task = this.queue.then(async () => {
       const lock = await acquireProcessLock(`${this.filePath}.writer.lock`);
-      try { return await work(); }
+      try {
+        // Every write builds on the sync file as it is on disk now, under the lock.
+        this.loadSyncState();
+        return await work();
+      }
       finally { lock.release(); }
     });
     this.queue = task.catch(() => {});
@@ -418,6 +466,7 @@ export class AuthorityRecordFile {
   private readLocked(): AuthorityRecord {
     this.refresh(false);
     if (this.failed) throw new AuthorityRecordUnavailableError(this.filePath);
+    if (this.syncFailed) throw new AuthorityRecordUnavailableError(this.syncStatePath());
     return this.current!.record;
   }
 
@@ -428,7 +477,7 @@ export class AuthorityRecordFile {
 
   private refresh(notifyOthers: boolean): void {
     const identity = this.statIdentity();
-    if (identity !== null && identity === this.identity && this.current) return;
+    if (identity !== null && identity === this.identity && this.current && !this.syncFailed) return;
     const previous = this.current?.record ?? null;
     let record: AuthorityRecord;
     if (identity === ABSENT) {
@@ -443,6 +492,12 @@ export class AuthorityRecordFile {
         this.identity = null;
         return;
       }
+    }
+    // The record moved, so the keys forgotten with it may have too: the sync file is read again with it.
+    this.loadSyncState();
+    if (this.syncFailed) {
+      this.identity = null;
+      return;
     }
     this.failed = false;
     this.identity = identity;
@@ -525,18 +580,52 @@ export { keyOf };
  */
 export function resolveAuthorityNodeId(recordPath: string): string {
   const path = join(dirname(recordPath), 'authority-node-id');
-  try {
-    const existing = readFileSync(path, 'utf8').trim();
-    if (/^[0-9a-f-]{36}$/.test(existing)) return existing;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  const held = readNodeId(path);
+  if (held !== undefined) return held;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  // The id is written whole to a file of its own, then linked into place: the
+  // link is an exclusive create that is complete or absent, never empty or partial.
   const id = randomUUID();
-  try { writeFileSync(path, `${id}\n`, { flag: 'wx', mode: 0o600 }); return id; }
-  catch (error) {
-    // Another process made it first: use theirs.
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return readFileSync(path, 'utf8').trim();
-    throw error;
+  const temporary = `${path}.${id}.tmp`;
+  const fd = openSync(temporary, 'wx', 0o600);
+  try {
+    writeSync(fd, `${id}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    try {
+      linkSync(temporary, path);
+      return id;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    // Another process made it first: use theirs when it holds an id.
+    const theirs = readNodeId(path);
+    if (theirs !== undefined) return theirs;
+    // The file holds no id (left empty or partial by a crash before this
+    // version wrote ids whole), so no entry under it could ever be read back:
+    // it is replaced whole, and whatever the file holds after the replace is
+    // the id (a process racing here may have replaced it first).
+    renameSync(temporary, path);
+    const replaced = readNodeId(path);
+    if (replaced === undefined) throw new Error(`The authority node id file ${path} does not hold a node id and could not be replaced. Remove it, then start again.`);
+    return replaced;
+  } finally {
+    rmSync(temporary, { force: true });
   }
 }
+
+/** The node id the file holds, or undefined when it is absent or holds no valid id. */
+function readNodeId(path: string): string | undefined {
+  try {
+    const existing = readFileSync(path, 'utf8').trim();
+    return NODE_ID_PATTERN.test(existing) ? existing : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  }
+}
+
+const NODE_ID_PATTERN = /^[0-9a-f-]{36}$/;

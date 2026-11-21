@@ -13,7 +13,7 @@
  * - the graph snapshot surfaces render (nodes, edges, states, pool state,
  *   stalled tells).
  */
-import { attemptGroupDependencyStatus, firstPhase } from './scheduler.js';
+import { attemptGroupDependencyStatus, firstPhase, heldByDependencyGate } from './scheduler.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from './types.js';
 
 /** Fields shared by every edge-add outcome. */
@@ -76,7 +76,8 @@ export function wouldCreateCycle(workstream: DependencyGraph, fromItemId: string
 
 /**
  * Add a dependency edge live (`itemId` now waits on `dependsOnId`). Refuses a
- * self-edge, an unknown endpoint, a duplicate (idempotent success), and, the
+ * self-edge, an unknown endpoint, an item the dependency gate no longer holds
+ * (already claimed or past its first phase), a duplicate (idempotent success), and, the
  * structured outcome, a cycle: the refusal emits `graph-cycle` naming the
  * path, so the discovery is immediate and visible, never a stuck node.
  */
@@ -93,6 +94,7 @@ export function addDependencyEdge(
     ?? workstream.items.find((i) => i.attemptSourceId === dependsOnId);
   if (!item || !blocker) return { added: false, reason: 'unknown item id' };
   if (item.dependsOn.includes(dependsOnId)) return { added: true, reason: 'edge already present' };
+  if (!heldByDependencyGate(workstream, item)) return { added: false, reason: `item ${item.title} has already started; a dependency added now would not hold it` };
   const cycle = wouldCreateCycle(workstream, itemId, dependsOnId);
   if (cycle) {
     emit({ type: 'graph-cycle', workstreamId: workstream.id, itemIds: [itemId, dependsOnId], cycle });
@@ -121,12 +123,9 @@ export function addConflictSerializationEdges(
   const first = firstPhase(workstream);
   for (const other of workstream.items) {
     if (other.id === conflicted.id) continue;
-    if (other.state === 'passed' || other.state === 'failed') continue;
-    if (other.state === 'in-phase') continue; // already running, the lane will serialize its merge anyway
     // Dependency gates only hold an item at its first phase before it is claimed (applyDependencyGates);
-    // an edge on any other item would look like protection and enforce nothing, so it is not added or counted.
-    if (!first || other.currentPhaseId !== first.id) continue;
-    if (other.state !== 'pending' && other.state !== 'awaiting-capacity' && other.state !== 'blocked-dependency') continue;
+    // an edge on any other item (running, finished or past its first phase) would enforce nothing.
+    if (!heldByDependencyGate(workstream, other, first)) continue;
     const otherFiles = [...(other.files ?? []), ...other.touchedPaths];
     if (!otherFiles.some((file) => fileSet.has(file))) continue;
     const result = addDependencyEdge(

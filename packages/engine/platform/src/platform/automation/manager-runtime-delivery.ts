@@ -337,7 +337,11 @@ export function maybeDeliverAutomationFailureNotice(
     if (!attempts.some((attempt) => attempt.status === 'sent') && fallback.length > 0) {
       attempts.push(...await deliveryManager.deliverText(job, run, message, fallback, { kind: 'failure-notice' }));
     }
-    if (!attempts.some((attempt) => attempt.status === 'sent')) onUndelivered(job, run, undeliveredReason(attempts));
+    if (!attempts.some((attempt) => attempt.status === 'sent')) {
+      onUndelivered(job, run, undeliveredReason(attempts));
+      return;
+    }
+    await record();
   })().catch((error) => {
     logger.warn('AutomationManager: failure notice delivery failed', {
       jobId: job.id,

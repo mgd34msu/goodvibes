@@ -445,6 +445,14 @@ export interface Escalation {
    * and no reading of a reply is involved.
    */
   readonly failurePause?: true | undefined;
+  /**
+   * Set on the question asked after the owner's change to a group's or the
+   * deliverable's criteria was applied but checking the work against it could
+   * not run: approving it runs that check again and nothing else (the change is
+   * not applied a second time and no budget is reset). `summary` is the change
+   * that was applied, as the question names it.
+   */
+  readonly recheckPending?: { readonly summary: string } | undefined;
   resolvedAt?: number | undefined;
   reply?: {
     readonly text: string;
@@ -590,6 +598,12 @@ export interface Contract {
   error?: string | undefined;
   readonly createdAt: number;
   completedAt?: number | undefined;
+  /**
+   * When the status last moved, set by every move (transitionContract), so a
+   * poller sees updatedAt change on a move that records no decision. Absent on
+   * contracts written before it was recorded; their other times stand in.
+   */
+  statusChangedAt?: number | undefined;
 }
 
 // ── Read-only views ───────────────────────────────────────────────────────────
@@ -718,9 +732,11 @@ function move<S extends string>(
   return { from, to };
 }
 
-/** Moves a contract to `to`, or throws IllegalContractTransitionError. */
-export function transitionContract(contract: Contract, to: ContractStatus): StatusChange<ContractStatus> {
-  return move(CONTRACT_TRANSITIONS, 'contract', contract, to);
+/** Moves a contract to `to` at `at` (recorded as statusChangedAt), or throws IllegalContractTransitionError. */
+export function transitionContract(contract: Contract, to: ContractStatus, at: number): StatusChange<ContractStatus> {
+  const change = move(CONTRACT_TRANSITIONS, 'contract', contract, to);
+  contract.statusChangedAt = at;
+  return change;
 }
 
 /** Moves a group to `to`, or throws IllegalContractTransitionError. */

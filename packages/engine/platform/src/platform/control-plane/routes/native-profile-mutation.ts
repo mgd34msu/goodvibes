@@ -189,7 +189,8 @@ function toolRequest(name: 'profile' | 'occasions', args: Record<string, unknown
       ...(args.away === undefined ? {} : { away: args.away === true }), ...(text('destination') ? { destination: text('destination') } : {}),
       ...(details.length > 0 ? { details } : {}), ...identity } };
     if (action === 'resolve_conflict' && text('keep')) return { method: 'occasions.conflict.resolve', input: { occasionId: text('occasionId'), keep: text('keep'), authority } };
-    if (action === 'remove') return { method: 'occasions.remove', input: { occasionId: text('occasionId'), confirmed: args.confirmed === true, authority } };
+    if (action === 'remove') return { method: 'occasions.remove', input: { occasionId: text('occasionId'), confirmed: args.confirmed === true,
+      ...(text('line') ? { line: text('line') } : {}), authority } };
     return undefined;
   }
   if (action === 'set') return { method: 'profile.set', input: { fieldId, value: text('value'), ...identity } };

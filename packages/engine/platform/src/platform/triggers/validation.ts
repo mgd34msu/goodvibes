@@ -262,7 +262,13 @@ export function validateProbe(input: unknown, field = 'probe'): TriggerProbe {
     throw new TriggerDefinitionError(`${field}.kind`, `must be one of ${[...PROBE_KINDS].join(', ')}`);
   }
   assertPlainData(probe, field);
-  if (probe.timeoutMs !== undefined) requireCount(probe.timeoutMs, `${field}.timeoutMs`);
+  if (probe.timeoutMs !== undefined) {
+    // A stored record from before this rule may hold 0; it still loads, and runs with the default budget (runProbe).
+    if (readingPersistedDefinition) requireCount(probe.timeoutMs, `${field}.timeoutMs`);
+    else if (typeof probe.timeoutMs !== 'number' || !Number.isSafeInteger(probe.timeoutMs) || probe.timeoutMs <= 0) {
+      throw new TriggerDefinitionError(`${field}.timeoutMs`, 'must be a positive whole number of milliseconds; omit it for the default budget');
+    }
+  }
 
   if (kind === 'http') {
     const url = requireString(probe.url, `${field}.url`);

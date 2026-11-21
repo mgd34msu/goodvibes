@@ -13,7 +13,8 @@ import type { ConfigManager } from '../config/manager.js';
 import type { ProcessManager } from '../tools/shared/process-manager.js';
 import { createBunStreamHost, createProcessManagerCommandRunner, createProcessManagerTriggerHost, createTriggerActionExecutor, type TriggerAgentSpawner } from './hosts.js';
 import { TriggerManager, type TriggerManagerConfig } from './manager.js';
-import { createDefaultProbeIo } from './probes.js';
+import { createDefaultProbeIo, type ProbeHostPolicy } from './probes.js';
+import { createConfiguredFetchDeps } from '../tools/fetch/runtime-deps.js';
 import type { UnattendedRuns } from '../automation/unattended-runs.js';
 import { ProbeToolHost } from './probe-tools.js';
 
@@ -65,6 +66,16 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   const { configManager, processManager } = deps;
   // Platform-tool probes call the tools of the sessions whose registries attach here (attachProbeTools).
   const probeTools = new ProbeToolHost();
+  // An http probe is held to the fetch tool's own host settings, read live.
+  const fetchDeps = createConfiguredFetchDeps({ serviceRegistry: null, featureFlags: null, configManager });
+  const hostList = (value: readonly string[] | (() => readonly string[] | undefined) | undefined): readonly string[] | undefined =>
+    typeof value === 'function' ? value() : value;
+  const hostPolicy: ProbeHostPolicy = {
+    trustedHosts: () => hostList(fetchDeps.defaultTrustedHosts),
+    blockedHosts: () => hostList(fetchDeps.defaultBlockedHosts),
+    localhostAllowed: () => fetchDeps.isLocalhostAllowed?.() === true,
+    allowedPrivateHosts: () => fetchDeps.allowedPrivateHosts?.() ?? [],
+  };
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
     config: () => readTriggerConfig(configManager),
@@ -74,7 +85,9 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
     probeIo: createDefaultProbeIo({
       runCommand: createProcessManagerCommandRunner(processManager),
       callTool: (tool, input, timeoutMs, ownerSessionId) => probeTools.call(tool, input, timeoutMs, ownerSessionId),
+      hostPolicy,
     }),
+    probeHostPolicy: hostPolicy,
     probeTools,
     ...(deps.sessionIsLive ? { sessionIsLive: deps.sessionIsLive } : {}),
     ...(deps.workAdmitted ? { workAdmitted: deps.workAdmitted } : {}),

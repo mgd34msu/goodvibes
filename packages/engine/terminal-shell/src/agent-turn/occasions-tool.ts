@@ -70,6 +70,7 @@ import {
   narrowOccasionsAnswer,
   narrowOccasionsConflictResolve,
   narrowOccasionsInterview,
+  narrowOccasionsList,
   narrowOccasionsProposal,
   narrowOccasionsSweep,
   narrowOccasionsWrite,
@@ -499,23 +500,34 @@ async function handleRemove(
   deps: AgentOccasionsToolDeps,
   occasionId: string,
   confirmed: boolean,
+  line: string,
   authority: OccasionsAuthority | 'autonomous',
 ): Promise<ToolOutcome> {
   if (!occasionId) return fail(['`occasionId` is required: which occasion to remove.']);
   if (!confirmed) {
     // §4.11: one confirmation. Not unquestioned, and not an argument, people
-    // divorce and people die.
+    // divorce and people die. The confirmed call names the line it removes, read here.
+    const listed = await deps.invoke(OCCASIONS_METHOD_IDS.list, {});
+    const occasion = listed.ok ? narrowOccasionsList(listed.data)?.occasions.find((view) => view.occasion.id === occasionId)?.occasion : undefined;
+    if (listed.ok && occasion === undefined) return fail([`There is no occasion ${occasionId}, so there is nothing to remove.`]);
     return fail([
       `Not removed: ${occasionId} and everything recorded against it (answers, gift history, calendar mirrors) cannot be restored, so he confirms once.`,
-      `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true.`,
+      occasion === undefined
+        ? `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true and line set to the occasion's line.`
+        : `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true and line:${JSON.stringify(occasion.text)}.`,
       'One question, not a negotiation. Do not ask why, and do not ask twice.',
     ]);
   }
-  const result = await deps.invoke(OCCASIONS_METHOD_IDS.remove, { occasionId, confirmed: true, authority });
+  if (!line) return fail(['`line` is required with confirmed:true: the line to remove, as the unconfirmed call named it. Nothing was removed.']);
+  const result = await deps.invoke(OCCASIONS_METHOD_IDS.remove, { occasionId, confirmed: true, line, authority });
   if (!result.ok) return fail([`Could not remove ${occasionId}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsWrite(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (!response.ok) return refusedWrite(occasionId, response.reason);
+  // A confirmed call whose line is already gone removes nothing: it was removed before.
+  if (response.removedLine === undefined) {
+    return ok([`That line of ${occasionId} is already gone; nothing more was removed.`]);
+  }
   const dropped = response.droppedRecords;
   return ok([
     `Say this in your reply: ${response.disclosure || `Removed ${occasionId} from your profile.`}`,
@@ -706,6 +718,7 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           },
           keep: { type: 'string', description: 'resolve_conflict: the date he says is right, as recorded (MM-DD or YYYY-MM-DD). The other lines for that title are removed. Omit to get the recorded dates to ask him about.' },
           confirmed: { type: 'boolean', description: 'action:"remove" only: true after you asked him once to confirm the removal. Never grants write authority.' },
+          line: { type: 'string', description: 'action:"remove" with confirmed:true only: the exact line to remove, as the unconfirmed call named it. Only that line goes, so repeating the call removes nothing more.' },
           authority: {
             type: 'string',
             enum: [...PROFILE_AUTHORITIES],
@@ -793,7 +806,7 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
         const keep = readString(args.keep);
         return await handleResolveConflict(currentDeps, occasionId, keep, keep ? authority.authority : undefined);
       }
-      return await handleRemove(currentDeps, occasionId, args.confirmed === true || args.confirmed === 'true', authority.authority);
+      return await handleRemove(currentDeps, occasionId, args.confirmed === true || args.confirmed === 'true', readString(args.line), authority.authority);
       } catch (error) { return failedOperation(error, requestSent, options?.signal?.aborted === true); }
     },
   };

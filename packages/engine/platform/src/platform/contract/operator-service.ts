@@ -266,7 +266,7 @@ export interface ContractSummary {
 /** The summary of one contract (see `ContractSummary`). */
 export function summarizeContract(contract: ContractView, hold: ContractHold | null = null): ContractSummary {
   const open = contract.escalations.filter((escalation) => escalation.resolvedAt === undefined).sort((a, b) => b.at - a.at);
-  let updatedAt = Math.max(contract.createdAt, contract.completedAt ?? 0);
+  let updatedAt = Math.max(contract.createdAt, contract.completedAt ?? 0, contract.statusChangedAt ?? 0);
   for (const decision of contract.decisions) if (decision.at > updatedAt) updatedAt = decision.at;
   for (const escalation of contract.escalations) updatedAt = Math.max(updatedAt, escalation.at, escalation.resolvedAt ?? 0);
   let unitsPassed = 0, unitsFailed = 0;

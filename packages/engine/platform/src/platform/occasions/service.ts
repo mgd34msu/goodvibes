@@ -158,6 +158,8 @@ export class OccasionsService {
    * model outage costs one failed request per line per window, not one per read.
    */
   private readonly attributionRetryAt = new Map<string, number>();
+  /** Settles when the latest sweep pass has; never rejects. Each pass starts after the one before it (see sweep). */
+  private sweepLane: Promise<void> = Promise.resolve();
   constructor(private readonly deps: OccasionsServiceDeps) {}
 
   private now(): number {
@@ -372,10 +374,12 @@ export class OccasionsService {
     return confirmPlan(this.deps.writer, input, owned);
   }
 
-  /** Remove an occasion and everything the machine remembered about it. */
+  /** Remove the named line of an occasion, and everything the machine remembered about it once no line declares it. */
   async removeOccasion(input: {
     readonly occasionId: string;
     readonly confirmed: boolean;
+    /** The exact line a confirmed call removes; required when confirmed. */
+    readonly line?: string | undefined;
     readonly authority: AuthoritySurface | 'autonomous';
   }, options: OccasionMutationOptions = {}): Promise<OccasionWriteOutcome> {
     const owned = captureOccasionOperation(this.deps, options);
@@ -641,8 +645,28 @@ export class OccasionsService {
    * It runs the same in every mode. With decision models off or unavailable,
    * who a date is about is the line's own `for me` marker, and the outcome says
    * so (`provenance: 'classic'`).
+   *
+   * Passes run one at a time, whoever starts them (the ticker, the
+   * occasions.sweep verb): a nudge item is written only after its push, so a
+   * second pass started during the first one's push would find the boundary
+   * unserved and push the same reminder again. Each pass waits for the one
+   * before it to settle and then reads what that pass recorded. Each keeps its
+   * own caller's operation, read after the wait, rather than sharing another
+   * caller's outcome.
    */
   async sweep(options: OccasionMutationOptions = {}): Promise<SweepOutcome> {
+    const previous = this.sweepLane;
+    let settle: () => void = () => {};
+    this.sweepLane = new Promise<void>((resolve) => { settle = resolve; });
+    try {
+      await previous;
+      return await this.sweepOnce(options);
+    } finally {
+      settle();
+    }
+  }
+
+  private async sweepOnce(options: OccasionMutationOptions): Promise<SweepOutcome> {
     return withConfiguredDecisionModelPolicy(async () => {
       const op = this.operation(options);
       const reading = await this.read(op, options);

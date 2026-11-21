@@ -84,6 +84,8 @@ export interface ContractWorkFields {
   readonly ownerAgentId: string;
   readonly createdAt: number;
   readonly completedAt?: number | undefined;
+  /** When the status last moved; absent on contracts written before it was recorded. */
+  readonly statusChangedAt?: number | undefined;
   readonly answer?: string | undefined;
   readonly statusLine?: string | undefined;
   readonly error?: string | undefined;
@@ -127,11 +129,12 @@ export function contractWorkProgress(contract: ContractWorkFields): string {
 }
 
 export function contractWorkSnapshot(contract: ContractWorkFields): ContractExternalWorkSnapshot {
-  // A raised or answered escalation changes what the contract is waiting on, so a poller comparing
-  // updatedAt must see it move even when no decision was recorded with it.
+  // A status move, or a raised or answered escalation, changes what the contract is doing or waiting
+  // on, so a poller comparing updatedAt must see it move even when no decision was recorded with it.
   const last = Math.max(
     contract.createdAt,
     contract.completedAt ?? 0,
+    contract.statusChangedAt ?? 0,
     ...contract.decisions.map((decision) => decision.at),
     ...contract.escalations.flatMap((escalation) => [escalation.at, escalation.resolvedAt ?? 0]),
   );

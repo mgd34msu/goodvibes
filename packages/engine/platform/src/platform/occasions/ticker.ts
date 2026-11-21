@@ -20,11 +20,12 @@
  *
  *  - **The interval is re-read every tick**, so `occasions.sweepIntervalMinutes`
  *    is a live setting rather than a restart-only one.
- *  - **Passes are strictly serial.** The next tick is armed only once the
+ *  - **The ticker never overlaps itself.** The next tick is armed only once the
  *    current pass has finished, so a slow sweep, delivering over a channel,
- *    say, delays the next pass rather than having one start on top of it. Two
- *    overlapping passes would deliver the same batch twice, and the fix for
- *    that is not to have a second one to skip.
+ *    say, delays the next pass rather than having one start on top of it. That
+ *    passes never overlap at all, a tick and an `occasions.sweep` call
+ *    included, is guaranteed by OccasionsService.sweep, which runs passes one
+ *    at a time; two overlapping passes would deliver the same nudge twice.
  *  - **A failing sweep re-arms.** One transient error must not stop the loop for
  *    the life of the process, which is what a naive `await` inside the timer
  *    body does.

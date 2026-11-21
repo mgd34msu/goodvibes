@@ -74,6 +74,19 @@ export function withoutListMarker(text: string): string {
   return text.replace(LIST_MARKER, '').trim();
 }
 
+/**
+ * One field of a line (a title, a person, a plan detail) made safe for the
+ * line grammar: a separator character inside it would split it in two, so both
+ * accepted separators become a hyphen, and whitespace (a newline included)
+ * collapses to single spaces.
+ */
+export function normalizeLineField(text: string): string {
+  return text
+    .replace(/[·|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Split a line into its title and its attribute segments. */
 export function splitSegments(text: string): { title: string; segments: readonly string[] } {
   const body = withoutListMarker(text);
@@ -361,10 +374,7 @@ export function parsePlanLine(lineIndex: number, text: string): PlanLineResult {
  * drops those rather than writing a bare separator.
  */
 export function normalizePlanDetail(detail: string): string {
-  const flattened = detail
-    .replace(/[·|]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const flattened = normalizeLineField(detail);
   if (flattened.length === 0) return '';
   const readsAsStructure = flattened.toLowerCase() === 'away'
     || IN.test(flattened)

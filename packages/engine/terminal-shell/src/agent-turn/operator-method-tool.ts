@@ -431,7 +431,7 @@ export function createAgentOperatorMethodTool(
       if (methodSnapshot.id === 'occasions.remove' && route.payload.confirmed !== true) {
         // Removal drops the date with its answers and gift history, which nothing restores: the owner says yes once.
         // Refused here so an unconfirmed call costs no effect admission and no request.
-        return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask him once, then call occasions.remove again with input.confirmed:true. One question, not a negotiation.` };
+        return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask him once, then call occasions.remove again with input.confirmed:true and input.line set to the occasion's text from occasions.list (only that line is removed). One question, not a negotiation.` };
       }
       const preview = summarizePreview(route);
       if (readFlag(args.dryRun, 'dryRun', false)) {

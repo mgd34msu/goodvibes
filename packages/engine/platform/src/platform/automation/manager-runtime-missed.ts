@@ -3,6 +3,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
+import { automationNoticeEffect } from './manager-runtime-delivery.js';
 
 /**
  * Records a scheduled occurrence that never fired as a first-class `missed` run.
@@ -72,13 +73,16 @@ export function recordAutomationMissedRun(
     error: describeMissedRunReason(plannedRunAt, now),
     cancelledReason: undefined,
   };
+  // The notice is owed from the save that records the missed run, so a restart before it is sent still sends it.
+  const owing: AutomationRun = { ...run, notice: { state: 'owed', effect: automationNoticeEffect(run.id) } };
 
-  context.runs.set(run.id, run);
+  context.runs.set(owing.id, owing);
   context.pruneRunHistory(job.id);
-  context.syncRunToRuntime(run, 'automation.missed');
-  context.deliverFailureNotice(job, run);
+  context.syncRunToRuntime(owing, 'automation.missed');
+  // The save is started before the notice, so the marker is written ahead of the write that clears it.
   void context.saveRuns().catch((error: unknown) => {
-    logger.warn('AutomationManager: missed run could not be saved', { jobId: job.id, runId: run.id, error: summarizeError(error) });
+    logger.warn('AutomationManager: missed run could not be saved', { jobId: job.id, runId: owing.id, error: summarizeError(error) });
   });
-  return run;
+  context.deliverFailureNotice(job, owing);
+  return owing;
 }

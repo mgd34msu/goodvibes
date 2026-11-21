@@ -19,7 +19,8 @@
  *     being heard on the same tick, without the election needing a concept of
  *     revocation at all.
  */
-import { isOutOfBandMessageType } from './group-membership.js';
+import { CONFIG_MESSAGE_TYPES } from './config-replication.js';
+import { GROUP_MESSAGE_TYPES, isOutOfBandMessageType } from './group-membership.js';
 import { MAX_DATAGRAM_SKEW_MS } from './protocol.js';
 import { ClusterOwnedLifecycle } from './owned-lifecycle.js';
 import {
@@ -33,13 +34,9 @@ import {
 } from './protocol-envelope.js';
 import type { ClusterLogger, ClusterTransport, ClusterTransportDescription } from './types.js';
 
-/** Envelope types the group layer handles itself rather than passing down. */
-const GROUP_OWNED_TYPES: ReadonlySet<string> = new Set([
-  'BEACON', 'ROSTER',
-  // Config replication rides the same signed channel. Anything not listed here
-  // is handed to the election, so a type added to the group layer and forgotten
-  // here arrives at the wrong state machine and is silently ignored.
-  'CONFIG_SNAPSHOT', 'CONFIG_SNAPSHOT_PART', 'CONFIG_DELTA', 'CONFIG_PROPOSE', 'CONFIG_REQUEST',
+/** Envelope types the group layer handles itself rather than passing down, derived from the group and config message registries. */
+const GROUP_OWNED_TYPES: ReadonlySet<string> = new Set<string>([
+  GROUP_MESSAGE_TYPES.beacon, GROUP_MESSAGE_TYPES.roster, ...Object.values(CONFIG_MESSAGE_TYPES),
 ]);
 
 /**

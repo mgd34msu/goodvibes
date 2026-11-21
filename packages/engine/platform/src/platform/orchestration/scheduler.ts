@@ -29,6 +29,16 @@ export function firstPhase(workstream: Workstream): Phase | undefined {
   return sortedPhases(workstream)[0];
 }
 
+/**
+ * Whether the dependency gate still holds `item`: it sits at the workstream's
+ * first phase, not yet claimed (pending, awaiting capacity or blocked on a
+ * dependency). A dependency added to any other item would enforce nothing.
+ */
+export function heldByDependencyGate(workstream: Workstream, item: WorkItem, first: Phase | undefined = firstPhase(workstream)): boolean {
+  if (!first || item.currentPhaseId !== first.id) return false;
+  return item.state === 'pending' || item.state === 'awaiting-capacity' || item.state === 'blocked-dependency';
+}
+
 /** The phase after `ordinal` in ordinal order; undefined after the last phase. */
 export function nextPhaseAfter(workstream: Workstream, ordinal: number): Phase | undefined {
   return sortedPhases(workstream).find((p) => p.ordinal > ordinal);

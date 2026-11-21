@@ -300,7 +300,7 @@ carries the date.
 | `occasions.propose` | `write:occasions` | What would be written, plus the one-line confirmation. Writes nothing. |
 | `occasions.confirm` | `write:occasions` | Write the confirmed occasion. Refuses without a kind. `self: true` marks the owner's own date (`for me`). |
 | `occasions.update` | `write:occasions` | Change an occasion's date, kind, person, recurrence, lead or `self` in place. The id stays, so answers and gift history stay with it; a different name is refused. Without `confirmed` it returns the line and the sentence to put to the owner and writes nothing. |
-| `occasions.remove` | `write:occasions` | One confirmation; removes the line and every record against it. |
+| `occasions.remove` | `write:occasions` | One confirmation; the confirmed call names the line it removes (`line`, the unconfirmed call's `removedLine`) and removes that line, and every record against the occasion once no line declares it. Repeating it removes nothing more. |
 | `occasions.answer` | `write:occasions` | yes / no / later / acknowledged. A yes opens the interview; acknowledged is the same as `occasions.acknowledge`. |
 | `occasions.acknowledge` | `write:occasions` | Record that the owner has one occurrence in hand, without ending the question: the open item stays open and stops being pushed. Distinct from `answer`, which resolves and removes the item. An occurrence already answered yes or no is left as it is and the reply says so (`changed: false`). |
 | `occasions.interview.get` | `read:occasions` | Resume at the unanswered question. |

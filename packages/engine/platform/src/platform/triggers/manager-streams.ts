@@ -159,7 +159,7 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
     // final batch, or the command ended while the action ran) the lines are kept on the record and
     // delivered again on the ladder, so a crash log's last lines are never lost.
     const giveBack = (): void => {
-      if (!batch.final && owner.streams.get(id) === runtime) runtime.processor.requeue(batch.lines, owner.now());
+      if (!batch.final && owner.streams.get(id) === runtime) runtime.processor.requeue(batch, owner.now());
       else owner.owe(id, { reason, fingerprint, prompt, lineCount: batch.lines.length });
     };
     void owner.fireAction(id, reason, fingerprint, 'stream', prompt).then((delivered) => {

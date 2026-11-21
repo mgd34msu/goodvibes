@@ -25,8 +25,8 @@
 // but a draft the user simply walks away from was never reclaimed by anything,
 // so the directory grew forever. `loadAll()`, the recovery point, called once
 // at command-facade construction, now also bounds the directory by BOTH an age
-// TTL and a count cap, and reports what it reclaimed through `lastReclaim` /
-// the `onReclaim` hook. Deletions are `rmSync(..., { force: true })`, so a file
+// TTL (counted since each draft was last saved) and a count cap, and reports
+// what it reclaimed through `lastReclaim` / the `onReclaim` hook. Deletions are `rmSync(..., { force: true })`, so a file
 // another process removed first is not an error: two concurrent `loadAll()`
 // calls converge on the same surviving set.
 // ---------------------------------------------------------------------------
@@ -39,13 +39,15 @@ import type { WorkstreamDraft } from './workstream-draft-types.js';
 /**
  * Age TTL for an abandoned draft. A proposal that has sat un-launched and
  * un-cancelled this long is not a plan the user is still reviewing; it is
- * litter. Measured from the draft's own `createdAt`.
+ * litter. Measured since the draft was last saved (created, reshaped or
+ * approved): its file's modification time.
  */
 export const WORKSTREAM_DRAFT_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 /**
- * Count cap on retained drafts: the newest this many survive, older ones are
- * reclaimed oldest-first. Bounds the directory even if every draft is recent.
+ * Count cap on retained drafts: the most recently saved this many survive,
+ * older ones are reclaimed least recently saved first. Bounds the directory
+ * even if every draft is recent.
  */
 export const WORKSTREAM_DRAFT_CAP = 50;
 
@@ -58,23 +60,26 @@ export const WORKSTREAM_DRAFT_CAP = 50;
  */
 export const WORKSTREAM_DRAFT_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-/** What one `loadAll()` reclaimed. Counts only, never draft text. */
+/** What one reap reclaimed. Counts and draft ids only, never draft text. */
 export interface WorkstreamDraftReclaim {
   /** Unix ms of the sweep. */
   readonly at: number;
-  /** Valid drafts removed because they aged past the TTL. */
+  /** Valid drafts removed because they were not saved within the TTL. */
   readonly expired: number;
   /** Valid drafts removed because they fell outside the count cap. */
   readonly overCap: number;
   /** Torn/malformed snapshots removed once they were older than the TTL. */
   readonly unreadable: number;
+  /** Ids of the valid drafts removed (expired or over the cap), so a holder of drafts in memory drops them too. */
+  readonly removedIds: readonly string[];
 }
 
 export interface WorkstreamDraftStoreOptions {
   /**
-   * Called after a `loadAll()` that reclaimed at least one file, so the count
-   * can be surfaced to the operator. Receives counts only. Never throws out of
-   * `loadAll()`, a failing hook is swallowed like every other side effect here.
+   * Called after a reap (`loadAll()` or a throttled `save()`) that reclaimed at
+   * least one file, so the count can be surfaced to the operator and the
+   * removed drafts dropped from memory. Receives counts and ids only. Never
+   * throws out of the store, a failing hook is swallowed like every other side effect here.
    */
   readonly onReclaim?: (summary: WorkstreamDraftReclaim) => void;
   /** Clock seam (tests). Defaults to Date.now. */
@@ -170,12 +175,21 @@ export function createWorkstreamDraftStore(
     }
   };
 
+  /** When a draft's file was last saved (every atomic save refreshes its mtime); `createdAt` when it cannot be read. */
+  const savedAt = (path: string, createdAt: number): number => {
+    try {
+      return statSync(path).mtimeMs;
+    } catch {
+      return createdAt;
+    }
+  };
+
   /**
    * Read every snapshot, reject the ones whose CONTENT is not a draft, apply
    * both bounds, and record/announce what was reclaimed. Returns the surviving
-   * drafts, oldest first. Never throws. `keepId` names a draft that was just
-   * written: its file is exempt from both bounds, so saving a draft (whose age
-   * is measured from `createdAt`) can never delete the file it just journaled.
+   * drafts, least recently saved first. Never throws. `keepId` names a draft
+   * that was just written: its file is exempt from both bounds, so saving a
+   * draft can never delete the file it just journaled.
    *
    * Idempotent: a second run over the same directory finds nothing left to
    * remove, which is also what makes two processes running it at once safe,
@@ -192,7 +206,7 @@ export function createWorkstreamDraftStore(
     const now = clock();
     lastSweepAt = now;
     const cutoff = now - ttlMs;
-    const drafts: WorkstreamDraft[] = [];
+    const drafts: { readonly draft: WorkstreamDraft; readonly savedAt: number }[] = [];
     let unreadable = 0;
     for (const entry of entries) {
       if (!entry.endsWith('.json')) continue;
@@ -207,7 +221,7 @@ export function createWorkstreamDraftStore(
       // becomes a draft. It is only DELETED once it is older than the TTL, so
       // a file another process is writing right now is left alone.
       if (parsed !== undefined && isDraftShape(parsed) && isSafeId(parsed.id)) {
-        drafts.push(parsed);
+        drafts.push({ draft: parsed, savedAt: savedAt(path, parsed.createdAt) });
         continue;
       }
       if (modifiedBefore(path, cutoff)) {
@@ -215,33 +229,36 @@ export function createWorkstreamDraftStore(
         unreadable += 1;
       }
     }
-    drafts.sort((a, b) => a.createdAt - b.createdAt);
+    drafts.sort((a, b) => a.savedAt - b.savedAt);
 
-    // Bound 1, age TTL: an abandoned proposal is reclaimed.
-    const live: WorkstreamDraft[] = [];
+    // Bound 1, age TTL: a proposal not saved (created, reshaped or approved) for that long is reclaimed.
+    const live: typeof drafts = [];
+    const removedIds: string[] = [];
     let expired = 0;
-    for (const draft of drafts) {
-      if (draft.id !== keepId && now - draft.createdAt > ttlMs) {
-        discard(fileFor(draft.id));
+    for (const entry of drafts) {
+      if (entry.draft.id !== keepId && now - entry.savedAt > ttlMs) {
+        discard(fileFor(entry.draft.id));
+        removedIds.push(entry.draft.id);
         expired += 1;
         continue;
       }
-      live.push(draft);
+      live.push(entry);
     }
-    // Bound 2, count cap: keep the newest `cap`, reclaim the oldest overflow.
+    // Bound 2, count cap: keep the most recently saved `cap`, reclaim the oldest overflow.
     let overCapCount = 0;
     const kept: WorkstreamDraft[] = [];
-    for (const draft of live) {
-      if (live.length - overCapCount > cap && draft.id !== keepId) {
-        discard(fileFor(draft.id));
+    for (const entry of live) {
+      if (live.length - overCapCount > cap && entry.draft.id !== keepId) {
+        discard(fileFor(entry.draft.id));
+        removedIds.push(entry.draft.id);
         overCapCount += 1;
       } else {
-        kept.push(draft);
+        kept.push(entry.draft);
       }
     }
 
     if (expired + overCapCount + unreadable > 0) {
-      lastReclaim = { at: now, expired, overCap: overCapCount, unreadable };
+      lastReclaim = { at: now, expired, overCap: overCapCount, unreadable, removedIds };
       try {
         options.onReclaim?.(lastReclaim);
       } catch {
@@ -279,8 +296,7 @@ export function createWorkstreamDraftStore(
       // Keep reaping DURING the session, not only at the loadAll() recovery
       // point: loadAll runs once at construction, so a long-lived session would
       // otherwise never bound the directory again. Throttled, and the draft just
-      // saved is exempt: its age is its createdAt, which can be old for a draft
-      // that is being edited right now.
+      // saved is exempt, even when its write failed and its older file is still there.
       if (clock() - lastSweepAt >= sweepIntervalMs) reap(draft.id);
       return written;
     },

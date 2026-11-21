@@ -233,6 +233,11 @@ export function createOperatorWorkLedgerReadClient(
       const subscription = Symbol();
       listeners.set(subscription, { listener, onUnavailable, onResumed });
       if (listeners.size === 1) { observedCursor = -1; failures = 0; unavailableReason = undefined; schedule(0, generation); }
+      else if (unavailableReason !== undefined && onUnavailable) {
+        // Joining during an outage: this subscriber is told now, as the others were when it began.
+        const reason = unavailableReason;
+        notifyObserver(() => onUnavailable(reason));
+      }
       let attached = true;
       return () => {
         if (!attached) return; attached = false;

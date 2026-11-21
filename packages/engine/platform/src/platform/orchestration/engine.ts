@@ -863,6 +863,9 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return index < 0 ? undefined : completedResults.get(workstream.id)?.[index]?.commit?.reason ?? 'commit failed';
   }
 
+  /** Commit retries running now, by item. */
+  const commitRetries = new Map<WorkItem, Promise<PhaseCommitOutcome | null>>();
+
   async function retryItemCommit(fence: Fence, itemId: string): Promise<PhaseCommitOutcome | null> {
     const found = findItemAndWorkstream(itemId);
     if (!found) return null;
@@ -1070,7 +1073,20 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       const resulting: string | undefined = found.item.mergeState; // mutated by the lane
       return resulting === 'merged' ? 'merged' : 'conflict';
     }),
-    retryItemCommit: (itemId) => ownedWork.run('retry item commit', (fence) => retryItemCommit(fence, itemId)),
+    retryItemCommit: (itemId) => {
+      // One commit retry per item at a time: a second caller gets the running
+      // one's outcome instead of committing again and overwriting its hash.
+      const item = findItemAndWorkstream(itemId)?.item;
+      const running = item ? commitRetries.get(item) : undefined;
+      if (running) return running;
+      const run = ownedWork.run('retry item commit', (fence) => retryItemCommit(fence, itemId));
+      if (item) {
+        commitRetries.set(item, run);
+        const settle = (): void => { if (commitRetries.get(item) === run) commitRetries.delete(item); };
+        void run.then(settle, settle);
+      }
+      return run;
+    },
     addDependency,
     requeueItem,
     getGraphSnapshot,

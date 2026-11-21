@@ -1,6 +1,6 @@
 # GoodVibes: overview, terms, architecture and where everything is stored
 
-This file describes GoodVibes release 3.4.1 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
+This file describes GoodVibes release 3.4.2 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
 
 How to read this file:
 
@@ -472,9 +472,9 @@ Terms used here:
 - A provider is a model service (for example OpenRouter or Anthropic).
 - The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release. When a later step of an install fails, the replaced programs are put back and so is the browser driver the run had replaced, so the programs and the driver stay from one release.
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
-- A release is a tagged GoodVibes version such as `v3.4.1`, published at `https://github.com/mgd34msu/goodvibes/releases`.
+- A release is a tagged GoodVibes version such as `v3.4.2`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.4.1.
+This part describes release 3.4.2.
 
 ## Choosing an installation method
 
@@ -579,31 +579,31 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 On a new Linux x64 machine where `~/.local/bin` is not on `PATH`, the shell is bash and the user is `alex`, these are the lines the installer prints, in order. Words in angle brackets are filled in at run time.
 
 ```text
-Installing GoodVibes v3.4.1 for linux-x64 into /home/alex/.local/bin
+Installing GoodVibes v3.4.2 for linux-x64 into /home/alex/.local/bin
 
-Installing goodvibes v3.4.1 ...
+Installing goodvibes v3.4.2 ...
   installed  /home/alex/.local/bin/goodvibes
 
-Installing goodvibes-daemon v3.4.1 ...
+Installing goodvibes-daemon v3.4.2 ...
   installed  /home/alex/.local/bin/goodvibes-daemon
-  running:   goodvibes-daemon 3.4.1
+  running:   goodvibes-daemon 3.4.2
 
 Added /home/alex/.local/bin to PATH in /home/alex/.bashrc (installer-managed; uninstall removes it).
 
-Installed: goodvibes 3.4.1
+Installed: goodvibes 3.4.2
   installed  /home/alex/.local/bin/lib/sqlite-vec-linux-x64/vec0.so
 
-Installing the web UI v3.4.1 ...
-  installed  /home/alex/.local/bin/webui/3.4.1
+Installing the web UI v3.4.2 ...
+  installed  /home/alex/.local/bin/webui/3.4.2
   installed  /home/alex/.local/bin/playwright-core
 
-Installing goodvibes-agent v3.4.1 ...
+Installing goodvibes-agent v3.4.2 ...
   installed  /home/alex/.local/bin/goodvibes-agent
-  running:   goodvibes-agent 3.4.1
+  running:   goodvibes-agent 3.4.2
 
 Installing the wake-word model ...
   wake-word model: Wake-word model installed and verified: "hey goodvibes" <model version> (<size>). Turn it on with voice.wake.enabled, nothing further to download.
-  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.1
+  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.2
     http://127.0.0.1:3421
     reachable from this machine only (the control-plane listener is bound to loopback).
     To reach it from another device on your network:  goodvibes-daemon webui enable --lan
@@ -658,13 +658,13 @@ When `curl` itself cannot download the script (no network, DNS failure, proxy), 
 Every option can be given as an environment variable on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.1 GOODVIBES_WEBUI=0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.2 GOODVIBES_WEBUI=0 sh
 ```
 
 Some options also exist as command-line flags. With `curl | sh`, flags follow `sh -s --`:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.1 --no-service
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.2 --no-service
 ```
 
 A downloaded copy of the script takes the same flags directly:
@@ -683,7 +683,7 @@ Usage: install.sh [--version VERSION] [--bin-dir DIR] [--from-dir DIR] [--no-ser
 GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.
 
 Options:
-  --version VERSION     Install this release, such as v3.4.1, for every program (default: latest;
+  --version VERSION     Install this release, such as v3.4.2, for every program (default: latest;
                         also GOODVIBES_VERSION).
   --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).
   --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,
@@ -713,7 +713,7 @@ The complete list of installer options and environment variables, generated from
 | `--no-service` |  | Do not install the daemon as a service, and record that choice so a daemon started by hand never installs one (also GOODVIBES_DAEMON_SERVICE=0). |
 | `--service` |  | Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0. |
 | `--no-auto-update` |  | Keep the daemon, the terminal app and the Agent from updating themselves, from their first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer. |
-| `--version` | `VERSION` | Install this release, such as v3.4.1, for every program (default: latest; also GOODVIBES_VERSION). |
+| `--version` | `VERSION` | Install this release, such as v3.4.2, for every program (default: latest; also GOODVIBES_VERSION). |
 | `--bin-dir`, `--install-dir` | `DIR` | Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR). |
 | `--decision-policy` | `POLICY` | Save the decision model policy (the judgment.policy setting; the daemon refuses a value it does not accept and names the allowed ones; see the current one with goodvibes-daemon config get judgment.policy). |
 | `--from-dir` | `DIR` | Install from DIR, a directory holding the release files and their SHA256SUMS.txt, with no request to GitHub; every file is checked against that list (also GOODVIBES_RELEASE_DIR). The release is read from the file names unless --version names it. |
@@ -747,7 +747,7 @@ Full list: "Installer options" in the part "Reference".
 
 | Option | Values and default | Effect |
 | --- | --- | --- |
-| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.1` or `3.4.1`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
+| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.2` or `3.4.2`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
 | `GOODVIBES_INSTALL_DIR` or `--bin-dir DIR` (alias `--install-dir DIR`) | `$HOME/.local/bin` | The directory that receives the programs and their support files. It is created when missing. A relative path or a symbolic link is resolved to its physical directory once at the start. The web UI goes to `<dir>/webui`, the browser driver to `<dir>/playwright-core`, native libraries to `<dir>/lib`. |
 | `GOODVIBES_DAEMON_SERVICE=0` or `--no-service` | `1` (default) | Skips first-run service registration and, when no daemon service is installed, records the choice with `goodvibes-daemon config set service.enabled false`. `service.enabled` is a daemon setting, read by the daemon before it would install itself as a service at its first idle moment and by `goodvibes doctor`, so a daemon started by hand stays without a service and doctor does not ask for one. The installer then prints `Daemon service setup skipped (--no-service); ...` followed by the daemon's path. `--service` (or `GOODVIBES_DAEMON_SERVICE=1`) turns it back on. Any value other than `1` means skip. An already installed service is left installed, recorded as it is, and refreshed and restarted on upgrade. The installer starts no daemon. When neither the flag nor the variable is given and `service.enabled` is already `false` (for example after `goodvibes-daemon uninstall-service`), no service is set up: the installer prints `Daemon service: off by your choice (service.enabled is false), so none was set up.` and `goodvibes-daemon install-service` as the way to turn it on. |
 | `GOODVIBES_AUTO_UPDATE=0` or `--no-auto-update` | `1` (default) | Runs `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` before any program starts. Both are daemon settings, kept in `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent, so none of the three updates itself, from its first launch. The closing lines say `Automatic updates: off for goodvibes, goodvibes-daemon and goodvibes-agent.` If the daemon refuses a write, the install still finishes and says how to turn them off. Update later by running the installer again. Any value other than `0` leaves updates on. |
@@ -778,7 +778,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 Install one exact release:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.1 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.2 sh
 ```
 
 Install into a different directory, for example `~/bin`:
@@ -801,10 +801,10 @@ Install with automatic updates off from the first launch:
 curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --no-auto-update
 ```
 
-Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.1 -R mgd34msu/goodvibes -D goodvibes-v3.4.1`), then run the installer from that copy:
+Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.2 -R mgd34msu/goodvibes -D goodvibes-v3.4.2`), then run the installer from that copy:
 
 ```sh
-sh install.sh --from-dir ./goodvibes-v3.4.1 --no-auto-update
+sh install.sh --from-dir ./goodvibes-v3.4.2 --no-auto-update
 ```
 
 With no service, no daemon runs until one is started by hand (`cd ~ && nohup goodvibes-daemon >/dev/null 2>&1 &`). The terminal app and the Agent never start a daemon that has no service: at start they only start an installed service that is stopped, and otherwise say that no daemon answers.
@@ -824,7 +824,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --decision-policy 'No Deci
 Install unattended (CI, a provisioning script, no terminal). Older copies on `PATH` are then removed only when `GOODVIBES_SHADOW_REMOVE=1`; with the default, an unanswerable question leaves them in place and the install still succeeds:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.1 GOODVIBES_SHADOW_REMOVE=1 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.2 GOODVIBES_SHADOW_REMOVE=1 sh
 ```
 
 Upgrade an existing installation to the newest release: run the same install command again. See "Updating".
@@ -865,7 +865,7 @@ Paths below use the default install directory `~/.local/bin` and the `linux-x64`
 | `~/.local/bin/lib/sqlite-vec-linux-x64/vec0.so` | The vector-search extension (`vec0.dylib` under `sqlite-vec-darwin-<arch>` on macOS). All three programs load it from here. |
 | `~/.local/bin/lib/sqlite-darwin-<arch>/libsqlite3.dylib` and `libsqlite3.dylib.json` | macOS only. The SQLite library the daemon uses, and its record. |
 | `~/.local/bin/playwright-core/` | The browser driver used by browser tools. Browsers themselves are downloaded later into a separate cache when first needed (`goodvibes-agent browser provision`). Holds `.goodvibes-release.json` naming its release. |
-| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.1/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
+| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.2/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
 | `~/.local/bin/.goodvibes-reader-requirements.json` | Written by the programs when saved data needs a minimum reader. The installer only reads it. Never delete it to force a downgrade. |
 | `~/.local/bin/<program>.previous` and other `*.previous` files | Rollback copies kept by an automatic update or `/update apply`. See "Rolling back". |
 | `~/.config/systemd/user/goodvibes.service` | Linux. The daemon's service, written by `goodvibes-daemon install-service`. |
@@ -928,7 +928,7 @@ When a directory earlier on `PATH` holds another `goodvibes`, it prints which co
 ```text
 PROBLEM: typing "goodvibes" does not run the copy this installer maintains.
          wins on PATH: /home/alex/.bun/bin/goodvibes (version 1.18.1)
-         installed here: /home/alex/.local/bin/goodvibes (version 3.4.1)
+         installed here: /home/alex/.local/bin/goodvibes (version 3.4.2)
 ```
 
 Then, for each earlier copy:
@@ -973,7 +973,7 @@ Once replacement has begun, every replaced file is kept as `<file>.goodvibes-pre
 
 ```text
 install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.
-install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.1 sh
+install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.2 sh
 ```
 
 If the previous files cannot all be put back, the installer keeps the claims, the backups and the journal, and prints one command per file instead:
@@ -1382,7 +1382,9 @@ Only a release ("binary") installation updates itself. A program run from source
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
 3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
-5. The daemon logs and records a receipt that begins `updated from 3.4.0 to 3.4.1 at <YYYY-MM-DD HH:MM> <zone>` (the time in `daemon.timezone`, else the owner profile's zone, else UTC, with the zone named) and names the programs and directories it replaced.
+5. The daemon logs and records a receipt that begins `updated from 3.4.1 to 3.4.2 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
+
+No clock ends an update. The download runs until it finishes, the release server or the connection fails (the transport gives up on a transfer that receives nothing for 300 seconds), the daemon stops, or the loop is stopped; a slow connection only makes it take longer. Release files are written to a private directory beside the installation (`.update-fetch-<pid>-<random>`) as they arrive and copied into place from there, so the daemon holds one piece of a file in memory at a time; the directory is removed when the update ends, and one left by a daemon that was killed mid-download is removed by the next update.
 
 It never installs a release that it rolled back from after a crash loop (see "Automatic rollback after failed starts"); it moves on when a newer release ships. After `update.alertAfterFailedChecks` (default 3) failed checks in a row, it tells the owner through a channel that still works, at most once every 12 hours. When another install or update holds the installation, it retries later. When an earlier install or update stopped part way, the loop stays off until the kept files are dealt with, and `goodvibes-daemon update` lists them.
 
@@ -1396,10 +1398,10 @@ On a machine whose daemon runs, it prints (receipt lines vary):
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.1
+  version:  3.4.2
   updates:  on, checking every 1h 0m
   receipts:
-    2026-11-20T09:12:44.120Z  updated from 3.4.0 to 3.4.1 at 2026-11-20 10:12 Europe/Berlin; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
+    2026-11-20T09:12:44.120Z  updated from 3.4.1 to 3.4.2 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
 ```
 
 The first line names `this machine`, or the daemon's address when `--host` points elsewhere. `version:` prints two lines, `<build> (the daemon build)` and `<platform version> (the platform package it reports on /status)`, when the two differ. `receipts:` reads `none written` when there are none, and `could not be read (<reason>)` when the receipts file is there but cannot be read or parsed; likewise `uptime:` reads `the lifecycle marker could not be read (<reason>)` when the marker file is there but cannot be read.
@@ -1408,7 +1410,7 @@ Inside `goodvibes` or `goodvibes-agent`, `/update daemon` shows the connected da
 
 ```text
 Daemon updates
-  running:  3.4.1
+  running:  3.4.2
   updates:  on, checking every 1h 0m
   next: /update daemon --check runs one check now
 ```
@@ -1419,14 +1421,15 @@ Both forms can contain these lines between `updates:` and the end:
 | --- | --- |
 | `  updates:  off: <reason>` | The loop is off; the reasons are listed in "Update settings". |
 | `  failing:  <n> checks in a row failed: <error>` (`1 check in a row failed` for one) | Recent checks failed. |
-| `  pending:  <version> is downloaded and verified (waiting <time>); it installs when no work is in flight` | A release is ready and waits for an idle moment. `(waiting <time>)` appears when the daemon knows since when. |
-| `  pending:  <version> is downloaded and verified (waiting <time>); it installs when this work finishes: <id>, <id>` | The same, naming the work it waits behind. |
+| `  installing: <version>, downloading for <time>: <size> received (now <file>)` | The release is downloading and installing now; `<size>` is how much of its files has arrived, `<file>` the release file receiving bytes. |
+| `  pending:  <version> was found (waiting <time>); it downloads and installs when no work is in flight` | A newer release was found and waits for an idle moment. `(waiting <time>)` appears when the daemon knows since when. |
+| `  pending:  <version> was found (waiting <time>); it downloads and installs when this work finishes: <id>, <id>` | The same, naming the work it waits behind. |
 | `  rejected: <version> crash looped and was rolled back; the update loop will not install that version again` | A release rolled back after failed starts. |
 | `  recovery: an interrupted <operation> stopped the update loop; it stays off until the kept files are dealt with` | An install, update or rollback stopped part way. One `            kept: <path>` line follows per kept file and one `            error: <text>` line per recovery error. |
 
 `goodvibes-daemon update` adds `  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet` while a crash-loop rollback has not yet been followed by a complete start, and ends with the receipts.
 
-Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon --check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. When the check finds a release and the daemon has reserved the handover to it, the answer comes at once instead of after the install: `  check:    found <version>; the daemon is installing it now and will restart into it`, followed by `            it stops answering for a short while; run this command again in a minute to see the new version`. `/update daemon check` leaves out the `next:` line.
+Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon --check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. When the check finds a release and the daemon has reserved the handover to it, the answer comes at once instead of after the install: `  check:    found <version>; the daemon is installing it now and will restart into it`, followed by `            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version`. `/update daemon check` leaves out the `next:` line.
 
 `goodvibes-daemon update` takes `--json`, and `--host <name>`, `--port <n>`, `--token <t>` to ask another machine's daemon. When the daemon on this machine does not answer, it exits `1` and prints the failure and its fix, an empty line, `what this machine's files say about the daemon:` and lines read from the daemon's local records: `  uptime:   <time>` (or `  uptime:   not recorded yet on this host`, or `  uptime:   the last daemon on this host shut down cleanly; this is a fresh start or none`, or `  uptime:   the lifecycle marker could not be read (<reason>)`), `  starts:   <n> consecutive start attempts did not finish starting`, the `rejected:` and `rollback:` lines, and the receipts. With no operator token yet it prints `no operator token was found for this machine` and `  start the daemon once so it creates its operator token, or pass --token`, and exits `1`. When the daemon answers but the update question fails, it prints `the daemon answered, but update.status failed: <error>` (or `update.check`) with its fix and exits `1`.
 
@@ -1439,7 +1442,7 @@ When `goodvibes` or `goodvibes-agent` starts its interactive screen from a relea
 - It waits at most `update.launchCheckTimeoutMs` (default 2500 ms) for the answer.
 - A successful lookup is remembered for six hours, so a start within that time asks no server.
 - It installs when a newer release exists, or when the latest release has the same version but the installed files do not all match it (a repair).
-- Both programs give the download, verification and swap at most `update.applyTimeoutMs` (default 45000 ms, range 5000 to 300000). Past it, an update that has not started replacing files is cancelled and tried at the next launch (`update deferred: will retry next launch`); one already replacing files finishes in the background and prints its own outcome when it settles.
+- Both programs wait at most `update.applyTimeoutMs` (default 45000 ms, range 5000 to 300000) for the download, verification and swap before starting the installed version. Past it the update is not cancelled: it keeps downloading and installing in the background and prints its own outcome when it settles. No clock cancels an update; it ends when it finishes, the connection fails, or the program exits.
 
 The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.3.2` and `v3.3.1`):
 
@@ -1450,8 +1453,8 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 | Installing | `downloading <new>…`, then `Update available: <new> (running <current>). Downloading and verifying...` (or `Repairing the installed GoodVibes suite at <new>. Downloading and verifying...`) | the `Update available` or `Repairing` line only |
 | Installed | `auto-update: <new> installed; restarting onto the new version`; the program replaces itself with the new one, same arguments | `auto-update: <new> installed, restarting onto the new version` |
 | First lines of the restarted program | `auto-update: updated from <current> to <new> at launch` | same |
-| Time limit reached before any file was replaced | `update deferred: will retry next launch` (the download is cancelled) | not applicable |
-| Time limit reached while files were being replaced | `update still finishing in background; restart to use <new> once it completes`, later `background update finished: <new without v> is installed; restart to use it`, or `background update failed: <reason>; the installed version may be unchanged, check with `goodvibes status``, or `background update requires recovery: <reason>; restart `goodvibes` to run the recovery before using this install` | not applicable |
+| Wait reached while the release was still downloading | `update still downloading in background; restart to use <new> once it completes`, then the same later lines as the next row | not applicable |
+| Wait reached while files were being replaced | `update still finishing in background; restart to use <new> once it completes`, later `background update finished: <new without v> is installed; restart to use it`, or `background update failed: <reason>; the installed version may be unchanged, check with `goodvibes status``, or `background update requires recovery: <reason>; restart `goodvibes` to run the recovery before using this install` | not applicable |
 | Failed, nothing changed | `auto-update failed: <reason>; starting the current version <current>`; the current version starts | `auto-update failed: <reason>, starting the current version <current>` |
 | Failed part way, files need recovery | `auto-update requires recovery: <reason>; startup stopped before loading installed companions`; the program stops | `auto-update requires recovery: <reason>; startup stopped`; the program stops |
 | Run from a package (`node_modules`) installation | nothing | `auto-update skipped: package-managed install, update with: curl -fsSL https://goodvibes.sh/install.sh \| sh` |
@@ -1459,7 +1462,7 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 
 After `requires recovery`, run the install command again: it recovers a transaction whose process is gone, or stops with `INSTALL_E120` and names the files to put back (see "Installer errors and their fixes").
 
-A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.1, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
+A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.2, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
 
 A launch or Agent update replaces the daemon program on disk too, but the running daemon keeps its version until it restarts. Restart it with `goodvibes-daemon restart-service`.
 
@@ -1468,7 +1471,7 @@ A launch or Agent update replaces the daemon program on disk too, but the runnin
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
 | `update.alertAfterFailedChecks` | number | `3` | integer in [1, 100] | each program | Consecutive failed update checks before the daemon tells the owner over a channel that still works that it can no longer update itself. Lower is louder; 1 reports the first failure. A repeat is held back for 12 hours so an ongoing outage is one message rather than one an hour. |
-| `update.applyTimeoutMs` | number | `45000` | integer in [5000, 300000] | each program | Maximum milliseconds the terminal app and the Agent spend downloading, verifying and swapping in a new release at launch. Past it, an update that has not started replacing files is cancelled and tried at the next launch; one already replacing files finishes in the background and says so when it is done. |
+| `update.applyTimeoutMs` | number | `45000` | integer in [5000, 300000] | each program | Maximum milliseconds the terminal app and the Agent wait at launch for a new release to download, verify and swap in before starting the installed version. Past it the update is not cancelled: it keeps downloading and installing in the background and says so when it is done; restart to use it. |
 | `update.auto` | boolean | `true` |  | daemon file | While-running self-update of this installation (the daemon, and the Agent): check for a new release hourly, download and checksum-verify it, swap at a no-active-work moment, and restart (the previous binary is kept for one-command rollback). A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false. |
 | `update.autoUpdateAtLaunch` | boolean | `true` |  | daemon file | The terminal app and the Agent check for and install a newer release at launch. Set false to disable launch updates; the Agent's while-running updates also stop unless update.auto is explicitly set. A daemon setting: one value for every program on this machine, kept in the daemon's settings file; a project settings file cannot set it. The release installer's --no-auto-update sets it false. |
 | `update.firstCheckSeconds` | number | `30` | integer in [0, 3600] | each program | Seconds after daemon start before the FIRST update check (a boot-settle delay, so a daemon that was down while releases shipped does not stay stale for a whole interval). Capped at one check interval. |
@@ -1582,7 +1585,7 @@ What does not carry over: the `*.previous` rollback copies (so `/update rollback
 To stay on one release and stop every automatic update:
 
 1. Turn off every automatic update: `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` (one setting file read by all three programs).
-2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.1 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
+2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.2 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
 3. Check: `goodvibes-daemon update` shows `updates:  off: update.auto is not true, so this daemon will not update itself`.
 
 To resume updates, set the same keys back to `true` (or run `goodvibes-daemon config unset update.auto`) and restart the programs.
@@ -1594,7 +1597,7 @@ Installing an older release over a newer one works only when the older programs 
 Install with `--no-auto-update` (or `GOODVIBES_AUTO_UPDATE=0`):
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.1 --no-auto-update
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.2 --no-auto-update
 ```
 
 Before any program starts, the installer writes `update.auto` and `update.autoUpdateAtLaunch` as `false` in the daemon's settings file, which the daemon, the terminal app and the Agent all read, so none of them updates itself from its first launch. Combine it with the other options, for example `--no-service`, `--bin-dir` or `--from-dir`. Behind a proxy, add the variables shown in "Network access, proxies and machines without internet".
@@ -2055,7 +2058,7 @@ Many ids guard against something changing the install directory, a claim file or
 | `INSTALL_E006` | could not resolve the latest release tag for mgd34msu/goodvibes | `curl` could not reach GitHub. | Check the network and proxy, or set `GOODVIBES_VERSION=vX.Y.Z`. |
 | `INSTALL_E007` | could not resolve the latest release tag | GitHub gave no tag (with `wget`, or an empty redirect). | As `INSTALL_E006`. |
 | `INSTALL_E008` | All products use GOODVIBES_VERSION; remove conflicting per-product version overrides. | `GOODVIBES_DAEMON_VERSION`, `GOODVIBES_AGENT_VERSION` or `GOODVIBES_WEBUI_VERSION` differs from `GOODVIBES_VERSION`. | `unset GOODVIBES_DAEMON_VERSION GOODVIBES_AGENT_VERSION GOODVIBES_WEBUI_VERSION`. |
-| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.1`. |
+| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.2`. |
 | `INSTALL_E010` | Missing or ambiguous checksum: `<file>`. Release `<v>` is incomplete; no source build will be attempted. | The release's checksum list has no line (or more than one line) for a file this platform needs. | Choose another release with `GOODVIBES_VERSION`. |
 | `INSTALL_E011` | Checksum mismatch: `<file>` | The download was corrupted or altered (often a proxy). | Retry; if it persists, check the network path. |
 | `INSTALL_E012` | Could not extract the verified browser driver. | `tar` failed (disk full, `$TMPDIR` problem). | Free space or set `TMPDIR`; retry. |
@@ -2599,7 +2602,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
 | `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.1`. |
+| `-v, --version` | Prints `goodvibes 3.4.2`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -3130,7 +3133,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.1`.
+`goodvibes version` prints `goodvibes 3.4.2`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -6002,7 +6005,7 @@ Both need the connected host; without it they print the reason and exit `1`.
 ```text
 $ goodvibes-agent compat
 GoodVibes Agent compatibility
-  package 3.4.1
+  package 3.4.2
   connected host http://127.0.0.1:3421 (unreachable)
   host compatible no
   operator token missing (/home/me/.goodvibes/daemon/operator-tokens.json)
@@ -9207,9 +9210,9 @@ goodvibes-daemon
 What it prints on a normal start (the exact host and port follow your settings):
 
 ```text
-goodvibes-daemon 3.4.1 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
-goodvibes-daemon 3.4.1 bound: host="127.0.0.1" port=3421
-goodvibes-daemon 3.4.1 host started (ready)
+goodvibes-daemon 3.4.2 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
+goodvibes-daemon 3.4.2 bound: host="127.0.0.1" port=3421
+goodvibes-daemon 3.4.2 host started (ready)
 ```
 
 When standard output is an interactive terminal, the daemon also prints the device pairing block once, after `bound`. When standard output is not a terminal (a service, a redirect to a file), it never prints the pairing block, because the block contains a credential. Run `goodvibes-daemon pair` to see it at any time.
@@ -9361,7 +9364,7 @@ goodvibes-daemon status
 
 ```text
 goodvibes daemon on this machine
-  version:  3.4.1
+  version:  3.4.2
   state:    running
   health:   healthy
   bound:    http://127.0.0.1:3421
@@ -9414,7 +9417,7 @@ It reprints the existing operator token in the link; it does not mint a new one.
 Example output for a daemon served over plain HTTP on the local network (QR code shortened):
 
 ```text
-GoodVibes daemon 3.4.1: scan to pair a device (opens the web app signed in):
+GoodVibes daemon 3.4.2: scan to pair a device (opens the web app signed in):
 
   http://desktop.local:3421
 
@@ -9487,7 +9490,7 @@ goodvibes-daemon mcp serve --categories all --allow-write --allow-destructive
 | `--allow-destructive` | Also serve the methods the contract marks dangerous. |
 | `--host`, `--port`, `--token` | As for `status`. |
 
-With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.1 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
+With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.2 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
 
 Standard output carries only protocol frames; every message for a person goes to standard error. When the daemon is not running, or the token is missing or refused, it prints one line on standard error and exits `1` before writing any frame. It exits `0` when the client closes standard input. A client cancellation (`notifications/cancelled`) stops the request to the daemon.
 
@@ -9547,7 +9550,7 @@ goodvibes-daemon update --check
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.1
+  version:  3.4.2
   updates:  off: update.auto is not true, so this daemon will not update itself
   receipts: none written
 ```
@@ -9618,7 +9621,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.1`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.2`.
 
 ## Network exposure
 
@@ -9698,7 +9701,7 @@ lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS, also Linux
 
 Binding decides who can connect; `controlPlane.enabled` decides whether a connection from another machine is served. A request from another machine to a daemon with `controlPlane.enabled` `false` gets `403` with code `CONTROL_PLANE_LOCAL_ONLY` and the body `{"error":"This daemon serves only its own machine","code":"CONTROL_PLANE_LOCAL_ONLY","state":"controlPlane.enabled is off, so a request from <address> is not served","next":[...],"status":403}`. Either answer proves the bind; no answer within a few seconds means the address is not bound or a firewall drops it.
 
-`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.1 bound: host="0.0.0.0" port=3421`, is right for that start.
+`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.2 bound: host="0.0.0.0" port=3421`, is right for that start.
 
 ### How a running daemon moves to a new address
 
@@ -10154,7 +10157,7 @@ Three ways reach the daemon from outside the local network. None is on by defaul
 
 ### Tailscale
 
-Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.1:
+Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.2:
 
 1. Install Tailscale on the daemon's machine and the phone, and log both in (`tailscale up`).
 2. Serve the daemon's control-plane port over HTTPS on the tailnet:
@@ -10441,7 +10444,7 @@ Join failures:
 ```text
 $ goodvibes-daemon cluster groups
 GROUP       ID                  MACHINES  VERSION  SEEN
-home        gG9JJ1P6CHMSME4AK   1         3.4.1    8s ago
+home        gG9JJ1P6CHMSME4AK   1         3.4.2    8s ago
 ```
 
 With nothing heard it prints `no goodvibes groups are advertising themselves on this network`, with advice to check multicast or join by id, and exits `0`.
@@ -10469,7 +10472,7 @@ goodvibes-daemon cluster status --json
 ```text
 this machine is not in a group
 machine: machine 9b16a341 (9b16a341-3555-4d53-b094-4d32f8937dc8)
-version: 3.4.1
+version: 3.4.2
 
 sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`
 ```
@@ -10480,7 +10483,7 @@ A member's `status`:
 group:    home  [gG9JJ1P6CHMSME4AK]
 machine:  bravo (86462aea-850a-4eea-a537-0b0e1e549cf9)
 members:  3
-version:  3.4.1
+version:  3.4.2
 surfaces: none held by this machine right now
 
 group key: generation 0, rotates every 24h
@@ -10548,7 +10551,7 @@ The removed machine is told. A running one takes the removal with the change its
 ```text
 this machine is not in a group: another member told it the group removed it 2m ago
 machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
-version: 3.4.1
+version: 3.4.2
 
 this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN` here and give it that key
 ```
@@ -10910,7 +10913,7 @@ Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` 
 
 | Term | Meaning |
 | --- | --- |
-| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.1. |
+| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.2. |
 | REST route | The HTTP method and path a method is bound to, such as `POST /api/sessions`. |
 | invoke-only method | A method with no REST route. It is called through `POST /api/control-plane/methods/<id>/invoke` or a WebSocket `call` frame. |
 | access | Each method is `public` (no credential), `authenticated` (any valid credential holding its scopes) or `admin` (an admin credential). |
@@ -11691,7 +11694,7 @@ All `config.*` and `credentials.*` methods are admin methods: a non-admin, whate
 
 | Method | Route | Scope | Does |
 | --- | --- | --- | --- |
-| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.1: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
+| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.2: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
 | `credentials.get` | `GET /config/credentials[?key=<config key>]` | `read:config` | `{"available":true,"credentials":[...]}`: whether each credential is configured and usable, never the secret. `503` `CREDENTIAL_STORE_UNAVAILABLE` when no secret store is wired. |
 | `config.set` | `POST /config` `{"key":"<config key>","value":<JSON>}` | `write:config` | Write one value. |
 | `config.setMany` | `POST /config/many` `{"entries":[{"key":"...","value":...},...]}` | `write:config` | Write several values as one update: every entry is checked before anything is written. |
@@ -11876,7 +11879,7 @@ Event names:
 
 The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
 
-The domains (28 in 3.4.1) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
+The domains (28 in 3.4.2) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
 
 How the daemon decides what a stream carries:
 
@@ -12025,7 +12028,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.4.1) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.4.2) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -12036,8 +12039,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.4.1
-npm install @goodvibes/engine@3.4.1
+bun add @goodvibes/engine@3.4.2
+npm install @goodvibes/engine@3.4.2
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -12045,7 +12048,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.4.1
+git checkout v3.4.2
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client
@@ -12119,7 +12122,7 @@ Every operator method (id, REST route or invoke-only, scopes) is listed in "Oper
 
 # Reference
 
-This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.4.1 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
+This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.4.2 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
 
 ## Settings
 
@@ -15265,7 +15268,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `update.applyTimeoutMs`: Maximum milliseconds the terminal app and the Agent spend downloading, verifying and swapping in a new release at launch. Past it, an update that has not started replacing files is cancelled and tried at the next launch; one already replacing files finishes in the background and says so when it is done.
+- `update.applyTimeoutMs`: Maximum milliseconds the terminal app and the Agent wait at launch for a new release to download, verify and swap in before starting the installed version. Past it the update is not cancelled: it keeps downloading and installing in the background and says so when it is done; restart to use it.
   - type `number`; default `45000`; allowed: integer in [5000, 300000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -21981,7 +21984,7 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `GOODVIBES_SUPPRESS_NOTIFY` | every program | `1` or `true` stops desktop notifications and notification webhooks from being sent. |
 | `GOODVIBES_TAILNET_ADDRESSES` | every program | Addresses in the 100.64.0.0/10 range (comma or space separated, or the whole range `100.64.0.0/10`) to treat as Tailscale addresses, so plain `http://` to them is allowed like any private-network address. |
 | `GOODVIBES_UNINSTALL` | installer | `1` makes `install.sh` remove the installed programs and services instead of installing; user data is kept. `--uninstall` does the same. |
-| `GOODVIBES_VERSION` | installer | The release `install.sh` installs, such as `v3.4.1`; `latest` when unset. The uninstaller without a receipt fetches that release's script. |
+| `GOODVIBES_VERSION` | installer | The release `install.sh` installs, such as `v3.4.2`; `latest` when unset. The uninstaller without a receipt fetches that release's script. |
 | `GOODVIBES_WAKE_MODEL` | installer | `0` skips downloading the wake-word model. |
 | `GOODVIBES_WEBUI` | installer | `0` skips installing the web UI. |
 | `GOODVIBES_WEBUI_VERSION` | installer | The web UI release to install, when it should differ from `GOODVIBES_VERSION`. |
@@ -22157,7 +22160,7 @@ Every option each install and uninstall script accepts. "Value" names what follo
 | `--no-service` |  | Do not install the daemon as a service, and record that choice so a daemon started by hand never installs one (also GOODVIBES_DAEMON_SERVICE=0). |
 | `--service` |  | Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0. |
 | `--no-auto-update` |  | Keep the daemon, the terminal app and the Agent from updating themselves, from their first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer. |
-| `--version` | `VERSION` | Install this release, such as v3.4.1, for every program (default: latest; also GOODVIBES_VERSION). |
+| `--version` | `VERSION` | Install this release, such as v3.4.2, for every program (default: latest; also GOODVIBES_VERSION). |
 | `--bin-dir`, `--install-dir` | `DIR` | Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR). |
 | `--decision-policy` | `POLICY` | Save the decision model policy (the judgment.policy setting; the daemon refuses a value it does not accept and names the allowed ones; see the current one with goodvibes-daemon config get judgment.policy). |
 | `--from-dir` | `DIR` | Install from DIR, a directory holding the release files and their SHA256SUMS.txt, with no request to GitHub; every file is checked against that list (also GOODVIBES_RELEASE_DIR). The release is read from the file names unless --version names it. |
@@ -23479,8 +23482,8 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 | `relay.codes.revoke` | invoke only | admin | `write:control-plane` | write | safe to repeat | Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 RELAY_CODE_REVOKED, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop. |
 | `relay.pairing.mint` | invoke only | admin | `write:control-plane` | write | not safe | Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held. |
 | `relay.reachability.get` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". `rendezvousId`, present while a registration is running, is the id the daemon is registered under, derived from its relay identity key; it is the id a pairing payload carries and a step-up challenge is bound to. `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding. |
-| `update.check` | invoke only | admin | `write:control-plane` | write | safe to repeat | Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it). |
-| `update.status` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight; `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with. |
+| `update.check` | invoke only | admin | `write:control-plane` | write | safe to repeat | Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a found release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it). |
+| `update.status` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release that was found and waits for a moment when no work is in flight before it is downloaded and installed; `installing` is a release being downloaded and installed now, with `receivedBytes` (bytes of release files received so far), `file` (the release file that last received bytes) and `since` (when the install began, epoch ms), and is null when none runs (no clock ends a download: it runs until it finishes, the connection fails, or the daemon stops); `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with. |
 
 ### cost
 

@@ -588,7 +588,7 @@ Both need the connected host; without it they print the reason and exit `1`.
 ```text
 $ goodvibes-agent compat
 GoodVibes Agent compatibility
-  package 3.4.1
+  package 3.4.2
   connected host http://127.0.0.1:3421 (unreachable)
   host compatible no
   operator token missing (/home/me/.goodvibes/daemon/operator-tokens.json)

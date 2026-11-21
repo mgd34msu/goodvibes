@@ -1,5 +1,44 @@
 # Changelog
 
+## [3.4.2] - 2026-11-21
+
+The full write-up is in
+[docs/releases/3.4.2.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.2/docs/releases/3.4.2.md).
+
+### Upgrading from 3.4.1
+
+- The update to 3.4.2 is done by the release you are running: a 3.4.1 or
+  earlier daemon on a slow connection can still hit its own two-minute limit
+  while downloading it. It tries again at its next check, and
+  `goodvibes-daemon update --check` asks it to try at once.
+
+### Added
+
+- `goodvibes-daemon update` and `/update daemon` show an update in progress
+  and how much of it has arrived; `update.status` and `update.check` carry
+  `installing` (`version`, `since`, `receivedBytes`, `file`, or null).
+
+### Changed
+
+- No clock ends an update: the daemon's update, `goodvibes update`, the
+  Agent's `/update` and its hourly update run until the release is installed,
+  the server or connection fails, the update is cancelled or the program
+  stops. A transfer that receives nothing for 300 seconds is still ended.
+- An update at start-up is no longer cancelled at `update.applyTimeoutMs`: the
+  launch waits that long, then starts the installed version while the download
+  carries on in the background and reports when it is done.
+  `update deferred: will retry next launch` is gone.
+- Release files are written to disk as they arrive and checked in pieces,
+  instead of being held in memory whole (updates had peaked at about 2.7 GB).
+
+### Fixed
+
+- The `pending:` line no longer says a release was downloaded and verified
+  when it had only been found: `pending: <version> was found ...; it downloads
+  and installs when no work is in flight`.
+- Update, crash and rollback receipts show the machine's own time zone again
+  (3.4.0 and 3.4.1 wrote UTC); `daemon.timezone` still decides when set.
+
 ## [3.4.1] - 2026-11-21
 
 The full write-up is in

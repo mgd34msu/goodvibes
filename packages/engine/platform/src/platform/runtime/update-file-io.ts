@@ -8,32 +8,44 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
  * What a staged file is written from: bytes held in memory (claims, receipts,
  * small generated files), or a release file the update downloaded to its
  * private download directory, copied into the stage in pieces so a release of
- * several hundred megabytes is never held in memory whole.
+ * several hundred megabytes is never held in memory whole. A downloaded file
+ * carries the size and SHA-256 that were verified against the release as it
+ * arrived; every later read of it is held to both.
  */
-export type UpdatePayload = Buffer | { readonly file: string; readonly size: number };
+export type UpdatePayload = Buffer | { readonly file: string; readonly size: number; readonly sha256: string };
 
 const COPY_CHUNK_BYTES = 1 << 20;
 
+const DOWNLOAD_CHANGED = 'Native update download changed before it was staged';
+
 /** The whole payload in memory: for the small files that are parsed, and for adapters that write only bytes. */
 export function updatePayloadBytes(payload: UpdatePayload): Buffer {
-  return Buffer.isBuffer(payload) ? payload : readFileSync(payload.file);
+  if (Buffer.isBuffer(payload)) return payload;
+  const bytes = readFileSync(payload.file);
+  if (bytes.byteLength !== payload.size || createHash('sha256').update(bytes).digest('hex') !== payload.sha256) throw new Error(DOWNLOAD_CHANGED);
+  return bytes;
 }
 
 function updatePayloadSize(payload: UpdatePayload): number {
   return Buffer.isBuffer(payload) ? payload.byteLength : payload.size;
 }
 
-/** Copy a downloaded file into an open descriptor in pieces; returns the bytes copied. */
-function copyFileInto(fd: number, source: string): number {
-  const from = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+/**
+ * Copy a downloaded file into an open descriptor in pieces, hashing what is
+ * copied, and refuse when the copy is not the verified download (size and
+ * SHA-256), so a stage is only ever the bytes that matched the release.
+ */
+function copyVerifiedFileInto(fd: number, source: { readonly file: string; readonly size: number; readonly sha256: string }): void {
+  const from = openSync(source.file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    const chunk = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+    const chunk = Buffer.allocUnsafe(COPY_CHUNK_BYTES), hash = createHash('sha256');
     let copied = 0;
     for (let read = readSync(from, chunk, 0, chunk.length, null); read > 0; read = readSync(from, chunk, 0, chunk.length, null)) {
+      hash.update(chunk.subarray(0, read));
       for (let offset = 0; offset < read;) offset += writeSync(fd, chunk, offset, read - offset);
       copied += read;
     }
-    return copied;
+    if (copied !== source.size || hash.digest('hex') !== source.sha256) throw new Error(DOWNLOAD_CHANGED);
   } finally { closeSync(from); }
 }
 
@@ -291,7 +303,7 @@ export function createOwnedNativeUpdateFile(path: string, data: UpdatePayload, m
     fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
     expected = fstatSync(fd, { bigint: true }); current(path);
     if (Buffer.isBuffer(data)) writeFileSync(fd, data);
-    else if (copyFileInto(fd, data.file) !== data.size) throw new Error('Native update download changed before it was staged');
+    else copyVerifiedFileInto(fd, data);
     fchmodSync(fd, mode); fsyncSync(fd);
     expected = fstatSync(fd, { bigint: true });
     if (expected.size !== BigInt(updatePayloadSize(data)) || (expected.mode & 0o7777n) !== BigInt(mode)) throw new Error('Native update stage did not finish');

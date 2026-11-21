@@ -13894,6 +13894,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "installing": {
+        "version": "sample",
+        "since": 0,
+        "receivedBytes": 0,
+        "file": "sample"
+      },
       "pendingSince": 0,
       "pendingBlockedBy": [
         "sample"
@@ -13932,6 +13938,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
+      "installing": {
+        "version": "sample",
+        "since": 0,
+        "receivedBytes": 0,
+        "file": "sample"
+      },
       "pendingSince": 0,
       "pendingBlockedBy": [
         "sample"

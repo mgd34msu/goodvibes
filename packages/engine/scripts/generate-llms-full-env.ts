@@ -239,7 +239,7 @@ export const ENV_CATALOG: readonly EnvEntry[] = [
   { name: 'GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES', readBy: 'Cloudflare Worker', does: 'The largest job payload, in bytes, the Worker puts on its queue.' },
 
   // Installer
-  { name: 'GOODVIBES_VERSION', readBy: 'installer', does: 'The release `install.sh` installs, such as `v3.4.1`; `latest` when unset. The uninstaller without a receipt fetches that release\'s script.' },
+  { name: 'GOODVIBES_VERSION', readBy: 'installer', does: 'The release `install.sh` installs, such as `v3.4.2`; `latest` when unset. The uninstaller without a receipt fetches that release\'s script.' },
   { name: 'GOODVIBES_DAEMON_VERSION', readBy: 'installer', does: 'The daemon release to install, when it should differ from `GOODVIBES_VERSION`.' },
   { name: 'GOODVIBES_AGENT_VERSION', readBy: 'installer', does: 'The Agent release to install, when it should differ from `GOODVIBES_VERSION`.' },
   { name: 'GOODVIBES_WEBUI_VERSION', readBy: 'installer', does: 'The web UI release to install, when it should differ from `GOODVIBES_VERSION`.' },

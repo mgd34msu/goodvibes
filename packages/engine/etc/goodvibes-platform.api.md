@@ -2229,7 +2229,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.4.1";
+    readonly productVersion: "3.4.2";
     readonly operatorMethodCount: 650;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
@@ -36358,6 +36358,12 @@ export interface OperatorMethodOutputMap {
         failedCheckCount: number;
         lastCheckFailure: null | string;
         pendingVersion: null | string;
+        installing?: null | {
+            version: string;
+            since: number;
+            receivedBytes: number;
+            file: null | string;
+        };
         pendingSince: null | number;
         pendingBlockedBy: readonly string[];
         rejectedVersion: null | string;
@@ -36384,6 +36390,12 @@ export interface OperatorMethodOutputMap {
         failedCheckCount: number;
         lastCheckFailure: null | string;
         pendingVersion: null | string;
+        installing?: null | {
+            version: string;
+            since: number;
+            receivedBytes: number;
+            file: null | string;
+        };
         pendingSince: null | number;
         pendingBlockedBy: readonly string[];
         rejectedVersion: null | string;

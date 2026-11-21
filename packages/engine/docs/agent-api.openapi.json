@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "GoodVibes Operator API: agent slice",
-  "version": "3.3.3",
+  "version": "3.3.4",
   "description": "Sessions, tasks, contracts, approvals and the event stream from the operator contract, for agents and scripts. Schemas repeated across operations are shared under components.schemas. The full document is `contracts/artifacts/operator-openapi.json`; this one is generated from the same contract by `bun run agent-spec:generate` and is not written by any build."
  },
  "servers": [

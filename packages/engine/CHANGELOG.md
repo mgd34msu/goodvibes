@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.3.4] - 2026-11-20
+
+The full write-up is in
+[docs/releases/3.3.4.md](https://github.com/mgd34msu/goodvibes/blob/v3.3.4/docs/releases/3.3.4.md).
+
+### Fixed
+
+- End the orderly stop before an update's handover after a minute, so an old
+  daemon that cannot finish stopping exits and the service manager starts the
+  new release; log each step of the stop as it starts.
+- Stop recording a handover that worked as incomplete with updates paused: the
+  service manager's stop of the old daemon under systemd is the requested
+  restart, for an update and for a rollback. Record a receipt still waiting to
+  be shown only once.
+- Give `service restart` and the other blocking service commands up to two
+  minutes, and say in words when a command was cut short instead of
+  `command exited with null`.
+- Stop retrying without pause a contract that can be neither started nor
+  cancelled; it waits until released.
+
+### Known
+
+- The cause of one observed case of a 3.3.1 daemon using a full processor core
+  after installing an update was not found. The one-minute bound on the stop
+  before the handover now ends such a daemon and starts the new release.
+
 ## [3.3.3] - 2026-11-20
 
 The full write-up is in

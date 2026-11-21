@@ -2449,11 +2449,18 @@ export class ConfigManager {
    * machine. A failed write leaves both files as they were and says so in the log.
    */
   #carryToDaemonTier(document: Record<string, unknown>): void {
-    if (this.readOnly || this.daemonTierPath === null || this.#daemonIsRemote()) return;
+    if (this.daemonTierPath === null || this.#daemonIsRemote()) return;
     const held = CARRIED_TO_DAEMON_TIER_KEYS
       .map((key) => ({ key, found: readDotPath(document, key) }))
       .filter((entry) => entry.found.present);
     if (held.length === 0) return;
+    // A read-only reader moves nothing: the manager that owns these files
+    // carries the keys and says so once. Left in, the reader would report a
+    // value that is about to be moved, not dropped, as ignored.
+    if (this.readOnly) {
+      for (const { key } of held) deleteRawDotPath(document, key);
+      return;
+    }
     const lines: string[] = [];
     try {
       const tier = readDaemonTierFile(this.daemonTierPath);

@@ -427,7 +427,12 @@ export async function verifyCompiledSuiteRollback({ host, target, source, source
   assert.equal(await invoke('git', ['-C', selectedSource, 'rev-parse', 'HEAD']), source);
   const module = pathToFileURL(join(selectedSource, 'packages/engine/platform/src/platform/daemon/lifecycle-marker.ts')).href;
   const seed = join(root, 'seed-failed-start-history.mjs');
-  writeFileSync(seed, `import assert from 'node:assert/strict';\nimport {recordDaemonStartAttempt,readLifecycleMarker} from ${JSON.stringify(module)};\nconst path=process.argv[2];\nconst original=readLifecycleMarker(path);\nassert.equal(original?.version,${JSON.stringify(currentVersion)});\nassert.equal(original?.failedStarts,0);\nassert.equal(original?.autoRollbackAt,undefined);\nfor(let i=0;i<3;i++) recordDaemonStartAttempt(path,{version:${JSON.stringify(currentVersion)}});\nassert.equal(readLifecycleMarker(path)?.failedStarts,3);\n`, { flag: 'wx', mode: 0o600 });
+  // The updated build has already fully started here, and the daemon by design never rolls back a build
+  // that has (`lastStartedVersion`: its failed starts are environmental). The seeded history is therefore
+  // the one an update that never came up leaves: the previous release last started and stopped cleanly,
+  // then the updated build failed three starts in a row.
+  const [current, previous] = [JSON.stringify(currentVersion), JSON.stringify(previousVersion)];
+  writeFileSync(seed, `import assert from 'node:assert/strict';\nimport {recordDaemonStart,recordDaemonCleanShutdown,recordDaemonStartAttempt,readLifecycleMarker} from ${JSON.stringify(module)};\nconst path=process.argv[2];\nconst original=readLifecycleMarker(path);\nassert.equal(original?.version,${current});\nassert.equal(original?.lastStartedVersion,${current});\nassert.equal(original?.failedStarts,0);\nassert.equal(original?.autoRollbackAt,undefined);\nrecordDaemonStart(path,{version:${previous}});\nrecordDaemonCleanShutdown(path,{version:${previous}});\nfor(let i=0;i<3;i++) recordDaemonStartAttempt(path,{version:${current}});\nconst seeded=readLifecycleMarker(path);\nassert.equal(seeded?.version,${current});\nassert.equal(seeded?.lastStartedVersion,${previous});\nassert.equal(seeded?.failedStarts,3);\n`, { flag: 'wx', mode: 0o600 });
   const seedRevision = () => {
     const stat = lstatSync(seed, { bigint: true }); assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.size <= 16384n);
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.mode, stat.uid].join(':');
@@ -952,7 +957,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       previousInstaller: `git:${previousSource}:scripts/install.sh`, baselineVersion: previousTag.slice(1), updatedVersion: version,
       restoredVersion: previousTag.slice(1), initialPid, updatedPid, rolledBackPid,
       previousRuntimeObservation, replacementPidObserved: initialPid !== undefined,
-      rollbackTrigger: 'three failed-start history entries seeded through the source lifecycle writer while service stopped; crashes not observed',
+      rollbackTrigger: 'an update that never fully started (previous release last started, then three failed starts) seeded through the source lifecycle writers while service stopped; crashes not observed',
       savedDataAndSettingsPreserved: true, configuredWebuiPathPreserved: true, readerRequirementsPreserved: true } : {}),
     uninstallPreservedData: true, futureVersionUpgrade: 'not claimed',
     publicRollback: previousRelease

@@ -27,10 +27,10 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  *   - a successful update restarts into the new binary and the restarted
  *     process prints a receipt naming both versions, so the swap is never
  *     silent.
- *   - the download, verification and swap get `update.applyTimeoutMs`, as in
- *     the terminal app (one sequence, terminal-shell/launch-auto-update.ts):
- *     before the swap begins the work is cancelled and deferred to the next
- *     launch; a swap already under way finishes and reports itself.
+ *   - the launch waits `update.applyTimeoutMs` for the download, verification
+ *     and swap, as in the terminal app (one sequence,
+ *     terminal-shell/launch-auto-update.ts); past it the current version
+ *     starts and the update keeps running in the background and reports itself.
  *   - every swap keeps the outgoing file at `<path>.previous`; rollback is
  *     one command (`/update rollback`).
  *

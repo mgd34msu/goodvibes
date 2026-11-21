@@ -2,8 +2,8 @@
  * method-catalog-update.ts, asking a daemon whether it is keeping itself current.
  *
  * The self-update loop already knew all of this: its cadence, how many checks
- * in a row had thrown and what the last one said, a release it had downloaded
- * and verified and was holding until the daemon went idle, and a release a
+ * in a row had thrown and what the last one said, a release it had found and
+ * was holding until the daemon went idle, and a release a
  * crash-loop rollback had rejected and will not reinstall. All of it lived in
  * one process's memory and a log file, so the only way to answer "is this
  * daemon updating itself" was shell access to the host.
@@ -15,7 +15,7 @@
  *
  * `update.check` runs the SAME tick the schedule runs, not a second path, so
  * an on-demand check and the hourly one cannot come to different conclusions.
- * It does not force an install: a verified swap still waits for a moment when
+ * It does not force an install: a found release still waits for a moment when
  * no work is in flight, which is what `pendingVersion` reports.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
@@ -50,6 +50,13 @@ const UPDATE_STATUS_PROPERTIES = {
   failedCheckCount: NUMBER_SCHEMA,
   lastCheckFailure: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
   pendingVersion: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
+  // Present from a daemon that reports a download in progress; null when none runs.
+  installing: { anyOf: [objectSchema({
+    version: STRING_SCHEMA,
+    since: NUMBER_SCHEMA,
+    receivedBytes: NUMBER_SCHEMA,
+    file: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
+  }, ['version', 'since', 'receivedBytes', 'file']), { type: 'null' }] },
   pendingSince: { anyOf: [NUMBER_SCHEMA, { type: 'null' }] },
   pendingBlockedBy: arraySchema(STRING_SCHEMA),
   rejectedVersion: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
@@ -71,7 +78,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
   methodDescriptor({
     id: 'update.status',
     title: 'Self-Update Status',
-    description: 'Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight; `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.',
+    description: 'Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release that was found and waits for a moment when no work is in flight before it is downloaded and installed; `installing` is a release being downloaded and installed now, with `receivedBytes` (bytes of release files received so far), `file` (the release file that last received bytes) and `since` (when the install began, epoch ms), and is null when none runs (no clock ends a download: it runs until it finishes, the connection fails, or the daemon stops); `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.',
     category: 'control-plane',
     effects: ['control-plane.read'],
     transport: ['ws'],
@@ -84,7 +91,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
     id: 'update.check',
     repeat: 'safe',
     title: 'Check For An Update Now',
-    description: 'Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it).',
+    description: 'Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a found release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it).',
     category: 'control-plane',
     effects: ['control-plane.administer'],
     transport: ['ws'],

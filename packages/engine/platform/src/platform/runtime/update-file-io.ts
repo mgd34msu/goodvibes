@@ -1,7 +1,74 @@
 /** Captured native update I/O. */
-import { chmodSync, closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+
+/**
+ * What a staged file is written from: bytes held in memory (claims, receipts,
+ * small generated files), or a release file the update downloaded to its
+ * private download directory, copied into the stage in pieces so a release of
+ * several hundred megabytes is never held in memory whole.
+ */
+export type UpdatePayload = Buffer | { readonly file: string; readonly size: number };
+
+const COPY_CHUNK_BYTES = 1 << 20;
+
+/** The whole payload in memory: for the small files that are parsed, and for adapters that write only bytes. */
+export function updatePayloadBytes(payload: UpdatePayload): Buffer {
+  return Buffer.isBuffer(payload) ? payload : readFileSync(payload.file);
+}
+
+function updatePayloadSize(payload: UpdatePayload): number {
+  return Buffer.isBuffer(payload) ? payload.byteLength : payload.size;
+}
+
+/** Copy a downloaded file into an open descriptor in pieces; returns the bytes copied. */
+function copyFileInto(fd: number, source: string): number {
+  const from = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const chunk = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+    let copied = 0;
+    for (let read = readSync(from, chunk, 0, chunk.length, null); read > 0; read = readSync(from, chunk, 0, chunk.length, null)) {
+      for (let offset = 0; offset < read;) offset += writeSync(fd, chunk, offset, read - offset);
+      copied += read;
+    }
+    return copied;
+  } finally { closeSync(from); }
+}
+
+/** The SHA-256 and size of a file, read in pieces. */
+export function digestUpdateFile(path: string): { readonly sha256: string; readonly size: number } {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const hash = createHash('sha256'), chunk = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+    let size = 0;
+    for (let read = readSync(fd, chunk, 0, chunk.length, null); read > 0; read = readSync(fd, chunk, 0, chunk.length, null)) {
+      hash.update(chunk.subarray(0, read)); size += read;
+    }
+    return { sha256: hash.digest('hex'), size };
+  } finally { closeSync(fd); }
+}
+
+const DOWNLOAD_DIRECTORY = /^\.update-fetch-(\d+)-/;
+
+/**
+ * A private directory (mode 0700) in `parent` that one update downloads its
+ * release files into before staging them; the caller removes it when the
+ * update ends. Directories left by an update whose process is gone are
+ * removed first. `parent` is the installation directory, so the download
+ * lives on the disk it is installed to rather than in memory.
+ */
+export function createUpdateDownloadDirectory(parent: string): string {
+  for (const name of readdirSync(parent)) {
+    const holder = Number(DOWNLOAD_DIRECTORY.exec(name)?.[1] ?? 0);
+    if (!Number.isSafeInteger(holder) || holder <= 0 || holder === process.pid) continue;
+    try { process.kill(holder, 0); continue; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; }
+    rmSync(join(parent, name), { recursive: true, force: true });
+  }
+  return mkdtempSync(join(parent, `.update-fetch-${process.pid}-`));
+}
 
 /**
  * Injectable filesystem surface. Existing adapters remain source compatible,
@@ -204,7 +271,7 @@ export interface OwnedNativeUpdateFile {
 /** Native creator proof for a claim or stage. The original descriptor remains
  * open until cleanup/transaction completion. Unknown colliding paths are never
  * truncated, adopted, chmodded or removed. No content digest/readback is needed. */
-export function createOwnedNativeUpdateFile(path: string, data: Buffer, mode: number, assertDirectory: () => void): OwnedNativeUpdateFile {
+export function createOwnedNativeUpdateFile(path: string, data: UpdatePayload, mode: number, assertDirectory: () => void): OwnedNativeUpdateFile {
   assertDirectory();
   let fd: number | undefined, selected = path;
   let expected: BigIntStats | undefined;
@@ -223,9 +290,11 @@ export function createOwnedNativeUpdateFile(path: string, data: Buffer, mode: nu
   try {
     fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
     expected = fstatSync(fd, { bigint: true }); current(path);
-    writeFileSync(fd, data); fchmodSync(fd, mode); fsyncSync(fd);
+    if (Buffer.isBuffer(data)) writeFileSync(fd, data);
+    else if (copyFileInto(fd, data.file) !== data.size) throw new Error('Native update download changed before it was staged');
+    fchmodSync(fd, mode); fsyncSync(fd);
     expected = fstatSync(fd, { bigint: true });
-    if (expected.size !== BigInt(data.byteLength) || (expected.mode & 0o7777n) !== BigInt(mode)) throw new Error('Native update stage did not finish');
+    if (expected.size !== BigInt(updatePayloadSize(data)) || (expected.mode & 0o7777n) !== BigInt(mode)) throw new Error('Native update stage did not finish');
     current(path);
     return Object.freeze({
       assertAt(path: string) { if (path !== selected) throw new Error('Native update selected source changed'); current(path); },

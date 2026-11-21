@@ -20,6 +20,13 @@ export interface DaemonUpdateStatusView {
   readonly failedCheckCount?: number;
   readonly lastCheckFailure?: string | null;
   readonly pendingVersion?: string | null;
+  /** A release being downloaded and installed now, and how much of it has arrived. */
+  readonly installing?: {
+    readonly version?: string;
+    readonly since?: number;
+    readonly receivedBytes?: number;
+    readonly file?: string | null;
+  } | null;
   /** Since when the pending release has waited for work in flight (epoch ms). */
   readonly pendingSince?: number | null;
   /** The fleet ids of the work the pending release waits behind. */
@@ -47,6 +54,12 @@ function formatElapsed(milliseconds: number): string {
   return `${seconds}s`;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} kB`;
+  return `${bytes} bytes`;
+}
+
 /** The daemon's update state in lines: on or off and why, failing checks, a release waiting and what holds it, a rejected release, a recovery fence. */
 export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, now: number = Date.now()): string[] {
   const lines: string[] = [];
@@ -60,14 +73,20 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
   if (failed > 0) {
     lines.push(`  failing:  ${failed} check${failed === 1 ? '' : 's'} in a row failed${update.lastCheckFailure ? `: ${update.lastCheckFailure}` : ''}`);
   }
-  // A release being installed now is said by the check line; it is not waiting.
-  if (update.pendingVersion && update.check !== 'installing') {
+  const installing = update.installing;
+  if (installing) {
+    const elapsed = typeof installing.since === 'number' ? ` for ${formatElapsed(now - installing.since)}` : '';
+    const file = installing.file ? ` (now ${installing.file})` : '';
+    lines.push(`  installing: ${installing.version ?? update.pendingVersion ?? 'a newer release'}, downloading${elapsed}: ${formatBytes(installing.receivedBytes ?? 0)} received${file}`);
+  }
+  // A release being installed now is said by the check line or the installing line; it is not waiting.
+  if (update.pendingVersion && update.check !== 'installing' && !installing) {
     const since = typeof update.pendingSince === 'number' ? ` (waiting ${formatElapsed(now - update.pendingSince)})` : '';
     const blockers = update.pendingBlockedBy ?? [];
     const held = blockers.length > 0
-      ? `; it installs when this work finishes: ${blockers.join(', ')}`
-      : '; it installs when no work is in flight';
-    lines.push(`  pending:  ${update.pendingVersion} is downloaded and verified${since}${held}`);
+      ? `; it downloads and installs when this work finishes: ${blockers.join(', ')}`
+      : '; it downloads and installs when no work is in flight';
+    lines.push(`  pending:  ${update.pendingVersion} was found${since}${held}`);
   }
   if (update.rejectedVersion) {
     lines.push(`  rejected: ${update.rejectedVersion} crash looped and was rolled back; the update loop will not install that version again`);
@@ -85,7 +104,7 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
 export function formatDaemonUpdateCheckLine(check: DaemonUpdateStatusView['check'], offReason: string | undefined, pendingVersion?: string | null): string[] {
   if (check === 'installing') {
     return [`  check:    found ${pendingVersion ?? 'a newer release'}; the daemon is installing it now and will restart into it`,
-      '            it stops answering for a short while; run this command again in a minute to see the new version'];
+      '            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version'];
   }
   if (check === 'ran') return ['  check:    ran now; the lines above are its result'];
   if (check === 'already-in-flight') return ['  check:    another check was already running, so none was started; the lines above are as of now'];

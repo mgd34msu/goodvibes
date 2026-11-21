@@ -71,9 +71,9 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'update.applyTimeoutMs',
-    label: 'Longest the start-up update may take (ms)',
+    label: 'Longest start-up waits for an update (ms)',
     type: 'number',
-    description: 'Maximum milliseconds the terminal app and the Agent spend downloading, verifying and swapping in a new release at launch. Past it, an update that has not started replacing files is cancelled and tried at the next launch; one already replacing files finishes in the background and says so when it is done',
+    description: 'Maximum milliseconds the terminal app and the Agent wait at launch for a new release to download, verify and swap in before starting the installed version. Past it the update is not cancelled: it keeps downloading and installing in the background and says so when it is done; restart to use it',
     ...intRange(5_000, 300_000),
   },
   {

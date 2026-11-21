@@ -28,14 +28,11 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  *   - a successful update restarts into the new binary and the restarted
  *     process prints a receipt naming both versions, so the swap is never
  *     silent.
- *   - the install gets a budget too, and running out of it is reported for
- *     what actually happened rather than assumed. The budget cancels the work
- *     through a real AbortSignal, so a download that is still in flight is
- *     genuinely stopped and "deferred, will retry next launch" is true. Once
- *     the swap has begun it is never interrupted: that outcome says it is
- *     still finishing, and its eventual success or failure is printed when it
- *     settles. The two are told apart by the swap state the install reports
- *     back (UpdateSwapProgress), never by guessing.
+ *   - the launch waits `update.applyTimeoutMs` for the install, then starts
+ *     the current version. The install is not cancelled by that wait: a slow
+ *     download is not a failed one. It keeps running in the background, says
+ *     it is still downloading or finishing, and its eventual success or
+ *     failure is printed when it settles.
  *   - every swap keeps the outgoing file at `<path>.previous`; rollback is
  *     one command (`/update rollback`).
  *

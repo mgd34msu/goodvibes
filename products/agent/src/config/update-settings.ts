@@ -34,7 +34,7 @@ export interface UpdateSettings {
   readonly autoUpdateAtLaunch: boolean;
   /** How long the launch-time version check may take before it is skipped. `update.launchCheckTimeoutMs`, default 2500, 250 to 30000. */
   readonly launchCheckTimeoutMs: number;
-  /** How long the launch-time download, verification and swap may take before it is deferred (`update.applyTimeoutMs`, default 45000, 5000 to 300000). */
+  /** How long the launch waits for its download, verification and swap before starting the installed version; the update keeps running in the background (`update.applyTimeoutMs`, default 45000, 5000 to 300000). */
   readonly applyTimeoutMs: number;
   /**
    * Keep checking for a newer release WHILE the agent runs, and install it at

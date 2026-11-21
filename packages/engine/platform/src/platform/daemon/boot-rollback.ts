@@ -74,8 +74,8 @@ export interface CrashLoopReceiptInput {
   readonly failedStarts: number;
   readonly restored: readonly { readonly label: string }[];
   readonly at: number;
-  /** The zone `at` is stated in: the owner's `daemon.timezone` (`receiptTimeZone`). */
-  readonly timeZone: string;
+  /** The zone `at` is stated in: the owner's `daemon.timezone` (`receiptTimeZone`); this machine's zone when undefined. */
+  readonly timeZone: string | undefined;
 }
 
 /**

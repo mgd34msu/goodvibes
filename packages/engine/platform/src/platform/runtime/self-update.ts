@@ -31,9 +31,12 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
  * unrelated writers.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { captureUpdateFileIo, createOwnedNativeUpdateFile, retainNativeUpdateDirectory, observesUpdateFiles, realUpdateFileIo, releaseAbandonedUpdateClaim, UPDATE_CLAIM_SUFFIX, UPDATE_TRANSIENT_SLOT_SUFFIXES, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
+import { closeSync, constants as fsConstants, existsSync, openSync, rmSync, writeSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { captureUpdateFileIo, createOwnedNativeUpdateFile, createUpdateDownloadDirectory, digestUpdateFile, retainNativeUpdateDirectory, observesUpdateFiles, realUpdateFileIo, releaseAbandonedUpdateClaim, updatePayloadBytes, UPDATE_CLAIM_SUFFIX, UPDATE_TRANSIENT_SLOT_SUFFIXES, type OwnedNativeUpdateFile, type NativeUpdateDirectoryOwner, type UpdateFileIo, type UpdatePayload } from './update-file-io.js';
 export { captureUpdateFileIo, realUpdateFileIo, releaseAbandonedUpdateClaim, retainNativeUpdateDirectory, UPDATE_TRANSACTION_SUFFIXES, type NativeUpdateDirectoryOwner, type UpdateFileIo } from './update-file-io.js';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { formatReceiptTime } from '../daemon/receipts.js';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
 import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt, type DaemonCiArtifact } from './daemon-native-cohort.js';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
@@ -98,27 +101,31 @@ export interface UpdateFetchLike {
     readonly status: number;
     readonly url: string;
     readonly headers: { get(name: string): string | null };
+    /** The body as it arrives; release files are read from it in pieces and never held whole. */
+    readonly body?: ReadableStream<Uint8Array> | null;
     text(): Promise<string>;
     arrayBuffer(): Promise<ArrayBuffer>;
   }>;
 }
 
+/**
+ * An update runs until it finishes, the release server or the connection fails
+ * (an error status, a closed or reset connection, a transfer the transport
+ * itself gives up on), the caller cancels it through `signal`, or the program
+ * stops. No clock ends it: a slow connection is not a failed update.
+ */
 export interface UpdateRequestOptions {
   readonly signal?: AbortSignal;
-  /** Whole operation budget, including response bodies. Defaults to two minutes. */
-  readonly timeoutMs?: number;
+  /** Told the size of each piece of a release file as it arrives, so a long download can show its progress. */
+  readonly onReceived?: ((assetName: string, bytes: number) => void) | undefined;
 }
-export const DEFAULT_UPDATE_TIMEOUT_MS = 120_000;
 
-/** Bound even injected fetch/body implementations that ignore AbortSignal. */
-export async function withUpdateBudget<T>(options: UpdateRequestOptions, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('update timeoutMs must be positive and finite');
+/** End even injected fetch/body implementations that ignore AbortSignal when the caller cancels. */
+export async function withUpdateCancellation<T>(options: UpdateRequestOptions, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal?.reason ?? new Error('update cancelled'));
   if (options.signal?.aborted) abort();
   else options.signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error(`update timed out after ${Math.ceil(timeoutMs)}ms`)), timeoutMs);
   let rejectAbort: (() => void) | undefined;
   try {
     controller.signal.throwIfAborted();
@@ -131,7 +138,6 @@ export async function withUpdateBudget<T>(options: UpdateRequestOptions, run: (s
       }),
     ]);
   } finally {
-    clearTimeout(timer);
     options.signal?.removeEventListener('abort', abort);
     if (rejectAbort) controller.signal.removeEventListener('abort', rejectAbort);
     // Release a native transport/body left unread after a rejected response,
@@ -149,7 +155,7 @@ export async function resolveLatestReleaseTag(
   const latest = new URL(releasesLatestUrl);
   if (!['https:', 'http:'].includes(latest.protocol) || latest.username || latest.password || latest.search || latest.hash
     || !latest.pathname.endsWith('/releases/latest')) throw new Error('invalid releases/latest URL');
-  return await withUpdateBudget(options, async (signal) => {
+  return await withUpdateCancellation(options, async (signal) => {
     const response = await fetchImpl(releasesLatestUrl, { method: 'HEAD', redirect: 'manual', signal });
     signal.throwIfAborted();
     const location = response.headers.get('location');
@@ -272,6 +278,46 @@ export function verifyChecksum(
   }
 }
 
+/** A release file downloaded to the update's private directory, with the digest of the bytes that arrived. */
+export interface DownloadedUpdateFile {
+  readonly file: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+/**
+ * Write a response body to `file` piece by piece as it arrives, hashing it on
+ * the way, so memory holds one piece at a time whatever the file's size. The
+ * transfer ends when the body ends, the connection fails, or `signal` aborts.
+ */
+async function downloadToFile(
+  response: Awaited<ReturnType<UpdateFetchLike>>, file: string, assetName: string, signal: AbortSignal,
+  onReceived: UpdateRequestOptions['onReceived'],
+): Promise<DownloadedUpdateFile> {
+  const body = response.body;
+  if (!body) throw new Error(`the download of ${assetName} has no body`);
+  const reader = body.getReader();
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+  const hash = createHash('sha256');
+  let size = 0, finished = false;
+  try {
+    for (let piece = await reader.read(); !piece.done; piece = await reader.read()) {
+      signal.throwIfAborted();
+      const bytes = piece.value;
+      hash.update(bytes);
+      for (let offset = 0; offset < bytes.byteLength;) offset += writeSync(fd, bytes, offset, bytes.byteLength - offset);
+      size += bytes.byteLength;
+      onReceived?.(assetName, bytes.byteLength);
+    }
+    finished = true;
+  } finally {
+    closeSync(fd);
+    if (!finished) await reader.cancel().catch(() => undefined);
+  }
+  signal.throwIfAborted();
+  return { file, size, sha256: hash.digest('hex') };
+}
+
 // ---------------------------------------------------------------------------
 // Owned staging, reversible cohort commit, and kept-previous rollback
 // ---------------------------------------------------------------------------
@@ -305,7 +351,7 @@ export interface UpdateTransactionReceipt {
  */
 export class UpdateTransactionContendedError extends Error {
   constructor(readonly holderPid: number, readonly startedAt: number) {
-    super(`another goodvibes update or install (process ${holderPid}, started ${new Date(startedAt).toISOString()}) holds the installation;`
+    super(`another goodvibes update or install (process ${holderPid}, started ${formatReceiptTime(startedAt)}) holds the installation;`
       + ' this attempt changed nothing and can be retried once it finishes.');
     this.name = 'UpdateTransactionContendedError';
   }
@@ -415,8 +461,10 @@ function validateTargets(targets: readonly { readonly path: string }[]): Transac
 /** Borrowed logical adapters still prove their original successful exclusive
  * creation through their own observations/bytes. This does not confer native
  * filesystem provenance or a verified native staging receipt. */
-function createLogicalUpdateFile(path: string, bytes: Buffer, mode: number, io: UpdateFileIo): OwnedNativeUpdateFile {
+function createLogicalUpdateFile(path: string, payload: UpdatePayload, mode: number, io: UpdateFileIo): OwnedNativeUpdateFile {
   if (!io.writeExclusive || !io.remove) throw new Error('Exclusive update I/O is unavailable');
+  // An adapter that writes only bytes takes the whole file; native I/O stages a download in pieces.
+  const bytes = updatePayloadBytes(payload);
   const expectedBytes = Buffer.from(bytes);
   io.writeExclusive(path, bytes);
   let selected = path, observed = io.observe?.(path);
@@ -451,7 +499,7 @@ function transact(
   operation: 'update' | 'rollback',
   paths: readonly TransactionPaths[],
   io: UpdateFileIo,
-  stage: (write: (path: string, bytes: Buffer, mode: number) => void) => void,
+  stage: (write: (path: string, payload: UpdatePayload, mode: number) => void) => void,
   beforeCommit: (() => void) | undefined,
   commit: (rename: (from: string, to: string) => void) => void,
   restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard; readonly retainPublication?: ((assertCurrent: () => void) => void) | undefined } = {},
@@ -473,7 +521,7 @@ function transact(
   const claimData = Buffer.from(JSON.stringify(claimFields));
   // The same claim, marked as a recovery fence, for a failed transaction to leave behind.
   const fenceData = Buffer.from(JSON.stringify({ ...claimFields, fenced: true }));
-  const create = (path: string, bytes: Buffer, mode: number) => {
+  const create = (path: string, bytes: UpdatePayload, mode: number) => {
     current();
     const owner = nativeIo ? createOwnedNativeUpdateFile(path, bytes, mode, physical) : createLogicalUpdateFile(path, bytes, mode, io);
     created.set(path, owner); creators.add(owner); return owner;
@@ -575,19 +623,27 @@ function transact(
 
 interface StagedUpdate {
   readonly target: UpdateTarget;
-  readonly buffer: Buffer;
+  /** A verified download on disk, or bytes this update generated. */
+  readonly payload: DownloadedUpdateFile | Buffer;
 }
 
-function installVerifiedBuffers(
+/** Whether the staged file at `path` holds exactly the verified payload. */
+function stagedMatches(path: string, payload: StagedUpdate['payload'], io: UpdateFileIo): boolean {
+  if (Buffer.isBuffer(payload)) return io.readFile!(path).equals(payload);
+  const staged = digestUpdateFile(path);
+  return staged.size === payload.size && staged.sha256 === payload.sha256;
+}
+
+function installVerifiedPayloads(
   verified: readonly StagedUpdate[], io: UpdateFileIo, _platform: NodeJS.Platform, beforeCommit?: () => void,
   restrictions: { readonly current?: () => void; readonly directory?: NativeUpdateDirectoryOwner; readonly readerExecPath?: string; readonly prepareNativeGuard?: () => DaemonNativeRenameGuard; readonly retainPublication?: ((assertCurrent: () => void) => void) | undefined } = {},
 ): void {
   const paths = validateTargets(verified.map(({ target }) => target));
   transact('update', paths, io, (write) => {
     for (let index = 0; index < verified.length; index += 1) {
-      const { target, buffer } = verified[index]!;
+      const { target, payload } = verified[index]!;
       const path = paths[index]!;
-      write(path.stage, buffer, target.executable ? 0o755 : 0o644);
+      write(path.stage, payload, target.executable ? 0o755 : 0o644);
     }
   }, beforeCommit, (rename) => {
     for (const path of paths) {
@@ -609,7 +665,7 @@ export function swapFileAtomically(
   buffer: Buffer,
   options: { executable: boolean; io?: UpdateFileIo; platform?: NodeJS.Platform },
 ): void {
-  installVerifiedBuffers([{ target: { label: targetPath, path: targetPath, assetName: '', executable: options.executable }, buffer: Buffer.from(buffer) }],
+  installVerifiedPayloads([{ target: { label: targetPath, path: targetPath, assetName: '', executable: options.executable }, payload: Buffer.from(buffer) }],
     options.io ?? realUpdateFileIo, options.platform ?? process.platform);
 }
 
@@ -735,8 +791,13 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   for (const target of options.targets) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(target.assetName)) throw new Error(`invalid update asset filename: ${target.assetName}`);
   }
-  const deadline = performance.now() + (options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS);
-  const verified = await withUpdateBudget(options, async (signal) => {
+  // Release files are written to a private directory beside the installation as
+  // they arrive and staged from there, never held in memory whole.
+  const installDirectory = readerExecPath ?? options.targets[0]?.path;
+  const downloadParent = installDirectory && observesUpdateFiles(capturedIo) && existsSync(dirname(installDirectory)) ? dirname(installDirectory) : tmpdir();
+  const downloads = createUpdateDownloadDirectory(downloadParent);
+  try {
+  const verified = await withUpdateCancellation(options, async (signal) => {
     const assertDownloadCurrent = (): void => {
       signal.throwIfAborted();
       directory?.assertCurrent();
@@ -779,25 +840,25 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const response = await fetchCurrent(url);
       signal.throwIfAborted();
       if (!response.ok) throw new Error(`download failed (${response.status}) for ${url}`);
-      const buffer = Buffer.from(new Uint8Array(await response.arrayBuffer()));
+      const downloaded = await downloadToFile(response, join(downloads, `${verified.length}-${target.assetName}`), target.assetName, signal, options.onReceived);
       assertDownloadCurrent();
       signal.throwIfAborted();
-      const pin = sha256(buffer);
-      verifyChecksum(target.assetName, pin, expected);
-      verifiedMembers.set(target.path, { path: target.path, assetName: target.assetName, sha256: pin, size: buffer.length, mode: target.executable ? 0o755 : 0o644 });
-      verified.push({ target, buffer });
+      verifyChecksum(target.assetName, downloaded.sha256, expected);
+      verifiedMembers.set(target.path, { path: target.path, assetName: target.assetName, sha256: downloaded.sha256, size: downloaded.size, mode: target.executable ? 0o755 : 0o644 });
+      verified.push({ target, payload: downloaded });
     }
     if (generatedReceipt) {
       const { artifact, version, target } = generatedReceipt;
       const payloads = verified.map(member => {
         const pin = verifiedMembers.get(member.target.path); if (!pin) throw new Error('Native daemon verified source member is missing');
-        return { pin, bytes: member.buffer };
+        return { pin, payload: member.payload };
       });
-      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), payloads[3]?.bytes);
+      const metadata = payloads[3]?.payload;
+      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), metadata && updatePayloadBytes(metadata));
       // This local transformation shares the same claims/compensation and exact
       // stage-byte checks as every native member. It was never downloaded and
       // has no independently expected checksum to compute or verify.
-      verified.push({ target, buffer: Buffer.from(JSON.stringify({ schema: 1,
+      verified.push({ target, payload: Buffer.from(JSON.stringify({ schema: 1,
         packageName: DAEMON_RELEASE_EVIDENCE_ID, version, artifact }, null, 2) + '\n') });
     }
     if (native) {
@@ -805,12 +866,12 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const descriptor = verified[descriptorIndex];
       if (!descriptor) throw new Error('Native daemon source manifest is missing');
       const target: DaemonNativeTarget = native.arch === 'x64' ? 'linux-x64' : 'linux-arm64';
-      let artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
+      let artifact = parseDaemonCiArtifact(JSON.parse(updatePayloadBytes(descriptor.payload).toString('utf8')), target);
       if (readerAsset !== undefined && readerPin !== undefined) {
         const response = await fetchCurrent(`${options.downloadBaseUrl}/${readerAsset}`);
         signal.throwIfAborted();
         if (!response.ok) throw new Error('Native daemon reader artifact download failed');
-        const bytes = Buffer.from(new Uint8Array(await response.arrayBuffer())); signal.throwIfAborted();
+        const bytes = Buffer.from(await response.arrayBuffer()); signal.throwIfAborted();
         assertDownloadCurrent();
         verifyChecksum(readerAsset, sha256(bytes), readerPin);
         const candidate = parseDaemonCiArtifact(JSON.parse(bytes.toString('utf8')), target);
@@ -828,13 +889,14 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const payloads = daemonTargets.slice(0, -1).map(target => {
         const pin = verifiedMembers.get(target.path), member = verified.find(member => member.target.path === target.path);
         if (!pin || !member) throw new Error('Native daemon verified source member is missing');
-        return { pin, bytes: member.buffer };
+        return { pin, payload: member.payload };
       });
-      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), payloads[3]?.bytes);
+      const metadata = payloads[3]?.payload;
+      assertDaemonNativePayloadPins(artifact, payloads.map(member => member.pin), metadata && updatePayloadBytes(metadata));
       // The installed receipt is a native transformation, not the downloaded
       // source artifact's bytes. Do not expose its former release pin as proof.
       verifiedMembers.delete(descriptor.target.path);
-      verified[descriptorIndex] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
+      verified[descriptorIndex] = { target: descriptor.target, payload: Buffer.from(JSON.stringify({ schema: 1,
         packageName: DAEMON_RELEASE_EVIDENCE_ID, version: normalizeVersion(native.version), artifact,
         ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
     }
@@ -844,14 +906,13 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   const assertCurrent = () => {
     directory?.assertCurrent();
     options.signal?.throwIfAborted();
-    if (performance.now() >= deadline) throw new Error('update timed out before commit');
     assertSynchronousCurrent(options.assertCurrent);
     directory?.assertCurrent();
   };
   assertCurrent();
   // The race above owns only read-only asynchronous preparation. A cancellation
   // during synchronous staging must never mask a transaction recovery receipt.
-  installVerifiedBuffers(verified, options.io ?? realUpdateFileIo, options.platform ?? process.platform, () => {
+  installVerifiedPayloads(verified, options.io ?? realUpdateFileIo, options.platform ?? process.platform, () => {
     assertCurrent();
     assertNativeCurrent?.();
     assertSynchronousCurrent(readerGuard);
@@ -869,13 +930,16 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');
     for (const member of verified) {
       const path = member.target.path + '.update-download', stat = io.observe(path);
-      if (!stat || stat.mode !== (member.target.executable ? 0o755 : 0o644) || !io.readFile(path).equals(member.buffer)) throw new Error('Native daemon staging differs from its verified payload');
+      if (!stat || stat.mode !== (member.target.executable ? 0o755 : 0o644) || !stagedMatches(path, member.payload, io)) throw new Error('Native daemon staging differs from its verified payload');
     }
     const guard = createDaemonNativeRenameGuard(options.targets, io);
     assertStagedCurrent = guard.assertCurrent.bind(guard);
     nativeStage = observesUpdateFiles(io);
     return guard;
   } } : {}) });
+  } finally {
+    rmSync(downloads, { recursive: true, force: true });
+  }
 }
 
 export interface RollbackTarget {

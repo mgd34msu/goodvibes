@@ -94,30 +94,40 @@ function parseReceipts(raw: string | null): ParsedReceiptFile {
 
 /**
  * The zone receipt times are stated in: the owner's `daemon.timezone` (or the
- * owner profile's zone when the setting is unset), else UTC.
+ * owner profile's zone when the setting is unset), else undefined, which
+ * {@link formatReceiptTime} reads as this machine's own zone.
  */
-export function receiptTimeZone(config: ConsumerConfigReader): string {
+export function receiptTimeZone(config: ConsumerConfigReader): string | undefined {
   const value = readConsumerSetting(config, 'daemon.timezone');
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : 'UTC';
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** The zone this machine's clock shows. */
+function machineTimeZone(): string {
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /**
- * Formats a timestamp as the date and wall-clock time in `timeZone`, with the
- * zone named, for receipt text ("2026-11-15 03:12 Europe/Berlin"). A receipt
- * can wait up to two weeks for a surface, so the time of day alone would not
- * say which day it was. A zone the runtime does not know is stated in UTC.
+ * Formats a timestamp as the date and wall-clock time for receipt text
+ * ("2026-11-15 03:12"). A receipt can wait up to two weeks for a surface, so
+ * the time of day alone would not say which day it was. The time is in
+ * `timeZone` when given and known to the runtime, else in this machine's own
+ * zone; the zone is named ("2026-11-15 03:12 Europe/Berlin") only when it is
+ * not the machine's.
  */
-export function formatReceiptTime(timestamp: number, timeZone: string): string {
+export function formatReceiptTime(timestamp: number, timeZone?: string): string {
+  const machine = machineTimeZone();
   let format: Intl.DateTimeFormat;
-  let zone = timeZone;
+  let zone = timeZone ?? machine;
   try {
-    format = receiptTimeFormat(timeZone);
+    format = receiptTimeFormat(zone);
   } catch {
-    zone = 'UTC';
+    zone = machine;
     format = receiptTimeFormat(zone);
   }
+  const named = format.resolvedOptions().timeZone === machine ? '' : ` ${zone}`;
   const parts = Object.fromEntries(format.formatToParts(new Date(timestamp)).map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${zone}`;
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}${named}`;
 }
 
 function receiptTimeFormat(timeZone: string): Intl.DateTimeFormat {

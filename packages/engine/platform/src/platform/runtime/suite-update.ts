@@ -6,8 +6,8 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
-  verifyChecksum, withUpdateBudget, type DaemonCurrentReader, type UpdateFetchLike, type UpdateRequestOptions } from './self-update.js';
+import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
+  verifyChecksum, withUpdateCancellation, type DaemonCurrentReader, type UpdateFetchLike, type UpdateRequestOptions } from './self-update.js';
 import { assertStagedClientReaderCompatible } from './client-reader-update.js';
 import { captureUpdateFileIo, observesUpdateFiles, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
 import { NativeDirectoryUpdateError, prepareNativeDirectoryRollback, prepareNativeUpdateDirectory, retainNativeUpdateTree, type NativeUpdateDirectory } from './update-directories.js';
@@ -131,22 +131,20 @@ function nativeDaemon(plan: SuiteUpdatePlan) {
 export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<SuiteUpdateResult> {
   // Capture host methods and effect-bearing choices before any network await.
   options = { ...options, io: captureUpdateFileIo(options.io ?? realUpdateFileIo) };
-  const io = options.io!, deadline = performance.now() + (options.timeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS);
+  const io = options.io!;
   const current = () => {
     options.signal?.throwIfAborted();
-    if (performance.now() >= deadline) throw new Error('Suite update deadline exceeded');
     synchronous(options.assertCurrent);
   };
   current();
   const plan = resolveSuiteUpdatePlan(options), daemon = nativeDaemon(plan);
   const directories = plan.directories.map(selection => ({ selection, original: retainNativeUpdateTree(selection.path) }));
   const selected = () => { current(); plan.assertCurrent(); for (const directory of directories) directory.original.assertCurrent(); };
-  const remaining = () => { current(); return Math.max(Number.EPSILON, deadline - performance.now()); };
   const prepared: NativeUpdateDirectory[] = [];
   let committed = false;
   try {
     selected();
-    const manifest = await withUpdateBudget({ ...(options.signal ? { signal: options.signal } : {}), timeoutMs: remaining() }, async signal => {
+    const manifest = await withUpdateCancellation({ ...(options.signal ? { signal: options.signal } : {}) }, async signal => {
       const response = await options.fetchImpl(`${options.downloadBaseUrl}/${CHECKSUM_MANIFEST_NAME}`, { signal });
       signal.throwIfAborted(); selected();
       if (!response.ok) throw new Error('Suite release checksum manifest download failed');
@@ -163,6 +161,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
         signal.throwIfAborted(); selected();
         if (!response.ok) throw new Error(`Suite directory asset download failed: ${selection.assetName}`);
         const bytes = Buffer.from(await response.arrayBuffer()); signal.throwIfAborted(); selected();
+        options.onReceived?.(selection.assetName, bytes.byteLength);
         // One published archive integrity check at download, never a runtime
         // directory identity or a repeated per-file checksum scan.
         verifyChecksum(selection.assetName, sha256(bytes), expected);
@@ -205,7 +204,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
           root.assertCurrent();
         };
       } } : {}),
-      ...(options.signal ? { signal: options.signal } : {}), timeoutMs: remaining(), assertCurrent: current,
+      ...(options.signal ? { signal: options.signal } : {}), onReceived: options.onReceived, assertCurrent: current,
       ...(daemon ? { daemonNative: { execPath: daemon.path, platform: options.platform, arch: options.arch, version: plan.version,
         additionalTargets: plan.files.filter(file => !daemonPaths.has(file.path)),
         ...(options.currentReader ? { currentReader: options.currentReader } : {}) } } : {}),

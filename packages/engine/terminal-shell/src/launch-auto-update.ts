@@ -3,13 +3,12 @@
  *
  * Each product supplies what is its own (which binary it swaps, its release
  * check, its restart marker, what an unswappable install says, a receipt it
- * keeps); the decision and its budgets are this one function: the release
- * check (launch-update-preflight.ts), then the download, verification and swap
- * bounded by `update.applyTimeoutMs`. Running out of the budget is reported
- * for what happened: before the swap began the work is cancelled through a
- * real AbortSignal and deferred to the next launch; once the swap has begun it
- * is never interrupted, and its own outcome is printed when it settles. The two
- * are told apart by the swap progress the install reports, never by guessing.
+ * keeps); the decision is this one function: the release check
+ * (launch-update-preflight.ts), then the download, verification and swap.
+ * The launch waits for the install at most `update.applyTimeoutMs`; past it the
+ * current version starts and the install keeps running in the background (a
+ * slow connection is not a failed update, so no clock cancels it), and its own
+ * outcome is printed when it settles.
  */
 import {
   SuiteUpdateRecoveryError,
@@ -25,7 +24,7 @@ import { withTimeout } from './service-io.js';
 
 /** Default budget for the launch-time version check; `update.launchCheckTimeoutMs`. */
 export const LAUNCH_UPDATE_CHECK_TIMEOUT_MS = 2500;
-/** Default budget for the launch-time download, verification and swap; `update.applyTimeoutMs`. */
+/** How long a launch waits for its install before starting the current version; `update.applyTimeoutMs`. */
 export const LAUNCH_APPLY_TIMEOUT_MS = 45_000;
 
 /**
@@ -69,9 +68,7 @@ export type LaunchAutoUpdateOutcome =
         | 'already-current'
         | 'check-skipped'
         | 'update-failed'
-        /** The budget ran out before anything was written, and the work was cancelled. */
-        | 'update-deferred'
-        /** The budget ran out after the swap had begun; it is left to finish and report its own outcome. */
+        /** The launch stopped waiting for the install; it keeps running and reports its own outcome. */
         | 'update-in-background';
     }
   | { readonly action: 'restart'; readonly latestTag: string }
@@ -95,7 +92,7 @@ export interface LaunchAutoUpdateInput {
   readonly env: NodeJS.ProcessEnv;
   readonly print: (line: string) => void;
   readonly timeoutMs?: number | undefined;
-  /** Overrides the download+verify+swap budget; defaults to settings.applyTimeoutMs, then LAUNCH_APPLY_TIMEOUT_MS. */
+  /** Overrides how long the launch waits for the install; defaults to settings.applyTimeoutMs, then LAUNCH_APPLY_TIMEOUT_MS. */
   readonly applyTimeoutMs?: number | undefined;
   /** Where the last successful release lookup is remembered, so a launch within a few hours of it does not ask again. */
   readonly lastCheckFile?: string | undefined;
@@ -137,14 +134,13 @@ export async function runLaunchAutoUpdate(input: LaunchAutoUpdateInput, product:
 
   const applyTimeoutMs = input.applyTimeoutMs ?? input.settings.applyTimeoutMs ?? LAUNCH_APPLY_TIMEOUT_MS;
   input.print(`downloading ${check.latestTag}…`);
+  // Cancelled only when this process ends; no clock cancels the install.
   const controller = new AbortController();
   const progress = createUpdateSwapProgress();
   try {
     const applyPromise = product.apply({ signal: controller.signal, progress });
-    // Losing the race abandons this promise. A cancelled download rejects
-    // shortly after and that is the expected end of the work, so it stays
-    // quiet. A swap that was already running is different: its late outcome is
-    // reported, because the launch has already told the user to expect it.
+    // When the launch stops waiting, the install keeps running and its late
+    // outcome is reported, because the launch has told the user to expect it.
     let reportLateOutcome = false;
     applyPromise.then(
       (late) => {
@@ -162,16 +158,10 @@ export async function runLaunchAutoUpdate(input: LaunchAutoUpdateInput, product:
     );
     const applyResult = await withTimeout(applyPromise, applyTimeoutMs);
     if (applyResult === 'timeout') {
-      if (!progress.begun) {
-        // Nothing has been written yet, so the work can genuinely be called off.
-        controller.abort();
-        input.print('update deferred: will retry next launch');
-        return { action: 'continue', reason: 'update-deferred' };
-      }
-      // The swap had already started when the budget ran out. A swap is never
-      // interrupted; say it is still running and let its own outcome be reported.
+      // The launch stops waiting, not the install: a download still arriving is
+      // not a failed one. Say it is still running and let its outcome be reported.
       reportLateOutcome = true;
-      input.print(`update still finishing in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)} once it completes`);
+      input.print(`update still ${progress.begun ? 'finishing' : 'downloading'} in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)} once it completes`);
       return { action: 'continue', reason: 'update-in-background' };
     }
     // The release may move between preflight and apply: report only what the suite transaction installed.

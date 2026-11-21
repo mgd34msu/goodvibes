@@ -4,7 +4,7 @@ import { lstatSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseSemanticVersion } from './semantic-version.js';
 import type { UpdateTarget } from './self-update.js';
-import type { UpdateFileIo } from './update-file-io.js';
+import { digestUpdateFile, type UpdateFileIo } from './update-file-io.js';
 import { captureIdentity, sameIdentity, retainNativeUpdateSources } from './native-file-sources.js';
 import { NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 import { DAEMON_RELEASE_EVIDENCE_ID, nativeCohortMembers } from './native-cohort-table.js';
@@ -170,12 +170,19 @@ export function inspectDaemonNativeInstallation(execPath: string, platform: stri
   if (options.integrity === 'size') {
     assertInstalledShape(targets.slice(0, -1), suffix, receipt, io);
   } else if (options.integrity !== false) {
-    const buffers = targets.slice(0, -1).map(member => {
+    // Each member is hashed as it is read in pieces, never held whole; only the
+    // small runtime metadata the provenance check parses is read into memory.
+    const members = targets.slice(0, -1);
+    if (members.length !== receipt.artifact.files.length) throw new Error('Native daemon payload set is incomplete');
+    const pins = members.map((member, index) => {
       const observation = io.observe!(member.path + suffix);
       if (!observation || observation.mode !== (member.executable ? 0o755 : 0o644)) throw new Error(`Native daemon payload is missing or has the wrong mode: ${member.label}`);
-      return io.readFile!(member.path + suffix);
+      const file = receipt.artifact.files[index]!, actual = digestUpdateFile(member.path + suffix);
+      if (actual.size !== file.size || actual.sha256 !== file.sha256) throw new Error(`Native daemon payload differs from its source manifest: ${file.path}`);
+      return { ...actual, mode: observation.mode };
     });
-    assertDaemonNativePayloadBytes(receipt.artifact, buffers);
+    const metadata = members[3];
+    assertDaemonNativePayloadPins(receipt.artifact, pins, metadata && io.readFile!(metadata.path + suffix));
   }
   return receipt;
 }

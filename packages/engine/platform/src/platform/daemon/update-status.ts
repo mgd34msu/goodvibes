@@ -13,6 +13,17 @@
 
 import type { UpdateTransactionReceipt } from '../runtime/self-update.js';
 
+/** A release the update loop is downloading and installing now. */
+export interface DaemonUpdateInstallProgress {
+  readonly version: string;
+  /** When the install began (epoch ms). */
+  readonly since: number;
+  /** Bytes of release files received so far. */
+  readonly receivedBytes: number;
+  /** The release file that last received bytes, or null before the first arrives. */
+  readonly file: string | null;
+}
+
 /** What an on-demand update check did, so "nothing found" is not confused with "nothing ran". */
 export type DaemonUpdateCheckOutcome = 'ran' | 'already-in-flight' | 'loop-off' | 'installing';
 
@@ -48,6 +59,8 @@ export interface DaemonUpdateStatus {
   readonly lastCheckFailure: string | null;
   /** A discovered release descriptor waiting for an idle moment, or null. */
   readonly pendingVersion: string | null;
+  /** A release being downloaded and installed right now and how much of it has arrived, or null. */
+  readonly installing: DaemonUpdateInstallProgress | null;
   /** Since when a release has waited for in-flight work to finish (epoch ms), or null when none waits. */
   readonly pendingSince: number | null;
   /** The fleet ids of the work the waiting release is held behind, empty when none waits. */

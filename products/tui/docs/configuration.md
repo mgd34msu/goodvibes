@@ -273,7 +273,7 @@ UI under Settings, General.
 | --- | --- | --- | --- |
 | `update.autoUpdateAtLaunch` | boolean | `true` | Check for and install a newer release at TUI launch. Set `false` to only update when you run `/update apply` yourself. |
 | `update.launchCheckTimeoutMs` | number | `2500` | Budget for the launch-time version check, a whole number from 250 to 30000; a value outside that range is reported at start and the default applies. A check that outlives it is skipped and the current version starts. |
-| `update.applyTimeoutMs` | number | `45000` | Budget for the launch-time download, verify, and swap, a whole number from 5000 to 300000; a value outside that range is reported at start and the default applies. An apply that outlives it is deferred to the next launch. |
+| `update.applyTimeoutMs` | number | `45000` | How long a launch waits for the download, verify, and swap before starting the installed version, a whole number from 5000 to 300000; a value outside that range is reported at start and the default applies. An update that outlives it is not cancelled: it keeps running in the background and says when it is done. |
 
 ```json
 {

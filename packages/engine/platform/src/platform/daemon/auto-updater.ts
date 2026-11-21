@@ -10,8 +10,9 @@
  * Safety boundary: the daemon's activity probe is checked before downloads
  * and synchronously after staging, immediately before the first live rename.
  * A busy daemon retains the release descriptor for a short retry; downloaded
- * bytes are discarded. Cancellation and a bounded deadline cover lookup and
- * downloads. This final snapshot is not a work-admission lease: the host must
+ * bytes are discarded. No clock ends a lookup or download: it ends when it
+ * finishes, when the release server or the connection fails, or when the
+ * updater is stopped. This final snapshot is not a work-admission lease: the host must
  * still fence new work through handover before automatic activation is safe.
  *
  * Restart: the swap is followed by the daemon's OWN orderly stop, the same
@@ -60,7 +61,6 @@ import {
   compareVersions,
   captureUpdateFileIo,
   realUpdateFileIo,
-  DEFAULT_UPDATE_TIMEOUT_MS,
   UpdateTransactionError,
   UpdateTransactionContendedError,
   describeTransactionRecovery,
@@ -78,6 +78,7 @@ import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { clientCompatibilityFloorFor } from '../control-plane/build-compatibility.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
+import type { DaemonUpdateInstallProgress } from './update-status.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
 import { observesUpdateFiles } from '../runtime/update-file-io.js';
@@ -157,8 +158,6 @@ export interface DaemonAutoUpdaterOptions {
   readonly firstCheckDelayMs?: number | undefined;
   /** How often to retry a discovered-but-deferred update while the daemon is busy. */
   readonly busyRetryMs?: number | undefined;
-  /** Whole lookup/download/staging budget per check. Defaults to two minutes. */
-  readonly updateTimeoutMs?: number | undefined;
   /** The daemon's real activity signal: true only when NO work is in flight. */
   readonly isIdle: () => boolean;
   /**
@@ -175,8 +174,8 @@ export interface DaemonAutoUpdaterOptions {
   readonly describeActiveWork?: (() => readonly string[]) | undefined;
   readonly serviceActions: AutoUpdateServiceActions;
   readonly receipts: DaemonReceiptStore;
-  /** The zone receipt times are stated in, read when a receipt is written (`receiptTimeZone`); UTC when absent. */
-  readonly receiptTimeZone?: (() => string) | undefined;
+  /** The zone receipt times are stated in, read when a receipt is written (`receiptTimeZone`); this machine's zone when absent or undefined. */
+  readonly receiptTimeZone?: (() => string | undefined) | undefined;
   readonly fetchImpl?: UpdateFetchLike | undefined;
   readonly io?: UpdateFileIo | undefined;
   /**
@@ -277,6 +276,8 @@ export interface DaemonUpdateLoopSnapshot {
   readonly pendingSince?: number | null;
   /** The work that kept the last check from installing it, by fleet id. */
   readonly pendingBlockedBy?: readonly string[];
+  /** A release being downloaded and installed right now, with how much of it has arrived, or null. */
+  readonly installing?: DaemonUpdateInstallProgress | null;
   /** The version installed on disk by this process, independently of handover. */
   readonly appliedVersion?: string | null;
   /** An incomplete filesystem transaction has paused updates pending inspection. */
@@ -302,7 +303,8 @@ export class DaemonAutoUpdater {
   private appliedVersion: string | null = null;
   private recoveryRequired = false;
   private transactionRecovery: UpdateTransactionReceipt | null = null;
-  private readonly updateTimeoutMs: number;
+  /** The release being downloaded and installed now, or null. */
+  private installing: DaemonUpdateInstallProgress | null = null;
   private handover: ServiceHandoverOutcome | null = null;
   private lastHandoverPreflightRefusal: string | null = null;
   private handoverCancelled = false;
@@ -358,10 +360,6 @@ export class DaemonAutoUpdater {
       },
     };
     this.writeReceipt = options.receipts.record.bind(options.receipts);
-    this.updateTimeoutMs = this.options.updateTimeoutMs ?? DEFAULT_UPDATE_TIMEOUT_MS;
-    if (!Number.isFinite(this.updateTimeoutMs) || this.updateTimeoutMs <= 0) {
-      throw new Error('updateTimeoutMs must be positive and finite');
-    }
     this.loop = new PeriodicUpdateLoop({
       checkIntervalMs: options.checkIntervalMs,
       firstCheckDelayMs: options.firstCheckDelayMs,
@@ -547,6 +545,7 @@ export class DaemonAutoUpdater {
       pendingVersion: this.pendingSwap ? normalizeVersion(this.pendingSwap.tag) : null,
       pendingSince: this.pendingSwap ? this.waitingSince : null,
       pendingBlockedBy: this.pendingSwap ? [...this.waitingFor] : [],
+      installing: this.installing ? { ...this.installing } : null,
       appliedVersion: this.appliedVersion,
       recoveryRequired: this.recoveryRequired,
       transactionRecovery: this.transactionRecovery ? {
@@ -632,14 +631,12 @@ export class DaemonAutoUpdater {
     // supported while asynchronous lookup cannot redirect resolve or commit I/O.
     const io = captureUpdateFileIo(this.options.io ?? realUpdateFileIo);
     const suiteConfiguration = this.options.suite ? retainSuiteUpdateConfiguration(this.options.suite.configManager) : undefined;
-    const deadline = performance.now() + this.updateTimeoutMs;
     const assertLifecycleCurrent = () => {
       signal.throwIfAborted();
       suiteConfiguration?.assertCurrent();
       if (signal !== this.failureReadAbort.signal || this.handoverCancelled || this.appliedVersion !== null || this.recoveryRequired) {
         throw new Error('update check no longer belongs to the current updater lifecycle');
       }
-      if (performance.now() >= deadline) throw new Error('update check deadline exceeded');
     };
     const installedTargets = resolveDaemonUpdateTargets(this.options.execPath, this.options.platform, this.options.arch);
     if (!installedTargets) return;
@@ -659,16 +656,11 @@ export class DaemonAutoUpdater {
     if (!installed || compareVersions(installed.version, this.options.currentVersion) !== 0) throw new Error('Running daemon does not own the complete installed native cohort');
     const assertInstallationCurrent = retainDaemonNativeFiles(installedTargets, io);
     const assertCurrent = () => { assertLifecycleCurrent(); assertInstallationCurrent(); };
-    const remainingBudget = () => {
-      assertCurrent();
-      return Math.max(Number.EPSILON, deadline - performance.now());
-    };
     const fetchImpl = this.options.fetchImpl ?? (fetch as unknown as UpdateFetchLike);
 
     if (!this.pendingSwap) {
-      const latestTag = await resolveLatestReleaseTag(fetchImpl, this.options.releasesLatestUrl, {
-        signal, timeoutMs: remainingBudget(),
-      });
+      assertCurrent();
+      const latestTag = await resolveLatestReleaseTag(fetchImpl, this.options.releasesLatestUrl, { signal });
       assertCurrent();
       const comparison = compareVersions(this.options.currentVersion, latestTag);
       if (comparison > 0 || comparison === 0 && (!suiteConfiguration || !installedSuiteNeedsRepair({ execPath: this.options.execPath,
@@ -736,6 +728,10 @@ export class DaemonAutoUpdater {
     const downloadBase = this.options.downloadBaseUrl
       ? this.options.downloadBaseUrl(tag)
       : defaultDownloadBaseUrl(this.options.releasesLatestUrl, tag);
+    // What `update.status` reports while the release downloads and installs.
+    const installing = { version: normalizeVersion(tag), since: this.now(), receivedBytes: 0, file: null as string | null };
+    this.installing = installing;
+    const onReceived = (file: string, bytes: number) => { installing.receivedBytes += bytes; installing.file = file; };
 
     const busyBeforeCommit = new Error('daemon became busy before update commit');
     let suiteResult: SuiteUpdateResult | undefined;
@@ -751,7 +747,7 @@ export class DaemonAutoUpdater {
     try {
       if (suiteConfiguration) {
         suiteResult = await applySuiteUpdate({ execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch,
-          version: tag, downloadBaseUrl: downloadBase, fetchImpl, io, signal, timeoutMs: remainingBudget(),
+          version: tag, downloadBaseUrl: downloadBase, fetchImpl, io, signal, onReceived,
           webuiDirectory: suiteConfiguration.webuiDirectory, ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}),
           assertCurrent: assertLifecycleCurrent, beforeCommit: admitIdle });
       } else await applyVerifiedUpdate({
@@ -761,7 +757,7 @@ export class DaemonAutoUpdater {
         io,
         platform: this.options.platform,
         signal,
-        timeoutMs: remainingBudget(),
+        onReceived,
         ...(this.options.platform === 'linux' ? { daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag,
           ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}) } } : { native: true, readerExecPath: this.options.execPath }),
         assertCurrent: assertLifecycleCurrent,
@@ -814,6 +810,8 @@ export class DaemonAutoUpdater {
         return;
       }
       throw error;
+    } finally {
+      this.installing = null;
     }
     this.pendingSwap = null;
     // Set the latch before any receipt, shutdown hook, or service action can
@@ -834,7 +832,7 @@ export class DaemonAutoUpdater {
     // shared-session work (control-plane/client-compatibility.ts) rather than
     // only being asked to restart.
     this.recordReceipt(
-      `updated from ${from} to ${to} at ${formatReceiptTime(now(), this.options.receiptTimeZone?.() ?? 'UTC')}`
+      `updated from ${from} to ${to} at ${formatReceiptTime(now(), this.options.receiptTimeZone?.())}`
       + (suiteResult ? `; installed suite: ${suiteResult.programs.join(', ')}, browser/WebUI directories: ${suiteResult.directoryPaths.join(', ')};` + (suiteResult.preservedPaths.length ? ` retained earlier backups: ${suiteResult.preservedPaths.join(', ')};` : '') : '')
       + ` on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted;`
       + ` once the new daemon answers, any client older than ${clientCompatibilityFloorFor(to)} stops taking shared-session work until it is restarted`,

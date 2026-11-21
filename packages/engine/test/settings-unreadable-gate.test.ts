@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
+import { readMerchantPolicy } from '../platform/src/platform/payments/payments-config.ts';
+import { classifyMerchant, windowForPurchase } from '../platform/src/platform/payments/merchant-recourse.ts';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -53,4 +55,21 @@ test('an unreadable gate value holds the gate at its strictest value; an unreada
     kept: 7,
     setAside: ['display.theme'],
   });
+});
+
+test('a stored shop exclusion list that names no shop makes a purchase at an established shop ask', async () => {
+  // The decision model's reading: target.com is an established shop with recourse.
+  const judge = { judge: async () => ({ qualifies: true, confident: true, recourse: 'an established retailer with a returns process' }) };
+  const windowAt = async (stored: unknown): Promise<string> => {
+    const config = open({ payments: { majorRetailersExcluded: stored } });
+    if (config instanceof Error) throw config;
+    const verdict = await classifyMerchant({ checkoutHost: 'www.target.com' }, judge, readMerchantPolicy(config));
+    return windowForPurchase({ aboveBudget: false, merchantIsMajor: verdict.isMajor });
+  };
+  expect({
+    text: await windowAt('bestbuy.com, amazon'),
+    list: await windowAt(['bestbuy.com', 'amazon']),
+    // Control: a list that reads lets the same purchase go on the silent window.
+    readable: await windowAt('bestbuy.com'),
+  }).toEqual({ text: 'approval', list: 'approval', readable: 'veto' });
 });

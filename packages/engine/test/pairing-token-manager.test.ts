@@ -23,6 +23,7 @@ import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/met
 import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
 import { readAgentHostPairing } from '../terminal-shell/src/agent-turn/connected-host-pairing-store.ts';
 import { isTrustedAncestorDirectory } from '../terminal-shell/src/host-pairing-store.ts';
+import { openAuthorityRecordFile } from '../platform/src/platform/cluster/authority-record-file.ts';
 
 const dirs: string[] = [];
 function tempFile(): string {
@@ -97,6 +98,36 @@ describe('PairingTokenManager', () => {
     mgr.revokeLegacyShared();
     expect(mgr.isLegacyRevoked()).toBe(true);
     expect(new PairingTokenManager(file).isLegacyRevoked()).toBe(true);
+  });
+});
+
+describe('a device on the authority record', () => {
+  test('revoked by the owner, it and what it minted stop signing in here and on a second machine reading the record, and are not listed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pairing-record-'));
+    dirs.push(dir);
+    const recordPath = join(dir, 'cluster', 'authority-record.json');
+    const record = openAuthorityRecordFile(recordPath, () => ({}));
+    const here = new PairingTokenManager(join(dir, 'here', 'pairing-tokens.json'), { authority: record });
+    // Another machine of the group: its own token file, the same record.
+    const machine = (name: string) => new PairingTokenManager(join(dir, name, 'pairing-tokens.json'), { authority: openAuthorityRecordFile(recordPath, () => ({})) });
+    const elsewhere = machine('elsewhere');
+    const phone = here.mint({ name: 'phone' });
+    const tablet = here.mint({ name: 'tablet', mintedBy: phone.id });
+    const desk = here.mint({ name: 'desk' });
+    for (const device of [phone, tablet, desk]) expect(here.authenticate(device.token)?.id).toBe(device.id);
+    // Each first use publishes the device to the record; a no-op write queued behind them resolves once they landed.
+    await record.write(() => ({ kind: 'none', value: null }));
+    const signsIn = (store: PairingTokenManager) => [phone, tablet, desk].map((device) => store.authenticate(device.token)?.id ?? null);
+    const listed = (store: PairingTokenManager) => store.list().map((entry) => entry.id).sort();
+    // The control: the other machine knows all three from the record alone.
+    expect(signsIn(elsewhere)).toEqual([phone.id, tablet.id, desk.id]);
+
+    expect(await here.revokeEverywhere(phone.id)).toEqual({ revoked: true, alsoRevoked: [tablet.id] });
+    const later = machine('later');
+    expect({ here: signsIn(here), elsewhere: signsIn(elsewhere), later: signsIn(later) }).toEqual({
+      here: [null, null, desk.id], elsewhere: [null, null, desk.id], later: [null, null, desk.id],
+    });
+    expect({ here: listed(here), elsewhere: listed(elsewhere) }).toEqual({ here: [desk.id], elsewhere: [desk.id] });
   });
 });
 

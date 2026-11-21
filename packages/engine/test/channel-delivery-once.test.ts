@@ -2,6 +2,8 @@
 // Red when: A repeated report after a restart sends the answer again, or an answer stored but not sent when the daemon stopped is never sent or is sent on every start.
 // Proves: One rate limit on the send loses the answer on the channel, a send cut off after it arrived is posted twice, or a retry repeats the parts of a long answer that already arrived.
 // Red when: channelSendKnowledge counts a 429 as a possibly-arrived send, or a reset after arrival as safe to repeat on ntfy, or deliverFinalExclusive resends delivered parts.
+// Proves: A GitHub issue or pull request the daemon took while restarting into an update is answered twice on GitHub after the restart.
+// Red when: The start-up recovery reads the owed answers after it has started the held events, so the answer it just started is owed twice and posted twice.
 /**
  * An agent's answer to a channel message reaches the channel once, also when
  * the daemon restarts after sending it and the surface that ran the agent
@@ -23,6 +25,11 @@
  * request with 429; a send cut off after it arrived is the server recording
  * the message and resetting the connection; the pipeline's wait before a
  * retry (the clock) resolves at once.
+ *
+ * The GitHub case: the real webhook adapter, work admission and operation log
+ * over its file, with a restart as a second log over the same file; GitHub's
+ * API is stood in at the wire (fetch), recording every request; the agent
+ * runtime starts an agent and reports its finished answer.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,6 +55,13 @@ import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.ts';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.ts';
 import { renderBuiltinChannelEvent } from '../platform/src/platform/channels/builtin/rendering.ts';
+import { createHmac } from 'node:crypto';
+import { handleGitHubAutomationWebhook, recoverGitHubReplies, resolveGitHubToken, type GitHubReplyOperation } from '../platform/src/platform/adapters/github/index.ts';
+import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
+import { DaemonWorkAdmission } from '../platform/src/platform/daemon/work-admission.ts';
+import { openOperationLog } from '../platform/src/platform/state/operation-log.ts';
+import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
+import { surfaceDaemon } from './_helpers/surface-daemon.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -295,4 +309,62 @@ test('an answer refused once by a rate limit still arrives once, one cut off aft
   // Two messages arrived, each part once, in order.
   const which = (body: string) => (body.includes('AAAA') ? (body.includes('BBBB') ? 'both' : 'first part') : body.includes('BBBB') ? 'second part' : 'other');
   expect(parts.map(which)).toEqual(['first part', 'second part']);
+});
+
+test('an issue the daemon took while restarting into an update is answered on GitHub once after the restart', async () => {
+  // The owner's home: GitHub token and webhook secret stored as the owner stores them.
+  const home = await surfaceDaemon({
+    services: { github: { name: 'github', authType: 'bearer', tokenKey: 'GITHUB_TOKEN', signingSecretKey: 'GITHUB_WEBHOOK_SECRET' } },
+    secrets: { GITHUB_TOKEN: 'owner-github-token', GITHUB_WEBHOOK_SECRET: 'gh-secret' },
+  });
+  cleanups.push(async () => { await home.stop(); rmSync(home.root, { recursive: true, force: true }); });
+  const logPath = join(home.root, 'operations.jsonl');
+  // GitHub's API at the wire: every request the daemon makes to it, answered as GitHub answers a new comment.
+  const github: Array<{ method: string; url: string; body: string }> = [];
+  const waiters: Array<{ count: number; resolve: () => void }> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    github.push({ method: init?.method ?? 'GET', url: String(url), body: typeof init?.body === 'string' ? init.body : '' });
+    for (const waiter of waiters.filter((entry) => github.length >= entry.count)) waiter.resolve();
+    return Response.json({ id: github.length }, { status: 201 });
+  }) as typeof fetch;
+  cleanups.push(() => { globalThis.fetch = realFetch; surfaceInboundDedup.clear(); });
+  const requestsReach = (count: number) => new Promise<void>((resolve) => { if (github.length >= count) resolve(); else waiters.push({ count, resolve }); });
+
+  // Before the restart: admission is closed for the update, so the issue is kept as owed work.
+  const admission = new DaemonWorkAdmission();
+  admission.close('restarting into an update');
+  const before = openOperationLog<GitHubReplyOperation>(logPath);
+  const body = JSON.stringify({
+    action: 'opened', repository: { full_name: 'owner/project' },
+    issue: { number: 7, title: 'The parser drops the last line', body: 'Repro attached.', author_association: 'OWNER', labels: [] },
+  });
+  const taken = await handleGitHubAutomationWebhook(new Request('http://localhost/webhook/github', {
+    method: 'POST', body,
+    headers: { 'content-type': 'application/json', 'x-github-event': 'issues', 'x-github-delivery': 'delivery-7', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'gh-secret').update(body).digest('hex')}` },
+  }), {
+    serviceRegistry: home.serviceRegistry, githubWebhookSecret: null, operations: before,
+    trySpawnAgent: () => admission.refusalResponse()!,
+    awaitAgent: async () => null,
+  } as Parameters<typeof handleGitHubAutomationWebhook>[1]);
+  expect(taken.status).toBe(202);
+  await before.flush();
+  before.close();
+
+  // After the restart: the agent runtime (where the model begins) starts the agent and it finishes with its answer.
+  const spawned: string[] = [];
+  let answersAwaited = 0;
+  const after = openOperationLog<GitHubReplyOperation>(logPath);
+  await recoverGitHubReplies({
+    operations: after,
+    resolveToken: () => resolveGitHubToken(home.serviceRegistry),
+    trySpawnAgent: () => { spawned.push(`agent-${spawned.length + 1}`); return { id: spawned.at(-1)! } as AgentRecord; },
+    awaitAgent: async (agentId) => { answersAwaited += 1; return { id: agentId, status: 'completed', fullOutput: 'The loop stops one line early.' } as AgentRecord; },
+  });
+  // Every answer the recovery set out to post has reached GitHub before it is counted.
+  await requestsReach(answersAwaited);
+  expect(spawned).toEqual(['agent-1']);
+  expect(github.map((request) => ({ method: request.method, url: request.url, answer: (JSON.parse(request.body) as { body: string }).body.startsWith('The loop stops one line early.') })))
+    .toEqual([{ method: 'POST', url: 'https://api.github.com/repos/owner/project/issues/7/comments', answer: true }]);
+  // The log stays open for the process: a settle still on its way after the post writes to its file, never to a closed one.
 });

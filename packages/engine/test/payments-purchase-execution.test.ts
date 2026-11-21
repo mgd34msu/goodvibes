@@ -493,13 +493,16 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(outcome.kind).toBe('refused');
     expect(alpha.submissions.length).toBe(0);
 
-    // A shop the owner said always to ask about gets the approval window however established the reading calls it.
-    const excluded = await buildHarness({ merchant: alpha, answer: null });
-    const unanswered = await runCheckout(excluded.request, await readFixtureCheckout(alpha), excluded.controls,
-      { ...excluded.deps, merchantPolicy: { excluded: 'bestbuy.com' } });
-    expect(excluded.notices[0]?.kind).toBe('approval');
-    expect(unanswered.kind).toBe('refused');
-    expect(alpha.submissions.length).toBe(0);
+    // A shop the owner said always to ask about gets the approval window however established the reading calls it,
+    // in whatever form he wrote it.
+    for (const written of ['bestbuy.com', 'www.bestbuy.com', 'https://www.bestbuy.com/']) {
+      const excluded = await buildHarness({ merchant: alpha, answer: null });
+      const unanswered = await runCheckout(excluded.request, await readFixtureCheckout(alpha), excluded.controls,
+        { ...excluded.deps, merchantPolicy: { excluded: written } });
+      expect(excluded.notices[0]?.kind, written).toBe('approval');
+      expect(unanswered.kind, written).toBe('refused');
+      expect(alpha.submissions.length, written).toBe(0);
+    }
   });
 
   test('a 3-D Secure challenge pauses with nothing submitted and the money still held', async () => {
@@ -567,13 +570,13 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
 
 describe('the card goes only to the merchant and cart the purchase was decided for', () => {
   test('a fill into a domain the purchase was not decided against is refused', async () => {
-    const fillOn = async (pageUrl: string): Promise<{ driver: FixtureCheckoutDriver; thrown: unknown }> => {
+    const fillOn = async (pageUrl: string, merchantDomain = 'bestbuy.com'): Promise<{ driver: FixtureCheckoutDriver; thrown: unknown }> => {
       const registry = new CheckoutRegistry(new MemoryCheckoutJournal());
       const driver = new FixtureCheckoutDriver({ merchant: alpha, pageUrl });
       const { cards, cardId } = await sentinelCards();
       await registry.open({
         purchaseId: 'p-1', sessionId: 'session-1', pageId: 'page-1',
-        merchantDomain: 'bestbuy.com', cardId, item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
+        merchantDomain, cardId, item: unsafeOwnerSuppliedTextForTests('thing'), currency: currency('USD'),
         phase: 'arming-payment', startedAtMs: 0, updatedAtMs: 0, draw: null, reservationId: null,
         shippingTierRequested: 'normal', shippingTierUsed: null, stepDown: null, totalMinorUnits: null,
       });
@@ -597,10 +600,19 @@ describe('the card goes only to the merchant and cart the purchase was decided f
       expectNoCardMaterial('the wrong-domain refusal', thrown instanceof Error ? thrown.message : '');
     }
 
-    // Control: the merchant's own payment subdomain receives the fill.
-    const paid = await fillOn('https://pay.bestbuy.com/checkout');
-    expect(paid.thrown).toBeNull();
-    expect(paid.driver.fillLog).toHaveLength(1);
+    // Another tenant of a shared host: a different owner under the same hosting domain.
+    for (const [merchantDomain, pageUrl] of [['alice.github.io', 'https://bob.github.io/checkout'], ['shop-a.myshopify.com', 'https://shop-b.myshopify.com/checkout']] as const) {
+      const { driver, thrown } = await fillOn(pageUrl, merchantDomain);
+      expect(thrown, pageUrl).toBeInstanceOf(FillCardRefusal);
+      expect(driver.fillLog.length, pageUrl).toBe(0);
+    }
+
+    // Control: the merchant's own payment subdomain, and a tenant's own page, receive the fill.
+    for (const [merchantDomain, pageUrl] of [['bestbuy.com', 'https://pay.bestbuy.com/checkout'], ['shop-a.myshopify.com', 'https://shop-a.myshopify.com/checkout']] as const) {
+      const paid = await fillOn(pageUrl, merchantDomain);
+      expect(paid.thrown, pageUrl).toBeNull();
+      expect(paid.driver.fillLog, pageUrl).toHaveLength(1);
+    }
   });
 
   test('a merchant total that disagrees with its own line items stops the purchase', async () => {

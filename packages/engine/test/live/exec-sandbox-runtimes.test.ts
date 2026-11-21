@@ -54,24 +54,30 @@ test('real contained Bun execution', () => {
   } finally { await manager.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a cache folder shown writable through the home mask does not show the browser profile or registry token inside it', async () => {
+test('a folder shown through the home mask does not show the browser profile, registry token or git credential store inside it', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sandbox-home-cache-'));
   const workspace = join(root, 'project'), home = join(root, 'private-home');
   const cache = join(home, '.cache'), cargo = join(cache, 'cargo');
   const cookies = join(cache, 'chromium', 'Default', 'Cookies'), token = join(cargo, 'credentials.toml'), built = join(cache, 'go-build', 'object');
-  for (const dir of [workspace, join(cache, 'chromium', 'Default'), join(cache, 'go-build'), join(cargo, 'registry')]) mkdirSync(dir, { recursive: true });
+  // Git's configuration folder is shown read-only; the credential store git keeps beside it is not.
+  const gitConfig = join(home, '.config', 'git'), gitCredentials = join(gitConfig, 'credentials'), gitSettings = join(gitConfig, 'config');
+  for (const dir of [workspace, join(cache, 'chromium', 'Default'), join(cache, 'go-build'), join(cargo, 'registry'), gitConfig]) mkdirSync(dir, { recursive: true });
   writeFileSync(cookies, 'BROWSER_COOKIE_SENTINEL');
   writeFileSync(token, 'REGISTRY_TOKEN_SENTINEL');
-  // The cache folders the view reads come from these variables; pinned to this home so the case does not depend on the caller's.
-  const saved = { XDG_CACHE_HOME: process.env.XDG_CACHE_HOME, CARGO_HOME: process.env.CARGO_HOME };
+  writeFileSync(gitCredentials, 'GIT_CREDENTIAL_SENTINEL');
+  writeFileSync(gitSettings, 'GIT_SETTINGS_SHOWN');
+  // The folders the view reads come from these variables; pinned to this home so the case does not depend on the caller's.
+  const saved = { XDG_CACHE_HOME: process.env.XDG_CACHE_HOME, CARGO_HOME: process.env.CARGO_HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
   process.env.XDG_CACHE_HOME = cache;
   process.env.CARGO_HOME = cargo;
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
   writeFileSync(join(workspace, 'home.test.ts'), `import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 const read = (path: string): string => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
 test('caches are writable, the secrets inside them are not there', () => {
   writeFileSync(${JSON.stringify(built)}, 'built');
-  expect({ cookies: existsSync(${JSON.stringify(cookies)}), token: read(${JSON.stringify(token)}).includes('SENTINEL') }).toEqual({ cookies: false, token: false });
+  expect({ cookies: existsSync(${JSON.stringify(cookies)}), token: read(${JSON.stringify(token)}).includes('SENTINEL'), gitCredentials: read(${JSON.stringify(gitCredentials)}).includes('SENTINEL'), gitSettings: read(${JSON.stringify(gitSettings)}) })
+    .toEqual({ cookies: false, token: false, gitCredentials: false, gitSettings: 'GIT_SETTINGS_SHOWN' });
 });\n`);
   const manager = new ProcessManager();
   const tool = createExecTool(manager, { defaultWorkingDirectory: workspace,

@@ -2,6 +2,8 @@
 // Red when: A second answer overwrites the first or the answer is not on disk when `answer` returns, approve and deny map wrongly to the broker or a stale revision is applied, another process's answer never reaches the waiting call, or a reopen trims an answered item or a decided approval.
 // Proves: An owner's answer to an agent is counted delivered before the model request carrying it was accepted, or vanishes when the process that took it dies.
 // Red when: Taking an answer marks it delivered, a second taker gets it while the first lives, or a dead taker's answer is never handed to the next one.
+// Proves: A question one session or agent asks the owner under a key another asker left open is handed that other question, so it never reaches the owner and the answer goes to the other asker.
+// Red when: The question store's de-duplication of an open key stops comparing the asking session and agent, so a second asker's post returns the first asker's open question.
 /**
  * The owner inbox: the first answer wins and survives a restart, an approval
  * answered there reaches the waiting call once, an answer written by another
@@ -17,6 +19,8 @@ import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-
 import { createOwnerInbox, listEveryOwnerItem, OWNER_ANSWER_AGENT_METADATA, type OwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
 import { sharedQuestionStore } from '../platform/src/platform/control-plane/question-store.js';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
+import { askingQuestions, type QuestionAsker } from '../platform/src/platform/agents/agent-owner-questions.js';
+import { createQueryTool } from '../platform/src/platform/tools/query/index.js';
 
 const roots: string[] = [];
 const inboxes: OwnerInbox[] = [];
@@ -139,6 +143,35 @@ test('the first answer wins, a later one is refused, and the answer and who gave
   expect(item?.answeredBy).toEqual({ actor: 'owner', surface: 'tui' });
   expect(reopened.listNow()).toEqual([]);
   expect(reopened.listNow({ status: 'closed' }).map((entry) => entry.id)).toEqual([posted.item.id]);
+});
+
+test('two sessions or two agents asking under one key each reach the owner with their own question; the same asker asking again gets its own back', async () => {
+  const { open } = fixture();
+  const inbox = open();
+  // The query tool as the daemon and a hosted session compose it: the asker is named on every post.
+  const ask = async (asker: QuestionAsker) => {
+    const tool = createQueryTool({ inbox: askingQuestions(inbox, () => asker), resolveSessionId: () => asker.session });
+    const result = await tool.execute({ mode: 'ask', question: 'May I restart the database tonight?', options: ['yes', 'no'], key: 'db-restart' });
+    expect(result.success).toBe(true);
+    return (JSON.parse(String(result.output)) as { questionId: string }).questionId;
+  };
+  const sessionA = await ask({ session: 'session-a', host: 'hosted' });
+  const sessionB = await ask({ session: 'session-b', host: 'hosted' });
+  const agentOne = await ask({ session: 'session-a', agent: 'agent-1', host: 'daemon' });
+  const agentTwo = await ask({ session: 'session-a', agent: 'agent-2', host: 'daemon' });
+  // The control: a repeat by the same asker asks the owner nothing new.
+  const sessionAAgain = await ask({ session: 'session-a', host: 'hosted' });
+  const agentOneAgain = await ask({ session: 'session-a', agent: 'agent-1', host: 'daemon' });
+
+  expect(new Set([sessionA, sessionB, agentOne, agentTwo]).size).toBe(4);
+  expect({ sessionAAgain, agentOneAgain }).toEqual({ sessionAAgain: sessionA, agentOneAgain: agentOne });
+  const asked = inbox.listNow({ kinds: ['question'], status: 'open' });
+  expect(asked.map((item) => [item.id, item.sessionId, item.metadata?.[OWNER_ANSWER_AGENT_METADATA]]).sort()).toEqual([
+    [sessionA, 'session-a', undefined],
+    [sessionB, 'session-b', undefined],
+    [agentOne, 'session-a', 'agent-1'],
+    [agentTwo, 'session-a', 'agent-2'],
+  ].sort());
 });
 
 test('an approval answered through the inbox reaches the waiting call once', async () => {

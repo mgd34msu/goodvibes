@@ -2,6 +2,8 @@
 // Red when: Step-up is decided by HTTP verb, so a write bound to GET or sent through generic invoke runs without an assertion, or the verifier is not given this call's method, path, rendezvous and principal.
 // Proves: A step-up assertion is accepted twice, after it expired, from another principal, for another call or with a wrong signature.
 // Red when: StepUpService stops marking a challenge consumed or stops binding it to principal, path and time.
+// Proves: A relay code the owner revoked comes back after a restart, or cannot be revoked again, when its removal could not be saved.
+// Red when: Revoking a relay code removes it from memory before its authority-record entry is revoked, or forgets a removal the file did not save, so the file reloads it live or a repeat revoke answers unknown.
 /**
  * A call that arrives over the relay needs the owner's WebAuthn step-up by what
  * it does, not by its HTTP verb: the daemon's own method catalog decides
@@ -16,7 +18,7 @@
  * single-use rule stands between a replay and a second run).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toBase64Url } from '@goodvibes/engine/transport-core/relay';
@@ -26,6 +28,8 @@ import { relayRequestFactsFrom, wrapDispatchWithStepUp } from '../platform/src/p
 import { encodeAssertionHeader, StepUpService, type MintedStepUpChallenge } from '../platform/src/platform/relay/step-up-service.js';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { RelayCodeStore } from '../platform/src/platform/relay/relay-codes.ts';
+import { openAuthorityRecordFile } from '../platform/src/platform/cluster/authority-record-file.ts';
 
 const relayed = (path: string, method: string, assertion?: string): Request =>
   new Request(`http://daemon.local${path}`, { method, headers: { [RELAY_VIA_HEADER]: '1', ...(assertion ? { [STEP_UP_ASSERTION_HEADER]: assertion } : {}) } });
@@ -138,5 +142,37 @@ describe('the step-up verifier', () => {
       wrongKey: { ok: false, reason: 'signature-invalid' },
       expired: { ok: false, reason: 'challenge-expired' },
     });
+  });
+});
+
+describe('a relay code the owner revoked', () => {
+  test('stays refused after a restart when its removal could not be saved, and revoking it again finishes the removal', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'gv-relay-revoke-'));
+    roots.push(home);
+    const recordPath = join(home, 'cluster', 'authority-record.json');
+    const codesDir = join(home, 'relay');
+    const codesPath = join(codesDir, 'relay-codes.json');
+    const open = () => new RelayCodeStore(codesPath, { authority: openAuthorityRecordFile(recordPath, () => ({})) });
+    const store = open();
+    const lost = await store.mint('lost phone');
+    expect(store.verify(lost.code)).toBe(lost.id);
+
+    // The relay codes folder cannot be written (a full or read-only disk), so the revoke cannot save the file.
+    chmodSync(codesDir, 0o500);
+    let failed: string | undefined;
+    try {
+      await store.revoke(lost.id);
+    } catch (error) {
+      failed = (error as { code?: string }).code;
+    } finally {
+      chmodSync(codesDir, 0o700);
+    }
+    // The file still lists the code; a restart reads it back and must still refuse it.
+    expect({ failed, inFile: readFileSync(codesPath, 'utf8').includes(lost.id), here: store.verify(lost.code), afterRestart: open().verify(lost.code) })
+      .toEqual({ failed: 'RELAY_CODE_REVOKE_NOT_SAVED', inFile: true, here: null, afterRestart: null });
+
+    // The owner revokes it again once the disk is writable: the removal is saved.
+    expect(await store.revoke(lost.id)).toBe(true);
+    expect(readFileSync(codesPath, 'utf8').includes(lost.id)).toBe(false);
   });
 });

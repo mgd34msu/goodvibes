@@ -86,3 +86,19 @@ test('when screening cannot run, the conversation keeps what was screened and st
   expect(result.items.map(item => item.bodyPreview)).toEqual(['first']);
   expect(result.conversationAdvance?.D1).toBe(NOW - 2_000 - 1);
 });
+
+test('a poll whose messages were never stored gives the same messages again; once stored, the next one follows', async () => {
+  const fake = slack(['D1'], () => ({ ok: true, body: { ok: true, has_more: false, messages: [
+    { ts: ts(NOW - 2_000), user: 'U-FRIEND', text: 'second' },
+    { ts: ts(NOW - 3_000), user: 'U-FRIEND', text: 'first' },
+  ] } }));
+  const adapter = createSlackInboxAdapter(context('xoxb-fixture'), { http: fake.http, mapItem: async input => mapped(input.text), now: () => NOW });
+  const stored = new Map([['D1', NOW - 10_000]]);
+  const taken = await adapter.poll({ limit: 1, conversations: stored });
+  expect(taken.items.map(item => item.bodyPreview)).toEqual(['first']);
+  // The poller's commit failed: the stored cursor did not move, so the next tick must hand 'first' over again.
+  const again = await adapter.poll({ limit: 1, conversations: stored });
+  expect(again.items.map(item => item.bodyPreview)).toEqual(['first']);
+  const committed = await adapter.poll({ limit: 1, conversations: new Map([['D1', again.conversationAdvance!.D1!]]) });
+  expect(committed.items.map(item => item.bodyPreview)).toEqual(['second']);
+});

@@ -1,5 +1,7 @@
 // Proves: A paired device or member that does not own a hosted session reads or rewrites the owner's queued messages, or cancels his turn or a running tool call.
 // Red when: A live-turn verb (sessions.queuedMessages.list, edit, delete, sessions.turns.cancel, sessions.toolCalls.cancel) acts on a hosted session without admitting the caller against that session's owners.
+// Proves: A paired device or member that does not own a hosted session rewinds its conversation, cutting the owner's messages, or undoes his rewind.
+// Red when: rewind.plan or rewind.apply with scope conversation or both, or rewind.undo, reaches the conversation without admitting the caller against that session's owners.
 /**
  * The catalog gate admits these verbs for any credential holding write:sessions
  * or read:transcripts, whatever session it names; the session's owners are the
@@ -22,6 +24,13 @@ import {
   type SessionLiveTurnControls,
 } from '../platform/src/platform/control-plane/routes/session-runtime.ts';
 import type { GatewayMethodHandler } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
+import {
+  createRewindApplyHandler,
+  createRewindPlanHandler,
+  createRewindUndoHandler,
+  type RewindConversationUndoPort,
+} from '../platform/src/platform/control-plane/routes/rewind.ts';
+import { UnifiedRewindService, type RewindConversationPort } from '../platform/src/platform/rewind/index.ts';
 
 const SESSION = 'hosted-alice';
 const OWNER_TEXT = 'Pay the March invoice to the account ending 4410';
@@ -83,4 +92,58 @@ test('a device that does not own a hosted session cannot read, rewrite or delete
   expect(await call('pairing:alice-phone', 'cancelToolCall')).toBe('done');
   expect(await call('pairing:alice-phone', 'delete')).toBe('done');
   expect(state).toEqual({ queue: [], cancelledTurns: ['t1'], cancelledCalls: ['c1'] });
+});
+
+/** The surface hosting the session's conversation: what it holds, what was cut from it and what was put back. */
+function hostedConversation() {
+  const state = { messages: 5, cuts: 0, restored: [] as string[] };
+  const port: RewindConversationPort & RewindConversationUndoPort = {
+    preview: async () => ({ messagesToDrop: state.messages, messagesRemaining: 0, revision: `r${state.messages}` }),
+    rewind: async () => { state.cuts += 1; state.messages = 0; return { droppedMessages: 5, undoSnapshotId: 'undo-1' }; },
+    restoreBefore: (id) => { state.restored.push(id); state.messages = 5; return true; },
+    messagesSinceRewind: (id) => (id === 'undo-1' && state.cuts > 0 ? 0 : null),
+    snapshotSession: () => SESSION,
+  };
+  return { state, port };
+}
+
+test('a device that does not own a hosted session cannot plan, apply or undo a rewind of its conversation; its owner can', async () => {
+  const { state, port } = hostedConversation();
+  const holder = new SessionLiveTurnControlsHolder();
+  holder.setSessionOwners((sessionId) => (sessionId === SESSION ? ['pairing:alice-phone'] : null));
+  const service = new UnifiedRewindService({ conversation: port });
+  const owners = (sessionId: string) => holder.ownersOf(sessionId);
+  const plan = createRewindPlanHandler(service, owners);
+  const apply = createRewindApplyHandler(service, owners);
+  const undo = createRewindUndoHandler(service, { local: port }, owners);
+  const call = async (principalId: string, handler: GatewayMethodHandler, body: Record<string, unknown>): Promise<unknown> => {
+    try {
+      return await handler({ body, context: { principalId, actor: device(principalId) } });
+    } catch (error) {
+      return (error as { code?: string }).code ?? 'threw';
+    }
+  };
+  const { token } = await call('pairing:alice-phone', plan, { sessionId: SESSION, scope: 'conversation' }) as { token: string };
+  const { token: bothToken } = await call('pairing:alice-phone', plan, { sessionId: SESSION, scope: 'both' }) as { token: string };
+
+  // Holding write:sessions and the owner's own confirm token, another device is still refused at each step.
+  const stranger = {
+    planConversation: await call('pairing:other-phone', plan, { sessionId: SESSION, scope: 'conversation' }),
+    planBoth: await call('pairing:other-phone', plan, { sessionId: SESSION, scope: 'both' }),
+    applyConversation: await call('pairing:other-phone', apply, { sessionId: SESSION, scope: 'conversation', confirmToken: token }),
+    applyBoth: await call('pairing:other-phone', apply, { sessionId: SESSION, scope: 'both', confirmToken: bothToken }),
+  };
+  expect({ stranger, state: { ...state, restored: [...state.restored] } }).toEqual({
+    stranger: { planConversation: 'NOT_YOURS', planBoth: 'NOT_YOURS', applyConversation: 'NOT_YOURS', applyBoth: 'NOT_YOURS' },
+    state: { messages: 5, cuts: 0, restored: [] },
+  });
+
+  // The control: the owner applies the rewind he planned.
+  const applied = await call('pairing:alice-phone', apply, { sessionId: SESSION, scope: 'conversation', confirmToken: token }) as { receipt: { conversation: { rewound: boolean } } };
+  expect(applied.receipt.conversation.rewound).toBe(true);
+  // Another device cannot undo it, bringing back what the owner cut; the owner can.
+  expect(await call('pairing:other-phone', undo, { sessionId: SESSION, undoSnapshotId: 'undo-1' })).toBe('NOT_YOURS');
+  expect(state).toEqual({ messages: 0, cuts: 1, restored: [] });
+  expect((await call('pairing:alice-phone', undo, { sessionId: SESSION, undoSnapshotId: 'undo-1' }) as { undone: boolean }).undone).toBe(true);
+  expect(state).toEqual({ messages: 5, cuts: 1, restored: ['undo-1'] });
 });

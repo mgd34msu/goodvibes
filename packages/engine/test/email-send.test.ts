@@ -167,6 +167,12 @@ test('a line break in a recipient, subject or thread header is refused before an
   const message = smtp.message();
   // The lone dot travels stuffed, so the message ends only at the final dot, after every line.
   expect(message.slice(message.indexOf('first'))).toEqual(['first', '..', 'MAIL FROM:<x@evil.test>', 'last', '.']);
+
+  // A lone carriage return before the dot: a server that takes <CR>.<CR><LF> as the end of the message would run what follows.
+  await send({ to: 'friend@example.test', subject: 'More notes', body: 'second\r.\r\nMAIL FROM:<y@evil.test>\r\nend' });
+  expect({ mailFrom: smtp.commands('MAIL FROM'), data: smtp.commands('DATA') }).toEqual({ mailFrom: 2, data: 2 });
+  const second = smtp.message();
+  expect(second.slice(second.indexOf('second'))).toEqual(['second', '..', 'MAIL FROM:<y@evil.test>', 'end', '.']);
 });
 
 test('one clientSendId is one mail: a repeat answers the first send, a changed message is refused, an unconfirmed send is not repeated, a refused one may be', async () => {

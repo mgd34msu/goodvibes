@@ -10,6 +10,8 @@
 // Red when: The ingress decision stops reading a delegated chat as delegated review for a sender other than the owner, or the first-sender seeding stops skipping a delegated chat: a claim is posted or the stranger becomes owner.
 // Proves: A post in a Telegram channel the bot was added to, which carries no person as sender, is taken for the owner and starts an owner's turn.
 // Red when: The Telegram adapter stops taking the posting channel (sender_chat) as the sender, so the post reaches the policy with no sender and runs with the owner's authority.
+// Proves: An owner who turned direct messages off on Slack, Discord, Google Chat, Matrix or Teams still has a direct message to the bot admitted.
+// Red when: An adapter reports a one-to-one conversation (or a thread inside one) to the policy as a channel or a thread of a channel, so dmPolicy deny never applies to it.
 /**
  * Who reaches the assistant over a chat channel, and who may answer for the
  * owner. On a surface with no owner the first unknown sender is held as a
@@ -43,6 +45,11 @@ import { DelegatedTelegramIntake } from '../platform/src/platform/daemon/delegat
 import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.ts';
 import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 import { processTelegramUpdate } from '../platform/src/platform/adapters/telegram/index.ts';
+import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.ts';
+import { handleDiscordGatewayDispatchPayload } from '../platform/src/platform/adapters/discord/index.ts';
+import { handleGoogleChatSurfaceWebhook } from '../platform/src/platform/adapters/google-chat/index.ts';
+import { handleMatrixSurfaceWebhook } from '../platform/src/platform/adapters/matrix/index.ts';
+import { handleMSTeamsSurfaceWebhook } from '../platform/src/platform/adapters/msteams/index.ts';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { currentGuestChannel } from '../platform/src/platform/security/turn-boundary.ts';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/record.ts';
@@ -338,6 +345,85 @@ test('a post in a Telegram channel, which names no person, is held as that chann
     retirePolicy();
     await daemon.stop();
     inbox.dispose();
+    surfaceInboundDedup.clear();
+  }
+});
+
+test('with direct messages turned off, the owner\'s direct message is refused on Slack, Discord, Google Chat, Matrix and Teams; the owner\'s channel message is still taken', async () => {
+  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const off = { dmPolicy: 'deny' as const, requireMention: false };
+  const daemon = await surfaceDaemon({
+    settings: { 'surfaces.googleChat.verificationToken': 'gchat-token', 'surfaces.matrix.webhookSecret': 'matrix-secret', 'surfaces.msteams.webhookSecret': 'teams-secret' },
+    policies: {
+      slack: { ...off, allowlistUserIds: ['U-OWNER'] },
+      discord: { ...off, allowlistUserIds: ['D-OWNER'] },
+      'google-chat': { ...off, allowlistUserIds: ['users/owner'] },
+      matrix: { ...off, allowlistUserIds: ['@owner:example.test'] },
+      msteams: { ...off, allowlistUserIds: ['teams-owner'] },
+    },
+  });
+  scratchDirs.push(daemon.root);
+  const context = daemon.adapterContext();
+  const post = (url: string, headers: Record<string, string>, body: unknown) =>
+    new Request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  const slack = (ts: string, event: Record<string, unknown>) => handleSlackSurfacePayload({
+    type: 'event_callback', team_id: 'T1', event_id: `Ev${ts}`, event: { type: 'message', user: 'U-OWNER', text: 'hello', ts, ...event },
+  }, context);
+  const discord = (id: string, guild: Record<string, unknown>) => handleDiscordGatewayDispatchPayload({
+    t: 'MESSAGE_CREATE', d: { id, channel_id: `ch-${id}`, author: { id: 'D-OWNER', username: 'owner' }, content: 'hello', ...guild },
+  }, context);
+  const gchat = (id: string, space: Record<string, unknown>) => handleGoogleChatSurfaceWebhook(post('http://localhost/webhook/google-chat', {}, {
+    type: 'MESSAGE', token: 'gchat-token', message: { name: `spaces/s/messages/${id}`, text: 'hello', sender: { name: 'users/owner' } }, space, user: { name: 'users/owner' },
+  }), context);
+  const matrix = (id: string, room: string, direct: Record<string, unknown>) => handleMatrixSurfaceWebhook(post('http://localhost/webhook/matrix', { 'x-goodvibes-matrix-token': 'matrix-secret' }, {
+    ...direct, event: { room_id: room, sender: '@owner:example.test', event_id: id, content: { body: 'hello', msgtype: 'm.text' } },
+  }), context);
+  const teams = (id: string, conversation: Record<string, unknown>, reply: Record<string, unknown> = {}) => handleMSTeamsSurfaceWebhook(post('http://localhost/webhook/msteams', { 'x-goodvibes-msteams-token': 'teams-secret' }, {
+    type: 'message', id, text: 'hello', conversation, from: { id: 'teams-owner' }, serviceUrl: 'https://smba.example.test/', ...reply,
+  }), context);
+  // Each adapter's own payload for a one-to-one conversation with the bot, and for a shared conversation (the control).
+  const rows: Array<[string, () => Promise<Response>]> = [
+    ['slack direct', () => slack('1.0001', { channel: 'D-OWNER', channel_type: 'im' })],
+    ['slack thread in a direct message', () => slack('1.0002', { channel: 'D-OWNER', channel_type: 'im', thread_ts: '1.0001' })],
+    ['slack channel', () => slack('1.0003', { channel: 'C-SHARED', channel_type: 'channel' })],
+    ['discord direct', () => discord('m-1', {})],
+    ['discord channel', () => discord('m-2', { guild_id: 'G1' })],
+    ['google-chat direct', () => gchat('m-1', { name: 'spaces/dm', type: 'DM' })],
+    ['google-chat channel', () => gchat('m-2', { name: 'spaces/room', type: 'ROOM' })],
+    ['matrix direct', () => matrix('$e1', '!dm:example.test', { is_direct: true })],
+    ['matrix channel', () => matrix('$e2', '!room:example.test', {})],
+    ['msteams direct', () => teams('a-1', { id: 'conv-dm', conversationType: 'personal' })],
+    ['msteams reply in a direct message', () => teams('a-2', { id: 'conv-dm', conversationType: 'personal' }, { replyToId: 'a-1' })],
+    ['msteams channel', () => teams('a-3', { id: 'conv-team', conversationType: 'channel' })],
+  ];
+  try {
+    const seen: Array<{ row: string; allowed: boolean; reason: string }> = [];
+    for (const [row, send] of rows) {
+      const before = daemon.channelPolicy.listAudit(1_000).length;
+      await send();
+      const audit = daemon.channelPolicy.listAudit(1_000);
+      expect(audit.length).toBe(before + 1);
+      seen.push({ row, allowed: audit[0]!.allowed, reason: audit[0]!.reason });
+    }
+    const refused = { allowed: false, reason: 'direct-messages-disabled' };
+    const taken = { allowed: true, reason: 'allowed' };
+    expect(seen).toEqual([
+      { row: 'slack direct', ...refused },
+      { row: 'slack thread in a direct message', ...refused },
+      { row: 'slack channel', ...taken },
+      { row: 'discord direct', ...refused },
+      { row: 'discord channel', ...taken },
+      { row: 'google-chat direct', ...refused },
+      { row: 'google-chat channel', ...taken },
+      { row: 'matrix direct', ...refused },
+      { row: 'matrix channel', ...taken },
+      { row: 'msteams direct', ...refused },
+      { row: 'msteams reply in a direct message', ...refused },
+      { row: 'msteams channel', ...taken },
+    ]);
+  } finally {
+    retirePolicy();
+    await daemon.stop();
     surfaceInboundDedup.clear();
   }
 });

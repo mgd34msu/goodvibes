@@ -23,7 +23,7 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native
 import { isViewSearchBackspace, isViewSearchCancel, isViewSearchCommit, isViewSearchPrintable } from './search-focus.ts';
 import { appendSteerText } from './fleet-session-tabs.ts';
 import { isObservedExternalNode, observedKindLabel, type ObservedNode } from './fleet-observed-render.ts';
-import { formatAgentCost } from './fleet-format.ts';
+import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { rootContractFromNode } from './fleet-contract-targets.ts';
 import { fleetNodeAttention } from './fleet-read-model.ts';
 import { contractGroupNodeId, contractUnitNodeId } from '@goodvibes/engine/platform/platform/runtime/fleet';
@@ -588,7 +588,7 @@ export class FleetActs {
       title: group.sourceTitle,
       candidates: held.map((cand, index) => {
         const files = cand.diff ? `${cand.diff.files.length} file${cand.diff.files.length === 1 ? '' : 's'}` : 'no diff';
-        const cost = cand.usage.costUsd !== null && cand.usage.costState !== 'unpriced' ? formatAgentCost(cand.usage.costUsd) : 'unpriced';
+        const cost = cand.usage.costUsd !== null && cand.usage.costState !== 'unpriced' ? formatUsd(cand.usage.costUsd, { estimated: cand.usage.costState === 'estimated' }) : 'unpriced';
         return { label: `${cand.attemptIndex + 1}. ${cand.title}`, detail: `${files} · ${cost}`, selected: index === selectedHeldIndex };
       }),
       proposal: proposedId ? (proposed ? `attempt ${proposed.attemptIndex + 1}` : shortId(proposedId)) : null,

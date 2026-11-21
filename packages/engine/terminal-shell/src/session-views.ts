@@ -41,7 +41,7 @@ import { laneColor } from './renderer/lane-graph-paint.js';
 import type { ShellFooterView } from './shell-footer-view.js';
 import type { SessionViewControls } from './session-view-input.js';
 import { activeTokens } from './renderer/theme.js';
-import { formatElapsed } from './format.js';
+import { formatElapsed, formatUsd } from './format.js';
 import { interpolateColor } from '@goodvibes/engine/platform/platform/utils';
 import { copyToClipboard } from './clipboard.js';
 export interface SessionViewsDeps {
@@ -633,7 +633,7 @@ export class SessionViews implements SessionViewControls {
             keys,
             trail: this.mainTrail(),
             notice: this.footerNotice(name),
-            cost: cost && cost.costState !== 'unpriced' && typeof cost.costUsd === 'number' ? `${name} $${cost.costUsd.toFixed(2)}` : null,
+            cost: cost && cost.costState !== 'unpriced' && typeof cost.costUsd === 'number' ? `${name} ${formatUsd(cost.costUsd, { estimated: cost.costState === 'estimated' })}` : null,
         };
         const body = (height: number): Line[] => {
             this.lastPage = height;

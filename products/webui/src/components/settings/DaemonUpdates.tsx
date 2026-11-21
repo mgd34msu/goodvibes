@@ -85,6 +85,7 @@ const CHECK_OUTCOME: Record<string, string> = {
   ran: 'A check ran now; the rows above are its result.',
   'already-in-flight': 'Another check was already running, so none was started; the rows above are as of now.',
   'loop-off': 'No check ran: the update loop is off.',
+  installing: 'A newer release was found; the daemon is installing it now and will restart into it. It stops answering for a short while.',
 };
 
 export function DaemonUpdates() {
@@ -135,7 +136,7 @@ export function DaemonUpdates() {
               control={<span className="settings-row__value">{view.failedCheckCount} in a row</span>}
             />
           )}
-          {view.pendingVersion && (
+          {view.pendingVersion && view.check !== 'installing' && (
             <SettingRow
               label="Waiting to install"
               description={[

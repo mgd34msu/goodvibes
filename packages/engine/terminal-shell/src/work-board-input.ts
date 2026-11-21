@@ -41,6 +41,7 @@ import {
   type WorkBoardPanelView,
 } from './renderer/work-board.js';
 import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.js';
+import { formatUsd } from './format.js';
 
 /** What the board is read from, each time the panel draws or takes a key. */
 export interface WorkBoardListSources {
@@ -405,7 +406,7 @@ export function boardNodeDetail(row: BoardRow, node: Partial<ProcessNode> | unde
   const usage = node?.usage;
   const tokens = usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : 0;
   if (tokens > 0) fact('tokens', tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens));
-  if (node && node.costState !== undefined && node.costState !== 'unpriced' && typeof node.costUsd === 'number') fact('cost', `${node.costState === 'estimated' ? '~' : ''}$${node.costUsd < 0.01 ? node.costUsd.toFixed(4) : node.costUsd.toFixed(3)}`);
+  if (node && node.costState !== undefined && node.costState !== 'unpriced' && typeof node.costUsd === 'number') fact('cost', formatUsd(node.costUsd, { estimated: node.costState === 'estimated' }));
   if (node?.currentActivity) fact('now', node.currentActivity.text);
   return { title: row.title, meta: row.meta.full, blocks: lines.length > 0 ? [{ kind: 'text', lines }] : [], tail: [] };
 }

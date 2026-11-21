@@ -13,6 +13,7 @@ import { buildViewLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.
 import { fleetAttentionText, fleetNodeAttention, fleetStallMarker, fleetUsageTokens, hasFleetCost, type FleetStateTone } from './fleet-read-model.ts';
 import { fleetStateDisplay } from './fleet-stop.ts';
 import { formatElapsed } from '../utils/format-elapsed.ts';
+import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { truncateDisplay } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { contractTree, type ContractView } from '@goodvibes/engine/platform/platform/contract';
 import { cellText } from '../renderer/lane-graph/bead.ts';
@@ -36,19 +37,10 @@ export function formatFleetTokens(usage: ProcessUsage | undefined): string {
   return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
 }
 
-/** A dollar amount at the precision a per-agent cost needs: sub-cent amounts keep four places. */
-export function formatAgentCost(usd: number): string {
-  if (usd === 0) return '$0.00';
-  if (usd < 0.0001) return '<$0.0001';
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(3)}`;
-}
-
 /** Honest cost display: never a fabricated $0.00, 'unpriced' when costState says so. */
 export function formatFleetCost(costUsd: number | null | undefined, costState: ProcessCostState): string {
   if (!hasFleetCost(costUsd, costState)) return 'unpriced';
-  const formatted = formatAgentCost(costUsd as number);
-  return costState === 'estimated' ? `~${formatted}` : formatted;
+  return formatUsd(costUsd as number, { estimated: costState === 'estimated' });
 }
 
 /**

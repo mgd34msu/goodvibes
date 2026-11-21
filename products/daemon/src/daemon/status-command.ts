@@ -531,7 +531,7 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
       `goodvibes daemon updates on ${where}`,
       ...versionLines(identity.data),
       ...formatDaemonUpdateStatusLines(update.data, input.now?.() ?? Date.now()),
-      ...(flags.check ? formatDaemonUpdateCheckLine(update.data.check, update.data.offReason) : []),
+      ...(flags.check ? formatDaemonUpdateCheckLine(update.data.check, update.data.offReason, update.data.pendingVersion) : []),
       ...(local.available && local.rolledBack ? ['  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet'] : []),
       ...receiptLines(local),
     ],

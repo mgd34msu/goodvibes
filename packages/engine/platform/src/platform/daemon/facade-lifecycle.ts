@@ -1123,10 +1123,12 @@ export class DaemonLifecycleRuntime {
    * on-demand check does and what the hourly one does cannot diverge. A check
    * that throws is recorded by the loop exactly as a scheduled failure is, and
    * the returned status carries it; this never rejects, because "the check
-   * failed" is an answer and the caller asked for the state.
+   * failed" is an answer and the caller asked for the state. A check that
+   * finds a release it can install answers `installing` before the install
+   * and handover run: the handover stops the listener serving this request.
    */
   async checkForUpdatesNow(): Promise<DaemonUpdateCheckStatus> {
-    const outcome = this.autoUpdater ? await this.autoUpdater.tick() : 'stopped';
+    const outcome = this.autoUpdater ? await this.autoUpdater.checkNow() : 'stopped';
     return { ...this.updateStatus(), check: outcome === 'stopped' ? 'loop-off' : outcome };
   }
 

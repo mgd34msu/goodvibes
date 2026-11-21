@@ -14,14 +14,16 @@
 import type { UpdateTransactionReceipt } from '../runtime/self-update.js';
 
 /** What an on-demand update check did, so "nothing found" is not confused with "nothing ran". */
-export type DaemonUpdateCheckOutcome = 'ran' | 'already-in-flight' | 'loop-off';
+export type DaemonUpdateCheckOutcome = 'ran' | 'already-in-flight' | 'loop-off' | 'installing';
 
 /** The status after an on-demand check, with what the check itself did. */
 export interface DaemonUpdateCheckStatus extends DaemonUpdateStatus {
   /**
    * `ran`: a check ran now (its result is in the fields below). `already-in-flight`: another
    * check is still running, none was started, and the fields are as of now. `loop-off`: the
-   * self-update loop is off (see `offReason`), so nothing ran.
+   * self-update loop is off (see `offReason`), so nothing ran. `installing`: a check ran now,
+   * found `pendingVersion`, and the daemon is installing it and will restart into it; this
+   * answer is sent before the install, so the connection closes shortly after it.
    */
   readonly check: DaemonUpdateCheckOutcome;
 }

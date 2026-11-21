@@ -27,6 +27,7 @@ import { beginModal, finishModal, clipText, scrollCountText, type KitHint, type 
 import { drawList, type KitRow } from './surface-kit-list.ts';
 import { drawTabRows, drawTextBlock, tabRowCount } from './surface-kit-extra.ts';
 import { abbreviateCount } from '../utils/format-number.ts';
+import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { getDisplayWidth } from '../utils/terminal-width.ts';
 import type { UsageAgentEntry, UsageTracker, UsageTurn } from '../runtime/usage-tracker.ts';
 
@@ -53,14 +54,6 @@ export interface UsageModalView {
 /** '53.0K', '1.2M'. */
 function formatTokenCount(n: number): string {
   return abbreviateCount(Math.max(0, Math.round(n))).replace(/k$/, 'K');
-}
-
-/** '$0.246', '<$0.0001', '$0.00'. */
-export function formatUsd(usd: number): string {
-  if (usd === 0) return '$0.00';
-  if (usd < 0.0001) return '<$0.0001';
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(3)}`;
 }
 
 function hintsFor(view: UsageModalView): KitHint[] {

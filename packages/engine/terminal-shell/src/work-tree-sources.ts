@@ -55,6 +55,8 @@ export interface AgentLaneInfo {
     readonly toolCallCount: number;
     /** Real cost in dollars when priced; undefined when not. */
     readonly costUsd?: number | undefined;
+    /** The cost is an estimate (some of it had no exact price). */
+    readonly costEstimated?: boolean | undefined;
     readonly error?: string | undefined;
     /** The agent's own transcript (its tool calls become beads in its lane). */
     readonly messages: readonly Message[];

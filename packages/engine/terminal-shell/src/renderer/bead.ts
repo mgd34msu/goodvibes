@@ -48,9 +48,3 @@ export function beadName(call: Pick<ToolCall, 'name'> & { readonly arguments?: R
     return summaryName({ name: call.name, arguments: call.arguments, activity: toolActivityOf(call.name) });
 }
 
-/** Compact dollars: $0.12, $1.40, $12. */
-export function formatCost(usd: number): string {
-    if (usd >= 10)
-        return `$${Math.round(usd)}`;
-    return `$${usd.toFixed(2)}`;
-}

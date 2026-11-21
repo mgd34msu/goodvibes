@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { openRecordLog, type RecordLog } from '../state/record-log.js';
@@ -149,12 +150,35 @@ export interface ApprovalActionInput {
   readonly relayRequestId?: string | undefined;
 }
 
+/** A change an approval puts in effect when approved (onApproved), and the name its refusals give it. */
+interface ApprovedChange {
+  readonly run: () => unknown | Promise<unknown>;
+  readonly handler: string;
+}
+
+/**
+ * Set while an approved change runs inside its approval's write unit. Every
+ * approval write checks it first: a write made by the change itself would wait
+ * for the unit that is waiting for the change, so it is refused at once,
+ * naming the handler (APPROVAL_WRITE_IN_APPROVED_CHANGE), never left waiting.
+ * The broker's own moves (timers, a raiser's signal, restart) run outside it.
+ */
+const approvedChangeScope = new AsyncLocalStorage<{ readonly approvalId: string; readonly handler: string }>();
+
+function refuseInsideApprovedChange(): void {
+  const running = approvedChangeScope.getStore();
+  if (!running) return;
+  throw Object.assign(new Error(`The approved-change handler "${running.handler}" of ${running.approvalId} tried to write an approval while its own approval was being applied. `
+    + 'That write would wait for the approval it is part of, so it was refused; nothing was written. The handler must not raise, answer or change approvals.'),
+  { code: 'APPROVAL_WRITE_IN_APPROVED_CHANGE', status: 500 });
+}
+
 /** Steps one answer runs inside its write unit, before the record is written. */
 interface CommitSteps {
   /** Saves the rule an answer remembers. */
   readonly keep?: (() => Promise<void>) | undefined;
   /** Puts an approved change in effect (onApproved). */
-  readonly effect?: (() => unknown | Promise<unknown>) | undefined;
+  readonly effect?: ApprovedChange | undefined;
   /** Stamped on the audit entry the transition writes. */
   readonly relayRequestId?: string | undefined;
 }
@@ -509,7 +533,7 @@ export class ApprovalBroker {
   private readonly raising = new Map<string, Promise<void>>();
   readonly #ownerApprovals = new OwnerApprovalAuthority();
   /** What an approval puts in effect when approved, run inside the answer (onApproved). */
-  readonly #approvedEffects = new Map<string, () => unknown | Promise<unknown>>();
+  readonly #approvedEffects = new Map<string, ApprovedChange>();
   private readonly listeners = new Set<ApprovalListener>();
   /** Every write runs one at a time, in call order; each transition is checked and written inside one unit. */
   private readonly writes = new StoreWriteQueue();
@@ -738,7 +762,8 @@ export class ApprovalBroker {
 
   /** A move the broker makes on its own (timer, signal, restart): no revision presented, failures logged. */
   #internal(id: string, transition: ApprovalTransition, failure: string): void {
-    void this.#transition({ id, expectedRevision: undefined, transition }).catch((error: unknown) => {
+    // The broker's own move, even when a signal it reacts to fires inside an approved change: queued, never refused.
+    void approvedChangeScope.exit(() => this.#transition({ id, expectedRevision: undefined, transition })).catch((error: unknown) => {
       logger.warn(failure, { approvalId: id, error: failureText(error) });
     });
   }
@@ -766,10 +791,12 @@ export class ApprovalBroker {
         return outcome.applied ? outcome.record : null;
       },
       publish: (approval) => this.publish(approval),
-      expire: (approvalId, note) => this.#transition({ id: approvalId, expectedRevision: undefined, transition: { to: 'expired', cause: 'deadline', note } }).then(() => undefined),
+      // The broker's own moves (deadline, a raiser that stopped waiting): they run outside any approved change,
+      // since an approved change that aborts a turn fires the signal that cancels that turn's ask.
+      expire: (approvalId, note) => approvedChangeScope.exit(() => this.#transition({ id: approvalId, expectedRevision: undefined, transition: { to: 'expired', cause: 'deadline', note } })).then(() => undefined),
       cancel: async (approvalId) => {
-        await this.#transition({ id: approvalId, expectedRevision: undefined,
-          transition: { to: 'cancelled', actor: BROKER_ACTOR, cause: 'requester-left', note: 'requesting consumer no longer current' } });
+        await approvedChangeScope.exit(() => this.#transition({ id: approvalId, expectedRevision: undefined,
+          transition: { to: 'cancelled', actor: BROKER_ACTOR, cause: 'requester-left', note: 'requesting consumer no longer current' } }));
       },
       buildAudit,
       coalesceKey: approvalCoalesceKey,
@@ -810,10 +837,16 @@ export class ApprovalBroker {
    * waiting and comes back to the approver as the answer's error with the
    * reason. Any end of the ask (approved, denied, expired, cancelled) lets it
    * go. Returns the unregister.
+   *
+   * `effect` must not write an approval (raise, answer, claim, cancel, update):
+   * such a write would wait for the unit it runs in, so it is refused at once
+   * with APPROVAL_WRITE_IN_APPROVED_CHANGE naming `handler` (the call it
+   * applies, e.g. `config.set`; the function's name when not given).
    */
-  onApproved(approvalId: string, effect: () => unknown | Promise<unknown>): () => void {
-    this.#approvedEffects.set(approvalId, effect);
-    return () => { if (this.#approvedEffects.get(approvalId) === effect) this.#approvedEffects.delete(approvalId); };
+  onApproved(approvalId: string, effect: () => unknown | Promise<unknown>, handler?: string): () => void {
+    const change: ApprovedChange = { run: effect, handler: handler ?? (effect.name || 'an approved-change handler') };
+    this.#approvedEffects.set(approvalId, change);
+    return () => { if (this.#approvedEffects.get(approvalId) === change) this.#approvedEffects.delete(approvalId); };
   }
 
   async #resolveApproval(approvalId: string, input: ResolveSharedApprovalInput, proof?: OwnerApprovalProof): Promise<TransitionOutcome> {
@@ -1030,6 +1063,7 @@ export class ApprovalBroker {
    * the new revision is published.
    */
   async #commit(requests: readonly TransitionRequest[], cause?: ApprovalCause, steps: CommitSteps = {}): Promise<TransitionOutcome[]> {
+    refuseInsideApprovedChange();
     const { keep, effect, relayRequestId } = steps;
     const planned: PlannedTransition[] = [];
     // Set inside the write unit: the write's failure, a remembered rule that was not saved, an approved change that could not be put in effect, and an owner decision that went stale after it landed.
@@ -1067,7 +1101,8 @@ export class ApprovalBroker {
       // The approved change is put in effect before the approval is recorded: a record never says approved for a change that is not in force.
       if (effect && changing.some((plan) => plan.refusal === undefined && plan.next!.status === 'approved')) {
         try {
-          await effect();
+          const approvalId = changing.find((plan) => plan.next!.status === 'approved')!.request.id;
+          await approvedChangeScope.run({ approvalId, handler: effect.handler }, effect.run);
           effectRan = true;
         } catch (error) {
           ended.notApplied = { error };
@@ -1257,6 +1292,7 @@ export class ApprovalBroker {
 
   /** Write a new record, and only then let anyone see it (F61): the map, the waiters, the timer and the event follow the write. */
   async #create(record: SharedApprovalRecord): Promise<void> {
+    refuseInsideApprovedChange();
     await this.writes.run(async () => {
       this.pruneTerminalApprovals();
       await this.#append([record]);

@@ -317,6 +317,10 @@ export class DaemonAutoUpdater {
   /** Settles only after lookup/apply/handover, including checks started by the timer. */
   private activeCheck: Promise<void> | null = null;
   private finishActiveCheck: (() => void) | null = null;
+  /** Handed to the next check `checkNow` starts; the check takes it synchronously as it begins. */
+  private nextCheckInstallNotice: (() => void) | null = null;
+  /** The running check's notice: called once, when it has found a release and starts installing it. */
+  private installNotice: (() => void) | null = null;
   /** Consecutive checks that threw. Reset by any check that completes. */
   private consecutiveFailures = 0;
   /** When the current unbroken run of failed checks began, or null. */
@@ -361,6 +365,8 @@ export class DaemonAutoUpdater {
       busyRetryMs: options.busyRetryMs,
       runCheck: async (): Promise<PeriodicCheckOutcome> => {
         const signal = this.failureReadAbort.signal;
+        this.installNotice = this.nextCheckInstallNotice;
+        this.nextCheckInstallNotice = null;
         // A separate completion promise never rejects and includes any owned
         // failure reading, so shutdown can drain it without a second retry owner.
         this.activeCheck = new Promise((resolve) => {
@@ -378,6 +384,7 @@ export class DaemonAutoUpdater {
           this.pendingSwap = null;
           if (!signal.aborted && !this.handoverCancelled) await this.recordCheckFailed(error, signal);
         } finally {
+          this.installNotice = null;
           this.finishActiveCheck?.();
         }
         if (!this.pendingSwap) this.clearWait();
@@ -597,6 +604,25 @@ export class DaemonAutoUpdater {
     return this.loop.tick();
   }
 
+  /**
+   * One check on request (the same tick the schedule runs), answered as soon
+   * as the outcome is known: when it finds a release and the daemon is free to
+   * take it, the answer is `installing` and is given BEFORE the download,
+   * install and handover run. The handover's orderly stop closes the listener
+   * and waits for the requests it is serving; a request still waiting for that
+   * handover would never finish, so the stop would never finish either.
+   */
+  checkNow(): Promise<'ran' | 'already-in-flight' | 'stopped' | 'installing'> {
+    const installing = Promise.withResolvers<'installing'>();
+    // A tick that starts a check runs it synchronously up to its first await,
+    // so the check has taken this notice by the time tick() returns; a tick
+    // that starts none leaves it to be cleared here.
+    this.nextCheckInstallNotice = () => { installing.resolve('installing'); };
+    const ticked = this.loop.tick();
+    this.nextCheckInstallNotice = null;
+    return Promise.race([ticked, installing.promise]);
+  }
+
   private async checkAndApply(signal: AbortSignal): Promise<void> {
     if (this.appliedVersion !== null || this.recoveryRequired || this.handoverCancelled) return;
     // Capture member methods per check, so pre-tick injected adapters remain
@@ -699,6 +725,10 @@ export class DaemonAutoUpdater {
         return;
       }
     assertCurrent();
+    // Found, idle and admitted: whoever asked for this check is answered now, before the install and handover run.
+    const notice = this.installNotice;
+    this.installNotice = null;
+    notice?.();
     const { tag, targets } = this.pendingSwap;
     const downloadBase = this.options.downloadBaseUrl
       ? this.options.downloadBaseUrl(tag)

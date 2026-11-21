@@ -2,6 +2,7 @@ import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { calcSessionCost, isModelPriced } from '@goodvibes/engine/platform/platform/providers';
 import { voiceCaptureRowVisible, type VoiceCaptureIndicatorState } from '../voice-capture-status.js';
 import type { ShellFooterView } from '../shell-footer-view.js';
+import { formatUsd } from '../format.js';
 import { activeTokens } from './theme.js';
 import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.js';
 import { renderStatusLine, type StatusAsks, type StatusChip } from './status-line.js';
@@ -94,22 +95,16 @@ export interface WrappedPromptCursorInfo {
   readonly visibleCursorCol: number;
 }
 
-function fmtCost(usd: number): string {
-  if (!(usd > 0)) return '0.00';
-  if (usd < 0.01) return usd.toFixed(4);
-  if (usd < 1) return usd.toFixed(3);
-  return usd.toFixed(2);
-}
 export function statusCostText(usage: SharedShellFooterOptions['usage'], model: string | undefined, includeFleet = false): string | null {
   if (usage.available === false) return 'usage unavailable';
   const inp = usage.up;
   const out = usage.down;
   // The session's cost as spent, each response at its own model's price; pricing
   // the totals at the current model is only for a caller that has no such figure.
-  const main = typeof usage.costUsd === 'number' ? `~$${fmtCost(usage.costUsd)}`
-    : model && isModelPriced(model) ? `~$${fmtCost(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model))}` : null;
+  const main = typeof usage.costUsd === 'number' ? formatUsd(usage.costUsd, { estimated: true })
+    : model && isModelPriced(model) ? formatUsd(calcSessionCost(inp, out, usage.cacheRead ?? 0, usage.cacheWrite ?? 0, model), { estimated: true }) : null;
   const fleet = usage.fleetCostUsd;
-  if (includeFleet && typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ~$${fmtCost(fleet)}`;
+  if (includeFleet && typeof fleet === 'number' && fleet > 0) return `you ${main ?? '~n/a'} · fleet ${formatUsd(fleet, { estimated: true })}`;
   return main;
 }
 export function promptCursorOffset(info: WrappedPromptCursorInfo): number | undefined {

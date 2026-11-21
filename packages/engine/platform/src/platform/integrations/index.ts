@@ -79,6 +79,7 @@ export {
 } from './ntfy.js';
 export type {
   DeadLetterCodec,
+  DeliveryAttempt,
   DeliveryOutcome,
   DeliveryFailureClass,
   DeadLetterEntry,

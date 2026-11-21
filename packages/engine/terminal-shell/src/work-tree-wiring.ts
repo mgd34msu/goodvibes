@@ -224,6 +224,7 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
         // Only a real reading: an unpriced node has no cost to state.
         return node && node.costState !== 'unpriced' && typeof node.costUsd === 'number' ? node.costUsd : undefined;
     };
+    const costEstimatedOf = (agentId: string): boolean => deps.fleetNodes().find((n) => n.id === agentId)?.costState === 'estimated';
     const agent = (agentId: string): AgentLaneInfo | null => {
         const record = deps.agentManager.getStatus(agentId);
         const contract = deps.contracts.byOwner(agentId);
@@ -234,7 +235,7 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
                 id: agentId, name: 'owner', task: contract.ask,
                 status: contract.status === 'passed' ? 'completed' : contract.status === 'failed' ? 'failed' : contract.status === 'cancelled' ? 'cancelled' : 'running',
                 startedAt: contract.createdAt, completedAt: contract.completedAt,
-                toolCallCount: 0, costUsd: costOf(agentId), messages: [], contract,
+                toolCallCount: 0, costUsd: costOf(agentId), costEstimated: costEstimatedOf(agentId), messages: [], contract,
             };
         if (!record)
             return null;
@@ -247,6 +248,7 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
             completedAt: record.completedAt,
             toolCallCount: record.toolCallCount,
             costUsd: costOf(record.id),
+            costEstimated: costEstimatedOf(record.id),
             error: record.error,
             messages: contract ? [] : messagesOf(record),
             contract,

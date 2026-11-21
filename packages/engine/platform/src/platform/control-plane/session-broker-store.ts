@@ -252,6 +252,14 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     } else if (document) {
       ({ records, carried } = await this.#migrateWholeStore(document));
     }
+    // An index this build wrote states every owed channel send. One from before
+    // (3.3.4) does not, but each session's log does (its input rows carry
+    // `channelReply: 'owed'`), so at the first start on such an index every
+    // session that would wait on disk is read once for it, and the rewritten
+    // index records the counts.
+    const owedCounted = isRecord(document) && document[OWED_COUNTED_KEY] === true;
+    if (document && !owedCounted) this.#indexDirty = true;
+    let carriedOwed = 0;
     const sessions = new Map<string, SharedSessionRecord>();
     const messages = new Map<string, SharedSessionMessage[]>();
     const inputs = new Map<string, SharedSessionInputRecord[]>();
@@ -273,13 +281,23 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
       this.#owed.set(record.id, owed);
       this.#indexed.set(record.id, indexedFields(record, owed));
       // Active sessions and any with work or a channel send still owed load now; the rest wait until asked for.
-      if (record.status !== 'active' && record.pendingInputCount === 0 && owed === 0) {
+      const waits = record.status !== 'active' && record.pendingInputCount === 0;
+      if (waits && owedCounted && owed === 0) {
         sessions.set(record.id, record);
         deferred.add(record.id);
         continue;
       }
       const history = this.loadSession(record.id);
-      this.#owed.set(record.id, countOwedChannelReplies(history.inputs));
+      const owedOnLog = countOwedChannelReplies(history.inputs);
+      this.#owed.set(record.id, owedOnLog);
+      if (waits && owedOnLog === 0) {
+        // Read only to count what it owes (the first start on an index from before): it owes nothing, so it waits on disk.
+        this.unload(record.id);
+        sessions.set(record.id, record);
+        deferred.add(record.id);
+        continue;
+      }
+      if (waits && !owedCounted) carriedOwed += 1;
       if (history.messages.length > 0) messages.set(record.id, history.messages);
       if (history.inputs.length > 0) inputs.set(record.id, history.inputs);
       sessions.set(record.id, withLoggedFacts(record, history.messages, history.inputs));
@@ -287,6 +305,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     this.#unreadableRecords = unreadable;
     this.#recoverUnlistedLogs(sessions, messages, inputs);
     if (this.#indexDirty) this.#writeIndex(sessions);
+    noteCarriedForward('closed session owing a channel reply', carriedOwed);
     return { sessions, messages, inputs, deferred, setAside: this.#setAside };
   }
 
@@ -463,6 +482,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
   #writeIndex(sessions: ReadonlyMap<string, SharedSessionRecord>): void {
     writeDocument(this.path, {
       version: SESSION_INDEX_VERSION,
+      [OWED_COUNTED_KEY]: true,
       sessions: [...sessions.values()].map((record) => {
         const owed = this.#owed.get(record.id) ?? 0;
         return record.status !== 'active' && owed > 0 ? { ...record, [OWED_REPLY_COUNT_KEY]: owed } : record;

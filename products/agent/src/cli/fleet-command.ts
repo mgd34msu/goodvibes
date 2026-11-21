@@ -7,6 +7,7 @@ import type {
   HeldMergeGroup,
 } from '@goodvibes/engine/platform/platform/orchestration';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import { createAgentDaemonVerbCaller, ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
@@ -75,7 +76,7 @@ function renderCandidate(candidate: AttemptCandidate): readonly string[] {
     lines.push(`      diff: ${candidate.diff.files.length} file(s), ${candidate.diff.stat}`);
   }
   const usage = candidate.usage;
-  const cost = usage.costState === 'priced' && usage.costUsd !== null ? `$${usage.costUsd.toFixed(4)}` : usage.costState;
+  const cost = usage.costState !== 'unpriced' && usage.costUsd !== null ? formatUsd(usage.costUsd, { estimated: usage.costState === 'estimated' }) : usage.costState;
   lines.push(`      usage: ${usage.turnCount} turn(s), ${usage.toolCallCount} tool call(s), cost ${cost}`);
   return lines;
 }

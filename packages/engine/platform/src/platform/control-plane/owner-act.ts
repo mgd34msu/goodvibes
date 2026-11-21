@@ -57,6 +57,6 @@ export async function putToOwner(broker: Pick<ApprovalBroker, 'raiseApproval' | 
     timeoutMs: OWNER_ACT_TIMEOUT_MS,
   });
   // The broker runs it inside the owner's approve and lets it go when the ask ends any other way.
-  broker.onApproved(raised.approval.id, request.apply);
+  broker.onApproved(raised.approval.id, request.apply, request.tool);
   return { approvalId: raised.approval.id };
 }

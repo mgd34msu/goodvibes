@@ -32,7 +32,7 @@ export interface DaemonUpdateStatusView {
     readonly recoveryPaths?: readonly string[];
     readonly recoveryErrors?: readonly string[];
   } | null;
-  readonly check?: 'ran' | 'already-in-flight' | 'loop-off';
+  readonly check?: 'ran' | 'already-in-flight' | 'loop-off' | 'installing';
 }
 
 function formatElapsed(milliseconds: number): string {
@@ -60,7 +60,8 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
   if (failed > 0) {
     lines.push(`  failing:  ${failed} check${failed === 1 ? '' : 's'} in a row failed${update.lastCheckFailure ? `: ${update.lastCheckFailure}` : ''}`);
   }
-  if (update.pendingVersion) {
+  // A release being installed now is said by the check line; it is not waiting.
+  if (update.pendingVersion && update.check !== 'installing') {
     const since = typeof update.pendingSince === 'number' ? ` (waiting ${formatElapsed(now - update.pendingSince)})` : '';
     const blockers = update.pendingBlockedBy ?? [];
     const held = blockers.length > 0
@@ -81,7 +82,11 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
 }
 
 /** What an on-demand `update.check` did, so "nothing found" is never read as "nothing ran". */
-export function formatDaemonUpdateCheckLine(check: DaemonUpdateStatusView['check'], offReason: string | undefined): string[] {
+export function formatDaemonUpdateCheckLine(check: DaemonUpdateStatusView['check'], offReason: string | undefined, pendingVersion?: string | null): string[] {
+  if (check === 'installing') {
+    return [`  check:    found ${pendingVersion ?? 'a newer release'}; the daemon is installing it now and will restart into it`,
+      '            it stops answering for a short while; run this command again in a minute to see the new version'];
+  }
   if (check === 'ran') return ['  check:    ran now; the lines above are its result'];
   if (check === 'already-in-flight') return ['  check:    another check was already running, so none was started; the lines above are as of now'];
   if (check === 'loop-off') return [`  check:    not run, the update loop is off${offReason ? `: ${offReason}` : ''}`];
@@ -107,7 +112,7 @@ export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boo
       'Daemon updates',
       ...(status.currentVersion ? [`  running:  ${status.currentVersion}`] : []),
       ...formatDaemonUpdateStatusLines(status),
-      ...(check ? formatDaemonUpdateCheckLine(status.check, status.offReason) : []),
+      ...(check ? formatDaemonUpdateCheckLine(status.check, status.offReason, status.pendingVersion) : []),
       ...(check ? [] : ['  next: /update daemon --check runs one check now']),
     ].join('\n');
   } catch (error) {

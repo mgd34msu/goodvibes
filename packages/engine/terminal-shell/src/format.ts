@@ -100,3 +100,26 @@ export function abbreviateCount(n: number, opts?: AbbreviateCountOpts): string {
   if (n < 1_000_000_000_000)          return fmt(n / 1_000_000_000, decimals)  + 'B';
   return                                     fmt(n / 1_000_000_000_000, decimals) + 'T';
 }
+
+export interface FormatUsdOptions {
+  /** The cost is an estimate (no exact price for some of it): drawn with a leading `~`. */
+  readonly estimated?: boolean | undefined;
+  /** Whole dollars from $10 up, for a narrow cell ($12 rather than $12.40). */
+  readonly compact?: boolean | undefined;
+}
+
+/**
+ * The one way both terminal apps draw a dollar cost: four places under a cent
+ * ($0.0040), three under a dollar ($0.246), two above ($1.40), `<$0.0001` for
+ * a spend too small to show, and a leading `~` when the figure is an estimate.
+ * A sub-cent spend never reads as an exact $0.00.
+ */
+export function formatUsd(usd: number, options: FormatUsdOptions = {}): string {
+  const mark = options.estimated ? '~' : '';
+  if (!(usd > 0)) return `${mark}$0.00`;
+  if (usd < 0.0001) return `${mark}<$0.0001`;
+  if (options.compact && usd >= 10) return `${mark}$${Math.round(usd)}`;
+  if (usd < 0.01) return `${mark}$${usd.toFixed(4)}`;
+  if (usd < 1) return `${mark}$${usd.toFixed(3)}`;
+  return `${mark}$${usd.toFixed(2)}`;
+}

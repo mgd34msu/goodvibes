@@ -64,7 +64,7 @@ const UPDATE_STATUS_REQUIRED = [
 const UPDATE_STATUS_SCHEMA = objectSchema(UPDATE_STATUS_PROPERTIES, UPDATE_STATUS_REQUIRED);
 const UPDATE_CHECK_SCHEMA = objectSchema({
   ...UPDATE_STATUS_PROPERTIES,
-  check: enumSchema(['ran', 'already-in-flight', 'loop-off']),
+  check: enumSchema(['ran', 'already-in-flight', 'loop-off', 'installing']),
 }, [...UPDATE_STATUS_REQUIRED, 'check']);
 
 export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -84,7 +84,7 @@ export const builtinGatewayUpdateMethodDescriptors: readonly GatewayMethodDescri
     id: 'update.check',
     repeat: 'safe',
     title: 'Check For An Update Now',
-    description: 'Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran).',
+    description: 'Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it).',
     category: 'control-plane',
     effects: ['control-plane.administer'],
     transport: ['ws'],

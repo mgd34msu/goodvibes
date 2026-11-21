@@ -159,25 +159,6 @@ export const GOOGLE_WALKTHROUGH_CONTINUATION_PROMPT = [
   'Never reply by telling them to run a command.',
 ].join('\n');
 
-export const GOOGLE_REFERENCED_COMMANDS: readonly string[] = [
-  '/google connect',
-  '/google status',
-  '/google adopt',
-  '/google reauthorize',
-  '/google forget',
-  '/google setup',
-  '/google client',
-  '/google client-file',
-  '/google account',
-  '/google calendar-address',
-  '/google runbook',
-  '/email check',
-  '/email config',
-  '/email set',
-  '/calendar refresh',
-  '/calendar list',
-];
-
 /**
  * Google APIs the OAuth path enables.
  *

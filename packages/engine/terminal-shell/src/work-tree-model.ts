@@ -24,9 +24,10 @@ import { contractIsActive, contractCommitNote, contractStatusSummary, projectCon
 import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
 import { isTranscriptNotice } from '@goodvibes/engine/platform/platform/core';
 import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
-import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, formatCost, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
+import { beadArgument, beadBody, beadName, beadStatus, beadSummary, cellText, formatBeadTime, inferResultToolName, isBackgroundCall, needsAttention, toolFamily, type BeadBody, type BeadStatus, type BeadSummary, } from './renderer/bead.js';
 import { SPINE, type LaneId } from './renderer/lane-graph-layout.js';
 import { userMessageFingerprint, type AgentLaneInfo, type TurnOutcome, type TurnTiming, type WorkTreeSources } from './work-tree-sources.js';
+import { formatUsd } from './format.js';
 type Message = ConversationMessageSnapshot;
 type AssistantMessage = Extract<Message, {
     role: 'assistant';
@@ -396,7 +397,7 @@ function laneTexts(info: AgentLaneInfo, name: string, rows: readonly TimedRow[],
     const tools = info.contract ? plural(info.contract.units.length, 'unit') : plural(info.toolCallCount, 'tool');
     const end = info.completedAt ?? ctx.now;
     const elapsed = info.startedAt !== undefined ? formatBeadTime(end - info.startedAt) : undefined;
-    const cost = info.costUsd !== undefined ? formatCost(info.costUsd) : undefined;
+    const cost = info.costUsd !== undefined ? formatUsd(info.costUsd, { estimated: info.costEstimated, compact: true }) : undefined;
     const failedTools = rows.filter((r) => r.row.kind === 'bead' && r.row.bead.lane === info.id && r.row.bead.status === 'err').length;
     const nested = rows.filter((r) => r.row.kind === 'spawn' || r.row.kind === 'folded').length;
     let lead: string;

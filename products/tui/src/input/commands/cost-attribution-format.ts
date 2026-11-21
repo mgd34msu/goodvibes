@@ -6,10 +6,11 @@
  * fabricated amount, and costState is 'priced' | 'estimated' | 'unpriced'
  * (a mix across contributors). These helpers preserve that distinction all
  * the way to the rendered line, "unpriced" always reads as unpriced,
- * "estimated" is always labeled, and a dollar figure only ever comes from a
+ * an estimate always carries its `~` mark, and a dollar figure only ever comes from a
  * real priced/estimated costUsd.
  */
 import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
+import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 
 export type CostAttributionResult = OperatorMethodOutput<'cost.attribution.get'>;
 export type CostAttributionDimension = CostAttributionResult['dimension'];
@@ -28,8 +29,7 @@ export const COST_ATTRIBUTION_OPTIONAL_DIMENSIONS: readonly CostAttributionDimen
 
 function formatCostAmount(costUsd: number | null, costState: CostAttributionResult['costState']): string {
   if (costUsd === null || costState === 'unpriced') return 'unpriced';
-  const amount = `$${costUsd.toFixed(4)}`;
-  return costState === 'estimated' ? `${amount} (estimated)` : amount;
+  return formatUsd(costUsd, { estimated: costState === 'estimated' });
 }
 
 function formatTokens(tokens: CostAttributionResult['tokens']): string {

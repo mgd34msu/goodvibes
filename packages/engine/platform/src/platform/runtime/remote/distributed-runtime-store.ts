@@ -73,7 +73,6 @@ const AUDIT_ACTIONS = new Set<DistributedRuntimeAuditRecord['action']>([
   'work-failed',
   'work-cancelled',
   'work-expired',
-  'work-requeued',
 ]);
 
 
@@ -447,9 +446,10 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
         },
       });
     }
+    // Work offered again is queued again; its note says why. An action every release reads keeps the file loadable after a rollback.
     recordDistributedRuntimeAudit(state, {
       id: `drt-audit-${workId}-${now}`,
-      action: settles ? 'work-expired' : 'work-requeued',
+      action: settles ? 'work-expired' : 'work-queued',
       actor: 'distributed-runtime',
       peerId: item.peerId,
       workId,

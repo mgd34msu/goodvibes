@@ -148,7 +148,6 @@ function removeEvent(ctx: CommandContext, id: string): string {
 /** Adds the file's events (an event already imported is skipped); /calendar delete removes one. */
 function importEvents(ctx: CommandContext, filePath: string): string {
   const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
-  if (sourcePath === null) throw commandRefusal(`${filePath} cannot be read from here.`);
   if (!existsSync(sourcePath)) throw commandRefusal(`File not found: ${sourcePath}`);
   const result = registryFromContext(ctx).importIcs(readFileSync(sourcePath, 'utf-8'));
   const { imported } = result;
@@ -170,7 +169,6 @@ function importEvents(ctx: CommandContext, filePath: string): string {
 /** To this screen, or a new file (an existing file is never replaced). */
 function exportEvents(ctx: CommandContext, dest: string): string {
   const destPath = dest ? resolveCommandFilePath(ctx, dest, 'write') : undefined;
-  if (destPath === null) throw commandRefusal(`${dest} cannot be written from here.`);
   const ics = registryFromContext(ctx).exportIcs(undefined, destPath);
   return destPath ? `Exported calendar to ${destPath}` : ics;
 }

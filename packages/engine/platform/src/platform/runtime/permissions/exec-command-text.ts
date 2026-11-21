@@ -5,6 +5,7 @@
  * the safety check and approval cards judge `execEntryTexts`, so nothing is
  * judged by a decoy `cmd` beside a different `cmd_base64`.
  */
+import { isAbsolute, join } from 'node:path';
 
 /** Shown in place of an entry whose `cmd_base64` is malformed; the exec tool refuses to run it. */
 export const INVALID_CMD_BASE64_TEXT = '(cmd_base64 is not valid base64)';
@@ -71,10 +72,57 @@ export function execListedCommandTexts(args: Record<string, unknown>): string[] 
  * destructive `scheduleCommand` must not be the only text judged.
  */
 export function execShellCommands(args: Record<string, unknown>): string[] {
-  const texts = execListedCommandTexts(args);
-  for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') texts.push(args[key] as string);
-  texts.push(...installedCommandTexts(args));
-  return [...new Set(texts)];
+  return [...new Set(execShellCommandsAt(args).map((entry) => entry.text))];
+}
+
+/** A shell command text and the directory it runs in when it names its own. */
+export interface ShellCommandAt {
+  readonly text: string;
+  /**
+   * The directory the command names for itself (an exec call's `working_dir`,
+   * an entry's `cwd` or `working_dir` under it), relative to the call's
+   * working directory or absolute; undefined when it names none.
+   */
+  readonly cwd?: string | undefined;
+}
+
+/** A directory named under another, as the exec tool resolves it: an absolute one replaces the one above it. */
+function under(parent: string | undefined, child: string | undefined): string | undefined {
+  if (child === undefined) return parent;
+  if (parent === undefined || isAbsolute(child)) return child;
+  return join(parent, child);
+}
+
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+
+/**
+ * The shell commands a call carries (as execShellCommands) with the directory
+ * each runs in: a `commands` entry in its own `cwd` (or `working_dir`) under
+ * the call's `working_dir`, every other command in the call's `working_dir`.
+ * One entry per distinct text and directory.
+ */
+export function execShellCommandsAt(args: Record<string, unknown>): ShellCommandAt[] {
+  const callDir = nonEmpty(args['working_dir']);
+  const out: ShellCommandAt[] = [];
+  const seen = new Set<string>();
+  const add = (text: string, cwd: string | undefined): void => {
+    const key = `${cwd ?? ''}\u0000${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ text, cwd });
+  };
+  const commands = args['commands'];
+  if (Array.isArray(commands)) {
+    for (const entry of commands) {
+      const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : undefined;
+      const own = record ? nonEmpty(record['cwd']) ?? nonEmpty(record['working_dir']) : undefined;
+      for (const text of execEntryTexts(entry)) add(text, under(callDir, own));
+    }
+  }
+  for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') add(args[key] as string, callDir);
+  for (const text of installedCommandTexts(args)) add(text, callDir);
+  return out;
 }
 
 function installedCommandTexts(args: Record<string, unknown>): string[] {

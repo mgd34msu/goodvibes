@@ -388,7 +388,6 @@ const MY_SKILLS = defineCommand<CommandContext>({
       sentence: 'The skill in {path} is added, off until you review it, until you change it.', undoneBy: 'delete', example: { path: 'skills/release-notes/SKILL.md' },
       run: (values, ctx, registry) => {
         const sourcePath = resolveCommandFilePath(ctx, values.path!, 'read');
-        if (sourcePath === null) throw commandRefusal(`${values.path} could not be read.`);
         const content = readFileSync(sourcePath, 'utf-8');
         const parseResult = parseSkillStandardMarkdown(content);
         if ('error' in parseResult) throw commandRefusal(`Skill standard import rejected: ${parseResult.error}`);
@@ -409,7 +408,6 @@ const MY_SKILLS = defineCommand<CommandContext>({
         const skill = registry.get(values.skill!);
         if (!skill) throw commandRefusal(`Unknown Agent skill ${values.skill}`, '/my-skills list shows the Agent-local skills.');
         const targetDir = resolveCommandFilePath(ctx, values.dir!, 'write');
-        if (targetDir === null) throw commandRefusal(`${values.dir} cannot be written.`);
         const overwrite = values.overwrite === 'replace';
         const replaced = overwrite && existsSync(skillStandardFilePath(skill.name, targetDir));
         const written = registry.exportToStandard(skill.id, targetDir, overwrite);

@@ -132,9 +132,12 @@ interface CacheKey {
   flags: string;
 }
 
+/** A cached content search's matches per file; the file text is not kept. */
+export type CachedMatchedFiles = Map<string, { matches: ContentMatch[] }>;
+
 interface CacheValue {
   files: string[];
-  matchedFiles: Map<string, { content: string; matches: ContentMatch[] }>;
+  matchedFiles: CachedMatchedFiles;
   totalMatches: number;
   fileMtimes: Map<string, number>;
 }
@@ -846,12 +849,12 @@ export class FindRuntimeService {
 
   searchCacheSet(key: CacheKey, value: CacheValue): void {
     const cacheKey = makeSearchCacheKey(key);
-    // What the entry holds: the paths it lists, and each matched file's path, any
-    // content it kept, and its match and context line text.
+    // What the entry holds: the paths it lists, and each matched file's path and
+    // its match and context line text.
     let chars = 0;
     for (const file of value.files) chars += file.length;
     for (const [file, entry] of value.matchedFiles) {
-      chars += file.length + entry.content.length;
+      chars += file.length;
       for (const match of entry.matches) {
         chars += match.text.length;
         for (const line of match.context_before ?? []) chars += line.length;

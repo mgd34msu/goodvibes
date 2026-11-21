@@ -10,3 +10,11 @@ export class ConnectedHostVerbError extends Error {
     this.code = code;
   }
 }
+
+/** A verb call refused before any request left this process: no daemon is reachable, so nothing it could do happened. */
+export class DaemonVerbNotSentError extends Error {
+  constructor(methodId: string, reason: string) {
+    super(`cannot invoke '${methodId}': ${reason}`);
+    this.name = 'DaemonVerbNotSentError';
+  }
+}

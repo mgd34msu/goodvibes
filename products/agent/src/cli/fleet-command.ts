@@ -9,7 +9,7 @@ import type {
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
-import { createAgentDaemonVerbCaller, ConnectedHostVerbError, isDefiniteHostRefusal } from '../runtime/client/daemon-verbs.ts';
+import { createAgentDaemonVerbCaller, ConnectedHostVerbError, DaemonVerbNotSentError, isDefiniteHostRefusal } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -42,7 +42,7 @@ const NOT_CONNECTED_CODES = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTF
 /** Whether the call failed before any request reached the host: no connection could be resolved, or the host refused the connection. */
 function neverReachedHost(error: unknown): boolean {
   if (!(error instanceof Error) || error instanceof ConnectedHostVerbError || error.name === 'TimeoutError') return false;
-  if (error.message.startsWith('cannot invoke ')) return true;
+  if (error instanceof DaemonVerbNotSentError) return true;
   const code = (error as { readonly code?: unknown }).code ?? (error.cause as { readonly code?: unknown } | undefined)?.code;
   return typeof code === 'string' && NOT_CONNECTED_CODES.has(code);
 }

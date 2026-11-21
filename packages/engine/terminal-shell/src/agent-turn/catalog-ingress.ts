@@ -250,7 +250,7 @@ type ToolResult = Awaited<ReturnType<Tool['execute']>>;
  * acted would report an applied effect as a failure. A read-only result is
  * checked once more, so a stale read is not returned.
  */
-async function forwardCatalogCall(tool: Tool, original: Record<string, unknown>, forwarded: Record<string, unknown>, options?: ToolExecuteOptions,
+export async function forwardCatalogCall(tool: Tool, original: Record<string, unknown>, forwarded: Record<string, unknown>, options?: ToolExecuteOptions,
   additionalGuard?: () => void): Promise<{ readonly result: ToolResult; readonly effectAdmitted: boolean }> {
   const originalGuard = harnessCatalogExecutionGuard(original, options);
   const inherited = admissionOf(options);
@@ -313,16 +313,24 @@ export function protectCatalogTool(tool: Tool, registry: ToolRegistry, selected 
       if (projected.status !== 'projected') throw new ToolInputProjectionError('held');
       outcome = await forwardCatalogCall(tool, input, projected.args, options, projected.assertCurrent);
     } finally {
-      // Release always runs; its checks never replace the result of a call whose effect was admitted.
-      try { await projected.release?.(); }
-      catch (error) {
-        if (!outcome?.effectAdmitted) throw error;
-        logger.warn('A catalog call applied its effect, then a release-time check failed; the applied result is returned', {
-          tool: tool.definition.name, error: summarizeError(error),
-        });
-      }
+      await releaseCatalogProjection(projected.release, outcome?.effectAdmitted === true, tool.definition.name);
     }
     if (!outcome.effectAdmitted) assertCurrent();
     return outcome.result;
   } };
+}
+
+/**
+ * Releases a projection after its call ran. Release always runs; its checks
+ * never replace the result of a call whose effect was admitted: that failure
+ * is logged and the applied result stands. Before an admitted effect it throws.
+ */
+export async function releaseCatalogProjection(release: (() => Promise<void> | void) | undefined, effectAdmitted: boolean, toolName: string): Promise<void> {
+  try { await release?.(); }
+  catch (error) {
+    if (!effectAdmitted) throw error;
+    logger.warn('A catalog call applied its effect, then a release-time check failed; the applied result is returned', {
+      tool: toolName, error: summarizeError(error),
+    });
+  }
 }

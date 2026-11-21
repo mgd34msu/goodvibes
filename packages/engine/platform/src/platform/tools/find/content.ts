@@ -7,7 +7,7 @@ import { isAbsolute, relative } from 'node:path';
 import { judgmentPort } from '@goodvibes/engine/errors';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { contentMatchView, contentRank } from '../batteries/content-rank.js';
-import type { ContentQuery, OutputOptions, ContentMatch } from './shared.js';
+import type { ContentQuery, OutputOptions, ContentMatch, CachedMatchedFiles } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
 import {
@@ -34,13 +34,18 @@ import type { FindCodeIntelligence } from './references.js';
 type MatchedFiles = Map<string, { content: string; matches: ContentMatch[] }>;
 
 /**
- * A copy that shares no match object with the original. The cache hands out one
- * entry to every later call, and `expand_to` writes into the matches it is given.
- * Cached entries carry no file text (`content` is empty): it is re-read when a
+ * A copy of the matches alone, sharing no match object with the original. The
+ * cache hands out one entry to every later call, and `expand_to` writes into the
+ * matches it is given. Cached entries carry no file text: it is re-read when a
  * query needs it, so a search on a common token does not pin the repository in memory.
  */
-function copyMatches(source: MatchedFiles, withContent: boolean): MatchedFiles {
-  return new Map(Array.from(source, ([file, entry]) => [file, { content: withContent ? entry.content : '', matches: entry.matches.map((match) => ({ ...match })) }] as const));
+function cachedMatches(source: MatchedFiles): CachedMatchedFiles {
+  return new Map(Array.from(source, ([file, entry]) => [file, { matches: entry.matches.map((match) => ({ ...match })) }] as const));
+}
+
+/** A cached entry's matches as a search's own, with no file text (`content` empty) and no match object shared with the cache. */
+function fromCache(source: CachedMatchedFiles): MatchedFiles {
+  return new Map(Array.from(source, ([file, entry]) => [file, { content: '', matches: entry.matches.map((match) => ({ ...match })) }] as const));
 }
 
 /** The decision site the content-rank reading is logged under. */
@@ -219,7 +224,7 @@ async function scanContentQuery(
   const fileMtimesForCache = new Map<string, number>();
 
   if (cacheValid && cachedEntry) {
-    matchedFiles = copyMatches(cachedEntry.matchedFiles, false);
+    matchedFiles = fromCache(cachedEntry.matchedFiles);
     totalMatches = cachedEntry.totalMatches;
   } else {
     matchedFiles = new Map<string, { content: string; matches: ContentMatch[] }>();
@@ -293,7 +298,7 @@ async function scanContentQuery(
     && (candidates === null || passedStats !== undefined)) {
     runtime.searchCacheSet(cacheKey, {
       files,
-      matchedFiles: copyMatches(matchedFiles, false),
+      matchedFiles: cachedMatches(matchedFiles),
       totalMatches,
       fileMtimes: fileMtimesForCache,
     });

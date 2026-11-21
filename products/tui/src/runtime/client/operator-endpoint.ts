@@ -45,6 +45,7 @@ import { configuredDaemonIsThisMachine, configuredDaemonOrigin, resolveDaemonTar
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 /** Re-exported so this repo's importers keep one import site for the shape
  * every client seam takes. See the doc comment further down for why
@@ -326,14 +327,6 @@ function withGatewayRouteForWsOnlyVerbs(
     return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, bearer, methodId, rest[0]);
   }) as typeof typedInvoke;
   return { ...client, operator: { ...client.operator, invoke } };
-}
-
-/** A verb call refused before any request left this process: no daemon is reachable, so nothing it could do happened. */
-export class DaemonVerbNotSentError extends Error {
-  constructor(methodId: string, reason: string) {
-    super(`cannot invoke '${methodId}': ${reason}`);
-    this.name = 'DaemonVerbNotSentError';
-  }
 }
 
 /**

@@ -231,7 +231,7 @@ export function parseMemoryRecordSearchBody(
 
 /**
  * Parse POST /api/memory/records/:id/update, editable fields
- * (scope/summary/detail/tags + the temporal validity window). All optional; the
+ * (cls/scope/summary/detail/tags + the temporal validity window). All optional; the
  * store leaves unset fields unchanged. NOT a review update (that is the /review
  * route), this edits content/scope, e.g. promoting a record project→team.
  *
@@ -241,6 +241,8 @@ export function parseMemoryRecordSearchBody(
  * clears the tags; an absent `tags` leaves them unchanged.
  */
 export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdateInput | Response {
+  const cls = readString(body, 'cls');
+  if (cls instanceof Response) return cls;
   const scope = readEnum(body, 'scope', MEMORY_SCOPES);
   if (scope instanceof Response) return scope;
   const summary = readString(body, 'summary');
@@ -259,6 +261,7 @@ export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdat
   const validUntil = readNullableNumber(body, 'validUntil');
   if (validUntil instanceof Response) return validUntil;
   return {
+    ...(cls.value ? { cls: cls.value } : {}),
     ...(scope.value ? { scope: scope.value } : {}),
     ...(summary.value ? { summary: summary.value } : {}),
     ...(detail !== undefined ? { detail } : {}),

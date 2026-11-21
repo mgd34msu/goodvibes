@@ -20,8 +20,9 @@
  *   keywords (`( ... )`, `{ ...; }`, `if ...; then ...`), and a shell script
  *   the command runs (`sh publish.sh`, `bash -o pipefail publish.sh`,
  *   `./publish.sh`, `source x.sh`, `bash < publish.sh`), read from disk from
- *   the directory the command's own `cd` left it in, with quoting removed the
- *   way the shell removes it (`g''it`, `"git"`, `g\it`).
+ *   the directory the command runs in (an exec entry's own `cwd`, else the
+ *   call's working directory) as the command's own `cd` left it, with quoting
+ *   removed the way the shell removes it (`g''it`, `"git"`, `g\it`).
  *
  * A command whose program, or whose arguments after a matching program, are
  * built when it runs (`$(printf git) push`, `git $X`, `xargs git`) matches:
@@ -33,7 +34,11 @@
  * read, a script too large to read, and a script that cannot be read (one the
  * command writes before it runs it, a missing file, commands a shell reads
  * from its standard input such as `echo 'git push' | sh`, a relative script
- * after a `cd` code cannot follow) match: code cannot see what they run.
+ * after a `cd` code cannot follow) match: code cannot see what they run. So
+ * does command text built when the command runs where the variable is the
+ * program (`bash -c "$CMD"`, `eval "$X"`) and a script path built that way
+ * (`sh "$F"`); a built `cd` target or argument (`sh -c "cd $DIR && make"`) is
+ * read like any other.
  *
  * Not seen: what a program does on its own once started (a git alias defined
  * before the rule, a compiled program, a script in another language that
@@ -45,7 +50,7 @@
  * one small file read per shell script a command runs.
  */
 import { baseName, commandWalker, shellWord, type CommandWalker, type ProgramRun } from './command-walk.js';
-import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
+import { execShellCommandsAt, type ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 import { declaredValues } from './classify.js';
 import type { ToolDefinition } from '../types/tools.js';
 
@@ -155,13 +160,13 @@ function argvPairs(value: unknown, out: Array<{ readonly command: string; readon
 }
 
 /** Every exec-style command field (`command`, `cmd`, `commands[]`) in the objects nested in a call's arguments (bounded walk). */
-function nestedCommandTexts(value: unknown, out: Set<string>, depth = 0): void {
+function nestedCommandTexts(value: unknown, out: ShellCommandAt[], depth = 0): void {
   if (depth > 6 || !value || typeof value !== 'object') return;
   if (Array.isArray(value)) { for (const item of value.slice(0, 64)) nestedCommandTexts(item, out, depth + 1); return; }
   const record = value as Record<string, unknown>;
-  if (depth > 0) for (const text of execShellCommands(record)) out.add(text);
+  if (depth > 0) out.push(...execShellCommandsAt(record));
   for (const [key, child] of Object.entries(record).slice(0, 64)) {
-    // A `commands` list is read whole by execShellCommands; its entries are not walked again.
+    // A `commands` list is read whole by execShellCommandsAt; its entries are not walked again.
     if (key !== 'commands') nestedCommandTexts(child, out, depth + 1);
   }
 }
@@ -171,7 +176,8 @@ const CODE_FIELDS: readonly string[] = ['expression', 'code', 'script', 'source'
 
 /** The texts one call hands a shell, an interpreter or a running process. */
 export interface CallShellTexts {
-  readonly commands: readonly string[];
+  /** Each with the directory it names for itself (an exec entry's `cwd`), where a script it runs is read from. */
+  readonly commands: readonly ShellCommandAt[];
   readonly argv: readonly { readonly command: string; readonly args: readonly string[] }[];
   readonly code: readonly string[];
   readonly pieces: readonly string[];
@@ -185,19 +191,21 @@ export interface CallShellTexts {
  */
 export function callShellTexts(toolName: string, args: Record<string, unknown>,
   definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): CallShellTexts {
-  const commands = new Set(execShellCommands(args));
+  const found: ShellCommandAt[] = execShellCommandsAt(args);
   // Commands nested in a call's input (an operator method's `input`, a remote run's payload) are read the same way.
-  nestedCommandTexts(args, commands);
-  for (const declared of declaredValues(args, definition?.subjects?.commands) ?? []) commands.add(declared);
+  nestedCommandTexts(args, found);
+  for (const declared of declaredValues(args, definition?.subjects?.commands) ?? []) found.push({ text: declared });
   const hook = args['hookDefinition'];
-  if (hook && typeof hook === 'object' && typeof (hook as Record<string, unknown>)['command'] === 'string') commands.add((hook as Record<string, unknown>)['command'] as string);
+  if (hook && typeof hook === 'object' && typeof (hook as Record<string, unknown>)['command'] === 'string') found.push({ text: (hook as Record<string, unknown>)['command'] as string });
+  const commands = new Map<string, ShellCommandAt>();
+  for (const entry of found) commands.set(`${entry.cwd ?? ''}\u0000${entry.text}`, entry);
   const argv: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
   argvPairs(args, argv);
   const runsCode = toolName === 'repl' || definition?.sideEffects?.includes('exec') === true;
   const code = runsCode ? CODE_FIELDS.map((field) => args[field]).filter((value): value is string => typeof value === 'string' && value.length > 0) : [];
   const action = typeof args['action'] === 'string' ? args['action'] : typeof args['processAction'] === 'string' ? args['processAction'] : undefined;
   const pieces = action?.toLowerCase() === 'write' && typeof args['data'] === 'string' ? [args['data']] : [];
-  return { commands: [...commands], argv, code, pieces };
+  return { commands: [...commands.values()], argv, code, pieces };
 }
 
 /**
@@ -207,9 +215,9 @@ export function callShellTexts(toolName: string, args: Record<string, unknown>,
 export function neverRunMatchIn(texts: CallShellTexts, patterns: readonly NeverRunPattern[], directory: string | undefined): NeverRunMatch | undefined {
   if (patterns.length === 0) return undefined;
   const walker = neverRunWalker(patterns, directory);
-  for (const command of texts.commands) {
-    const found = walker.command(command);
-    if (found) return { ...found, command };
+  for (const entry of texts.commands) {
+    const found = walker.command(entry.text, entry.cwd);
+    if (found) return { ...found, command: entry.text };
   }
   // A program and its argv (`trigger`'s `command` with `args`): no shell reads it, so its words are the argv.
   for (const entry of texts.argv) {

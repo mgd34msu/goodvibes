@@ -59,9 +59,9 @@ export function parseAgentLocalLibraryArgs(
  * A file argument resolved the way every other Agent command resolves one: relative
  * to the workspace, `~` meaning the Agent home. A model-run command may only name
  * a place inside the workspace; the owner typing the command may name any path.
- * Returns null after printing why when the path is refused.
+ * Throws the command's refusal when the path is refused.
  */
-export function resolveCommandFilePath(ctx: CommandContext, raw: string, purpose: 'read' | 'write'): string | null {
+export function resolveCommandFilePath(ctx: CommandContext, raw: string, purpose: 'read' | 'write'): string {
   const shellPaths = requireShellPaths(ctx);
   const resolved = shellPaths.resolveWorkspacePath(raw);
   if (ctx.invokedByModel === true && !shellPaths.isWithinWorkingDirectory(resolved)) {

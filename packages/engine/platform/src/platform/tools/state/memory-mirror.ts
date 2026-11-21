@@ -10,6 +10,8 @@
  * memory class is read afterwards, off the call's path, and the row is
  * refiled when the reading settles. An unsure, late or unavailable reading
  * leaves the row pending for review; it never loses the memory or delays it.
+ * A memory host older than this release ignores the class on an update, so
+ * there the row keeps its class and only leaves the pending state.
  *
  * Only memory records are read and written here; no file is.
  */
@@ -162,18 +164,10 @@ function classifyLater(store: StateMemoryStore, id: string, key: string, value: 
     });
     if (cls === undefined) return;
     const record = await store.get(id);
-    if (!record || record.detail !== value || record.cls === cls) {
-      if (record?.detail === value) await store.update(id, { tags: record.tags.filter((tag) => tag !== PENDING_TAG) });
-      return;
-    }
-    // The store's update has no class field, so the row is saved again under its class and the pending copy goes.
-    const filed = await store.add({
-      scope: record.scope, cls, summary: record.summary, detail: value,
-      tags: record.tags.filter((tag) => tag !== PENDING_TAG), review: { state: 'fresh' },
-    });
-    const still = await store.get(id);
-    // A write of the key while the class was read wins: the filed copy is the stale one then.
-    await store.delete(still?.detail === value ? id : filed.id);
+    // A write of the key while the class was read wins: that write reads its own class.
+    if (!record || record.detail !== value) return;
+    // Refiled in place: the row keeps its id, so no copy exists for a concurrent save to lose.
+    await store.update(id, { ...(record.cls === cls ? {} : { cls }), tags: record.tags.filter((tag) => tag !== PENDING_TAG) });
   })().catch((error: unknown) => {
     logger.debug('state tool: memory class not read; the record stays pending review', { key, error: summarizeError(error) });
   });

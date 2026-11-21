@@ -39,7 +39,12 @@ export function prepareKnowledgeIssueUpsert(
   const incomingLifecycle = readRecord(input.metadata?.issueLifecycle);
   const previous = readSubjectRevision(existing?.metadata);
   const next = readSubjectRevision(input.metadata);
-  const changed = Boolean(previous && next && previous !== next);
+  // A resolved issue stored before its producer labelled revisions, and resolved by
+  // no review, cannot show it saw this revision: a labelled open report of it starts
+  // a lifecycle. One the owner reviewed keeps his answer.
+  const resolvedBeforeLabels = !mutation && previous === undefined && next !== undefined && existing?.status === 'resolved'
+    && input.status !== 'resolved' && typeof readRecord(existing.metadata.review).action !== 'string';
+  const changed = Boolean(previous && next && previous !== next) || resolvedBeforeLabels;
   const revisionLabels = readLabel(input.metadata?.subjectRevision) !== undefined || readLabel(existing?.metadata.subjectRevision) !== undefined;
   const retired = [...new Set([...readStrings(lifecycle.retiredSubjectRevisions), ...readStrings(lifecycle.retiredFingerprints)])];
   const observedCurrentLifecycle = typeof lifecycle.id === 'string' && incomingLifecycle.id === lifecycle.id;

@@ -3,7 +3,7 @@ import type { PairingTokenManager } from '../pairing/pairing-token-store.js';
 import { pairingPrincipalId } from '../pairing/principal-ids.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
 import type { RuntimeEventBus } from './events/index.js';
-import { ApiTokenAuditor } from '../security/token-audit.js';
+import { ApiTokenAuditor, DEFAULT_ROTATION_CADENCE_MS } from '../security/token-audit.js';
 import { createTokenAuditBusEmitter } from './token-audit-events.js';
 import { logger } from '../utils/logger.js';
 import { isFeatureGateEnabled } from './feature-flags/gates.js';
@@ -25,8 +25,8 @@ interface TokenAuditSettings {
   readonly managed: boolean;
   /** Managed and the token audit feature enabled: the pairing store refuses a token past the cadence. */
   readonly enforced: boolean;
-  /** The rotation cadence in ms; undefined when the setting is not a positive number. */
-  readonly cadenceMs: number | undefined;
+  /** The rotation cadence in ms: the setting, or the auditor's default when it is not a positive number. */
+  readonly cadenceMs: number;
   /** The warning lead time in ms; undefined when the setting is not a positive number. */
   readonly warningMs: number | undefined;
 }
@@ -45,7 +45,8 @@ function readTokenAuditSettings(
   return {
     managed,
     enforced: managed && isFeatureGateEnabled(featureFlags, 'token-scope-rotation-audit'),
-    cadenceMs: positiveDaysMs(configManager.get('security.tokenAudit.rotationCadenceDays')),
+    // One cadence for both readers: what the auditor reports is what the pairing store enforces.
+    cadenceMs: positiveDaysMs(configManager.get('security.tokenAudit.rotationCadenceDays')) ?? DEFAULT_ROTATION_CADENCE_MS,
     warningMs: positiveDaysMs(configManager.get('security.tokenAudit.rotationWarningDays')),
   };
 }
@@ -69,7 +70,7 @@ export function createConfiguredTokenAuditor(options: {
       const settings = readTokenAuditSettings(configManager, featureFlags);
       return {
         managed: settings.managed,
-        ...(settings.cadenceMs !== undefined ? { defaultRotationCadenceMs: settings.cadenceMs } : {}),
+        defaultRotationCadenceMs: settings.cadenceMs,
         ...(settings.warningMs !== undefined ? { defaultRotationWarningThresholdMs: settings.warningMs } : {}),
       };
     },
@@ -92,7 +93,7 @@ export function bindPairingRotationLimit(
 ): () => void {
   pairingTokens.setRotationLimit(() => {
     const settings = readTokenAuditSettings(options.configManager, options.featureFlags);
-    return settings.enforced ? settings.cadenceMs ?? null : null;
+    return settings.enforced ? settings.cadenceMs : null;
   });
   return () => pairingTokens.setRotationLimit(undefined);
 }

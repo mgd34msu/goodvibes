@@ -1,4 +1,8 @@
 import { createPublicKey } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { noteCarriedForwardChange } from '../state/carried-forward.js';
+import { contentDigest } from '../utils/target-ref.js';
+import { sha256Base64Url } from '../utils/sha256.js';
 import { fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -149,6 +153,16 @@ function noteUnboundTrust(records: Readonly<Record<string, PluginTrustRecord>>):
   }
 }
 
+/** The content digest 3.4.0 bound trust to: the manifest and the entry file's bytes; null when the entry cannot be read. */
+function entryOnlyContentDigest(discovered: DiscoveredPlugin): string | null {
+  try {
+    const entryPath = resolve(discovered.pluginDir, discovered.manifest.main ?? 'index.js');
+    return contentDigest({ manifest: discovered.manifest, entry: sha256Base64Url(readFileSync(entryPath)) });
+  } catch {
+    return null;
+  }
+}
+
 /** One copy of a plugin as trust is bound to it: its directory and its content digest. */
 function copyIdentity(discovered: DiscoveredPlugin): { readonly dir: string; readonly digest: string | null } {
   return { dir: resolve(discovered.pluginDir), digest: pluginContentDigest(discovered) };
@@ -294,6 +308,7 @@ export class PluginManager {
         unappliedTier: (pluginName, copy) => this.currentTrust().unappliedTier(pluginName, copyIdentity(copy)) };
       this.refreshState();
       this.loadTrust();
+      this.carryTrustBoundToEntryOnly();
       await this.loadEnabledPlugins();
     });
   }
@@ -1154,6 +1169,38 @@ export class PluginManager {
         if (state.trust[name]?.updatedAt === own[name]?.updatedAt) delete state.trust[name];
       }
     });
+  }
+
+  /**
+   * A trust tier saved by 3.4.0 is bound to the plugin's manifest and entry file
+   * only. Where that copy is still in the directory it was trusted in and its
+   * manifest and entry are what was trusted, the tier is bound now to the copy's
+   * whole current content (what 3.4.0 trusted: it bound nothing more), keeping
+   * its tier, grant and time; from then on any changed file needs trusting
+   * again. An untrusted record stays as it is, and a quarantine is not touched.
+   * Said once, through the carried-forward notice. Costs one read of the entry
+   * file of each plugin whose tier does not apply to its current content.
+   */
+  private carryTrustBoundToEntryOnly(): void {
+    const records = this.currentTrust().exportRecords();
+    const carried: string[] = [];
+    for (const plugin of discoverAllPlugins(this.pathOptions)) {
+      const name = plugin.manifest.name;
+      const record = records[name];
+      if (!record || record.tier === 'untrusted' || record.contentDigest === undefined || record.boundDir !== resolve(plugin.pluginDir)) continue;
+      if (carried.includes(name) || record.contentDigest !== entryOnlyContentDigest(plugin)) continue;
+      const digest = pluginContentDigest(plugin);
+      if (digest === null) continue;
+      const failure = this.saveTrustRecord(name, { ...record, contentDigest: digest });
+      if (failure !== undefined) {
+        logger.warn(`[plugins] The trust tier of '${name}' from the earlier version could not be carried forward: ${failure}`);
+        continue;
+      }
+      carried.push(name);
+    }
+    if (carried.length === 0) return;
+    noteCarriedForwardChange(`Plugin trust carried forward from the earlier version for ${carried.length} plugin${carried.length === 1 ? '' : 's'} (${carried.join(', ')}); `
+      + 'each is now bound to its current content, so a later change to any of its files needs /plugin trust again.');
   }
 
   /** The trust tiers as they stand now: the shared file is read again only when it changed (one stat). */

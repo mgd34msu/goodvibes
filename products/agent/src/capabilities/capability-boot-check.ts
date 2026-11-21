@@ -30,12 +30,6 @@ export interface CapabilityBootCheckInput {
   readonly secretPresent?: ProbeContext['secretPresent'];
   /** Reads the MCP posture (and why it could not be read) now; called on every resolution, so a server that connects or drops mid-session is seen. */
   readonly mcpServers?: () => McpServerPosture;
-  /**
-   * Reads the qualified names (`mcp:<server>:<tool>`) of the MCP tools offered now; called on every resolution.
-   * The MCP API lists tools only asynchronously, so the Agent's wiring supplies none and an
-   * `mcp-tool-available` probe reports unsatisfied; no built-in capability declares one.
-   */
-  readonly mcpToolNames?: () => Iterable<string>;
   /** Operator method ids the daemon serves, from the static operator contract. */
   readonly servedOperatorMethodIds?: Iterable<string>;
 }
@@ -52,7 +46,6 @@ export function buildProbeContext(input: CapabilityBootCheckInput): ProbeContext
     registeredToolNames,
     mcpServers: mcp?.servers ?? [],
     ...(mcp?.unreadable ? { mcpServersUnreadable: mcp.unreadable } : {}),
-    mcpToolNames: new Set(input.mcpToolNames?.() ?? []),
     servedOperatorMethodIds: new Set(input.servedOperatorMethodIds ?? []),
     configValuePresent: input.configValuePresent,
     ...(input.secretPresent ? { secretPresent: input.secretPresent } : {}),

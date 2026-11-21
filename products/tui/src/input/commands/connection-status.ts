@@ -38,7 +38,7 @@
  */
 
 import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
-import { DaemonVerbNotSentError } from '../../runtime/client/operator-endpoint.ts';
+import { DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export type ConnectionSurface = 'mail' | 'calendar';
 

@@ -51,7 +51,7 @@ import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/pla
 import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
-import { ConnectedHostVerbError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
+import { ConnectedHostVerbError, DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;
@@ -161,7 +161,7 @@ export function resolveConnectedHostConnection(
 }
 
 // One class for a host's refusal, shared with the Agent turn's accounts tool, which tells it apart.
-export { ConnectedHostVerbError };
+export { ConnectedHostVerbError, DaemonVerbNotSentError };
 
 /**
  * Whether the host positively refused the call (a 4xx other than a request
@@ -286,7 +286,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
     },
     invoke: async <T,>(methodId: string, input?: unknown, invokeOptions?: AgentDaemonVerbInvokeOptions): Promise<T> => {
       const resolved = resolveConnection(options);
-      if ('reason' in resolved) throw new Error(`cannot invoke '${methodId}': ${resolved.reason}`);
+      if ('reason' in resolved) throw new DaemonVerbNotSentError(methodId, resolved.reason);
       const timeoutMs = options.invokeTimeoutMs ?? DEFAULT_INVOKE_TIMEOUT_MS;
       const signal = options.invokeSignal ? options.invokeSignal() : AbortSignal.timeout(timeoutMs);
       let response: Response;

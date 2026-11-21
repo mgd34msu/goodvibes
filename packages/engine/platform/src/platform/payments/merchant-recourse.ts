@@ -60,7 +60,7 @@
  */
 import { registrableDomain } from '../security/public-suffix.js';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
-import { merchantDomain } from './merchant-domain.js';
+import { merchantDomain, registrableMerchant } from './merchant-domain.js';
 import {
   DEFAULT_MARKETPLACE_LISTING_THRESHOLDS,
   evaluateMarketplaceListing,
@@ -191,6 +191,12 @@ export function parseDomainList(raw: string | undefined): readonly string[] {
     .filter((entry) => entry.length > 0);
 }
 
+/** The entries of a comma-separated shop list that name no shop (no registrable domain), as written. */
+export function unreadableShopEntries(raw: string | undefined): readonly string[] {
+  if (raw === undefined) return [];
+  return raw.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0 && registrableMerchant(entry) === null);
+}
+
 /**
  * Apply the marketplace policy, the same question whatever kind of marketplace
  * it is. `unknown` counts as third-party, because the field is page-derived and
@@ -264,6 +270,18 @@ export async function classifyMerchant(
   }
 
   // 2 & 3. The owner's explicit instructions beat any judgement, in both directions.
+  // An exclusion list holding an entry that names no shop cannot say which shops
+  // it meant: until it is fixed, every purchase asks.
+  const unreadableExclusion = unreadableShopEntries(policy.excluded)[0];
+  if (unreadableExclusion !== undefined) {
+    return {
+      isMajor: false,
+      registrable,
+      basis: 'owner-override',
+      reason: `Your list of shops to always check with you (payments.majorRetailersExcluded) has an entry that names no shop (${JSON.stringify(unreadableExclusion)}), `
+        + 'so I check every purchase with you until it is fixed with /settings.',
+    };
+  }
   if (parseDomainList(policy.excluded).includes(registrable)) {
     return {
       isMajor: false,

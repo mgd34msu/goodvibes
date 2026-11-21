@@ -41,6 +41,7 @@
  */
 import type { ToolDefinition } from '../types/tools.js';
 import { walkCommands } from './command-walk.js';
+import type { ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 
 /**
  * What a call sends to: the recipients read from it (empty when it sends to
@@ -457,9 +458,10 @@ function programRecipients(name: string, args: readonly string[]): SendRecipient
 
 /**
  * What the shell commands send to, read by the gate's one command walk;
- * `directory` is where a relative script path is read from.
+ * `directory` is the call's working directory: a command without a `cwd` of
+ * its own reads a relative script path from it.
  */
-export function commandRecipients(commands: readonly string[], directory: string | undefined): SendRecipients {
+export function commandRecipients(commands: readonly ShellCommandAt[], directory: string | undefined): SendRecipients {
   if (commands.length === 0) return [];
   const out: string[] = [];
   let unreadable = false;
@@ -511,7 +513,7 @@ function argumentRecipients(toolName: string, args: Record<string, unknown>): st
  * where a shell script a command runs is read from.
  */
 export function undeclaredSendRecipients(toolName: string, args: Record<string, unknown>,
-  definition: Pick<ToolDefinition, 'sideEffects'> | undefined, commands: readonly string[], reads: boolean, directory: string | undefined): SendRecipients {
+  definition: Pick<ToolDefinition, 'sideEffects'> | undefined, commands: readonly ShellCommandAt[], reads: boolean, directory: string | undefined): SendRecipients {
   const parts: SendRecipients[] = [commandRecipients(commands, directory)];
   if (toolName === 'fetch') parts.push(fetchRecipients(args));
   else if (!reads && toolName === 'mcp' && args['mode'] === 'call' && args['input'] && typeof args['input'] === 'object' && !Array.isArray(args['input'])) {

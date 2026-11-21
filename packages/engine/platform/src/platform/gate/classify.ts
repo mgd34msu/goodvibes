@@ -34,7 +34,7 @@ import { relative, resolve, isAbsolute, sep } from 'node:path';
 import type { PermissionCategory, ToolArgumentPath, ToolDecision, ToolDefinition, ToolSideEffect } from '../types/tools.js';
 import type { GatePresetName } from './presets.js';
 import { effectPermittedForProvenance, isGuestSurfaceId, surfaceCarriesCommandAuthority, surfaceRequestsReachOwner } from './surface-authority.js';
-import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
+import { execShellCommandsAt, type ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 import { fileOperationDestroys, unrecoverableDeletionIn, type Destruction } from './unrecoverable-commands.js';
 
 /**
@@ -386,12 +386,16 @@ function namesOneOf(args: Record<string, unknown>, field: string, values: readon
 /**
  * The shell commands a call runs or installs, for a tool that runs commands
  * (`exec`, a tool declaring the `exec` effect) or declares where its commands
- * sit; empty for any other tool.
+ * sit; empty for any other tool. Each carries the directory it names for
+ * itself (an exec entry's `cwd`), where a script it runs is read from.
  */
-export function callCommands(toolName: string, args: Record<string, unknown>, definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): string[] {
-  const declared = declaredValues(args, definition?.subjects?.commands) ?? [];
+export function callCommands(toolName: string, args: Record<string, unknown>, definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): ShellCommandAt[] {
   const runs = toolName === 'exec' || definition?.sideEffects?.includes('exec') === true;
-  return runs ? [...new Set([...execShellCommands(args), ...declared])] : declared;
+  const commands: ShellCommandAt[] = runs ? execShellCommandsAt(args) : [];
+  for (const text of declaredValues(args, definition?.subjects?.commands) ?? []) {
+    if (!commands.some((entry) => entry.text === text && entry.cwd === undefined)) commands.push({ text });
+  }
+  return commands;
 }
 
 /**

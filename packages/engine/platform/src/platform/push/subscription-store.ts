@@ -16,7 +16,10 @@
  *
  * Every write refuses while the authority record exists but cannot be read
  * (`AuthorityRecordUnavailableError`), so an unreadable record never empties
- * this file or turns a delete into a not-found.
+ * this file or turns a delete into a not-found. The one exception is the
+ * revocation of a user who lost admin access: it is kept in this file as a
+ * pending principal revocation, and the first write that can read the record
+ * revokes that user's devices there.
  *
  * Dead records (see subscription-housekeeping.ts for what counts as evidence)
  * are left out of every read, and dropped from the file by whichever write
@@ -71,6 +74,34 @@ interface SubscriptionSnapshot extends Record<string, unknown> {
   readonly lastRemovals?: Readonly<Record<string, PushSubscriptionRemoval>> | undefined;
   /** Removals made here that have not yet reached the authority record; absent when none wait. */
   readonly pendingRevocations?: readonly PendingRevocation[] | undefined;
+  /**
+   * Principals whose devices were revoked while the authority record could not
+   * be read, so their devices could not all be named yet; absent when none wait.
+   */
+  readonly pendingPrincipalRevocations?: readonly PendingPrincipalRevocation[] | undefined;
+}
+
+/** Every device a principal registered up to `at`, revoked; carried until a write can name them on the authority record. */
+interface PendingPrincipalRevocation {
+  readonly principalId: string;
+  readonly evidence: string;
+  readonly at: number;
+}
+
+function readPendingPrincipalRevocations(value: unknown): PendingPrincipalRevocation[] {
+  if (!Array.isArray(value)) return [];
+  const pending: PendingPrincipalRevocation[] = [];
+  for (const item of value as unknown[]) {
+    if (item === null || typeof item !== 'object') continue;
+    const { principalId, evidence, at } = item as Record<string, unknown>;
+    if (typeof principalId === 'string' && typeof evidence === 'string' && typeof at === 'number' && Number.isFinite(at)) pending.push({ principalId, evidence, at });
+  }
+  return pending;
+}
+
+/** Whether a pending principal revocation covers this record: that principal's, registered no later than the revocation. */
+function revokedByPrincipal(record: StoredPushSubscription, principals: readonly PendingPrincipalRevocation[]): PendingPrincipalRevocation | undefined {
+  return principals.find((entry) => entry.principalId === record.principalId && record.createdAt <= entry.at);
 }
 
 /** A removal on its way to the authority record. */
@@ -202,19 +233,24 @@ export class PushSubscriptionStore {
     this.now = options.now ?? ((): number => Date.now());
   }
 
-  private async loadSnapshot(): Promise<{ raw: unknown[]; lastRemovals: Record<string, PushSubscriptionRemoval>; pending: PendingRevocation[] }> {
+  private async loadSnapshot(): Promise<{
+    raw: unknown[]; lastRemovals: Record<string, PushSubscriptionRemoval>; pending: PendingRevocation[]; principals: PendingPrincipalRevocation[];
+  }> {
     const snapshot = await this.store.load();
     const raw = Array.isArray(snapshot?.subscriptions) ? [...snapshot.subscriptions] : [];
     const stored = snapshot?.lastRemovals;
     const lastRemovals = stored !== null && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
-    return { raw, lastRemovals, pending: readPendingRevocations(snapshot?.pendingRevocations) };
+    return {
+      raw, lastRemovals, pending: readPendingRevocations(snapshot?.pendingRevocations),
+      principals: readPendingPrincipalRevocations(snapshot?.pendingPrincipalRevocations),
+    };
   }
 
   /** Records from disk with the provably dead ones left out. A read never serves a dead record. */
   private async loadUsable(): Promise<StoredPushSubscription[]> {
-    const { raw, pending } = await this.loadSnapshot();
+    const { raw, pending, principals } = await this.loadSnapshot();
     const merged = this.withRecord(findDeadPushRecords(raw, this.policy(), this.now()).kept, pending);
-    return [...merged.kept, ...merged.elsewhere];
+    return [...merged.kept, ...merged.elsewhere].filter((record) => !revokedByPrincipal(record, principals));
   }
 
   /**
@@ -342,11 +378,21 @@ export class PushSubscriptionStore {
   }> {
     const authority = this.authority;
     if (authority && !authority.view()) throw new AuthorityRecordUnavailableError(authority.filePath);
-    const { raw, lastRemovals, pending } = await this.loadSnapshot();
-    const decision = findDeadPushRecords(raw, this.policy(), this.now());
+    const { raw, lastRemovals, pending, principals } = await this.loadSnapshot();
+    const now = this.now();
+    const decision = findDeadPushRecords(raw, this.policy(), now);
     // A record the authority record holds as revoked is dropped from this file by this write.
     const merged = this.withRecord(decision.kept, pending);
-    return { records: merged.kept, lastRemovals, removed: decision.removed, elsewhere: merged.elsewhere, pending };
+    // A principal revoked while the record could not be read: its devices are named now, and this write revokes them.
+    const withdrawn: PushSubscriptionRemoval[] = [];
+    const notWithdrawn = (record: StoredPushSubscription): boolean => {
+      const entry = revokedByPrincipal(record, principals);
+      if (entry) withdrawn.push(removalOf(record, 'access-withdrawn', entry.evidence, now));
+      return entry === undefined;
+    };
+    const records = merged.kept.filter(notWithdrawn);
+    const elsewhere = merged.elsewhere.filter(notWithdrawn);
+    return { records, lastRemovals, removed: [...decision.removed, ...withdrawn], elsewhere, pending };
   }
 
   /**
@@ -515,7 +561,7 @@ export class PushSubscriptionStore {
 
   /** A principal's devices and the latest removal among them, from one read. */
   async status(principalId: string): Promise<PushSubscriptionStatus> {
-    const { raw, lastRemovals, pending } = await this.loadSnapshot();
+    const { raw, lastRemovals, pending, principals } = await this.loadSnapshot();
     const now = this.now();
     const decision = findDeadPushRecords(raw, this.policy(), now);
     // A record that is dead but not yet dropped by a write is already gone for
@@ -526,7 +572,8 @@ export class PushSubscriptionStore {
     }
     const merged = this.withRecord(decision.kept, pending);
     return {
-      subscriptions: [...merged.kept, ...merged.elsewhere].filter((r) => r.principalId === principalId).map(toPublicSubscription),
+      subscriptions: [...merged.kept, ...merged.elsewhere]
+        .filter((r) => r.principalId === principalId && !revokedByPrincipal(r, principals)).map(toPublicSubscription),
       ...(lastRemoval ? { lastRemoval } : {}),
     };
   }
@@ -571,9 +618,28 @@ export class PushSubscriptionStore {
    * record (so no machine of the group pushes to them again), in one write,
    * with `reason` recorded as the principal's last removal so
    * push.subscriptions.list says why. Resolves to how many were removed.
+   *
+   * While the authority record exists but cannot be read, the devices it holds
+   * cannot all be named: the revocation of the principal is kept in this file
+   * instead, no read here serves those devices from then on, and the next write
+   * that can read the record revokes each of them there. Resolves to how many
+   * of this file's records it covers.
    */
   async revokePrincipal(principalId: string, evidence: string): Promise<number> {
     return this.run(async () => {
+      const authority = this.authority;
+      if (authority && !authority.view()) {
+        const snapshot = await this.store.load();
+        const at = this.now();
+        const principals = [...readPendingPrincipalRevocations(snapshot?.pendingPrincipalRevocations).filter((entry) => entry.principalId !== principalId),
+          { principalId, evidence, at }];
+        await this.store.persist({ ...(snapshot ?? { subscriptions: [] }), pendingPrincipalRevocations: principals });
+        logger.warn('The push devices of a user who lost admin access are no longer served here; the authority record cannot be read, so the next write that can read it revokes them on every machine of the group', {
+          principalId,
+        });
+        const raw = Array.isArray(snapshot?.subscriptions) ? snapshot.subscriptions : [];
+        return raw.filter((record) => (record as Partial<StoredPushSubscription> | null)?.principalId === principalId).length;
+      }
       const { records, lastRemovals, removed, elsewhere, pending } = await this.loadForWrite();
       const targets = [...records, ...elsewhere].filter((record) => record.principalId === principalId);
       if (targets.length === 0) {

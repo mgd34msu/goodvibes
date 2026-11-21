@@ -39,8 +39,6 @@ export interface ProbeContext {
   }[];
   /** Why `mcpServers` could not be read, when it could not. */
   readonly mcpServersUnreadable?: string | undefined;
-  /** Qualified names of MCP tools currently listed by connected servers. */
-  readonly mcpToolNames: ReadonlySet<string>;
   /** Operator method ids the daemon actually serves (not merely catalogs). */
   readonly servedOperatorMethodIds: ReadonlySet<string>;
   /**
@@ -160,11 +158,6 @@ export function runCapabilityProbe(probe: CapabilityProbe, context: ProbeContext
       return { satisfied: true, detail: `the MCP server ${probe.serverName} is connected and usable` };
     }
 
-    case 'mcp-tool-available':
-      return context.mcpToolNames.has(probe.qualifiedName)
-        ? { satisfied: true, detail: `${probe.qualifiedName} is listed by a connected server` }
-        : { satisfied: false, detail: `${probe.qualifiedName} is not offered by any connected MCP server` };
-
     case 'operator-method-served':
       return context.servedOperatorMethodIds.has(probe.methodId)
         ? { satisfied: true, detail: `the daemon serves ${probe.methodId}` }
@@ -225,7 +218,6 @@ export function emptyProbeContext(): ProbeContext {
   return {
     registeredToolNames: new Set(),
     mcpServers: [],
-    mcpToolNames: new Set(),
     servedOperatorMethodIds: new Set(),
     configValuePresent: () => ({ state: 'absent' }),
   };

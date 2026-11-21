@@ -66,6 +66,7 @@ import { logger } from '../../utils/logger.js';
 import type {
   MemoryAddOptions,
   MemoryBundle,
+  MemoryClass,
   MemoryDoctorReport,
   MemoryImportResult,
   MemoryLink,
@@ -89,7 +90,7 @@ import { memoryVerbUnavailableError } from './wire-verb-availability.js';
 
 /**
  * Patch shape accepted by an editable-field update
- * (scope/summary/detail/tags + the temporal validity window).
+ * (class/scope/summary/detail/tags + the temporal validity window).
  *
  * For validFrom/validUntil the three states are distinct and all reachable over
  * the wire: omitted (`undefined`) leaves the bound unchanged, a number sets it,
@@ -98,6 +99,8 @@ import { memoryVerbUnavailableError } from './wire-verb-availability.js';
  * carried no window and such a proposal could not round-trip.
  */
 export interface MemoryUpdatePatch {
+  /** The record's class; the row is refiled in place, keeping its id. */
+  readonly cls?: MemoryClass | undefined;
   readonly scope?: MemoryScope | undefined;
   readonly summary?: string | undefined;
   readonly detail?: string | undefined;

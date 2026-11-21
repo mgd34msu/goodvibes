@@ -336,7 +336,6 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         async run(values, ctx) {
           const shellPaths = requireShellPaths(ctx);
           const target = resolveCommandFilePath(ctx, values.path!, 'write');
-          if (target === null) throw commandRefusal(`${values.path} cannot be written from here.`);
           if (existsSync(target) && values.overwrite !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /agent-home export-starter ${values.starter} ${values.path} --overwrite`);
           return step(() => {
             mkdirSync(dirname(target), { recursive: true });
@@ -352,7 +351,6 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         async run(values, ctx) {
           const shellPaths = requireShellPaths(ctx);
           const source = resolveCommandFilePath(ctx, values.path!, 'read');
-          if (source === null) throw commandRefusal(`${values.path} cannot be read from here.`);
           return step(() => {
             const template = importAgentRuntimeProfileTemplate(shellPaths.homeDirectory, source, { replace: values.replace === 'yes' });
             return `Added starter ${template.id} (${formatAgentRecordSource(template.source).toLowerCase()}).\n  make a home from it: /agent-home create <name> --starter ${template.id}`;

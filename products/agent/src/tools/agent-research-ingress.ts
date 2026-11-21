@@ -2,7 +2,7 @@ import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
-import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
+import { forwardCatalogCall, harnessCatalogExecutionGuard, releaseCatalogProjection } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 export function isResearchReportEditor(args: Record<string, unknown>): boolean {
   if (args.mode === 'run_workspace_action') {
@@ -66,10 +66,16 @@ export function protectAgentHarnessResearchTool(tool: Tool, registry: ToolRegist
     const assertCurrent = harnessCatalogExecutionGuard(input, options);
     const projected = await projector.project({ callId: 'research-editor-direct', name: tool.definition.name, args,
       signal: options?.signal, assertCurrent });
+    let effectAdmitted = false;
     try {
       if (projected.status !== 'projected') return { success: false, error: 'Research report not run: the form fields are missing. Pass fields with sources and reportMarkdown, then call again.' };
       projected.assertCurrent?.();
-      return await forwardHarnessCatalogCall(originalBody, input, projected.args, options, projected.assertCurrent);
-    } finally { await projected.release?.(); }
+      const outcome = await forwardCatalogCall(originalBody, input, projected.args, options, projected.assertCurrent);
+      effectAdmitted = outcome.effectAdmitted;
+      return outcome.result;
+    } finally {
+      // A release-time check never turns a report already written into a failure.
+      await releaseCatalogProjection(projected.release, effectAdmitted, tool.definition.name);
+    }
   } };
 }

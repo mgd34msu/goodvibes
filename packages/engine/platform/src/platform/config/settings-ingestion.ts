@@ -28,12 +28,18 @@
  * keep serving everything else. A daemon that will not start helps nobody; a
  * daemon running one setting short, loudly, is recoverable.
  *
- * The exception is the class where running WITHOUT the operator's value is
- * worse than not running: a key whose fallback default permits more than the
+ * The exception is the class where running on the shipped default is worse
+ * than running at all: a key whose fallback default permits more than the
  * value that was stored. If an operator wrote a permission gate and we cannot
- * read it, resolving to the shipped default can open something they closed. For
- * those keys, {@link SAFETY_GATE_CONFIG_PREFIXES}, the reader refuses, loudly
- * and with the same three facts.
+ * read it, resolving to the shipped default can open something they closed. A
+ * stored value never stops the program either, since an upgrade must not turn
+ * a value an earlier release accepted into a daemon that will not start. So
+ * for those keys ({@link SAFETY_GATE_CONFIG_PREFIXES}, and the payment exclusion
+ * list) the reader HOLDS the feature CLOSED: the key resolves to its strictest
+ * posture ({@link closedPostureOf}), and the owner is told once (the daemon's
+ * announce-once receipt, the store the carried-forward line is said through,
+ * withdrawn when the key is fixed) which key, why, and how to fix it. A new value that
+ * does not validate is still refused when it is saved (write-admission.ts).
  *
  * A whole file that does not parse is also a refusal, for the same reason: an
  * unreadable file may have held a safety-gate key, and the reader cannot tell.
@@ -47,7 +53,7 @@ import { CONFIG_SCHEMA, DEFAULT_CONFIG } from './schema.js';
 import { parsePermissionMode, retiredPermissionModeNotice } from '../gate/presets.js';
 import type { ConfigSetting } from './schema.js';
 import { listDaemonOwnedConfigPaths } from './config-ownership.js';
-import { deleteRawDotPath } from './settings-io.js';
+import { deleteRawDotPath, writeRawDotPath } from './settings-io.js';
 import { readDotPath } from './shared-config-tier.js';
 import { isSecretBearingConfigKey, SECRET_BEARING_CONFIG_PATHS } from './secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from './structured-credential-config.js';
@@ -65,8 +71,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-/** What the reader did with a setting it could not ingest as written: skipped it (its default applies) or refused the file. */
-export type SettingsIngestionAction = 'skipped' | 'refused';
+/**
+ * What the reader did with a setting it could not ingest as written: skipped it
+ * (its default applies), held its feature closed (its strictest posture
+ * applies), or refused the file (a newer file, or one that does not parse).
+ */
+export type SettingsIngestionAction = 'skipped' | 'held' | 'refused';
 
 /** One setting that did not make it into the resolved config, and why. */
 export interface SettingsIngestionNotice {
@@ -93,8 +103,8 @@ export class SettingsIngestionRefusal extends Error {
 
 /**
  * The key classes where a fallback to the shipped default can permit more than
- * the operator's stored value did, so an unreadable value is refused rather
- * than skipped.
+ * the operator's stored value did, so an unreadable value holds its feature
+ * closed ({@link closedPostureOf}) rather than being skipped.
  *
  * A declared list rather than a name pattern, for the reason
  * secret-bearing-config-keys.ts already gives: a pattern is a habit, and every
@@ -149,24 +159,87 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
  *     ships as `true`. For every one of them the shipped default is the
  *     RESTRICTIVE value, so falling back to it can only ever close something,
  *     never open it. A key whose default is the weaker setting does not belong
- *     here; it belongs in the list above. Refusing to start over these would trade a safe fallback
- *     for a dead daemon.
+ *     here; it belongs in the list above. Their default is already the closed
+ *     posture, so skipping them is enough.
  *   - credential keys: a daemon short a mailbox password runs with one
  *     connector down. That is a degraded surface, not an open door, and it is
  *     exactly the case that must not crash-loop.
  */
 
-/** True when an unreadable value at this key must refuse rather than skip. */
+/**
+ * What a key's feature does while its stored value cannot be read: the values
+ * written in its place (each a valid value of its key), or `keep` when the
+ * feature reads the stored text itself and fails closed on what it cannot read.
+ * `means` finishes the sentence "until it is fixed, ...".
+ */
+export interface ClosedPosture {
+  readonly writes: readonly (readonly [key: string, value: unknown])[];
+  readonly keep?: true | undefined;
+  readonly means: string;
+}
+
+const ASK_ME: ClosedPosture['writes'][number] = ['permissions.mode', 'ask-me'];
+
+/**
+ * The closed posture of every key whose shipped default permits more than a
+ * stored value could have; undefined for any other key (it is skipped).
+ */
+export function closedPostureOf(key: string): ClosedPosture | undefined {
+  if (key.startsWith('permissions.tools.')) return { writes: [[key, 'prompt']], means: `every ${key.slice('permissions.tools.'.length)} call asks you` };
+  if (key.startsWith('runtime.toolBudget.')) {
+    const limit: Record<string, number> = { 'runtime.toolBudget.maxMs': 1, 'runtime.toolBudget.maxTokens': 1, 'runtime.toolBudget.maxCostUsd': 0.01 };
+    const tightest = limit[key];
+    return {
+      writes: [['runtime.toolBudget.enforced', true], ...(tightest === undefined ? [] : [[key, tightest] as const])],
+      means: tightest === undefined ? 'the tool budget is enforced' : `the tool budget is enforced with ${key} at its tightest (${tightest})`,
+    };
+  }
+  switch (key) {
+    case 'permissions.mode': return { writes: [ASK_ME], means: 'you are asked as in Ask me' };
+    case 'permissions.engine': return { writes: [[key, 'policy-engine']], means: 'the policy engine decides' };
+    case 'policy.registryEnabled':
+    case 'policy.requireSignedBundles': return { writes: [[key, true]], means: `${key} is on` };
+    case 'policy.bundleSource':
+    case 'policy.bundlePath': return { writes: [ASK_ME], means: 'no policy bundle loads and you are asked as in Ask me' };
+    case 'judgment.fallbacks':
+    case 'judgment.backend':
+    case 'judgment.keyName':
+    case 'provider.decisionRouter':
+      return { writes: [['judgment.policy', 'No Decision Model']], means: 'no decision model is asked anything, and GoodVibes asks you instead' };
+    case 'relay.requireStepUpForMutations': return { writes: [[key, true]], means: 'every change made through the relay needs a passkey confirmation' };
+    case 'fetch.blockedHosts': return { writes: [[key, '**']], means: 'fetch refuses every website' };
+    case 'conversationGate.mode': return { writes: [[key, 'confirm-all']], means: 'every conversation step is confirmed with you' };
+    case 'sandbox.mcpIsolation': return { writes: [[key, 'contained']], means: 'MCP servers run contained' };
+    case 'storage.secretPolicy': return { writes: [[key, 'require_secure']], means: 'secrets are kept only in secure storage' };
+    // Read by the merchant classifier (payments/merchant-recourse.ts classifyMerchant), which asks before every purchase while an entry names no shop.
+    case 'payments.majorRetailersExcluded': return { writes: [], keep: true, means: 'every purchase asks you first' };
+    default: return undefined;
+  }
+}
+
+/** Apply a closed posture to the raw settings in place of the stored value of `key`. */
+function applyClosedPosture(raw: Record<string, unknown>, key: string, posture: ClosedPosture): void {
+  if (posture.keep) {
+    // Kept as text, so the feature reads it and fails closed on it; a value that is not text becomes text that names nothing.
+    const hit = readDotPath(raw, key);
+    if (!hit.present) writeRawDotPath(raw, key, 'unreadable');
+    else if (typeof hit.value !== 'string') writeRawDotPath(raw, key, JSON.stringify(hit.value) ?? 'unreadable');
+  } else {
+    deleteRawDotPath(raw, key);
+  }
+  for (const [target, value] of posture.writes) writeRawDotPath(raw, target, value);
+}
+
+/** The notice for a stored value whose feature is held closed. */
+function heldNotice(file: string, key: string, reason: string, fix: string, means: string): SettingsIngestionNotice {
+  return { file, key, reason, remedy: `${fix}; until it is fixed, ${means}`, action: 'held' };
+}
+
+/** True when this key's shipped default permits more than a stored value could: an unreadable stored value holds its feature closed. */
 export function isSafetyGateConfigKey(key: string): boolean {
   return SAFETY_GATE_CONFIG_PREFIXES.some((prefix) => (
     prefix.endsWith('.') ? key.startsWith(prefix) : key === prefix
   ));
-}
-
-/** True when any safety-gate key lives at or under this section path. */
-function sectionHoldsSafetyGate(path: string): boolean {
-  const prefix = `${path}.`;
-  return SAFETY_GATE_CONFIG_PREFIXES.some((gate) => gate.startsWith(prefix) || prefix.startsWith(gate));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -266,28 +339,9 @@ export interface UnknownSettingKey {
   readonly name: string;
 }
 
-/**
- * Build a notice, deciding skip-versus-refuse from the key class and saying
- * what that decision MEANS in the remedy. A skipped key resolves to its
- * default; a refused key does not resolve at all, because resolving it to a
- * default is the hazard.
- */
-function notice(
-  file: string,
-  key: string,
-  reason: string,
-  fix: string,
-  refused = isSafetyGateConfigKey(key),
-): SettingsIngestionNotice {
-  return {
-    file,
-    key,
-    reason,
-    remedy: refused
-      ? `${fix}; this key decides what may run, so falling back to the shipped default could permit more than you stored, nothing starts until it is readable`
-      : `${fix}; until then ${key} resolves to its default`,
-    action: refused ? 'refused' : 'skipped',
-  };
+/** The notice for a skipped key, saying what skipping it MEANS: it resolves to its default. */
+function notice(file: string, key: string, reason: string, fix: string): SettingsIngestionNotice {
+  return { file, key, reason, remedy: `${fix}; until then ${key} resolves to its default`, action: 'skipped' };
 }
 
 /**
@@ -307,14 +361,20 @@ function screenSectionShapes(
       const hit = readDotPath(raw, path);
       if (!hit.present) continue;
       if (!isPlainObject(hit.value)) {
-        found.push(notice(
-          file,
-          path,
-          `is a section of settings, but the file holds ${describeShape(hit.value)} here`,
-          `remove the ${path} entry or restore it to an object`,
-          sectionHoldsSafetyGate(path),
-        ));
+        const reason = `is a section of settings, but the file holds ${describeShape(hit.value)} here`;
+        const fix = `remove the ${path} entry or restore it to an object`;
         deleteRawDotPath(raw, path);
+        // Every setting under it whose default permits more is held closed, as when its own value cannot be read.
+        const held = CONFIG_SCHEMA.flatMap((setting) => {
+          const posture = setting.key.startsWith(`${path}.`) ? closedPostureOf(setting.key) : undefined;
+          return posture ? [{ key: setting.key, posture }] : [];
+        });
+        if (held.length === 0) {
+          found.push(notice(file, path, reason, fix));
+          continue;
+        }
+        for (const { key, posture } of held) applyClosedPosture(raw, key, posture);
+        found.push(heldNotice(file, path, reason, fix, held.map(({ posture }) => posture.means).filter((means, index, all) => all.indexOf(means) === index).join('; ')));
         continue;
       }
       walk(defaultChild, path);
@@ -391,6 +451,12 @@ function screenSchemaValues(
     }
     const failure = schemaFailure(setting, readDotPath(raw, setting.key).value);
     if (!failure) continue;
+    const posture = closedPostureOf(setting.key);
+    if (posture) {
+      found.push(heldNotice(file, setting.key, failure, `fix it with /settings or in ${shortPath(file)}`, posture.means));
+      applyClosedPosture(raw, setting.key, posture);
+      continue;
+    }
     found.push(notice(file, setting.key, failure, 'fix the value or remove the key'));
     deleteRawDotPath(raw, setting.key);
   }
@@ -419,10 +485,8 @@ function screenSecretReferences(
       key,
       diagnosticMode === 'structural' ? 'holds a secret reference that cannot be resolved'
         : `holds a secret reference that cannot be resolved: ${describeMalformedSecretRef(hit.value)}`,
+      // A credential is skipped: one connector down is a degraded surface, not an open door, and it must not crash-loop.
       'fix the reference, nothing was sent and the credential was not used',
-      // A credential is never in the refusing class: one connector down is a
-      // degraded surface, not an open door, and it must not crash-loop.
-      false,
     ));
     deleteRawDotPath(raw, key);
   }
@@ -528,6 +592,7 @@ export function announceIngestionNotice(
 ): void {
   const fields = { file: entry.file, key: entry.key, reason: entry.reason, remedy: entry.remedy };
   if (entry.action === 'refused') logger.error('goodvibes settings: a setting could not be ingested', fields);
+  else if (entry.action === 'held') logger.warn('goodvibes settings: a stored setting could not be read; its feature is held closed', fields);
   else logger.warn('goodvibes settings: a setting was skipped', fields);
   // A refusal stops the program, so it is said every time, with its remedy.
   // A skipped setting is said once per tree, in one short line: not
@@ -587,6 +652,9 @@ export function describeIngestionNotice(entry: SettingsIngestionNotice): string 
     return entry.key === '(whole file)'
       ? `Settings file ${where} refused: ${entry.reason}. ${entry.remedy}`
       : `Setting ${entry.key} refused (${where}): ${entry.reason}. ${entry.remedy}`;
+  }
+  if (entry.action === 'held') {
+    return `Setting ${entry.key} could not be read (${where}): it ${entry.reason}. ${entry.remedy[0]!.toUpperCase()}${entry.remedy.slice(1)}.`;
   }
   // The first clause of the reason; the full reason and remedy are in the activity log.
   const why = entry.reason.split(';')[0]!.trim().replace(/^is /, '');

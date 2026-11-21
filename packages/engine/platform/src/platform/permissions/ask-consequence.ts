@@ -28,6 +28,7 @@ import { basename } from 'node:path';
 import { unrecoverableDeletionIn, fileOperationDestroys } from '../gate/unrecoverable-commands.js';
 import { walkCommands } from '../gate/command-walk.js';
 import { splitShellCommand, extractCommandArgs } from '../runtime/permissions/rules/prefix.js';
+import { execShellCommandsAt } from '../runtime/permissions/exec-command-text.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import type { GateRiskFamily } from '../gate/batteries/risk-family.js';
 import type { GateFactName } from '../gate/reading.js';
@@ -134,7 +135,7 @@ export function commandEffect(command: string): CommandEffect | undefined {
   const split = splitShellCommand(command);
   if (split.opaque || split.segments.length !== 1) return undefined;
   // The sentence is about the command line itself: a script it runs is not read for it.
-  return walkCommands<CommandEffect>([command], (run) => programEffect(run.name, run.args), {
+  return walkCommands<CommandEffect>([{ text: command }], (run) => programEffect(run.name, run.args), {
     directory: undefined, tooDeep: () => undefined, onScriptTooLarge: () => undefined, readScripts: false,
   });
 }
@@ -147,7 +148,8 @@ export function codeUndoFact(toolName: string, args: Record<string, unknown>, ow
   directory: string | undefined): string | undefined {
   // A tool that declares the operator act irreversible is the tool's own fact.
   if (ownerOnly === 'irreversible-operator') return 'the tool declares this cannot be undone';
-  const commands = extractCommandArgs(args);
+  const listed = execShellCommandsAt(args);
+  const commands = listed.length > 0 ? listed : extractCommandArgs(args).map((text) => ({ text }));
   const destroys = commands.length > 0 ? unrecoverableDeletionIn(commands, directory) : undefined;
   // What code could not read is not known to destroy anything; the gate asks, but nothing is claimed.
   if (destroys !== undefined && !destroys.unread) return destroys.reason;

@@ -14,7 +14,8 @@
  * scripts a command runs. A command nested too deeply to read, a script too
  * large to read, and a script that cannot be read (missing when the call is
  * judged, read from a shell's standard input, relative to a directory code
- * cannot follow) count as a deletion, so what code cannot see fails closed. What these rules do not
+ * cannot follow, a script path or a `-c` / `eval` program built when the
+ * command runs) count as a deletion, so what code cannot see fails closed. What these rules do not
  * name stays a judgment, where a confident reading still puts it on the
  * owner's list.
  *
@@ -23,6 +24,7 @@
  * script a command runs, one stat and one read of at most 256 KiB.
  */
 import { walkCommands } from './command-walk.js';
+import type { ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 
 /** What a call destroys, in words. */
 export interface Destruction {
@@ -96,10 +98,10 @@ function programDestroys(name: string, args: readonly string[]): string | undefi
 /**
  * The first destruction the commands carry (`git clean deletes untracked
  * files, which git keeps no copy of`); undefined when none of them is one
- * these rules recognise. `directory` is where a relative script path is read
- * from.
+ * these rules recognise. `directory` is the call's working directory: a
+ * command without a `cwd` of its own reads a relative script path from it.
  */
-export function unrecoverableDeletionIn(commands: readonly string[], directory: string | undefined): Destruction | undefined {
+export function unrecoverableDeletionIn(commands: readonly ShellCommandAt[], directory: string | undefined): Destruction | undefined {
   return walkCommands<Destruction>(commands, (run) => {
     const reason = programDestroys(run.name, run.args);
     return reason === undefined ? undefined : { reason, unread: false };

@@ -113,6 +113,8 @@ export interface MemoryRecordReviewInput {
  * proposal that changes only the window can be applied.
  */
 export interface MemoryRecordUpdateInput {
+  /** The record's class; the store checks it as it checks a new record's. */
+  readonly cls?: string | undefined;
   readonly scope?: string | undefined;
   readonly summary?: string | undefined;
   readonly detail?: string | undefined;

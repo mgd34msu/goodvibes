@@ -35,6 +35,15 @@
  * a `cd` code cannot follow (`cd "$DIR"`, `cd -`, `popd`). A visitor that must
  * fail closed can. A compiled program is not read: what it runs is its own.
  *
+ * Command text the shell builds as the command runs (`bash -c "$CMD"`,
+ * `eval "$X"`, `flock -c "$C"`) is still read as written, each variable or
+ * substitution in it one built word, so `sh -c "cd $DIR && make"` reads `make`
+ * and a variable that is only a `cd` target or an argument stays an argument.
+ * When such text leaves the program itself to the variable (`bash -c "$CMD"`),
+ * and when the script a shell or `source` is handed is a built path
+ * (`sh "$F"`), what runs cannot be known when the call is judged: that answers
+ * `onUnread`, naming the text as built when the command runs.
+ *
  * Cost: one parse of each command text; per shell script a command runs, one
  * stat and one read of at most 256 KiB, each script once per walk.
  */
@@ -43,6 +52,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { CommandNode, ShellNode } from '../runtime/permissions/normalization/ast.js';
 import { parseCommandAST } from '../runtime/permissions/normalization/parser.js';
+import type { ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 
 /** How a wrapper program reads the words after it to find the program it runs. */
 interface WrapperSpec {
@@ -154,8 +164,12 @@ export interface CommandWalkOptions<T> {
 
 /** One walk: what it reads shares the scripts it has read, so a script that runs itself is read once. */
 export interface CommandWalker<T> {
-  /** The first answer for a command text a shell reads. */
-  command(text: string): T | undefined;
+  /**
+   * The first answer for a command text a shell reads, run in `cwd` when the
+   * command names its own directory (an exec entry's `cwd`, relative to the
+   * walk's directory or absolute), else in the walk's directory.
+   */
+  command(text: string, cwd?: string | undefined): T | undefined;
   /** The first answer for a program started with this argv, no shell reading it. */
   argv(program: string, args: readonly string[]): T | undefined;
 }
@@ -247,7 +261,12 @@ interface Place {
   dir: string | undefined;
   /** For each `( ... )` group the walk is inside, the directory to return to when it ends. */
   readonly groups: Array<string | undefined>;
+  /** The text is built when the command runs (a `-c` or `eval` string holding a variable): a built program in it is unknown content. */
+  readonly built: boolean;
 }
+
+/** What `onUnread` is told for command text built as the command runs. */
+const BUILT_COMMAND = 'a command whose text is built when the command runs';
 
 /** What one command runs in. */
 interface RunContext {
@@ -393,18 +412,24 @@ export function commandWalker<T>(visit: ProgramVisitor<T>, options: CommandWalkO
     }
     const operand = argWords[index];
     if (commandString) {
-      return operand !== undefined && !operand.built ? descend(name, depth, () => command(operand.text, depth + 1, ctx.place.dir)) : undefined;
+      return operand !== undefined ? descend(name, depth, () => command(operand.text, depth + 1, ctx.place.dir, operand.built)) : undefined;
     }
     if (stdin || operand === undefined) {
       // No script named: the shell reads its commands from standard input.
       if (ctx.input !== undefined && !ctx.input.built) return script(ctx.input.text, depth, ctx.place);
       return options.onUnread?.('commands a shell reads from its standard input');
     }
-    return operand.built ? undefined : script(operand.text, depth, ctx.place);
+    return operand.built ? builtScript(operand.text) : script(operand.text, depth, ctx.place);
   };
+
+  /** A script whose path is built when the command runs: what it runs cannot be known when the call is judged. */
+  const builtScript = (path: string): T | undefined =>
+    options.readScripts === false ? undefined : options.onUnread?.(`the script ${path}, whose path is built when the command runs`);
 
   const program = (word: ShellWord, argWords: readonly ShellWord[], inputArgs: boolean, depth: number, ctx: RunContext): T | undefined => {
     const name = baseName(word.text);
+    // Inside text built when the command runs, a built program is whatever the variable holds: unknown content.
+    if (word.built && ctx.place.built) return options.onUnread?.(BUILT_COMMAND);
     const found = visit({
       name, built: word.built, args: argWords.map((arg) => arg.text),
       staticArgs: argWords.filter((arg) => !arg.built).map((arg) => arg.text),
@@ -426,7 +451,12 @@ export function commandWalker<T>(visit: ProgramVisitor<T>, options: CommandWalkO
       }
     }
     if (name === 'eval') {
-      return descend(name, depth, () => commandIn(argWords.filter((arg) => !arg.built).map((arg) => arg.text).join(' '), depth + 1, ctx.place));
+      const text = argWords.map((arg) => arg.text).join(' ');
+      if (!argWords.some((arg) => arg.built)) return descend(name, depth, () => commandIn(text, depth + 1, ctx.place));
+      // Built text runs in this shell too, so where its `cd` leaves the shell cannot be followed after it.
+      const found = descend(name, depth, () => commandIn(text, depth + 1, { dir: ctx.place.dir, groups: [], built: true }));
+      ctx.place.dir = undefined;
+      return found;
     }
     if (name === 'alias') {
       // `alias p='git push'` defines a name for the command; the definition is read as a command.
@@ -436,7 +466,8 @@ export function commandWalker<T>(visit: ProgramVisitor<T>, options: CommandWalkO
     }
     if (name === 'source' || name === '.') {
       const file = argWords[0];
-      return file !== undefined && !file.built ? script(file.text, depth, ctx.place, true) : undefined;
+      if (file === undefined) return undefined;
+      return file.built ? builtScript(file.text) : script(file.text, depth, ctx.place, true);
     }
     if (SHELLS.has(name)) return shell(name, argWords, depth, ctx);
     // A program named by a path may be a script the model wrote: read what it runs.
@@ -466,7 +497,7 @@ export function commandWalker<T>(visit: ProgramVisitor<T>, options: CommandWalkO
         if (spec.valueFlags?.has(next.text)) { index += 2; continue; }
         if (spec.commandFlags?.has(next.text)) {
           const text = list[index + 1];
-          return text !== undefined && !text.built ? descend(baseName(word.text), depth, () => command(text.text, depth + 1, ctx.place.dir)) : undefined;
+          return text !== undefined ? descend(baseName(word.text), depth, () => command(text.text, depth + 1, ctx.place.dir, text.built)) : undefined;
         }
         if (next.text.startsWith('-') || isAssignment(next.text)) { index++; continue; }
         if (positionals > 0) { positionals--; index++; continue; }
@@ -507,22 +538,33 @@ export function commandWalker<T>(visit: ProgramVisitor<T>, options: CommandWalkO
     return tree(parsed, depth, place, false);
   };
 
-  /** A command text run in a shell of its own, starting in `dir`. */
-  const command = (text: string, depth: number, dir: string | undefined): T | undefined =>
-    commandIn(text, depth, { dir, groups: [] });
+  /** A command text run in a shell of its own, starting in `dir`; `built` when the text is built as the command runs. */
+  const command = (text: string, depth: number, dir: string | undefined, built = false): T | undefined =>
+    commandIn(text, depth, { dir, groups: [], built });
 
   return {
-    command: (text) => command(text, 0, options.directory),
+    command: (text, cwd) => command(text, 0, entryDirectory(cwd, options.directory)),
     argv: (programName, args) => words([programName, ...args].map((text) => ({ text, built: false })), 0, false,
-      { place: { dir: options.directory, groups: [] }, piped: false, input: undefined }),
+      { place: { dir: options.directory, groups: [], built: false }, piped: false, input: undefined }),
   };
 }
 
+/**
+ * The directory a command with its own `cwd` runs in, resolved the way the
+ * exec tool resolves it: an absolute one as it is, a relative one against the
+ * call's directory (unknown when that is), none at all the call's directory.
+ */
+function entryDirectory(cwd: string | undefined, directory: string | undefined): string | undefined {
+  if (cwd === undefined) return directory;
+  if (isAbsolute(cwd)) return cwd;
+  return directory === undefined ? undefined : resolve(directory, cwd);
+}
+
 /** The first answer `visit` gives for a program any of the commands runs, in one walk. */
-export function walkCommands<T>(commands: readonly string[], visit: ProgramVisitor<T>, options: CommandWalkOptions<T>): T | undefined {
+export function walkCommands<T>(commands: readonly ShellCommandAt[], visit: ProgramVisitor<T>, options: CommandWalkOptions<T>): T | undefined {
   const walker = commandWalker(visit, options);
-  for (const text of commands) {
-    const found = walker.command(text);
+  for (const entry of commands) {
+    const found = walker.command(entry.text, entry.cwd);
     if (found !== undefined) return found;
   }
   return undefined;

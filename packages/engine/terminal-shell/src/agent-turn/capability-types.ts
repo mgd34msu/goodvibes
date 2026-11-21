@@ -54,8 +54,6 @@ export type CapabilityProbe =
   | { readonly kind: 'model-tool-registered'; readonly toolName: string }
   /** An MCP server of this name is connected and not blocked or quarantined. */
   | { readonly kind: 'mcp-server-connected'; readonly serverName: string }
-  /** A specific MCP tool is listed by a connected server. */
-  | { readonly kind: 'mcp-tool-available'; readonly qualifiedName: string }
   /** A daemon operator method is served, not merely cataloged. */
   | { readonly kind: 'operator-method-served'; readonly methodId: string }
   /**

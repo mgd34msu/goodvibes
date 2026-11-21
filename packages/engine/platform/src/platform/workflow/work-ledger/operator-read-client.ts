@@ -233,10 +233,15 @@ export function createOperatorWorkLedgerReadClient(
       const subscription = Symbol();
       listeners.set(subscription, { listener, onUnavailable, onResumed });
       if (listeners.size === 1) { observedCursor = -1; failures = 0; unavailableReason = undefined; schedule(0, generation); }
-      else if (unavailableReason !== undefined && onUnavailable) {
+      else if (unavailableReason !== undefined) {
         // Joining during an outage: this subscriber is told now, as the others were when it began.
         const reason = unavailableReason;
-        notifyObserver(() => onUnavailable(reason));
+        if (onUnavailable) notifyObserver(() => onUnavailable(reason));
+      } else if (observedCursor >= 0 && lastSnapshot) {
+        // Joining a healthy observation: this subscriber gets the state the others already have,
+        // instead of nothing until the cursor next moves.
+        const current = lastSnapshot;
+        notifyObserver(() => listener(structuredClone(current)));
       }
       let attached = true;
       return () => {

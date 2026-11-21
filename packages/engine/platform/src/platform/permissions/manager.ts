@@ -1711,7 +1711,7 @@ export class PermissionManager {
     if (request.action === 'add' || request.action === 'enable') {
       const command = hook.type === 'command' && typeof (hook as { readonly command?: unknown }).command === 'string' ? (hook as { readonly command: string }).command : undefined;
       const neverRun = command === undefined ? undefined
-        : await this.neverRunMatch({ commands: [command], argv: [], code: [], pieces: [] }, this.configReader.getWorkingDirectory() ?? undefined, signal);
+        : await this.neverRunMatch({ commands: [{ text: command }], argv: [], code: [], pieces: [] }, this.configReader.getWorkingDirectory() ?? undefined, signal);
       if (neverRun) return { approved: false, reason: this.neverRunResult(neverRun, analysis).detail ?? `the never-run rule "${neverRun.rule}" refuses this hook` };
     }
     const configured = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions?.tools;

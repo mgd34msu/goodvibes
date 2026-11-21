@@ -1232,7 +1232,7 @@ Create a pending pair request and receive a challenge for operator approval.
 
 ### `pair.verify`
 
-Exchange an approved pair request and challenge for a scoped peer token. Answers 404 while the request is still pending or the challenge does not match, so the device keeps polling; a rejected, expired or already verified request answers 410 REMOTE_PAIR_REQUEST_SETTLED and the device must request pairing again.
+Exchange an approved pair request and challenge for a scoped peer token. Answers 404 while the request is still pending or the challenge does not match, so the device keeps polling; a rejected, expired or already verified request answers 410 REMOTE_PAIR_REQUEST_SETTLED and the device must request pairing again. A verify sent again with the same challenge before the request expires, while the token the first verify issued has never been used, returns a new token and revokes the unused one; this recovers a verify whose answer was lost.
 
 - HTTP: `POST /api/remote/pair/verify`
 - Auth: `none`

@@ -456,10 +456,13 @@ export async function runSurface(input: AnalyzeInput, projectRoot: string): Prom
 
   for (const file of targetFiles) {
     const fileExports = await collectExportedSymbols([file], intelligence);
+    if (fileExports.unreadable !== undefined) {
+      return analyzeRefusal(`Cannot read file: ${relative(projectRoot, fileExports.unreadable)}`, 'Pass files that exist inside the project and can be read.');
+    }
 
     surface.push({
       file: relative(projectRoot, file),
-      exports: fileExports.map(({ name, kind, line }) => ({ name, kind: kind ?? 'unknown', line })),
+      exports: fileExports.exported.map(({ name, kind, line }) => ({ name, kind: kind ?? 'unknown', line })),
     });
   }
 

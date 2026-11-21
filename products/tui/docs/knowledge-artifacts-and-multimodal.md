@@ -167,6 +167,8 @@ Large file uploads should use daemon upload bodies rather than JSON inline data:
 - `POST /api/knowledge/ingest/artifact` accepts existing artifact references, daemon-local paths, remote URIs, multipart files, and raw binary uploads.
 - Keep JSON `dataBase64` only for small inline control payloads. PDFs, photos, archives, and large documents should use multipart or raw upload bodies.
 
+A remote URI is fetched only from a public address unless `network.remoteFetch.allowPrivateHosts` is on: every hop, redirects included, resolves the host and checks each address it resolves to, and the request goes to the checked address. A public name that resolves to a loopback or private address is refused with `400` `DESTINATION_REFUSED`, naming the address (`Artifact URI blocked by SSRF policy: host "<name>" resolves to 127.0.0.1, a loopback address. ...`). That setting and `storage.artifacts.maxBytes` take effect at the next upload or fetch, without a restart.
+
 The host-side artifact storage cap is configured with `storage.artifacts.maxBytes`. The default is 512 MiB.
 
 ## Multimodal

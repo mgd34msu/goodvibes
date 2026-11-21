@@ -209,7 +209,6 @@ the jobs that read it restore it instead of rebuilding.
 | `typecheck` | The test, type-test, installer and product projects against the built declarations; API reports, exports, examples, browser compatibility, package metadata |
 | `proofs` | `bun run test` |
 | `live-sandbox` | `bun run test:live` inside real bubblewrap, where a skip fails |
-| `measure` | `bun run measure:check` against the recorded budgets |
 | `package` | Pack, publint, install smoke, packaged-artifact conformance and bundle sizes; the three Linux programs built, the built-program smoke files, the web UI's browser journeys against its production build, the daemon inside bubblewrap and the web UI against a real daemon; then no file in the checkout may have changed |
 | `security-audit` | Dependency audit and secret scan |
 | `native` | Pushes to `main` and manual runs, not pull requests: the daemon built and run on Linux ARM, macOS Intel and macOS ARM, and on macOS its launchd service started, restarted and stopped in the logged-in session's domain |

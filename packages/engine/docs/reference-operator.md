@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `648`
+- Methods: `650`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -1245,6 +1245,9 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
               },
               "note": {
                 "type": "string"
+              },
+              "relayRequestId": {
+                "type": "string"
               }
             },
             "required": [
@@ -2326,6 +2329,9 @@ Cancel a pending approval; send `expectedRevision`, the `revision` you read. An 
               },
               "note": {
                 "type": "string"
+              },
+              "relayRequestId": {
+                "type": "string"
               }
             },
             "required": [
@@ -3401,6 +3407,9 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                 "type": "number"
               },
               "note": {
+                "type": "string"
+              },
+              "relayRequestId": {
                 "type": "string"
               }
             },
@@ -4497,6 +4506,9 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                 "type": "number"
               },
               "note": {
+                "type": "string"
+              },
+              "relayRequestId": {
                 "type": "string"
               }
             },
@@ -5709,6 +5721,9 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                   "type": "number"
                 },
                 "note": {
+                  "type": "string"
+                },
+                "relayRequestId": {
                   "type": "string"
                 }
               },
@@ -7357,6 +7372,9 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                 "type": "number"
               },
               "note": {
+                "type": "string"
+              },
+              "relayRequestId": {
                 "type": "string"
               }
             },
@@ -26947,7 +26965,7 @@ Return schedule records.
     },
     "defaultTimezone": {
       "type": "string",
-      "description": "The IANA zone a cron schedule created without a timezone is stored in: the host's own zone."
+      "description": "The IANA zone a cron schedule created without a timezone is stored in: daemon.timezone (where the owner is) when set, else the host's own zone."
     }
   },
   "required": [
@@ -30850,7 +30868,7 @@ The calendars the configured account can reach (the Google calendar list, or the
 
 #### `calendar.events.create`
 
-Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID: read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.
+Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.
 
 - Title: `Create Calendar Event`
 - Source: `builtin`
@@ -44615,7 +44633,7 @@ Update companion-chat session metadata, including session-local provider, model 
 
 #### `companion.chat.turns.cancel`
 
-Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: "cancelled"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: "stopping"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.
+Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: "cancelled"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). A stop without `turnId` that lands before the next turn starts (a message still being saved, or one queued to start) cancels that turn: the answer is `cancelled: true` with `stoppedBeforeStart: true` (and `messageIds` when a queued message was named), no `turnId`, and the message stays in the transcript as `unanswered`. No turn in flight and none on its way is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: "stopping"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.
 
 - Title: `Cancel Companion Chat Turn`
 - Source: `builtin`
@@ -44665,13 +44683,21 @@ Stop the in-flight turn for a companion chat session, a true server-side stop: t
     "alreadyCancelled": {
       "type": "boolean"
     },
+    "stoppedBeforeStart": {
+      "type": "boolean"
+    },
+    "messageIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "partialPersisted": {
       "type": "boolean"
     }
   },
   "required": [
     "sessionId",
-    "turnId",
     "cancelled",
     "partialPersisted"
   ],
@@ -45085,6 +45111,9 @@ Remove the explicit value of one config key through the daemon API so it reads a
         "approvalId": {
           "type": "string"
         },
+        "followable": {
+          "type": "boolean"
+        },
         "key": {
           "type": "string"
         },
@@ -45441,6 +45470,9 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
         "approvalId": {
           "type": "string"
         },
+        "followable": {
+          "type": "boolean"
+        },
         "key": {
           "type": "string"
         },
@@ -45637,6 +45669,9 @@ Write several config values on the daemon as one update: `{ entries: [{ key, val
         },
         "approvalId": {
           "type": "string"
+        },
+        "followable": {
+          "type": "boolean"
         },
         "key": {
           "type": "string"
@@ -46215,7 +46250,7 @@ Stop a contract and every unit agent it runs; its status line records how many f
 
 #### `contracts.dispatch`
 
-Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).
+Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller, also after a daemon restart, and the session made for it still ends when it settles. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).
 
 - Title: `Dispatch Contract Work`
 - Source: `builtin`
@@ -49232,6 +49267,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
         "ownerPrincipalId": {
           "type": "string"
         },
+        "sessionCreatedForDispatch": {
+          "type": "boolean"
+        },
         "ask": {
           "type": "string"
         },
@@ -49961,6 +49999,13 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                               "definitionAfter"
                             ],
                             "additionalProperties": false
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "bubblewrap",
+                              "host"
+                            ]
                           }
                         },
                         "required": [
@@ -50847,6 +50892,13 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                               "definitionAfter"
                             ],
                             "additionalProperties": false
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "bubblewrap",
+                              "host"
+                            ]
                           }
                         },
                         "required": [
@@ -52148,6 +52200,13 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                                     "definitionAfter"
                                   ],
                                   "additionalProperties": false
+                                },
+                                "backend": {
+                                  "type": "string",
+                                  "enum": [
+                                    "bubblewrap",
+                                    "host"
+                                  ]
                                 }
                               },
                               "required": [
@@ -53446,6 +53505,13 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                         "definitionAfter"
                       ],
                       "additionalProperties": false
+                    },
+                    "backend": {
+                      "type": "string",
+                      "enum": [
+                        "bubblewrap",
+                        "host"
+                      ]
                     }
                   },
                   "required": [
@@ -57310,6 +57376,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
     "ownerPrincipalId": {
       "type": "string"
     },
+    "sessionCreatedForDispatch": {
+      "type": "boolean"
+    },
     "ask": {
       "type": "string"
     },
@@ -58039,6 +58108,13 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                           "definitionAfter"
                         ],
                         "additionalProperties": false
+                      },
+                      "backend": {
+                        "type": "string",
+                        "enum": [
+                          "bubblewrap",
+                          "host"
+                        ]
                       }
                     },
                     "required": [
@@ -58925,6 +59001,13 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                           "definitionAfter"
                         ],
                         "additionalProperties": false
+                      },
+                      "backend": {
+                        "type": "string",
+                        "enum": [
+                          "bubblewrap",
+                          "host"
+                        ]
                       }
                     },
                     "required": [
@@ -60226,6 +60309,13 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -61524,6 +61614,13 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                     "definitionAfter"
                   ],
                   "additionalProperties": false
+                },
+                "backend": {
+                  "type": "string",
+                  "enum": [
+                    "bubblewrap",
+                    "host"
+                  ]
                 }
               },
               "required": [
@@ -65377,6 +65474,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
           "ownerPrincipalId": {
             "type": "string"
           },
+          "sessionCreatedForDispatch": {
+            "type": "boolean"
+          },
           "ask": {
             "type": "string"
           },
@@ -66106,6 +66206,13 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -66992,6 +67099,13 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -68293,6 +68407,13 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                       "definitionAfter"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "backend": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bubblewrap",
+                                      "host"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -69591,6 +69712,13 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "definitionAfter"
                         ],
                         "additionalProperties": false
+                      },
+                      "backend": {
+                        "type": "string",
+                        "enum": [
+                          "bubblewrap",
+                          "host"
+                        ]
                       }
                     },
                     "required": [
@@ -73667,6 +73795,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
         "ownerPrincipalId": {
           "type": "string"
         },
+        "sessionCreatedForDispatch": {
+          "type": "boolean"
+        },
         "ask": {
           "type": "string"
         },
@@ -74396,6 +74527,13 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                               "definitionAfter"
                             ],
                             "additionalProperties": false
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "bubblewrap",
+                              "host"
+                            ]
                           }
                         },
                         "required": [
@@ -75282,6 +75420,13 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                               "definitionAfter"
                             ],
                             "additionalProperties": false
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "bubblewrap",
+                              "host"
+                            ]
                           }
                         },
                         "required": [
@@ -76583,6 +76728,13 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                                     "definitionAfter"
                                   ],
                                   "additionalProperties": false
+                                },
+                                "backend": {
+                                  "type": "string",
+                                  "enum": [
+                                    "bubblewrap",
+                                    "host"
+                                  ]
                                 }
                               },
                               "required": [
@@ -77881,6 +78033,13 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "definitionAfter"
                       ],
                       "additionalProperties": false
+                    },
+                    "backend": {
+                      "type": "string",
+                      "enum": [
+                        "bubblewrap",
+                        "host"
+                      ]
                     }
                   },
                   "required": [
@@ -80175,6 +80334,17 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                   "ownerOnly": {
                     "type": "boolean"
                   },
+                  "modelRefused": {
+                    "type": "boolean"
+                  },
+                  "confirmation": {
+                    "type": "string",
+                    "enum": [
+                      "confirm",
+                      "owner-request",
+                      "not-declined"
+                    ]
+                  },
                   "irreversible": {
                     "type": "boolean"
                   },
@@ -81076,6 +81246,17 @@ Return a single gateway method descriptor.
         "ownerOnly": {
           "type": "boolean"
         },
+        "modelRefused": {
+          "type": "boolean"
+        },
+        "confirmation": {
+          "type": "string",
+          "enum": [
+            "confirm",
+            "owner-request",
+            "not-declined"
+          ]
+        },
         "irreversible": {
           "type": "boolean"
         },
@@ -81351,6 +81532,17 @@ Return the gateway method catalog.
           },
           "ownerOnly": {
             "type": "boolean"
+          },
+          "modelRefused": {
+            "type": "boolean"
+          },
+          "confirmation": {
+            "type": "string",
+            "enum": [
+              "confirm",
+              "owner-request",
+              "not-declined"
+            ]
           },
           "irreversible": {
             "type": "boolean"
@@ -82053,7 +82245,7 @@ List the relay codes this daemon issued, one per device paired through the relay
 
 #### `relay.codes.revoke`
 
-Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.
+Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 RELAY_CODE_REVOKED, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.
 
 - Title: `Revoke Relay Code`
 - Source: `builtin`
@@ -82109,7 +82301,7 @@ Revoke one device's relay code. Revocation is immediate: every relay connection 
 
 #### `relay.pairing.mint`
 
-Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.
+Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.
 
 - Title: `Mint A Relay Pairing Payload`
 - Source: `builtin`
@@ -82183,6 +82375,7 @@ Return the pairing payload one device scans to reach this daemon through the rel
       "type": "string",
       "enum": [
         "disabled",
+        "failed",
         "idle",
         "connecting",
         "registered",
@@ -82240,6 +82433,7 @@ Whether this daemon is registered with the relay, and what state its registratio
       "type": "string",
       "enum": [
         "disabled",
+        "failed",
         "idle",
         "connecting",
         "registered",
@@ -82296,7 +82490,7 @@ Whether this daemon is registered with the relay, and what state its registratio
 
 #### `update.check`
 
-Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran).
+Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it).
 
 - Title: `Check For An Update Now`
 - Source: `builtin`
@@ -82486,7 +82680,8 @@ Run one update check immediately instead of waiting for the next interval, and r
       "enum": [
         "ran",
         "already-in-flight",
-        "loop-off"
+        "loop-off",
+        "installing"
       ]
     }
   },
@@ -84896,6 +85091,25 @@ Return the full body and attachment metadata for a single inbox message by IMAP 
     },
     "uidValidity": {
       "type": "number"
+    },
+    "bodyUnavailable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "section",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -104490,11 +104704,161 @@ Return structured extraction records for ingested sources.
 }
 ```
 
-#### `knowledge.graphql.execute`
+#### `knowledge.graphql.mutate`
 
-Execute a GraphQL query or mutation against the dedicated knowledge domain endpoint.
+Run a GraphQL mutation against the dedicated knowledge domain endpoint (ingest a URL, run a job, change a schedule, materialize a projection...). Admin, and it may fetch from the network, so over the relay with relay.requireStepUpForMutations on it needs a passkey confirmation. A query is refused 400 GRAPHQL_QUERY_NOT_ALLOWED naming knowledge.graphql.query.
 
-- Title: `Execute Knowledge GraphQL`
+- Title: `Run a Knowledge GraphQL Mutation`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/knowledge/graphql/mutate`
+- Scopes: `write:knowledge`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "operationName": {
+      "type": "string"
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {}
+        ]
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+#### `knowledge.graphql.query`
+
+Run a GraphQL query against the dedicated knowledge domain endpoint (POST, or GET with the query in the URL). A read: it changes nothing. A mutation is refused 400 GRAPHQL_MUTATION_NOT_ALLOWED naming knowledge.graphql.mutate.
+
+- Title: `Query Knowledge GraphQL`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
@@ -107858,6 +108222,31 @@ Stop a queued or running knowledge job run this daemon started: it is settled fa
               "properties": {
                 "refreshed": {
                   "type": "number"
+                },
+                "attempted": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sourceId",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -108394,6 +108783,31 @@ Return recent knowledge job runs.
                 "properties": {
                   "refreshed": {
                     "type": "number"
+                  },
+                  "attempted": {
+                    "type": "number"
+                  },
+                  "failed": {
+                    "type": "number"
+                  },
+                  "failures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceId": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sourceId",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -109062,6 +109476,31 @@ Queue or run a structured knowledge maintenance job.
               "properties": {
                 "refreshed": {
                   "type": "number"
+                },
+                "attempted": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sourceId",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -130991,7 +131430,7 @@ The memory store's point-in-time copies, newest first: the daily copy, the copy 
 
 #### `memory.snapshots.restore`
 
-Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: requires confirm: true on an explicit request from the owner's own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.
+Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.
 
 - Title: `Restore Memory From a Copy`
 - Source: `builtin`
@@ -134305,7 +134744,7 @@ Change one recorded occasion in place: any of date, kind, person, recurrence, le
 
 #### `pairing.handoff.complete`
 
-Apply the surface's per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent's credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off's token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority is not offered a passkey.
+Apply the surface's per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent's credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off's token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority cannot complete a hand-off, so pairing.handoff.create offers it nothing to complete.
 
 - Title: `Complete Pairing Hand-off`
 - Source: `builtin`
@@ -134431,7 +134870,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -134765,7 +135204,7 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
 
 #### `pairing.tokens.delete`
 
-Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.
+Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY.
 
 - Title: `Revoke Paired Device Token`
 - Source: `builtin`
@@ -134798,27 +135237,89 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "id": {
-      "type": "string"
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "alsoRevoked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "revoked",
+        "alsoRevoked"
+      ],
+      "additionalProperties": false
     },
-    "revoked": {
-      "type": "boolean"
-    },
-    "alsoRevoked": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "followable": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "id",
-    "revoked",
-    "alsoRevoked"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -135037,11 +135538,11 @@ Change the user-visible name of a paired device token. An unknown id is a 404 PA
 
 #### `pairing.tokens.revokeShared`
 
-Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
+Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device he paired himself, his sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
 
 - Title: `Revoke The Legacy Shared Token`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:control-plane`
@@ -135395,7 +135896,7 @@ Today's spending pools: the daily item budget, the separate overage budget that 
 
 #### `payments.cards.create`
 
-Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.
+Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. Sending the same card again (the same label, number and expiry, for example after an answer that was lost) returns the card already stored and stores nothing new; no Idempotency-Key is taken, because a kept request would be a hash of the card on disk. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.
 
 - Title: `Add a Payment Card`
 - Source: `builtin`
@@ -135697,7 +136198,7 @@ Configured cards, as METADATA ONLY: id, label, brand, last four digits, whether 
 
 #### `payments.checkout.approve`
 
-The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.
+The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.
 
 - Title: `Approve One Purchase`
 - Source: `builtin`
@@ -137322,7 +137823,7 @@ The purchase audit ledger: what was bought, from which merchant registrable doma
 
 #### `payments.standing.create`
 
-The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments repeat sends both. The owner's own act: an agent cannot add one.
+The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments repeat sends both. The owner's own act: an agent cannot add one.
 
 - Title: `Authorise a Purchase in Advance`
 - Source: `builtin`
@@ -137475,7 +137976,7 @@ The owner authorises, in advance, a purchase a schedule or trigger may start wit
 
 #### `payments.standing.delete`
 
-Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments repeats remove sends both. The owner's own act.
+Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments stop-repeat sends both. The owner's own act.
 
 - Title: `Withdraw a Standing Authorisation`
 - Source: `builtin`
@@ -149913,7 +150414,7 @@ The durable "always allow" grants a person gave, per capability and per device, 
 
 #### `devices.grants.revoke`
 
-Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.
+Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked: a grant already revoked answers revoked 0, so a repeat after a lost reply succeeds. Naming nothing (no grantId, nodeId or capabilityId) is 400 INVALID_ARGUMENT, and a grantId the record never held is 404 GRANT_NOT_FOUND (read devices.grants.list for the ids); nothing is revoked either way.
 
 - Title: `Revoke a Device Capability Grant`
 - Source: `builtin`
@@ -149944,7 +150445,45 @@ Revoke durable grants by grant id, by device, by capability, or any combination.
       "type": "string"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "grantId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "grantId"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "properties": {
+        "capabilityId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "capabilityId"
+      ],
+      "additionalProperties": true
+    }
+  ]
 }
 ```
 
@@ -155379,7 +155918,7 @@ Every session this daemon hosts, most recently updated first. Terminated session
 
 #### `sessions.hosted.share`
 
-Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted session's owners, so it may attach, read the transcript and watch the session's turns live (`read:own-sessions`). Only an owner of the session or an admin shares it; anyone else is refused 403 NOT_YOURS. The owners are saved with the session and outlive its end and a restart; sharing with a principal that already owns it changes nothing (`added: false`). Attaching never adds an owner, so this is the one way another credential joins a session. ws-only invoke verb; no REST binding.
+Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted session's owners, so it may attach, read the transcript and watch the session's turns live (`read:own-sessions`). Only an owner of the session or an admin shares it; anyone else is refused 403 NOT_YOURS. A principal this daemon does not know (no such user, no live pairing) is refused 404 PRINCIPAL_NOT_FOUND, naming local_auth.status and pairing.tokens.list. The owners are saved with the session and outlive its end and a restart; sharing with a principal that already owns it changes nothing (`added: false`). Attaching never adds an owner, so this is the one way another credential joins a session; sessions.hosted.unshare undoes it. ws-only invoke verb; no REST binding.
 
 - Title: `Share a Daemon-Hosted Session`
 - Source: `builtin`
@@ -155553,6 +156092,187 @@ Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted
     "session",
     "owners",
     "added"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `sessions.hosted.unshare`
+
+Remove a principal from a hosted session's owners: it can no longer attach, read the transcript or watch the session, and every client it attached is detached at once (the session's detach policy applies when those were the last attached). Only an owner of the session or an admin does it; anyone else is refused 403 NOT_YOURS. The last owner is never removed (409 HOSTED_SESSION_LAST_OWNER): share with another principal first, or end the session. Removing a principal that is not an owner changes nothing (`removed: false`). The change is saved with the session. ws-only invoke verb; no REST binding.
+
+- Title: `Stop Sharing a Daemon-Hosted Session`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:sessions`
+- Emits events: `control.hosted_session_update`
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "principalId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "principalId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nativeConversation": {
+          "type": "boolean",
+          "const": true
+        },
+        "workspaceRoot": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "running",
+            "terminated"
+          ]
+        },
+        "detachPolicy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "kill",
+                "survive"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effectiveDetachPolicy": {
+          "type": "string",
+          "enum": [
+            "kill",
+            "survive"
+          ]
+        },
+        "attachedClients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "turnCount": {
+          "type": "number"
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "lastTurnAt": {
+          "type": "number"
+        },
+        "terminatedAt": {
+          "type": "number"
+        },
+        "terminatedReason": {
+          "type": "string"
+        },
+        "restoredFromDisk": {
+          "type": "boolean"
+        },
+        "originSurface": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
+            "yolo",
+            "plan"
+          ]
+        },
+        "contractIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "saveError": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceRoot",
+        "title",
+        "status",
+        "detachPolicy",
+        "effectiveDetachPolicy",
+        "attachedClients",
+        "createdAt",
+        "updatedAt",
+        "turnCount",
+        "messageCount",
+        "restoredFromDisk",
+        "contractIds"
+      ],
+      "additionalProperties": false
+    },
+    "owners": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "removed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "session",
+    "owners",
+    "removed"
   ],
   "additionalProperties": false
 }
@@ -157087,17 +157807,27 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
         "messageId": {
           "type": "string"
         },
-        "routedTo": {
-          "type": "string"
-        },
         "sessionId": {
           "type": "string"
+        },
+        "inputId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "spawn",
+            "continued-live",
+            "queued-follow-up",
+            "queued-for-surface",
+            "rejected"
+          ]
         }
       },
       "required": [
-        "messageId",
-        "routedTo",
-        "sessionId"
+        "sessionId",
+        "inputId",
+        "mode"
       ],
       "additionalProperties": false
     },
@@ -158109,6 +158839,9 @@ Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only p
         "approvalId": {
           "type": "string"
         },
+        "followable": {
+          "type": "boolean"
+        },
         "key": {
           "type": "string"
         },
@@ -158156,7 +158889,7 @@ Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only p
 
 #### `sessions.queuedMessages.delete`
 
-Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.
+Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may delete (403 NOT_YOURS otherwise).
 
 - Title: `Delete a Queued Mid-Turn Message`
 - Source: `builtin`
@@ -158216,7 +158949,7 @@ Remove a message still waiting in the mid-turn queue so it is never delivered. A
 
 #### `sessions.queuedMessages.edit`
 
-Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.
+Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may edit (403 NOT_YOURS otherwise).
 
 - Title: `Edit a Queued Mid-Turn Message`
 - Source: `builtin`
@@ -158280,7 +159013,7 @@ Replace the text of a message still waiting in the mid-turn queue. A message alr
 
 #### `sessions.queuedMessages.list`
 
-List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL.
+List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may read them (403 NOT_YOURS otherwise).
 
 - Title: `List Queued Mid-Turn Messages`
 - Source: `builtin`
@@ -159739,7 +160472,7 @@ Deliver a live steering message to the active agent for a shared session, option
 
 #### `sessions.toolCalls.cancel`
 
-Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured "cancelled by user" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.
+Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured "cancelled by user" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING. Below admin, only an owner of the session may cancel (403 NOT_YOURS otherwise).
 
 - Title: `Cancel One In-Flight Tool Call`
 - Source: `builtin`
@@ -159799,7 +160532,7 @@ Cancel a single running tool call by its callId, leaving the turn and any other 
 
 #### `sessions.turns.cancel`
 
-Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions.
+Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions, and below admin an owner of the session (403 NOT_YOURS otherwise).
 
 - Title: `Request Cancellation of an Expected Turn`
 - Source: `builtin`
@@ -168137,6 +168870,9 @@ Return registered web search provider capabilities.
         ],
         "additionalProperties": false
       }
+    },
+    "defaultProviderId": {
+      "type": "string"
     }
   },
   "required": [
@@ -191645,6 +192381,9 @@ Every approval record transition, pushed the moment the broker records it: an as
                 "type": "number"
               },
               "note": {
+                "type": "string"
+              },
+              "relayRequestId": {
                 "type": "string"
               }
             },

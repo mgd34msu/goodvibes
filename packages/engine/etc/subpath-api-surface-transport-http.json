@@ -289,7 +289,7 @@
         "status",
         "url"
       ],
-      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; readonly idempotencyKey?: string | undefined; }"
     },
     {
       "name": "TransportMiddleware",
@@ -866,7 +866,7 @@
         "status",
         "url"
       ],
-      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; readonly idempotencyKey?: string | undefined; }"
     },
     {
       "name": "TransportMiddleware",
@@ -1059,7 +1059,7 @@
         "status",
         "url"
       ],
-      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+      "text": "export interface TransportJsonError { readonly status: number; readonly body: unknown; readonly url: string; readonly method: string; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; readonly idempotencyKey?: string | undefined; }"
     },
     {
       "name": "TransportMiddleware",

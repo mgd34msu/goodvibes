@@ -741,7 +741,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -1447,6 +1447,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       },
                       "note": {
                         "type": "string"
+                      },
+                      "relayRequestId": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -1870,6 +1873,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true,
@@ -2544,6 +2548,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "number"
                       },
                       "note": {
+                        "type": "string"
+                      },
+                      "relayRequestId": {
                         "type": "string"
                       }
                     },
@@ -3630,6 +3637,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "number"
                       },
                       "note": {
+                        "type": "string"
+                      },
+                      "relayRequestId": {
                         "type": "string"
                       }
                     },
@@ -4733,6 +4743,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       },
                       "note": {
                         "type": "string"
+                      },
+                      "relayRequestId": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -5156,6 +5169,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true,
@@ -5961,6 +5975,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "number"
                         },
                         "note": {
+                          "type": "string"
+                        },
+                        "relayRequestId": {
                           "type": "string"
                         }
                       },
@@ -7604,6 +7621,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       },
                       "note": {
                         "type": "string"
+                      },
+                      "relayRequestId": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -7966,7 +7986,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -8792,6 +8812,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -12329,7 +12350,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
-        "repeat": "unsafe",
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
         "metadata": {
           "uploadModes": [
             "json-inline",
@@ -12633,7 +12660,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -12682,7 +12709,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -12878,7 +12905,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -12927,7 +12954,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -12980,7 +13007,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -13065,7 +13092,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -14338,7 +14365,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -17807,7 +17834,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -24120,7 +24147,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -25395,7 +25422,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -27222,7 +27249,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "defaultTimezone": {
               "type": "string",
-              "description": "The IANA zone a cron schedule created without a timezone is stored in: the host's own zone."
+              "description": "The IANA zone a cron schedule created without a timezone is stored in: daemon.timezone (where the owner is) when set, else the host's own zone."
             }
           },
           "required": [
@@ -27552,7 +27579,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -27926,7 +27953,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -28704,7 +28731,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -29122,7 +29149,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -30956,7 +30983,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -31110,7 +31137,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.events.create",
         "title": "Create Calendar Event",
-        "description": "Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID: read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.",
+        "description": "Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.",
         "category": "calendar",
         "source": "builtin",
         "access": "admin",
@@ -31186,6 +31213,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "confirmation": "confirm",
         "recipients": [
           "attendees[]"
         ],
@@ -31193,7 +31221,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -31253,6 +31281,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "confirmation": "confirm",
         "irreversible": true,
         "invokable": true,
         "repeat": "safe",
@@ -31519,6 +31548,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "confirmation": "confirm",
         "recipients": [
           "attendees[]"
         ],
@@ -31526,7 +31556,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -31689,11 +31719,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "confirmation": "confirm",
         "invokable": true,
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -32039,7 +32070,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -32386,7 +32417,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -33020,7 +33051,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -33908,7 +33939,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -35901,7 +35932,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -36748,7 +36779,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -38409,7 +38440,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -38527,7 +38558,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -39064,7 +39095,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -39525,7 +39556,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -40707,7 +40738,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -41050,7 +41081,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -41590,7 +41621,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -42099,7 +42130,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -42727,7 +42758,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -43144,7 +43175,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -43412,7 +43443,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -43851,7 +43882,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "invokable": true,
-        "repeat": "unsafe"
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "companion.chat.sessions.delete",
@@ -44851,7 +44888,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.turns.cancel",
         "title": "Cancel Companion Chat Turn",
-        "description": "Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: \"cancelled\"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: \"stopping\"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.",
+        "description": "Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: \"cancelled\"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). A stop without `turnId` that lands before the next turn starts (a message still being saved, or one queued to start) cancels that turn: the answer is `cancelled: true` with `stoppedBeforeStart: true` (and `messageIds` when a queued message was named), no `turnId`, and the message stays in the transcript as `unanswered`. No turn in flight and none on its way is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: \"stopping\"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -44896,13 +44933,21 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "alreadyCancelled": {
               "type": "boolean"
             },
+            "stoppedBeforeStart": {
+              "type": "boolean"
+            },
+            "messageIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "partialPersisted": {
               "type": "boolean"
             }
           },
           "required": [
             "sessionId",
-            "turnId",
             "cancelled",
             "partialPersisted"
           ],
@@ -45312,6 +45357,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "approvalId": {
                   "type": "string"
                 },
+                "followable": {
+                  "type": "boolean"
+                },
                 "key": {
                   "type": "string"
                 },
@@ -45361,7 +45409,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -45673,6 +45721,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "approvalId": {
                   "type": "string"
                 },
+                "followable": {
+                  "type": "boolean"
+                },
                 "key": {
                   "type": "string"
                 },
@@ -45722,7 +45773,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -45875,6 +45926,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "approvalId": {
                   "type": "string"
                 },
+                "followable": {
+                  "type": "boolean"
+                },
                 "key": {
                   "type": "string"
                 },
@@ -45924,7 +45978,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -45984,7 +46038,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -46150,7 +46204,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -46492,7 +46546,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.dispatch",
         "title": "Dispatch Contract Work",
-        "description": "Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).",
+        "description": "Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller, also after a daemon restart, and the session made for it still ends when it settles. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -49500,6 +49554,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "ownerPrincipalId": {
                   "type": "string"
                 },
+                "sessionCreatedForDispatch": {
+                  "type": "boolean"
+                },
                 "ask": {
                   "type": "string"
                 },
@@ -50229,6 +50286,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "definitionAfter"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "backend": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bubblewrap",
+                                      "host"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -51115,6 +51179,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "definitionAfter"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "backend": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bubblewrap",
+                                      "host"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -52416,6 +52487,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "definitionAfter"
                                           ],
                                           "additionalProperties": false
+                                        },
+                                        "backend": {
+                                          "type": "string",
+                                          "enum": [
+                                            "bubblewrap",
+                                            "host"
+                                          ]
                                         }
                                       },
                                       "required": [
@@ -53714,6 +53792,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -54571,7 +54656,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "body",
           "name": "idempotencyKey",
-          "behavior": "A repeat by the same caller with the same `idempotencyKey` returns the first dispatch's contract while that contract runs, instead of starting a second one."
+          "behavior": "A repeat by the same caller with the same `idempotencyKey`, `ask` and workspace returns the first dispatch's contract instead of starting a second one, and creates no second session; the same key with a different ask or workspace is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the workspace's contract store per caller, as for contracts.start, so a retry after a daemon restart, or through another process on the same project, still returns the first contract. A dispatch whose key cannot be recorded is refused with CONTRACT_KEY_UNRECORDED and starts nothing; a repeat while another process is still starting the first is refused with IDEMPOTENCY_KEY_IN_FLIGHT."
         },
         "repeat": "keyed",
         "errorCodes": [
@@ -57593,6 +57678,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "ownerPrincipalId": {
               "type": "string"
             },
+            "sessionCreatedForDispatch": {
+              "type": "boolean"
+            },
             "ask": {
               "type": "string"
             },
@@ -58322,6 +58410,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "definitionAfter"
                                 ],
                                 "additionalProperties": false
+                              },
+                              "backend": {
+                                "type": "string",
+                                "enum": [
+                                  "bubblewrap",
+                                  "host"
+                                ]
                               }
                             },
                             "required": [
@@ -59208,6 +59303,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "definitionAfter"
                                 ],
                                 "additionalProperties": false
+                              },
+                              "backend": {
+                                "type": "string",
+                                "enum": [
+                                  "bubblewrap",
+                                  "host"
+                                ]
                               }
                             },
                             "required": [
@@ -60509,6 +60611,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "definitionAfter"
                                       ],
                                       "additionalProperties": false
+                                    },
+                                    "backend": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bubblewrap",
+                                        "host"
+                                      ]
                                     }
                                   },
                                   "required": [
@@ -61807,6 +61916,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "definitionAfter"
                           ],
                           "additionalProperties": false
+                        },
+                        "backend": {
+                          "type": "string",
+                          "enum": [
+                            "bubblewrap",
+                            "host"
+                          ]
                         }
                       },
                       "required": [
@@ -65666,6 +65782,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "ownerPrincipalId": {
                     "type": "string"
                   },
+                  "sessionCreatedForDispatch": {
+                    "type": "boolean"
+                  },
                   "ask": {
                     "type": "string"
                   },
@@ -66395,6 +66514,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "definitionAfter"
                                       ],
                                       "additionalProperties": false
+                                    },
+                                    "backend": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bubblewrap",
+                                        "host"
+                                      ]
                                     }
                                   },
                                   "required": [
@@ -67281,6 +67407,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "definitionAfter"
                                       ],
                                       "additionalProperties": false
+                                    },
+                                    "backend": {
+                                      "type": "string",
+                                      "enum": [
+                                        "bubblewrap",
+                                        "host"
+                                      ]
                                     }
                                   },
                                   "required": [
@@ -68582,6 +68715,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "definitionAfter"
                                             ],
                                             "additionalProperties": false
+                                          },
+                                          "backend": {
+                                            "type": "string",
+                                            "enum": [
+                                              "bubblewrap",
+                                              "host"
+                                            ]
                                           }
                                         },
                                         "required": [
@@ -69880,6 +70020,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "definitionAfter"
                                 ],
                                 "additionalProperties": false
+                              },
+                              "backend": {
+                                "type": "string",
+                                "enum": [
+                                  "bubblewrap",
+                                  "host"
+                                ]
                               }
                             },
                             "required": [
@@ -70881,7 +71028,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -70969,7 +71116,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -74022,6 +74169,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "ownerPrincipalId": {
                   "type": "string"
                 },
+                "sessionCreatedForDispatch": {
+                  "type": "boolean"
+                },
                 "ask": {
                   "type": "string"
                 },
@@ -74751,6 +74901,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "definitionAfter"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "backend": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bubblewrap",
+                                      "host"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -75637,6 +75794,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "definitionAfter"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "backend": {
+                                    "type": "string",
+                                    "enum": [
+                                      "bubblewrap",
+                                      "host"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -76938,6 +77102,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "definitionAfter"
                                           ],
                                           "additionalProperties": false
+                                        },
+                                        "backend": {
+                                          "type": "string",
+                                          "enum": [
+                                            "bubblewrap",
+                                            "host"
+                                          ]
                                         }
                                       },
                                       "required": [
@@ -78236,6 +78407,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -80548,6 +80726,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "ownerOnly": {
                             "type": "boolean"
                           },
+                          "modelRefused": {
+                            "type": "boolean"
+                          },
+                          "confirmation": {
+                            "type": "string",
+                            "enum": [
+                              "confirm",
+                              "owner-request",
+                              "not-declined"
+                            ]
+                          },
                           "irreversible": {
                             "type": "boolean"
                           },
@@ -81449,6 +81638,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "ownerOnly": {
                   "type": "boolean"
                 },
+                "modelRefused": {
+                  "type": "boolean"
+                },
+                "confirmation": {
+                  "type": "string",
+                  "enum": [
+                    "confirm",
+                    "owner-request",
+                    "not-declined"
+                  ]
+                },
                 "irreversible": {
                   "type": "boolean"
                 },
@@ -81723,6 +81923,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "ownerOnly": {
                     "type": "boolean"
+                  },
+                  "modelRefused": {
+                    "type": "boolean"
+                  },
+                  "confirmation": {
+                    "type": "string",
+                    "enum": [
+                      "confirm",
+                      "owner-request",
+                      "not-declined"
+                    ]
                   },
                   "irreversible": {
                     "type": "boolean"
@@ -82425,7 +82636,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "relay.codes.revoke",
         "title": "Revoke Relay Code",
-        "description": "Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 relay-code-revoked, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.",
+        "description": "Revoke one device's relay code. Revocation is immediate: every relay connection the code opened is closed at once (each open stream gets a stream-close with reason relay-code-revoked, its in-flight requests are aborted; `closedConnections` counts them), the device's next request through the relay is refused with 401 RELAY_CODE_REVOKED, and every other device keeps working. The device reaches the daemon through the relay again only after pairing again on the home network. An unknown id is a 404 RELAY_CODE_NOT_FOUND, never a 200-noop.",
         "category": "control-plane",
         "source": "builtin",
         "access": "admin",
@@ -82468,7 +82679,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -82476,7 +82687,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "relay.pairing.mint",
         "title": "Mint A Relay Pairing Payload",
-        "description": "Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 relay-code-revoked), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: \"Relay device\" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.",
+        "description": "Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: \"Relay device\" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.",
         "category": "control-plane",
         "source": "builtin",
         "access": "admin",
@@ -82540,6 +82751,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "disabled",
+                "failed",
                 "idle",
                 "connecting",
                 "registered",
@@ -82562,7 +82774,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -82591,6 +82803,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "disabled",
+                "failed",
                 "idle",
                 "connecting",
                 "registered",
@@ -82651,7 +82864,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "update.check",
         "title": "Check For An Update Now",
-        "description": "Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and \"the check failed\" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran).",
+        "description": "Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and \"the check failed\" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran) or `installing` (a check ran now, found `pendingVersion`, and the daemon is installing it and will restart into it; this answer is sent before the install starts, so the daemon stops answering shortly after it).",
         "category": "control-plane",
         "source": "builtin",
         "access": "admin",
@@ -82831,7 +83044,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "enum": [
                 "ran",
                 "already-in-flight",
-                "loop-off"
+                "loop-off",
+                "installing"
               ]
             }
           },
@@ -83836,7 +84050,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -83968,7 +84182,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "invokable": true,
-        "repeat": "unsafe"
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true
       },
       {
         "id": "email.draft.update",
@@ -84045,6 +84265,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "confirmation": "not-declined",
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -85165,6 +85386,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "uidValidity": {
               "type": "number"
+            },
+            "bodyUnavailable": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "section": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "section",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -85241,6 +85481,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "confirmation": "not-declined",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -85311,6 +85552,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "outward",
+        "confirmation": "confirm",
         "recipients": [
           "to"
         ],
@@ -86293,7 +86535,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -87211,7 +87453,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -88141,7 +88383,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -94421,7 +94663,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -94563,7 +94805,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -96798,7 +97040,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -97241,7 +97483,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -97675,7 +97917,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -99016,7 +99258,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -100452,7 +100694,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -103161,7 +103403,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -104660,9 +104902,170 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "idempotent": true
       },
       {
-        "id": "knowledge.graphql.execute",
-        "title": "Execute Knowledge GraphQL",
-        "description": "Execute a GraphQL query or mutation against the dedicated knowledge domain endpoint.",
+        "id": "knowledge.graphql.mutate",
+        "title": "Run a Knowledge GraphQL Mutation",
+        "description": "Run a GraphQL mutation against the dedicated knowledge domain endpoint (ingest a URL, run a job, change a schedule, materialize a projection...). Admin, and it may fetch from the network, so over the relay with relay.requireStepUpForMutations on it needs a passkey confirmation. A query is refused 400 GRAPHQL_QUERY_NOT_ALLOWED naming knowledge.graphql.query.",
+        "category": "knowledge",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:knowledge"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/knowledge/graphql/mutate"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "operationName": {
+              "type": "string"
+            },
+            "variables": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            },
+            "errors": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {}
+                ]
+              }
+            },
+            "extensions": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "effect": "outward",
+        "invokable": true,
+        "replay": {
+          "in": "header",
+          "name": "Idempotency-Key",
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+        },
+        "repeat": "keyed",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "GRAPHQL_QUERY_NOT_ALLOWED",
+            "status": 400,
+            "meaning": "The operation is a query; send it to knowledge.graphql.query. Nothing ran."
+          }
+        ]
+      },
+      {
+        "id": "knowledge.graphql.query",
+        "title": "Query Knowledge GraphQL",
+        "description": "Run a GraphQL query against the dedicated knowledge domain endpoint (POST, or GET with the query in the URL). A read: it changes nothing. A mutation is refused 400 GRAPHQL_MUTATION_NOT_ALLOWED naming knowledge.graphql.mutate.",
         "category": "knowledge",
         "source": "builtin",
         "access": "authenticated",
@@ -104803,15 +105206,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           },
           "additionalProperties": true
         },
-        "effect": "outward",
+        "effect": "read",
         "invokable": true,
-        "replay": {
-          "in": "header",
-          "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
-        },
-        "repeat": "keyed",
-        "idempotent": true
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "GRAPHQL_MUTATION_NOT_ALLOWED",
+            "status": 400,
+            "meaning": "The operation is a mutation; send it to knowledge.graphql.mutate. Nothing ran."
+          }
+        ]
       },
       {
         "id": "knowledge.graphql.schema",
@@ -105160,7 +105565,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -105381,7 +105786,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -105803,7 +106208,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -106077,7 +106482,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -106375,7 +106780,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -106587,7 +106992,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -108062,6 +108467,31 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "properties": {
                         "refreshed": {
                           "type": "number"
+                        },
+                        "attempted": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "failures": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceId",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -108597,6 +109027,31 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "properties": {
                           "refreshed": {
                             "type": "number"
+                          },
+                          "attempted": {
+                            "type": "number"
+                          },
+                          "failed": {
+                            "type": "number"
+                          },
+                          "failures": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "sourceId": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "sourceId",
+                                "reason"
+                              ],
+                              "additionalProperties": false
+                            }
                           }
                         },
                         "required": [
@@ -109266,6 +109721,31 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "properties": {
                         "refreshed": {
                           "type": "number"
+                        },
+                        "attempted": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "failures": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceId",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -109654,7 +110134,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -112088,7 +112568,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -113993,7 +114473,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -122026,7 +122506,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -123758,7 +124238,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -124075,7 +124555,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -124700,7 +125180,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -125109,7 +125589,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -125446,7 +125926,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -125887,7 +126367,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -126232,7 +126712,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -126931,7 +127411,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -127873,7 +128353,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -131203,7 +131683,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "memory.snapshots.restore",
         "title": "Restore Memory From a Copy",
-        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: requires confirm: true on an explicit request from the owner's own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
+        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
         "category": "memory",
         "source": "builtin",
         "access": "admin",
@@ -131280,7 +131760,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true,
@@ -131401,7 +131882,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -134350,7 +134831,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -134526,7 +135007,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.handoff.complete",
         "title": "Complete Pairing Hand-off",
-        "description": "Apply the surface's per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent's credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off's token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority is not offered a passkey.",
+        "description": "Apply the surface's per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent's credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off's token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority cannot complete a hand-off, so pairing.handoff.create offers it nothing to complete.",
         "category": "pairing",
         "source": "builtin",
         "access": "admin",
@@ -134640,7 +135121,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -134648,7 +135129,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.handoff.create",
         "title": "Create Pairing Hand-off",
-        "description": "The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).",
+        "description": "The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -134793,7 +135274,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -134957,7 +135438,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "replay": {
           "in": "body",
@@ -134969,7 +135450,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.delete",
         "title": "Revoke Paired Device Token",
-        "description": "Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop.",
+        "description": "Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -134992,30 +135473,92 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "revoked": {
+                  "type": "boolean"
+                },
+                "alsoRevoked": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "revoked",
+                "alsoRevoked"
+              ],
+              "additionalProperties": false
             },
-            "revoked": {
-              "type": "boolean"
-            },
-            "alsoRevoked": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "followable": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "id",
-            "revoked",
-            "alsoRevoked"
-          ],
-          "additionalProperties": false
+          ]
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -135162,7 +135705,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "replay": {
           "in": "body",
@@ -135224,10 +135767,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.revokeShared",
         "title": "Revoke The Legacy Shared Token",
-        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.",
+        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device he paired himself, his sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.",
         "category": "pairing",
         "source": "builtin",
-        "access": "authenticated",
+        "access": "admin",
         "transport": [
           "ws"
         ],
@@ -135248,6 +135791,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -135570,7 +136114,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.cards.create",
         "title": "Add a Payment Card",
-        "description": "Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.",
+        "description": "Store a card. The number, expiry, CVV and cardholder name go to the daemon secret store, encrypted at rest, under keys derived from the config path; only the label, brand, last four digits, kind and declared issuer cap are kept as config. The response carries the metadata record and never echoes what was submitted, because an echo would be a read path and no read path exists. Sending the same card again (the same label, number and expiry, for example after an answer that was lost) returns the card already stored and stores nothing new; no Idempotency-Key is taken, because a kept request would be a hash of the card on disk. A virtual card with a hard issuer cap is the recommended configuration: it bounds what any leak could cost to one killable number, which a real card number does not.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -135705,8 +136249,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
-        "repeat": "unsafe"
+        "repeat": "safe",
+        "idempotent": true
       },
       {
         "id": "payments.cards.delete",
@@ -135870,7 +136416,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.checkout.approve",
         "title": "Approve One Purchase",
-        "description": "The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency (\"25\" and \"25.00\" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses; /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.",
+        "description": "The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency (\"25\" and \"25.00\" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -135948,11 +136494,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -136409,6 +136957,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -136536,6 +137086,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -136611,6 +137162,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -136837,6 +137390,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -136909,6 +137464,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -137506,7 +138063,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.standing.create",
         "title": "Authorise a Purchase in Advance",
-        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments repeat sends both. The owner's own act: an agent cannot add one.",
+        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments repeat sends both. The owner's own act: an agent cannot add one.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -137653,11 +138210,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -137665,7 +138224,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.standing.delete",
         "title": "Withdraw a Standing Authorisation",
-        "description": "Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments repeats remove sends both. The owner's own act.",
+        "description": "Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments stop-repeat sends both. The owner's own act.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -137715,6 +138274,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "dangerous": true,
         "effect": "write",
         "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "owner-request",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -137867,7 +138428,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -138127,7 +138688,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -138179,7 +138740,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -138742,7 +139303,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -141969,7 +142530,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -142383,7 +142944,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -142436,7 +142997,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -143462,7 +144023,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true,
@@ -143859,7 +144420,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -144713,7 +145274,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -145146,7 +145707,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -145410,7 +145971,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "unsafe"
       },
@@ -147155,7 +147716,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -149823,7 +150384,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -149981,7 +150542,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "devices.grants.revoke",
         "title": "Revoke a Device Capability Grant",
-        "description": "Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked.",
+        "description": "Revoke durable grants by grant id, by device, by capability, or any combination. A revocation is a terminal entry on the authority record, so it holds on every machine of the group, after a restart, and on a machine that was away when it was made; the next request for that capability asks the person again, and a request still waiting for the phone under a revoked grant is withdrawn. Returns exactly what was revoked: a grant already revoked answers revoked 0, so a repeat after a lost reply succeeds. Naming nothing (no grantId, nodeId or capabilityId) is 400 INVALID_ARGUMENT, and a grantId the record never held is 404 GRANT_NOT_FOUND (read devices.grants.list for the ids); nothing is revoked either way.",
         "category": "runtime",
         "source": "builtin",
         "access": "authenticated",
@@ -150012,7 +150573,45 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "grantId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "grantId"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "nodeId"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "capabilityId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "capabilityId"
+              ],
+              "additionalProperties": true
+            }
+          ]
         },
         "outputSchema": {
           "type": "object",
@@ -154767,7 +155366,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -155532,7 +156131,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.hosted.share",
         "title": "Share a Daemon-Hosted Session",
-        "description": "Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted session's owners, so it may attach, read the transcript and watch the session's turns live (`read:own-sessions`). Only an owner of the session or an admin shares it; anyone else is refused 403 NOT_YOURS. The owners are saved with the session and outlive its end and a restart; sharing with a principal that already owns it changes nothing (`added: false`). Attaching never adds an owner, so this is the one way another credential joins a session. ws-only invoke verb; no REST binding.",
+        "description": "Add a principal (a user name, or `pairing:<id>` for a paired device) to a hosted session's owners, so it may attach, read the transcript and watch the session's turns live (`read:own-sessions`). Only an owner of the session or an admin shares it; anyone else is refused 403 NOT_YOURS. A principal this daemon does not know (no such user, no live pairing) is refused 404 PRINCIPAL_NOT_FOUND, naming local_auth.status and pairing.tokens.list. The owners are saved with the session and outlive its end and a restart; sharing with a principal that already owns it changes nothing (`added: false`). Attaching never adds an owner, so this is the one way another credential joins a session; sessions.hosted.unshare undoes it. ws-only invoke verb; no REST binding.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -155710,9 +156309,209 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "meaning": "This daemon holds no hosted session with that id; nothing was shared."
           },
           {
+            "code": "PRINCIPAL_NOT_FOUND",
+            "status": 404,
+            "meaning": "No user, live pairing or owner credential on this daemon has that principal id; nothing was shared."
+          },
+          {
             "code": "NOT_YOURS",
             "status": 403,
             "meaning": "The caller is not an owner of the session and not an admin; nothing was shared."
+          }
+        ]
+      },
+      {
+        "id": "sessions.hosted.unshare",
+        "title": "Stop Sharing a Daemon-Hosted Session",
+        "description": "Remove a principal from a hosted session's owners: it can no longer attach, read the transcript or watch the session, and every client it attached is detached at once (the session's detach policy applies when those were the last attached). Only an owner of the session or an admin does it; anyone else is refused 403 NOT_YOURS. The last owner is never removed (409 HOSTED_SESSION_LAST_OWNER): share with another principal first, or end the session. Removing a principal that is not an owner changes nothing (`removed: false`). The change is saved with the session. ws-only invoke verb; no REST binding.",
+        "category": "sessions",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:sessions"
+        ],
+        "events": [
+          "control.hosted_session_update"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "principalId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "nativeConversation": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "workspaceRoot": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "idle",
+                    "running",
+                    "terminated"
+                  ]
+                },
+                "detachPolicy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "kill",
+                        "survive"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "effectiveDetachPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "kill",
+                    "survive"
+                  ]
+                },
+                "attachedClients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "providerId": {
+                  "type": "string"
+                },
+                "modelId": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "turnCount": {
+                  "type": "number"
+                },
+                "messageCount": {
+                  "type": "number"
+                },
+                "lastTurnAt": {
+                  "type": "number"
+                },
+                "terminatedAt": {
+                  "type": "number"
+                },
+                "terminatedReason": {
+                  "type": "string"
+                },
+                "restoredFromDisk": {
+                  "type": "boolean"
+                },
+                "originSurface": {
+                  "type": "string"
+                },
+                "permissionMode": {
+                  "type": "string",
+                  "enum": [
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
+                    "yolo",
+                    "plan"
+                  ]
+                },
+                "contractIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "saveError": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "workspaceRoot",
+                "title",
+                "status",
+                "detachPolicy",
+                "effectiveDetachPolicy",
+                "attachedClients",
+                "createdAt",
+                "updatedAt",
+                "turnCount",
+                "messageCount",
+                "restoredFromDisk",
+                "contractIds"
+              ],
+              "additionalProperties": false
+            },
+            "owners": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "session",
+            "owners",
+            "removed"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "SESSION_NOT_FOUND",
+            "status": 404,
+            "meaning": "This daemon holds no hosted session with that id; nothing was changed."
+          },
+          {
+            "code": "NOT_YOURS",
+            "status": 403,
+            "meaning": "The caller is not an owner of the session and not an admin; nothing was changed."
+          },
+          {
+            "code": "HOSTED_SESSION_LAST_OWNER",
+            "status": 409,
+            "meaning": "That principal is the session's only owner; nothing was changed."
           }
         ]
       },
@@ -157269,17 +158068,27 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "messageId": {
                   "type": "string"
                 },
-                "routedTo": {
-                  "type": "string"
-                },
                 "sessionId": {
                   "type": "string"
+                },
+                "inputId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "spawn",
+                    "continued-live",
+                    "queued-follow-up",
+                    "queued-for-surface",
+                    "rejected"
+                  ]
                 }
               },
               "required": [
-                "messageId",
-                "routedTo",
-                "sessionId"
+                "sessionId",
+                "inputId",
+                "mode"
               ],
               "additionalProperties": false
             },
@@ -158329,6 +159138,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "approvalId": {
                   "type": "string"
                 },
+                "followable": {
+                  "type": "boolean"
+                },
                 "key": {
                   "type": "string"
                 },
@@ -158373,12 +159185,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ]
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -158386,7 +159198,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.queuedMessages.delete",
         "title": "Delete a Queued Mid-Turn Message",
-        "description": "Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may delete (403 NOT_YOURS otherwise).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -158448,7 +159260,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.queuedMessages.edit",
         "title": "Edit a Queued Mid-Turn Message",
-        "description": "Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may edit (403 NOT_YOURS otherwise).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -158514,7 +159326,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.queuedMessages.list",
         "title": "List Queued Mid-Turn Messages",
-        "description": "List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. Queued messages remain editable and deletable until they are delivered; a delivered message no longer appears here. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is resolvable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may read them (403 NOT_YOURS otherwise).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -160010,7 +160822,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.toolCalls.cancel",
         "title": "Cancel One In-Flight Tool Call",
-        "description": "Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured \"cancelled by user\" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING.",
+        "description": "Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. The cancelled call settles as a structured \"cancelled by user\" tool result the model adapts to in the same turn, distinct from a whole-turn interrupt. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL, and an unknown or already-settled callId is a 404 TOOL_CALL_NOT_RUNNING. Below admin, only an owner of the session may cancel (403 NOT_YOURS otherwise).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -160072,7 +160884,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.turns.cancel",
         "title": "Request Cancellation of an Expected Turn",
-        "description": "Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions.",
+        "description": "Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and future queued work. Acceptance does not establish settlement: observe the existing runtime turn terminal event for the same sessionId and turnId. Settlement covers this turn's owned provider, tool, hook and hook-Agent work; independent workflow-trigger automations and already-committed external effects are excluded. Repeated requests are idempotent. Known recently ended IDs report already-ended; unknown or expired IDs report stale-turn when another turn is active, otherwise turn-not-found. Works for any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts); other session ids answer 404 SESSION_NOT_LOCAL. Requires write:sessions, and below admin an owner of the session (403 NOT_YOURS otherwise).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -161666,7 +162478,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -162366,7 +163178,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true,
@@ -165933,7 +166745,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -166112,7 +166924,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -166544,7 +167356,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -166953,7 +167765,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -167757,7 +168569,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
+        "confirmation": "not-declined",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true,
@@ -168652,7 +169465,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -168719,6 +169532,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 ],
                 "additionalProperties": false
               }
+            },
+            "defaultProviderId": {
+              "type": "string"
             }
           },
           "required": [
@@ -169058,7 +169874,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -189899,7 +190715,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
+        "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -190296,7 +191112,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "header",
           "name": "Idempotency-Key",
-          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (retry shortly); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN (check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
+          "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
         "idempotent": true
@@ -192365,6 +193181,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       },
                       "note": {
                         "type": "string"
+                      },
+                      "relayRequestId": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -194292,10 +195111,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 648,
-      "typedInputs": 643,
+      "methods": 650,
+      "typedInputs": 645,
       "genericInputs": 5,
-      "typedOutputs": 646,
+      "typedOutputs": 648,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -194304,8 +195123,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 648,
-      "validated": 641,
+      "methods": 650,
+      "validated": 643,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

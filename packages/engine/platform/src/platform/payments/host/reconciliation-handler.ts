@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { TypedHandler } from './handler-plumbing.js';
+import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
 import { PaymentOperationStoreError } from './operation-store.js';

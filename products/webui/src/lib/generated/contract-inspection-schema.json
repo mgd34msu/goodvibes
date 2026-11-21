@@ -2971,6 +2971,9 @@
     "ownerPrincipalId": {
       "type": "string"
     },
+    "sessionCreatedForDispatch": {
+      "type": "boolean"
+    },
     "ask": {
       "type": "string"
     },
@@ -3700,6 +3703,13 @@
                           "definitionAfter"
                         ],
                         "additionalProperties": false
+                      },
+                      "backend": {
+                        "type": "string",
+                        "enum": [
+                          "bubblewrap",
+                          "host"
+                        ]
                       }
                     },
                     "required": [
@@ -4586,6 +4596,13 @@
                           "definitionAfter"
                         ],
                         "additionalProperties": false
+                      },
+                      "backend": {
+                        "type": "string",
+                        "enum": [
+                          "bubblewrap",
+                          "host"
+                        ]
                       }
                     },
                     "required": [
@@ -5887,6 +5904,13 @@
                                 "definitionAfter"
                               ],
                               "additionalProperties": false
+                            },
+                            "backend": {
+                              "type": "string",
+                              "enum": [
+                                "bubblewrap",
+                                "host"
+                              ]
                             }
                           },
                           "required": [
@@ -7185,6 +7209,13 @@
                     "definitionAfter"
                   ],
                   "additionalProperties": false
+                },
+                "backend": {
+                  "type": "string",
+                  "enum": [
+                    "bubblewrap",
+                    "host"
+                  ]
                 }
               },
               "required": [

@@ -15,24 +15,21 @@ import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/te
  * path. Apply/rollback preserve earlier programs and check saved-data readers
  * before changing live files. Running programs use the replacement on restart.
  * `/update review` prints this install's update state (installed and latest
- * version, install kind, rollback copy) and `/update save-review` saves it to a file.
+ * version, install kind, rollback copy) and `/update save-review` saves it to a
+ * file; both are built in terminal-shell/release-update-preflight.ts from the
+ * facts this app supplies.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import {
   captureUpdateFileIo,
-  PREVIOUS_FILE_SUFFIX,
   realUpdateFileIo,
   type UpdateFileIo,
 } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
-import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
-import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
+import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import type { CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
@@ -173,86 +170,6 @@ export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<vo
   options.print(formatSuiteUpdateReport(result, 'restored', await daemonRestartFooter(result, options.platform, options.configManager, options.runCommand)));
 }
 
-/** What `/update review` prints and `/update save-review` saves, built once for both. */
-interface UpdateReview {
-  readonly version: 2;
-  readonly exportedAt: number;
-  readonly appVersion: string;
-  readonly installKind: InstallKind;
-  /** The newest published release, or why it could not be read. */
-  readonly latest: { readonly tag: string; readonly isCurrent: boolean } | { readonly unknown: string };
-  /** Where updates come from: the project's published releases. */
-  readonly channel: string;
-  /** True when a previous program is kept beside this one, so /update rollback has something to restore. */
-  readonly rollbackRetained: boolean;
-  readonly subscriptionProviders: readonly string[];
-  readonly sandboxProfile: string;
-}
-
-function buildUpdateReview(ctx: CommandContext, latest: UpdateReview['latest']): UpdateReview {
-  const subscriptions = requireSubscriptionManager(ctx);
-  const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
-  const config = ctx.platform.configManager;
-  return {
-    version: 2,
-    exportedAt: Date.now(),
-    appVersion: VERSION,
-    installKind: detectInstallKind(process.execPath),
-    latest,
-    channel: REPO_RELEASES_LATEST_URL,
-    rollbackRetained: existsSync(`${process.execPath}${PREVIOUS_FILE_SUFFIX}`),
-    subscriptionProviders: [...new Set([...builtinProviders, ...subscriptions.list().map((entry) => entry.provider)])],
-    sandboxProfile: `commands ${config.get('sandbox.enabled') === false ? 'host' : 'contained'}/mcp ${String(config.get('sandbox.mcpIsolation'))}`,
-  };
-}
-
-/** The newest published release, read once; a failed read is named, not guessed. */
-async function readLatestRelease(): Promise<UpdateReview['latest']> {
-  try {
-    const result = await checkForUpdate(fetch as UpdateFetchLike, VERSION);
-    return { tag: result.latestTag, isCurrent: result.isCurrent };
-  } catch (error) {
-    return { unknown: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-function formatUpdateReview(review: UpdateReview, title: string): string {
-  const latest = 'tag' in review.latest
-    ? `${review.latest.tag}${review.latest.isCurrent ? ' (this is current)' : ' (newer than this one: /update apply installs it)'}`
-    : `unknown (${review.latest.unknown})`;
-  return [
-    title,
-    `  installed version: ${review.appVersion}`,
-    `  latest release: ${latest}`,
-    `  channel: ${review.channel}`,
-    `  install kind: ${review.installKind}`,
-    `  rollback copy: ${review.rollbackRetained ? 'kept beside this program; /update rollback restores it' : 'none kept (/update apply keeps one)'}`,
-    `  subscription providers: ${review.subscriptionProviders.length}${review.subscriptionProviders.length > 0 ? ` (${review.subscriptionProviders.join(', ')})` : ''}; sign-ins survive an update`,
-    `  sandbox profile: ${review.sandboxProfile}`,
-  ].join('\n');
-}
-
-/** Parse a saved update review, refusing anything that is not one rather than printing "undefined" fields. */
-function parseUpdateReview(text: string): UpdateReview {
-  const value: unknown = JSON.parse(text);
-  const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
-  const latest = record?.latest as Record<string, unknown> | undefined;
-  if (
-    !record
-    || record.version !== 2
-    || typeof record.appVersion !== 'string'
-    || typeof record.installKind !== 'string'
-    || typeof record.channel !== 'string'
-    || typeof record.rollbackRetained !== 'boolean'
-    || typeof record.sandboxProfile !== 'string'
-    || !Array.isArray(record.subscriptionProviders)
-    || !latest || (typeof latest.tag !== 'string' && typeof latest.unknown !== 'string')
-  ) {
-    throw new Error('the file is not an update state saved by /update save-review');
-  }
-  return record as unknown as UpdateReview;
-}
-
 export function registerUpdateCommand(registry: CommandRegistry): void {
   registry.register(selfUpdateCommand);
 }
@@ -269,31 +186,11 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
   install: {
-    async review(ctx) {
-      // What /install showed (saved profiles, stored secret names) sits with the update state.
-      const profiles = requireProfileManager(ctx).list().length;
-      const secretKeys = (await requireSecretsManager(ctx).list()).length;
-      return [
-        formatUpdateReview(buildUpdateReview(ctx, await readLatestRelease()), 'This install'),
-        `  saved settings profiles: ${profiles}`,
-        `  stored secrets: ${secretKeys}`,
-      ].join('\n');
-    },
-    exists: (ctx, path) => existsSync(requireShellPaths(ctx).resolveWorkspacePath(path)),
-    async save(ctx, path) {
-      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
-      const review = buildUpdateReview(ctx, await readLatestRelease());
-      mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
-      return `Saved this install's update state to ${targetPath}. It records the update state for support or before an upgrade; nothing applies it.`;
-    },
-    read(ctx, path) {
-      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
-      try {
-        return formatUpdateReview(parseUpdateReview(readFileSync(targetPath, 'utf-8')), `Update state (saved ${targetPath})`);
-      } catch (error) {
-        throw commandRefusal(`Cannot read ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    },
+    channel: REPO_RELEASES_LATEST_URL,
+    resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
+    settings: (ctx) => ctx.platform.configManager,
+    subscriptionProviders: (ctx) => requireSubscriptionManager(ctx).list().map((entry) => entry.provider),
+    savedProfiles: (ctx) => requireProfileManager(ctx).list().length,
+    storedSecrets: async (ctx) => (await requireSecretsManager(ctx).list()).length,
   },
 });

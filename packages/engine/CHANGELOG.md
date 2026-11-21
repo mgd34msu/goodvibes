@@ -1,5 +1,119 @@
 # Changelog
 
+## [3.4.0] - 2026-11-21
+
+The full write-up is in
+[docs/releases/3.4.0.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.0/docs/releases/3.4.0.md).
+
+### Upgrading from 3.3.x
+
+- Switch every webhook sender to the listener's own token: the webhook
+  listener no longer accepts the operator token. The token is created on the
+  first start in `<daemon home>/http-listener-token.json` (or comes from
+  `GOODVIBES_HTTP_TOKEN`), said once, and printed by `goodvibes-daemon
+  listener token --show`. A sender still on the operator token gets `401`
+  `OPERATOR_TOKEN_NOT_ACCEPTED`.
+- Update the daemon first: both terminal programs refuse a daemon older than
+  3.3.2 (was 3.1.2).
+- Set `daemon.connectedHost.url` for an Agent that reached another machine
+  through `controlPlane.host` alone; it now refuses before sending anything.
+- Fix or remove a corrupt `daemon-settings.json`: the daemon now refuses to
+  start with it, naming the file.
+- On the first start the daemon moves `power.keepAwake` into its own
+  settings, removes `daemon.connectedHost.*` copied there by 3.3.4, clears a
+  `web.publicBaseUrl` that held only its own, loopback or placeholder address,
+  sends the chat answers closed sessions still owed, and starts agreed work
+  left unstarted; each move is said once.
+- Removed: the setting `push.subscriptions.sweepIntervalMinutes`; the error
+  codes `TOKEN_EXPIRED`, `VALIDATION_FAILED`, `INVALID_INPUT`,
+  `INVALID_REQUEST` (all `INVALID_ARGUMENT`), `REQUIRE_CONFIRM` and
+  `EXPLICIT_USER_REQUEST_REQUIRED` (both `CONFIRMATION_REQUIRED`),
+  `INSTALL_E111`; the method `knowledge.graphql.execute` (now
+  `knowledge.graphql.query` and `knowledge.graphql.mutate`); the event
+  `COMPANION_MESSAGE_RECEIVED`; the Agent's `/plugin-trust` (now `/plugin`).
+- Renamed codes: `step-up-required`, `relay-disabled`, `relay-code-revoked`
+  are `STEP_UP_REQUIRED`, `RELAY_DISABLED`, `RELAY_CODE_REVOKED`. A refused
+  calendar or mail password is `424` (`CALENDAR_AUTH_FAILED`,
+  `EMAIL_CREDENTIALS_REJECTED`), not `401`.
+- Exit codes: `start-service` and `restart-service` exit `3` when the service
+  is not running afterwards (was `0`); `stop-service` exits `1` when it still
+  runs; `uninstall-service` exits `1` when it cannot save the choice; the
+  release installer exits `4` when it installed with problems; the terminal
+  app exits `143` on SIGTERM and `129` on SIGHUP.
+
+### Added
+
+- `/setup connect-daemon`, to point either program at a daemon on another
+  computer; the Agent dials `daemon.connectedHost.url`, https included, and
+  `--runtime-url` accepts `https://`.
+- `/session resume <id> --force` asks the terminal holding the session, through
+  the shared daemon, to save it and let go, then resumes it here.
+- `goodvibes-daemon listener token [--show] [--json]`.
+- `/devices requests`, `approve <request> [--replace]` and `reject <request>`,
+  and Waiting to pair in the web UI, for devices asking to pair as nodes. The
+  Agent's `/devices` pairs, shows and unpairs its host and handles the relay;
+  the Agent has `/plugin` and `/hooks`.
+- `sessions.hosted.unshare`, and Remove beside each owner in the web UI.
+- Pair a new device in the web UI's Paired devices.
+- `webSearch.defaultProvider` and `defaultProviderId` on
+  `web_search.providers.list`.
+- `/template save --everywhere`; `Template replaced` when it overwrote one.
+- WebSocket event frames carry `id`, and a socket opened with `?lastEventId=`
+  is replayed from it.
+
+### Changed
+
+- A session is written by one terminal at a time: a second terminal is refused
+  at resume, save or delete with `SESSION_OPEN_ELSEWHERE` and what to do.
+- A chat message's sender is answered exactly once, whoever runs the turn;
+  `sessions.messages.create` with no `kind` queues a follow-up turn and answers
+  `{messageId?, sessionId, inputId, mode}` (no `routedTo`).
+- A client asking the daemon to check for an update is answered as soon as a
+  release is found and the handover reserved (`check: found <version>; the
+  daemon is installing it now and will restart into it`).
+- Contract gates, the exec tool and sandbox sessions share one view of the
+  home folder: toolchain installs read-only, build caches writable, secrets
+  hidden. Contract gates run contained, without credential variables.
+- `power.keepAwake` is the daemon's setting; the forwarding from the terminal
+  programs is gone.
+- A starting daemon is waited on by its ready record, with one line saying it
+  is starting; the failure line appears only when the service stopped.
+- An approved loosening is applied as part of the approval; a change that
+  cannot be applied leaves the ask open (`APPROVED_NOT_APPLIED`). Every
+  confirmation refusal is `CONFIRMATION_REQUIRED`.
+- Deletions and sends run through wrappers (`setsid`, `flock`, `busybox`, `env
+  -S`, ...) or a script are read as such: owner-only and new-recipient asks.
+- A program attached to a daemon on another machine shows that daemon's
+  settings and refuses a change while it is down; nothing is written locally.
+- Cron schedules created without a zone follow `daemon.timezone`.
+- Usage `inputTokens` is fresh input for every provider; cached input is no
+  longer counted twice, and every program prices cache tokens the same way.
+- `web.publicBaseUrl` is never filled in by the daemon; `--json` failures of
+  `goodvibes-daemon` are one JSON document on stdout.
+- Relay settings apply without a restart, and a failed relay start reads
+  `failed`.
+
+### Fixed
+
+- After a restart accepted by systemd the old daemon exits at once instead of
+  using a full processor core until stopped.
+- A Stop sent before a queued turn starts cancels it
+  (`stoppedBeforeStart: true`) instead of `NO_ACTIVE_TURN` followed by the turn
+  running.
+- A send or a write whose answer was lost is not repeated: channel replies,
+  notifications, Google Calendar creates, `/schedule add`, `/mail send`, keyed
+  web UI writes, `contracts.dispatch` and relayed approval actions.
+- A run interrupted by a restart is not retried on its own, and a due run
+  starts as soon as a slot frees.
+- Many failures that read as success now say what happened: unreadable files,
+  undelivered answers, unfetched mail bodies, plugin and browser sign-in
+  failures, service commands that left the service in the wrong state.
+- Paired devices and members no longer see or control other principals'
+  hosted sessions; an agent credential no longer claims approvals or cancels
+  asks it did not raise.
+- A remote artifact URL whose name resolves to a private or loopback address
+  is refused.
+
 ## [3.3.4] - 2026-11-20
 
 The full write-up is in

@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
-import type { HandlerContextEnvelope, TypedHandler } from './handler-plumbing.js';
+import type { HandlerContextEnvelope, TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';

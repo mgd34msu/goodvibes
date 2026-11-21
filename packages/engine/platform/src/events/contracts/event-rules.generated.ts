@@ -287,14 +287,6 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     outcome: { kind: 'enum', values: ['applied', 'failed', 'kept-original'] },
     detail: { kind: 'string', optional: true },
   },
-  COMPANION_MESSAGE_RECEIVED: {
-    sessionId: { kind: 'string' },
-    messageId: { kind: 'string' },
-    body: { kind: 'string' },
-    source: { kind: 'string' },
-    timestamp: { kind: 'number' },
-    metadata: { kind: 'object', optional: true },
-  },
   COMPANION_PAIR_REQUESTED: {
     clientIp: { kind: 'string' },
   },

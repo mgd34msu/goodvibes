@@ -1,9 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
-import type { ActionDescription, CommandActionContext, InputDescription } from './command-actions/types.js';
+import type { CommandActionContext, InputDescription } from './command-actions/types.js';
 import { choiceInput, readAction, textInput } from './described-command-kit.js';
 import { detectInstallKind } from '@goodvibes/engine/platform/platform/runtime/install-kind';
 import type { InstallKind } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -120,21 +123,106 @@ export interface SelfUpdateInvocation {
   readonly currentVersion: string;
   readonly print: (line: string) => void;
 }
-/** What `/update` does in one app beyond check, apply and roll back: this install's update state, kept in a file. */
-export interface InstallReviewPolicy<Context> {
-  /** This install's update state: version, latest release, install kind, rollback copy and the facts an upgrade keeps. */
-  review(context: Context): Promise<string>;
-  /** Whether a file is at this path now. */
-  exists(context: Context, path: string): boolean;
-  save(context: Context, path: string): Promise<string>;
-  read(context: Context, path: string): string;
+/**
+ * What `/update review` prints and `/update save-review` saves, built once for
+ * both. The saved file is this record as JSON; `/update read-review` reads any
+ * file in this shape, whichever app saved it.
+ */
+interface UpdateReview {
+  readonly version: 2;
+  readonly exportedAt: number;
+  readonly appVersion: string;
+  readonly installKind: InstallKind;
+  /** The newest published release, or why it could not be read. */
+  readonly latest: { readonly tag: string; readonly isCurrent: boolean } | { readonly unknown: string };
+  /** Where updates come from: the project's published releases. */
+  readonly channel: string;
+  /** True when a previous program is kept beside this one, so /update rollback has something to restore. */
+  readonly rollbackRetained: boolean;
+  readonly subscriptionProviders: readonly string[];
+  readonly sandboxProfile: string;
+}
+
+/** The two sandbox settings the review names. */
+export interface SandboxSettingsReader {
+  get(key: 'sandbox.enabled' | 'sandbox.mcpIsolation'): unknown;
+}
+
+/** What one app supplies for its install review: where its facts are read and how a typed path is resolved. */
+export interface InstallReviewSource<Context> {
+  /** The release page the newest release is read from. */
+  readonly channel: string;
+  /** A typed file path, resolved against this app's working folder. */
+  readonly resolvePath: (context: Context, path: string) => string;
+  readonly settings: (context: Context) => SandboxSettingsReader;
+  /** The subscription providers signed in or added here; the built-in ones are added to them. */
+  readonly subscriptionProviders: (context: Context) => readonly string[];
+  /** How many saved settings profiles this install keeps. */
+  readonly savedProfiles: (context: Context) => number;
+  /** How many secrets this install stores (their names only are counted). */
+  readonly storedSecrets: (context: Context) => Promise<number>;
+}
+
+function buildUpdateReview<Context>(
+  source: InstallReviewSource<Context>, context: Context, appVersion: string, latest: UpdateReview['latest'],
+): UpdateReview {
+  const config = source.settings(context);
+  const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
+  return {
+    version: 2,
+    exportedAt: Date.now(),
+    appVersion,
+    installKind: detectInstallKind(process.execPath),
+    latest,
+    channel: source.channel,
+    rollbackRetained: existsSync(`${process.execPath}${PREVIOUS_FILE_SUFFIX}`),
+    subscriptionProviders: [...new Set([...builtinProviders, ...source.subscriptionProviders(context)])],
+    sandboxProfile: `commands ${config.get('sandbox.enabled') === false ? 'host' : 'contained'}/mcp ${String(config.get('sandbox.mcpIsolation'))}`,
+  };
+}
+
+function formatUpdateReview(review: UpdateReview, title: string): string {
+  const latest = 'tag' in review.latest
+    ? `${review.latest.tag}${review.latest.isCurrent ? ' (this is current)' : ' (newer than this one: /update apply installs it)'}`
+    : `unknown (${review.latest.unknown})`;
+  return [
+    title,
+    `  installed version: ${review.appVersion}`,
+    `  latest release: ${latest}`,
+    `  channel: ${review.channel}`,
+    `  install kind: ${review.installKind}`,
+    `  rollback copy: ${review.rollbackRetained ? 'kept beside this program; /update rollback restores it' : 'none kept (/update apply keeps one)'}`,
+    `  subscription providers: ${review.subscriptionProviders.length}${review.subscriptionProviders.length > 0 ? ` (${review.subscriptionProviders.join(', ')})` : ''}; sign-ins survive an update`,
+    `  sandbox profile: ${review.sandboxProfile}`,
+  ].join('\n');
+}
+
+/** Parse a saved update review, refusing anything that is not one rather than printing "undefined" fields. */
+function parseUpdateReview(text: string): UpdateReview {
+  const value: unknown = JSON.parse(text);
+  const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
+  const latest = record?.latest as Record<string, unknown> | undefined;
+  if (
+    !record
+    || record.version !== 2
+    || typeof record.appVersion !== 'string'
+    || typeof record.installKind !== 'string'
+    || typeof record.channel !== 'string'
+    || typeof record.rollbackRetained !== 'boolean'
+    || typeof record.sandboxProfile !== 'string'
+    || !Array.isArray(record.subscriptionProviders)
+    || !latest || (typeof latest.tag !== 'string' && typeof latest.unknown !== 'string')
+  ) {
+    throw new Error('the file is not an update state saved by /update save-review');
+  }
+  return record as unknown as UpdateReview;
 }
 
 /**
  * `/update`, described once (command-actions/) for both terminal apps: look
  * for a newer release, install it, go back to the kept previous version, see
- * the daemon's own updates, and (where the app keeps one) this install's
- * update state and its file. `/install`'s facts are in "See this install".
+ * the daemon's own updates, and see this install's update state and keep it
+ * in a file. `/install`'s facts are in "See this install".
  */
 export function createSelfUpdateCommand<Context extends CommandActionContext & { print(message: string): void }>(policy: {
   readonly workspaceDistribution: boolean;
@@ -147,10 +235,19 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
   readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
   /** The connected daemon's own update loop, which this app's update does not cover. */
   readonly daemon?: ((context: Context) => DaemonUpdateVerbs) | undefined;
-  /** This install's update state; the review, save-review and read-review actions exist only with it. */
-  readonly install?: InstallReviewPolicy<Context> | undefined;
+  /** Where this install's update state is read, for the review, save-review and read-review actions. */
+  readonly install: InstallReviewSource<Context>;
 }): DescribedCommand<Context> {
   const install = policy.install;
+  /** The newest published release, read once; a failed read is named, not guessed. */
+  const readLatestRelease = async (): Promise<UpdateReview['latest']> => {
+    try {
+      const result = await policy.check(fetch as UpdateFetchLike, policy.version);
+      return { tag: result.latestTag, isCurrent: result.isCurrent };
+    } catch (error) {
+      return { unknown: error instanceof Error ? error.message : String(error) };
+    }
+  };
   const inWorkspace = (): void => {
     if (policy.workspaceDistribution) throw commandRefusal(policy.workspaceGuidance);
   };
@@ -228,12 +325,20 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
           return describeDaemonUpdates(policy.daemon(context), values.now === 'yes');
         },
       }),
-      // The install review actions exist only where the app keeps an install review.
-      ...(install ? ([readAction<Context>({
+      readAction<Context>({
         id: 'review', label: 'See this install', word: 'review',
         sentence: 'Shows the version installed, the newest release, how it was installed, whether a previous version is kept and what an update keeps.',
         operator: terminal,
-        async run(_values, context) { return install.review(context); },
+        async run(_values, context) {
+          // What /install showed (saved profiles, stored secret names) sits with the update state.
+          const profiles = install.savedProfiles(context);
+          const secretKeys = await install.storedSecrets(context);
+          return [
+            formatUpdateReview(buildUpdateReview(install, context, policy.version, await readLatestRelease()), 'This install'),
+            `  saved settings profiles: ${profiles}`,
+            `  stored secrets: ${secretKeys}`,
+          ].join('\n');
+        },
       }),
       {
         id: 'save-review', label: 'Save this install\'s update state to a file', word: 'save-review',
@@ -249,10 +354,14 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
         operator: terminal, example: { path: 'update-review.json' },
         async run(values, context) {
-          if (values.replace !== 'yes' && install.exists(context, values.path!)) {
+          const targetPath = install.resolvePath(context, values.path!);
+          if (values.replace !== 'yes' && existsSync(targetPath)) {
             throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /update save-review ${values.path} --replace`);
           }
-          return install.save(context, values.path!);
+          const review = buildUpdateReview(install, context, policy.version, await readLatestRelease());
+          mkdirSync(dirname(targetPath), { recursive: true });
+          writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
+          return `Saved this install's update state to ${targetPath}. It records the update state for support or before an upgrade; nothing applies it.`;
         },
       },
       readAction<Context>({
@@ -260,8 +369,15 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         inputs: [pathInput('An update state saved earlier')],
         sentence: 'Reads the update state saved in {path} and shows what it recorded.',
         operator: terminal, example: { path: 'update-review.json' },
-        async run(values, context) { return install.read(context, values.path!); },
-      })] satisfies ActionDescription<Context>[]) : []),
+        async run(values, context) {
+          const targetPath = install.resolvePath(context, values.path!);
+          try {
+            return formatUpdateReview(parseUpdateReview(readFileSync(targetPath, 'utf-8')), `Update state (saved ${targetPath})`);
+          } catch (error) {
+            throw commandRefusal(`Cannot read ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        },
+      }),
     ],
   });
 }

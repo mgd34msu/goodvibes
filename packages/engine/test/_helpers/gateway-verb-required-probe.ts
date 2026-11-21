@@ -348,11 +348,20 @@ const PROBE_CONTEXT: GatewayMethodInvocationContext = {
   metadata: {},
 };
 
+/**
+ * The fields the contract tells a caller to send: `required`, plus those of
+ * the first alternative of an `anyOf` (method-catalog-shared.ts
+ * `branchedSchema`) or a `oneOf`, of which typed clients must satisfy one.
+ */
 function declaredRequiredOf(descriptor: GatewayMethodDescriptor): readonly string[] {
   const schema = descriptor.inputSchema;
   if (!schema) return [];
-  const required = (schema as Record<string, unknown>).required;
-  return Array.isArray(required) ? required.filter((entry): entry is string => typeof entry === 'string') : [];
+  const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  const record = schema as Record<string, unknown>;
+  const alternatives = Array.isArray(record.anyOf) ? record.anyOf : Array.isArray(record.oneOf) ? record.oneOf : [];
+  const first: unknown = alternatives[0];
+  const firstRequired = typeof first === 'object' && first !== null ? strings((first as Record<string, unknown>).required) : [];
+  return [...new Set([...strings(record.required), ...firstRequired])];
 }
 
 function buildProbeParams(descriptor: GatewayMethodDescriptor, required: readonly string[]): Record<string, unknown> {

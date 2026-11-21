@@ -164,8 +164,6 @@ export function createStandaloneDaemonHost(options: {
           };
       }
       switch (outcome.action) {
-        case 'starting':
-          return { answered: false, detail: `the daemon service "${outcome.serviceName}" is starting and has not answered yet` };
         case 'started':
           return { answered: true, detail: `started the daemon service "${outcome.serviceName}" and it answers on its configured address` };
         case 'came-online':

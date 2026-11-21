@@ -379,7 +379,7 @@ const models = createObservabilityReadModels(runtimeServices);
 
 ## Latency budgets
 
-`DEFAULT_BUDGETS` (`runtime/perf/budgets.ts`) states the latency each critical path should keep, as p95: time to first output after a turn is submitted, time to stop after a cancel, and time from a call reaching the gate to its decision. Each process that answers `/health diagnose` (both terminal apps) or `ops.doctor` (the daemon) keeps one `SloCollector` on its runtime event bus and compares the measured p95 with the budget in the stuck-turn and permission-deadlock runbooks. The measurement harness (`bun packages/engine/scripts/measure/run.ts`) reports the same p95 values (`turnStartP95Ms`, `permissionDecisionP95Ms`) for the tool and turn scenarios. A budget is an upper bound unless it says `direction: 'min'` (a success rate).
+`DEFAULT_BUDGETS` (`runtime/perf/budgets.ts`) states the latency each critical path should keep, as p95: time to first output after a turn is submitted, time to stop after a cancel, and time from a call reaching the gate to its decision. Each process that answers `/health diagnose` (both terminal apps) or `ops.doctor` (the daemon) keeps one `SloCollector` on its runtime event bus and compares the measured p95 with the budget in the stuck-turn and permission-deadlock runbooks. A budget is an upper bound unless it says `direction: 'min'` (a success rate).
 
 ---
 

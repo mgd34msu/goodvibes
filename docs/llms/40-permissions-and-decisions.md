@@ -470,6 +470,8 @@ How to reverse a decision:
 /questions answer <item> <choice|text> [note]   asks first: an answer cannot be taken back
 ```
 
+When the daemon does not answer, `/questions list`, `/questions all` and `/decisions list` show what this machine holds under one line naming it: `The daemon at <address> did not answer (<reason>); showing only what is held on this machine, so its approvals and questions are missing.`
+
 For an item with options, the first word of the answer is the choice and the rest is its note. Only the owner can answer. A channel owner claim offers `accept` and `decline`: `/questions answer <id> accept`. A decision item offers `keep`, `undo`, `never`, `always` and `ask`; a held-call item `approve` and `dismiss`.
 
 ## Plan mode

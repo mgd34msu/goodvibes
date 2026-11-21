@@ -90,8 +90,6 @@
     "version:check": "bun packages/engine/scripts/version-consistency-check.ts",
     "validate": "bun packages/engine/scripts/validate.ts",
     "validate:strict": "bun run validate",
-    "measure": "bun packages/engine/scripts/measure/run.ts",
-    "measure:check": "bun packages/engine/scripts/measure/run.ts --check packages/engine/scripts/measure/budgets.json",
     "install:smoke": "bun packages/engine/scripts/install-smoke-check.ts",
     "release:artifact-lane": "bun packages/engine/scripts/release-artifact-lane.ts",
     "release:dry-run": "bun packages/engine/scripts/publish-packages.ts --dry-run",

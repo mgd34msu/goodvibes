@@ -44,10 +44,10 @@ import type {
   PaymentsGatewayService,
 } from '../../control-plane/routes/payments.js';
 import { logger } from '../../utils/logger.js';
-import { registerCatalogHandlers } from './handler-plumbing.js';
+import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
-import type { TypedHandler, Unregister } from './handler-plumbing.js';
+import type { TypedHandler, Unregister } from '../../control-plane/host-handlers.js';
 import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler } from './checkout-handlers.js';
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
 import { paymentHostStopSentence, paymentHostStopView } from '../payment-host-health.js';

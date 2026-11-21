@@ -1,11 +1,13 @@
 // Proves: A machine that asked to pair gets a peer token before the owner approved it, with the wrong challenge, or keeps one after it was revoked.
-// Red when: Verifying a pair request issues a token while it waits for the owner, after he rejected it, a second time, or for the wrong challenge; or a revoked peer token still authenticates.
+// Red when: Verifying a pair request issues a token while it waits for the owner, after he rejected it, after its token was used, or for the wrong challenge; a repeated verify leaves the token it replaced working; or a revoked peer token still authenticates.
 /**
  * Anyone who can reach the daemon may ask to pair a machine as a remote peer;
  * a peer token then pulls the owner's work and runs it. The real distributed
  * runtime over a store in a temp directory: a request yields a token only after
- * the owner approved it, only to the holder of its challenge, and only once; a
- * rejected request yields none; a revoked token stops authenticating.
+ * the owner approved it, only to the holder of its challenge, and one live
+ * token at a time (a verify repeated while its token is unused replaces that
+ * token, and none follows once it is used); a rejected request yields none; a
+ * revoked token stops authenticating.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -39,16 +41,21 @@ test('a pair request yields a token only after approval, to its challenge, once;
   await runtime.approvePairRequest(asked.request.id);
   const wrongChallenge = await attempt(() => runtime.verifyPairRequest(asked.request.id, refused.challenge));
   const verified = await runtime.verifyPairRequest(asked.request.id, asked.challenge);
-  const again = await attempt(() => runtime.verifyPairRequest(asked.request.id, asked.challenge));
-  const token = verified!.token.value;
+  // The same verify again while its token is unused (its answer was lost) gets a new token; the first stops working.
+  const retried = await runtime.verifyPairRequest(asked.request.id, asked.challenge);
+  const firstAfterRetry = await runtime.authenticatePeerToken(verified!.token.value);
+  const token = retried!.token.value;
   const beforeRevoke = (await runtime.authenticatePeerToken(token))?.peer.id;
-  await runtime.revokePeerToken(verified!.peer.id);
+  // Once the token has been used, the request is settled: no further token.
+  const again = await attempt(() => runtime.verifyPairRequest(asked.request.id, asked.challenge));
+  await runtime.revokePeerToken(retried!.peer.id);
   const afterRevoke = await runtime.authenticatePeerToken(token);
 
-  expect({ beforeApproval, afterRejection, wrongChallenge, again, beforeRevoke, afterRevoke }).toEqual({
+  expect({ beforeApproval, afterRejection, wrongChallenge, firstAfterRetry, again, beforeRevoke, afterRevoke }).toEqual({
     beforeApproval: 'nothing yet',
     afterRejection: 'refused REMOTE_PAIR_REQUEST_SETTLED',
     wrongChallenge: 'nothing yet',
+    firstAfterRetry: null,
     again: 'refused REMOTE_PAIR_REQUEST_SETTLED',
     beforeRevoke: verified!.peer.id,
     afterRevoke: null,

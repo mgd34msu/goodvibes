@@ -243,6 +243,26 @@ function validateBase(value: unknown, schema: Record<string, unknown>, path: str
 }
 
 /**
+ * The schema to validate against: a method that declares a confirmation lists
+ * `confirm` as required (method-catalog-shared.ts), but a missing one is the
+ * confirmation gate's to refuse, with its one CONFIRMATION_REQUIRED body, so
+ * it is not refused here as a missing field. Its type is still checked.
+ */
+function confirmLeftToGate(descriptor: GatewayMethodDescriptor, schema: Record<string, unknown>): Record<string, unknown> {
+  return descriptor.confirmation === 'confirm' || descriptor.confirmation === 'owner-request' ? withoutRequiredConfirm(schema) : schema;
+}
+
+function withoutRequiredConfirm(schema: Record<string, unknown>): Record<string, unknown> {
+  const alternatives = schema['oneOf'];
+  const required = schema['required'];
+  return {
+    ...schema,
+    ...(Array.isArray(alternatives) ? { oneOf: alternatives.map((alternative: unknown) => typeof alternative === 'object' && alternative !== null ? withoutRequiredConfirm(alternative as Record<string, unknown>) : alternative) } : {}),
+    ...(Array.isArray(required) ? { required: (required as readonly unknown[]).filter((key) => key !== 'confirm') } : {}),
+  };
+}
+
+/**
  * Validate an invocation's params against a verb's inputSchema. Returns an
  * `InvokeValidationError` when a typed schema is violated, or null when the
  * params conform, the schema is generic/untyped, or there is nothing to check.
@@ -258,7 +278,7 @@ export function validateInvocationInput(
   const schema = descriptor.inputSchema;
   if (classifyInputSchema(schema) !== 'validated') return null;
   const value = params === undefined ? {} : params;
-  const detail = validateValue(value, schema as Record<string, unknown>, '');
+  const detail = validateValue(value, confirmLeftToGate(descriptor, schema as Record<string, unknown>), '');
   return detail ? { code: 'INVALID_ARGUMENT', detail } : null;
 }
 

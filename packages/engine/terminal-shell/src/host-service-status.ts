@@ -1,12 +1,9 @@
-import type { HostServiceStatus, HostServicesConfig, HostServicesHandle } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import type { HostServiceStatus, HostServicesHandle } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { deriveControlPlaneBaseUrl } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointSettingKey } from './cli-endpoints.js';
 export type HostServiceName = 'daemon' | 'httpListener';
-/**
- * The settings the pending status reads. The host-services keys are listed too
- * so the narrower host-services reader a product holds can be passed as is.
- */
-type PendingStatusConfigKey = RuntimeEndpointSettingKey | 'controlPlane.tls.mode' | Parameters<HostServicesConfig['get']>[0];
+/** The settings the pending status reads: the daemon's and the listener's endpoint keys and the control plane's TLS mode. */
+type PendingStatusConfigKey = RuntimeEndpointSettingKey<'controlPlane' | 'httpListener'> | 'controlPlane.tls.mode';
 export function formatHostServiceBaseUrl(host: string, port: number): string {
   const normalized = host.trim().toLowerCase();
   const probe = normalized === '0.0.0.0' ? '127.0.0.1' : normalized === '::' || normalized === '[::]' ? '::1' : host;

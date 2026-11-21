@@ -9611,6 +9611,118 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           ]
         },
         {
+          "id": "requests",
+          "label": "See devices waiting to pair",
+          "word": "requests",
+          "line": "/devices requests",
+          "sentence": "Lists each device that asked to pair as a node (a browser's Phone node, a peer daemon) and waits for your approval, with what it offers and the node id it pairs as.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "method": "remote.pair.requests.list",
+            "fields": {}
+          },
+          "inputs": []
+        },
+        {
+          "id": "approve",
+          "label": "Approve a device waiting to pair",
+          "word": "approve",
+          "line": "/devices approve <request> [--replace]",
+          "sentence": "The device that sent {request} may finish pairing and then reach the daemon as a node {lasts}: revoking it ends that.",
+          "done": "",
+          "touches": "credential",
+          "lasts": "kept",
+          "risk": "none",
+          "ownerOnly": {
+            "reason": "approving gives a device access to the daemon",
+            "instead": "/devices requests shows the devices waiting to pair"
+          },
+          "operator": {
+            "method": "remote.pair.requests.approve",
+            "fields": {
+              "requestId": "request"
+            }
+          },
+          "inputs": [
+            {
+              "id": "request",
+              "label": "Request",
+              "help": "The devices waiting to pair",
+              "kind": "choice",
+              "choices": {
+                "list": "devices.pair-requests"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            },
+            {
+              "id": "replace",
+              "label": "Replace",
+              "help": "The request names a device already paired: approve it as that same device pairing again, which ends the old pairing",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "no",
+                  "label": "No"
+                },
+                {
+                  "value": "yes",
+                  "label": "Yes, it is the same device pairing again"
+                }
+              ],
+              "required": {
+                "default": "no",
+                "defaultMeans": "no"
+              },
+              "typed": {
+                "flag": "--replace",
+                "switchOn": "yes"
+              }
+            }
+          ]
+        },
+        {
+          "id": "reject",
+          "label": "Reject a device waiting to pair",
+          "word": "reject",
+          "line": "/devices reject <request>",
+          "sentence": "The device that sent {request} stays unpaired {lasts}; to pair after all, it has to ask again.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "ownerOnly": {
+            "reason": "answering a pairing request is the owner's own act",
+            "instead": "/devices requests shows the devices waiting to pair"
+          },
+          "operator": {
+            "method": "remote.pair.requests.reject",
+            "fields": {
+              "requestId": "request"
+            }
+          },
+          "inputs": [
+            {
+              "id": "request",
+              "label": "Request",
+              "help": "The devices waiting to pair",
+              "kind": "choice",
+              "choices": {
+                "list": "devices.pair-requests"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
           "id": "nodes",
           "label": "See phones paired as device nodes",
           "word": "nodes",
@@ -23799,353 +23911,6 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       ]
     },
     {
-      "name": "plugin-trust",
-      "title": "Plugins and their trust",
-      "summary": "Switch plugins on and off, and set what each one may do",
-      "group": "Extensions",
-      "report": "list",
-      "actions": [
-        {
-          "id": "list",
-          "label": "See your plugins",
-          "word": "list",
-          "line": "/plugin-trust list",
-          "sentence": "Shows every plugin with its state and trust tier.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": []
-        },
-        {
-          "id": "enable",
-          "label": "Switch a plugin on",
-          "word": "enable",
-          "line": "/plugin-trust enable <plugin>",
-          "sentence": "{plugin} starts now and at every start, under its trust tier, until you change it.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "none",
-          "undoneBy": "disable",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        },
-        {
-          "id": "disable",
-          "label": "Switch a plugin off",
-          "word": "disable",
-          "line": "/plugin-trust disable <plugin>",
-          "sentence": "{plugin} stops now and does not start again, until you change it.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "none",
-          "undoneBy": "enable",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        },
-        {
-          "id": "reload",
-          "label": "Load the plugins again",
-          "word": "reload",
-          "line": "/plugin-trust reload",
-          "sentence": "Every switched-on plugin is stopped and started again from its files.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": []
-        },
-        {
-          "id": "quarantine",
-          "label": "Quarantine a plugin",
-          "word": "quarantine",
-          "line": "/plugin-trust quarantine <plugin> [<why...>]",
-          "sentence": "{plugin} is stopped and blocked from loading until you change it (lift the quarantine).",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "none",
-          "undoneBy": "lift",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            },
-            {
-              "id": "reason",
-              "label": "Why",
-              "help": "A note you will see when you look at it",
-              "kind": "text",
-              "freeTextReason": "your own words",
-              "required": {
-                "default": "quarantined by operator",
-                "defaultMeans": "no note"
-              },
-              "typed": {
-                "tail": true
-              }
-            }
-          ]
-        },
-        {
-          "id": "lift",
-          "label": "Lift a plugin's quarantine",
-          "word": "lift",
-          "line": "/plugin-trust lift <plugin>",
-          "sentence": "{plugin} may load again (after a reload), until you change it.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "loosens-a-protection",
-          "riskWords": "loosens a protection",
-          "ownerOnly": {
-            "reason": "it lets a quarantined plugin load again",
-            "instead": "Ask the owner to lift it with /plugin-trust lift."
-          },
-          "undoneBy": "quarantine",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        },
-        {
-          "id": "trust",
-          "label": "Set what a plugin may do",
-          "word": "trust",
-          "line": "/plugin-trust trust <plugin> <trust tier> [<note...>]",
-          "sentence": "{plugin} is set to the {tier} tier on every app of this machine until you change it; a trusted tier without a valid signature is recorded in its trust note.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            },
-            {
-              "id": "tier",
-              "label": "Trust tier",
-              "help": "What it may register",
-              "kind": "choice",
-              "choices": [
-                {
-                  "value": "untrusted",
-                  "label": "Untrusted",
-                  "help": "panels, commands and reading files only; its tool, provider, event-hook, gateway-method, channel and delivery registrations are refused"
-                },
-                {
-                  "value": "limited",
-                  "label": "Limited",
-                  "help": "the tools, providers and event hooks its manifest declares, plus gateway methods, channels and delivery strategies; high-risk capabilities stay withheld"
-                },
-                {
-                  "value": "trusted",
-                  "label": "Trusted",
-                  "help": "everything its manifest declares, including shell, file-write and network capabilities",
-                  "risk": "loosens-a-protection"
-                }
-              ],
-              "required": true,
-              "typed": {
-                "position": 2
-              }
-            },
-            {
-              "id": "note",
-              "label": "Note",
-              "help": "Why you chose it",
-              "kind": "text",
-              "freeTextReason": "your own words",
-              "required": {
-                "default": "",
-                "defaultMeans": "no note"
-              },
-              "typed": {
-                "tail": true
-              }
-            }
-          ]
-        },
-        {
-          "id": "trust-key",
-          "label": "Save a plugin publisher's key",
-          "word": "trust-key",
-          "line": "/plugin-trust trust-key <plugin> <key file>",
-          "sentence": "The key in {key} is saved as {plugin}'s publisher key, until you change it, so its signature can be checked.",
-          "done": "",
-          "touches": "credential",
-          "lasts": "kept",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Plugins run inside each terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            },
-            {
-              "id": "key",
-              "label": "Key file",
-              "help": "The publisher's Ed25519 public key (.pem)",
-              "kind": "path",
-              "freeTextReason": "a file path on this machine",
-              "required": true,
-              "typed": {
-                "position": 2
-              }
-            }
-          ]
-        },
-        {
-          "id": "verify",
-          "label": "Check a plugin's signature",
-          "word": "verify",
-          "line": "/plugin-trust verify <plugin>",
-          "sentence": "Checks {plugin}'s manifest signature against its publisher key.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        },
-        {
-          "id": "capabilities",
-          "label": "See what a plugin asks to do",
-          "word": "capabilities",
-          "line": "/plugin-trust capabilities <plugin>",
-          "sentence": "Shows the capabilities {plugin} declares and which its tier grants or withholds.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": [
-            {
-              "id": "plugin",
-              "label": "Plugin",
-              "help": "Plugins found on this machine",
-              "kind": "choice",
-              "choices": {
-                "list": "plugins"
-              },
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "power",
       "title": "Sleep",
       "summary": "See whether this computer may sleep, and keep it awake",
@@ -27570,8 +27335,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 },
                 {
                   "value": "yes",
-                  "label": "Resume it here anyway",
-                  "help": "That terminal's live state is forked."
+                  "label": "Have it handed over here",
+                  "help": "That terminal saves it and lets go first, through the daemon both are attached to."
                 }
               ],
               "required": {
@@ -31264,8 +31029,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 },
                 {
                   "value": "yes",
-                  "label": "Resume it here anyway",
-                  "help": "That terminal's live state is forked."
+                  "label": "Have it handed over here",
+                  "help": "That terminal saves it and lets go first, through the daemon both are attached to."
                 }
               ],
               "required": {
@@ -33642,6 +33407,21 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "inputs": []
         },
         {
+          "id": "connect-daemon",
+          "label": "Use a daemon on another computer",
+          "word": "connect-daemon",
+          "line": "/setup connect-daemon",
+          "sentence": "Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Done from a terminal app."
+          },
+          "inputs": []
+        },
+        {
           "id": "webhooks",
           "label": "Receive webhooks",
           "word": "webhooks",
@@ -35628,13 +35408,13 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "save",
           "label": "Save your last message as a template",
           "word": "save",
-          "line": "/template save <name>",
-          "sentence": "Your last message is kept as template {name} in this project, until you change it.",
+          "line": "/template save <name> [--everywhere]",
+          "sentence": "Your last message is kept as template {name} ({scope}); a template already saved under that name there is replaced.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "none",
-          "undoneBy": "delete",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
           "operator": {
             "terminalOnly": "Templates are files of this project and this machine."
           },
@@ -35648,6 +35428,31 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "required": true,
               "typed": {
                 "position": 1
+              }
+            },
+            {
+              "id": "scope",
+              "label": "For",
+              "help": "This project only, or every project on this machine",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "project",
+                  "label": "This project"
+                },
+                {
+                  "value": "global",
+                  "label": "Every project",
+                  "help": "Every project can use it."
+                }
+              ],
+              "required": {
+                "default": "project",
+                "defaultMeans": "this project"
+              },
+              "typed": {
+                "flag": "--everywhere",
+                "switchOn": "global"
               }
             }
           ]
@@ -39616,6 +39421,16 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         "value": "grantId",
         "label": "capabilityTitle",
         "detail": "nodeId"
+      }
+    },
+    "devices.pair-requests": {
+      "method": "remote.pair.requests.list",
+      "input": {},
+      "rows": {
+        "from": "requests",
+        "value": "id",
+        "label": "label",
+        "detail": "requestedId"
       }
     },
     "devices.relay-codes": {

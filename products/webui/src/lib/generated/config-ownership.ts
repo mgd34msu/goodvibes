@@ -45,7 +45,8 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   "daemon.timezone",
   "network.privateDeliveryHosts",
   "update.auto",
-  "update.autoUpdateAtLaunch"
+  "update.autoUpdateAtLaunch",
+  "power.keepAwake"
 ] as const;
 
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [

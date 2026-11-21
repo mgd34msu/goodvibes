@@ -361,6 +361,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "storage.artifacts.maxBytes",
     "label": "Largest file you can upload (bytes)",
+    "appliesWhen": "now",
     "type": "number",
     "default": 536870912,
     "description": "Maximum stored artifact size for file, URL, multipart, and raw upload ingest in bytes",
@@ -941,7 +942,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Trust a proxy's client addresses",
     "type": "boolean",
     "default": false,
-    "description": "Trust proxy forwarding headers such as x-forwarded-for for the control plane"
+    "description": "Trust proxy forwarding headers such as x-forwarded-for for the control plane. Read at each request: a change applies at once, with no restart."
   },
   {
     "key": "controlPlane.openaiCompatible.enabled",
@@ -963,7 +964,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Serve the web UI from the daemon",
     "type": "boolean",
     "default": false,
-    "description": "Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls."
+    "description": "Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls. Turned on alone, it serves controlPlane.webui.bundleDir, or web.staticAssetsDir when that is empty, without checking that a bundle is there (a page load then answers 503 naming the setting); goodvibes-daemon webui enable --bundle-dir <dir> is the path that checks the bundle."
   },
   {
     "key": "controlPlane.webui.bundleDir",
@@ -1044,7 +1045,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Trust a proxy's client addresses for webhooks",
     "type": "boolean",
     "default": false,
-    "description": "Trust proxy forwarding headers such as x-forwarded-for for the webhook listener"
+    "description": "Trust proxy forwarding headers such as x-forwarded-for for the webhook listener. Read at each request: a change applies at once, with no restart."
   },
   {
     "key": "httpListener.trustCloudflare",
@@ -1119,7 +1120,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Outside address used in web links",
     "type": "string",
     "default": "",
-    "description": "Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived: the daemon's own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices."
+    "description": "Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived live from the current settings: the daemon's own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices. Installers and goodvibes-daemon webui enable never fill it; set it only for an address the daemon cannot derive."
   },
   {
     "key": "web.staticAssetsDir",
@@ -1494,10 +1495,10 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "daemon.timezone",
-    "label": "Time zone for daily budgets and reminders",
+    "label": "Time zone for daily budgets, reminders and new schedules",
     "type": "string",
     "default": "",
-    "description": "IANA timezone name the daemon reckons CALENDAR DAYS in, e.g. 'America/New_York', 'Europe/London'. Empty means UTC. This is the daemon's own location, not a display preference and not a per-schedule zone (schedules keep their own). Anything that resets daily reads it: the payment capability's daily budgets roll over at midnight in this zone. Changing it does not refill a spent budget: each spend keeps the day it was made on and counts until that day is over, and an agent cannot change it in a way that moves today; only the owner can.",
+    "description": "IANA timezone name for where the owner is, e.g. 'America/New_York', 'Europe/London'. Anything that resets daily reads it: the payment capability's daily budgets roll over at midnight in this zone (UTC when empty). It is also the default zone for a schedule or reminder created without one: a repeating time such as weekdays at 08:00 is kept in this zone (the host's own zone when empty). A schedule created with a zone, or from a terminal or browser that sends where the time was typed, keeps that zone, and changing this setting does not move schedules already kept. Changing it does not refill a spent budget: each spend keeps the day it was made on and counts until that day is over, and an agent cannot change it in a way that moves today; only the owner can.",
     "validationHint": "empty (UTC) or an IANA timezone name like 'America/New_York'"
   },
   {
@@ -1655,6 +1656,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": 90,
     "description": "The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer's memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
+  },
+  {
+    "key": "memory.projection.dir",
+    "label": "Folder memories are written to as files",
+    "type": "string",
+    "default": ".goodvibes/memory/projection",
+    "description": "/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /memory review-files reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.",
+    "validationHint": "a folder path, relative to the project or absolute"
   },
   {
     "key": "profile.enabled",
@@ -2217,6 +2226,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "push.vapidSubject",
     "label": "Contact address push services can reach you at",
+    "appliesWhen": "restart",
     "type": "string",
     "default": "",
     "description": "Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID \"sub\" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem. A change takes effect after the daemon restarts.",
@@ -2237,14 +2247,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": 5,
     "description": "How many deliveries in a row a push service must refuse before the daemon treats that endpoint as dead and removes it. A 404 or 410 removes it immediately, that is the push service saying the subscription is gone, so this bound is for the murkier case of an endpoint that only ever errors or times out. Any single success resets the count to zero. Raise it if you have a flaky network and would rather keep retrying; lower it to clear out dead endpoints faster.",
     "validationHint": "integer in [1, 100]"
-  },
-  {
-    "key": "push.subscriptions.sweepIntervalMinutes",
-    "label": "How often push devices are checked (minutes)",
-    "type": "number",
-    "default": 60,
-    "description": "How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss. A change to the interval takes effect after the daemon restarts.",
-    "validationHint": "integer in [1, 1440]"
   },
   {
     "key": "fleet.maxSize",
@@ -2503,7 +2505,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "ntfy server",
     "type": "string",
     "default": "https://ntfy.sh",
-    "description": "Base URL for ntfy delivery"
+    "description": "Base URL of the ntfy server notifications are published to and topics are read from. Empty means the public server, https://ntfy.sh."
   },
   {
     "key": "surfaces.ntfy.topic",
@@ -3699,6 +3701,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "network.remoteFetch.allowPrivateHosts",
     "label": "Allow fetching from addresses on your own network",
+    "appliesWhen": "now",
     "type": "boolean",
     "default": false,
     "description": "Allow explicit admin-approved remote fetches from private, localhost, or metadata hosts for artifacts and ingest flows"
@@ -3721,6 +3724,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "relay.url",
     "label": "Relay address",
+    "appliesWhen": "now",
     "type": "string",
     "default": "",
     "description": "Relay URL to dial (wss://…); empty disables the outbound relay connection"
@@ -4402,7 +4406,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Address of the daemon to connect to",
     "type": "string",
     "default": "",
-    "description": "Where the terminal (goodvibes) dials its daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. Setup's \"Connect to an existing daemon\" writes this, so finishing setup or changing the local bind does not move the terminal off the daemon it connected to. Clear it to go back to the daemon on this machine.",
+    "description": "Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. /setup connect-daemon (\"Use a daemon on another computer\") writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent's --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.",
     "validationHint": "empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421"
   },
   {
@@ -4866,6 +4870,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "",
     "description": "Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode."
+  },
+  {
+    "key": "webSearch.defaultProvider",
+    "label": "Web search provider",
+    "appliesWhen": "now",
+    "type": "string",
+    "default": "auto",
+    "description": "The provider that answers a web search that names none: a registered provider id (duckduckgo, searxng, brave, exa, firecrawl, tavily, perplexity, or one a plugin adds). auto (the default) uses the first configured of searxng, brave, exa, firecrawl, tavily and perplexity, else duckduckgo, which needs no key. A provider named here that is not registered or has no credential falls back to the auto rule; a search that passes providerId uses that one."
   },
   {
     "key": "security.tokenAudit.enabled",
@@ -5475,7 +5487,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "permissions-simulation",
     "name": "Permissions Simulation Mode",
-    "description": "Enables the dual-evaluator simulation pipeline for the permissions policy engine. Tracks divergence between actual and candidate evaluators without changing enforcement behaviour until switched to enforce mode. On by default so divergence evidence accumulates before any stricter enforcement is considered; it never blocks tool execution by itself.",
+    "description": "Enables the dual-evaluator simulation pipeline for the permissions policy engine. Tracks divergence between actual and candidate evaluators without changing enforcement behaviour until switched to enforce mode. Divergence evidence accumulates before any stricter enforcement is considered; it never blocks tool execution by itself.",
     "domain": "permissions",
     "enablement": {
       "key": "permissions.simulation",
@@ -5514,7 +5526,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "unified-runtime-task",
     "name": "Unified RuntimeTask",
-    "description": "The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. On by default; turn runtime.unifiedTasks off to disable it.",
+    "description": "The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. Turn runtime.unifiedTasks off to disable it.",
     "domain": "runtime",
     "enablement": {
       "key": "runtime.unifiedTasks",
@@ -5531,7 +5543,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "watcher-triggers",
     "name": "Trigger Family",
-    "description": "Enables three unattended watcher kinds over one supervision spine: stream watchers that regex-filter and batch a long-lived command's output; model-free condition checks running a declarative probe/extract/rule pipeline with no LLM in the loop; and one-shot on-exit triggers where GoodVibes launches a command and fires exactly one payload when it terminates (daemon-owned, so a six-hour build does not hold an agent turn open). A firing trigger runs an agent turn or a pre-registered digest-pinned action grant, never a command composed at fire time. Off by default: a trigger launches and supervises real processes with nobody watching, so turning it on is a deliberate choice; with it on and no triggers defined the supervisor idles and consumes nothing. Tune the backoff ladder, strike breaker, retention bounds, batching and process caps via the watchers.triggers.* settings.",
+    "description": "Enables three unattended watcher kinds over one supervision spine: stream watchers that regex-filter and batch a long-lived command's output; model-free condition checks running a declarative probe/extract/rule pipeline with no LLM in the loop; and one-shot on-exit triggers where GoodVibes launches a command and fires exactly one payload when it terminates (daemon-owned, so a six-hour build does not hold an agent turn open). A firing trigger runs an agent turn or a pre-registered digest-pinned action grant, never a command composed at fire time. A trigger launches and supervises real processes with nobody watching, so turning it on is a deliberate choice; with it on and no triggers defined the supervisor idles and consumes nothing. Tune the backoff ladder, strike breaker, retention bounds, batching and process caps via the watchers.triggers.* settings.",
     "domain": "watchers",
     "enablement": {
       "key": "watchers.triggers.enabled",
@@ -5681,7 +5693,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "session-compaction",
     "name": "Session Compaction",
-    "description": "Activates structured session compaction with semantic chunking and relevance scoring. On by default: long sessions compact at behavior.autoCompactThreshold with a receipt on every compaction. Set behavior.compactionStrategy to off to run uncompacted.",
+    "description": "Activates structured session compaction with semantic chunking and relevance scoring. Long sessions compact at behavior.autoCompactThreshold with a receipt on every compaction. Set behavior.compactionStrategy to off to run uncompacted.",
     "domain": "behavior",
     "enablement": {
       "key": "behavior.compactionStrategy",
@@ -5975,7 +5987,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "integration-delivery-slo",
     "name": "Integration Delivery SLO",
-    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. Enabled by default alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
+    "description": "Enforces delivery service-level objectives for the enabled channel surfaces (Slack, Discord, webhooks): failures are classified as retryable or terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics. Failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. It runs alongside the channel family it belongs to; disable to keep warn-level logging without DLQ tracking.",
     "domain": "integrations",
     "enablement": {
       "key": "integrations.delivery.sloEnforced",
@@ -6014,7 +6026,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "token-scope-rotation-audit",
     "name": "Token Scope and Rotation Audit",
-    "description": "Enables minimum scope principle checks and rotation cadence audits for API tokens. In managed mode, tokens with excess scopes or overdue rotation are blocked from use. Diagnostics panel surfaces token age, scope violations, and rotation warnings. Emits TOKEN_SCOPE_VIOLATION, TOKEN_ROTATION_WARNING, TOKEN_ROTATION_EXPIRED, and TOKEN_BLOCKED events via the security event domain. On by default in advisory mode (security.tokenAudit.managed false): tokens are reported, never blocked, until managed enforcement is opted into.",
+    "description": "Enables minimum scope principle checks and rotation cadence audits for API tokens. In managed mode, tokens with excess scopes or overdue rotation are blocked from use. Diagnostics panel surfaces token age, scope violations, and rotation warnings. Emits TOKEN_SCOPE_VIOLATION, TOKEN_ROTATION_WARNING, TOKEN_ROTATION_EXPIRED, and TOKEN_BLOCKED events via the security event domain. In advisory mode (security.tokenAudit.managed false) tokens are reported, never blocked, until managed enforcement is opted into.",
     "domain": "security",
     "enablement": {
       "key": "security.tokenAudit.enabled",
@@ -6034,7 +6046,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "automation-domain",
     "name": "Automation Domain",
-    "description": "Enables the first-class automation job/run domain used by the shared scheduling engine. This is the top-level switch for durable automation records, schedule evaluation, and run history. On by default: with no routines defined it idles and surfaces a how-to-create-your-first-routine empty state instead of requiring setup.",
+    "description": "Enables the first-class automation job/run domain used by the shared scheduling engine. This is the top-level switch for durable automation records, schedule evaluation, and run history. With no routines defined it idles and surfaces a how-to-create-your-first-routine empty state instead of requiring setup.",
     "domain": "automation",
     "enablement": {
       "key": "automation.enabled",
@@ -6467,7 +6479,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "web-surface",
     "name": "Web Surface",
-    "description": "Enables the browser-based operator surface backed by the shared control plane. On by default, bound to loopback (web.hostMode local, 127.0.0.1): a stock install serves the web surface on this machine only and announces its URL once at start. Widen deliberately via web.hostMode network/custom.",
+    "description": "Enables the browser-based operator surface backed by the shared control plane. Bound to loopback by default (web.hostMode local, 127.0.0.1): a stock install serves the web surface on this machine only and announces its URL once at start. Widen deliberately via web.hostMode network/custom.",
     "domain": "web",
     "enablement": {
       "key": "web.enabled",
@@ -6489,7 +6501,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "watcher-framework",
     "name": "Watcher Framework",
-    "description": "Enables managed watcher/listener services, checkpointing, and recovery semantics for long-running external sources. On by default: with no watchers configured the framework idles and consumes nothing.",
+    "description": "Enables managed watcher/listener services, checkpointing, and recovery semantics for long-running external sources. With no watchers configured the framework idles and consumes nothing.",
     "domain": "watchers",
     "enablement": {
       "key": "watchers.enabled",
@@ -6509,7 +6521,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "service-management",
     "name": "Service Management",
-    "description": "Enables install/start/stop/status/autostart management for running Goodvibes as a durable host service. On by default: the management verbs become available, but nothing is installed or started until explicitly requested (service.autostart stays false).",
+    "description": "Enables install/start/stop/status/autostart management for running Goodvibes as a durable host service. The management verbs are available, but nothing is installed or started until explicitly requested (service.autostart stays false).",
     "domain": "service",
     "enablement": {
       "key": "service.enabled",
@@ -6531,7 +6543,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "daemon-auto-update",
     "name": "Daemon Auto-Update",
-    "description": "The daemon checks for a new release hourly, downloads and checksum-verifies it, swaps binaries at a no-active-work moment (never mid-turn), keeps the previous binary for one-command rollback, and restarts via the service manager. On by default per the owner directive; update.auto turns it off, update.intervalMinutes tunes the cadence.",
+    "description": "The daemon checks for a new release hourly, downloads and checksum-verifies it, swaps binaries at a no-active-work moment (never mid-turn), keeps the previous binary for one-command rollback, and restarts via the service manager. update.auto turns it off, update.intervalMinutes tunes the cadence.",
     "domain": "update",
     "enablement": {
       "key": "update.auto",
@@ -6550,7 +6562,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "exec-sandbox",
     "name": "Per-Command Exec Sandbox",
-    "description": "Enables the per-command OS-level exec boundary (bubblewrap on Linux): the workspace is writable, the rest of the filesystem read-only, /tmp isolated, and network disabled unless a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would otherwise prompt can auto-allow, and commands needing host access (network, host-privilege escalation, package installs) surface as named escalation asks. The permission gate reads the catastrophic case before the call, inside the boundary as outside it. On by default where the host probe passes (Linux with bubblewrap available); the first auto-allow announces once that commands now run contained and escalations will ask. When bubblewrap is absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec path is byte-for-byte unchanged. Set sandbox.enabled false to revert to unsandboxed exec.",
+    "description": "Enables the per-command OS-level exec boundary (bubblewrap on Linux): the workspace is writable, the rest of the filesystem read-only, /tmp isolated, and network disabled unless a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would otherwise prompt can auto-allow, and commands needing host access (network, host-privilege escalation, package installs) surface as named escalation asks. The permission gate reads the catastrophic case before the call, inside the boundary as outside it. It applies where the host probe passes (Linux with bubblewrap available); the first auto-allow announces once that commands now run contained and escalations will ask. When bubblewrap is absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec path is byte-for-byte unchanged. Set sandbox.enabled false to revert to unsandboxed exec.",
     "domain": "sandbox",
     "enablement": {
       "key": "sandbox.enabled",
@@ -6568,7 +6580,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "sandbox-model-judgment",
     "name": "Sandbox Model-Judgment Tier",
-    "description": "Enables an optional model-judgment pass on the residual sandbox ask-tail: when the per-command exec sandbox is active and a command still lands on ask (a boundary needing host access, network, host-privilege escalation), a provider call over the command, its sandbox plan, workspace context, and the policy reasons produces a PROPOSED verdict with stated reasons. The tier NEVER converts allow→deny and NEVER touches the frozen catastrophic-only exec block (rm -rf /, dd to devices, mkfs, fork bomb…); it can only ANNOTATE the human ask (\"model judgment: looks safe because… / flags risk because…\") or, ONLY when the operator opted into sandbox.judgment auto-approve, auto-approve a looks-safe verdict. A flags-risk verdict never auto-denies, it annotates the ask the human still decides; a judgment failure degrades to a plain ask. Every judgment leaves a receipt. On by default in annotate-only mode (sandbox.judgment annotate); auto-approval is a separate explicit opt-in (sandbox.judgment auto-approve).",
+    "description": "Enables an optional model-judgment pass on the residual sandbox ask-tail: when the per-command exec sandbox is active and a command still lands on ask (a boundary needing host access, network, host-privilege escalation), a provider call over the command, its sandbox plan, workspace context, and the policy reasons produces a PROPOSED verdict with stated reasons. The tier NEVER converts allow→deny and NEVER touches the frozen catastrophic-only exec block (rm -rf /, dd to devices, mkfs, fork bomb…); it can only ANNOTATE the human ask (\"model judgment: looks safe because… / flags risk because…\") or, ONLY when the operator opted into sandbox.judgment auto-approve, auto-approve a looks-safe verdict. A flags-risk verdict never auto-denies, it annotates the ask the human still decides; a judgment failure degrades to a plain ask. Every judgment leaves a receipt. In annotate-only mode (sandbox.judgment annotate) it only annotates; auto-approval is a separate explicit opt-in (sandbox.judgment auto-approve).",
     "domain": "sandbox",
     "enablement": {
       "key": "sandbox.judgment",
@@ -6642,7 +6654,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "wake-word-detection",
     "name": "Wake-Word Detection",
-    "description": "Listens continuously on a capture device for a spoken wake phrase and hands the utterance that follows to speech-to-text. Detection runs the pinned \"hey goodvibes\" classifier behind a melspectrogram computed in code and Google's Apache-2.0 speech-embedding model, both on a WASM backend, so the same detector runs in a daemon child process and in a browser tab. Disabled by default because holding a microphone open must be an explicit act; enabling it starts a supervised capture process and shows a persistent listening indicator for as long as it runs. Live on all four surfaces: the terminal and the agent through a recorder subprocess, the web UI in a browser tab, and the desktop companion app in its embedded webview. Each is opted in by its own voice.wake.surfaces.* row. Tuned through voice.wake.*, whose threshold, patience and cooldown rows govern how readily it fires, and whose supervisor rows bound how a crashing detector is retried. The model's published recall figures are measured on synthesised speech only, no human recording of the phrase exists, while its false-accept figures are measured on real speech.",
+    "description": "Listens continuously on a capture device for a spoken wake phrase and hands the utterance that follows to speech-to-text. Detection runs the pinned \"hey goodvibes\" classifier behind a melspectrogram computed in code and Google's Apache-2.0 speech-embedding model, both on a WASM backend, so the same detector runs in a daemon child process and in a browser tab. Holding a microphone open must be an explicit act; enabling it starts a supervised capture process and shows a persistent listening indicator for as long as it runs. Live on all four surfaces: the terminal and the agent through a recorder subprocess, the web UI in a browser tab, and the desktop companion app in its embedded webview. Each is opted in by its own voice.wake.surfaces.* row. Tuned through voice.wake.*, whose threshold, patience and cooldown rows govern how readily it fires, and whose supervisor rows bound how a crashing detector is retried. The model's published recall figures are measured on synthesised speech only, no human recording of the phrase exists, while its false-accept figures are measured on real speech.",
     "domain": "voice",
     "enablement": {
       "key": "voice.wake.enabled",

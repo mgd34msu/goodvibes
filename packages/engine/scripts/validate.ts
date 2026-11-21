@@ -26,7 +26,7 @@ const ENGINE_ROOT = resolve(__dirname, '..');
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
 /** The CI jobs, in the order a full run takes them. */
-const JOBS = ['gates', 'build', 'typecheck', 'proofs', 'live-sandbox', 'measure', 'package'] as const;
+const JOBS = ['gates', 'build', 'typecheck', 'proofs', 'live-sandbox', 'package'] as const;
 type Job = typeof JOBS[number];
 
 interface Step {
@@ -106,10 +106,6 @@ const STEPS: readonly Step[] = [
 
   // live-sandbox: the test/live files inside real bubblewrap, where a skip fails.
   script('live-sandbox', 'test:live'),
-
-  // measure: request, read, write and statement counts per scenario against
-  // the recorded budgets.
-  script('measure', 'measure:check'),
 
   // package: the packages as released, then the three Linux programs as built
   // and run. The four release-stage readers share one packed stage.

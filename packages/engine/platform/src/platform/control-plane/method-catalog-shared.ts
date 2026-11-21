@@ -513,10 +513,12 @@ export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescri
     ?? (access === 'admin' && facts.scopes.some((scope) => ACCESS_AND_SETTINGS_WRITE_SCOPES.has(scope)) ? true : undefined);
   const effect: GatewayMethodEffect = facts.outward ? 'outward' : defaultMethodEffect(facts.scopes);
   const repeat = methodRepeat(input.id, effect, input.repeat, input.replay);
+  const inputSchema = withConfirmField(input.id, input.confirmation, input.inputSchema);
   return {
     source: input.source ?? 'builtin',
     transport: input.transport ?? ['http', 'ws'],
     ...input,
+    ...(inputSchema !== undefined ? { inputSchema } : {}),
     access,
     scopes: facts.scopes,
     effects: [...input.effects],
@@ -527,6 +529,40 @@ export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescri
     ...(facts.changesContract ? { changesContract: true } : {}),
     effect,
     repeat,
+  };
+}
+
+/**
+ * A method that runs only with `confirm: true` (confirmation `confirm` or
+ * `owner-request`) has `confirm` as a required boolean in its input schema,
+ * taken from that one declaration, so a client compiled against the contract
+ * sends it. A missing `confirm` is refused by the confirmation gate
+ * (CONFIRMATION_REQUIRED), not by schema validation (invoke-input-validation.ts).
+ */
+function withConfirmField(
+  id: string,
+  confirmation: GatewayMethodDescriptor['confirmation'],
+  schema: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (confirmation !== 'confirm' && confirmation !== 'owner-request') return schema;
+  return requireConfirm(id, schema);
+}
+
+/** `schema` with `confirm` required: in each alternative of a `oneOf`, else in the object schema itself. A `confirm` property already stated (`const: true`) is kept. */
+function requireConfirm(id: string, schema: Record<string, unknown> | undefined): Record<string, unknown> {
+  const alternatives = schema?.['oneOf'];
+  if (schema && Array.isArray(alternatives)) {
+    return { ...schema, oneOf: alternatives.map((alternative: unknown) => requireConfirm(id, typeof alternative === 'object' && alternative !== null ? alternative as Record<string, unknown> : undefined)) };
+  }
+  const properties = schema?.['properties'];
+  if (!schema || schema['type'] !== 'object' || typeof properties !== 'object' || properties === null || Array.isArray(properties)) {
+    throw new Error(`Gateway method ${id} runs only with confirm: true, so its input schema must be an object schema that can carry confirm.`);
+  }
+  const required = Array.isArray(schema['required']) ? (schema['required'] as readonly unknown[]) : [];
+  return {
+    ...schema,
+    properties: 'confirm' in properties ? properties : { ...properties, confirm: BOOLEAN_SCHEMA },
+    required: required.includes('confirm') ? [...required] : [...required, 'confirm'],
   };
 }
 

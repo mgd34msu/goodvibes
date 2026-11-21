@@ -29,8 +29,10 @@ import {
   NUMBER_SCHEMA,
   STRING_SCHEMA,
   arraySchema,
+  branchedSchema,
   methodDescriptor,
   objectSchema,
+  requirementBranch,
 } from './method-catalog-shared.js';
 
 const DEVICE_NODE_SCHEMA = objectSchema({
@@ -231,12 +233,17 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
     category: 'runtime',
     effects: ['config.write'],
     http: { method: 'POST', path: '/api/devices/grants/revoke' },
-    inputSchema: objectSchema({
+    // At least one of grantId, nodeId and capabilityId names what is revoked.
+    inputSchema: branchedSchema(objectSchema({
       grantId: STRING_SCHEMA,
       nodeId: STRING_SCHEMA,
       capabilityId: STRING_SCHEMA,
       note: STRING_SCHEMA,
-    }, []),
+    }, []), [
+      requirementBranch({ grantId: STRING_SCHEMA }, ['grantId']),
+      requirementBranch({ nodeId: STRING_SCHEMA }, ['nodeId']),
+      requirementBranch({ capabilityId: STRING_SCHEMA }, ['capabilityId']),
+    ]),
     outputSchema: objectSchema({
       revoked: NUMBER_SCHEMA,
       removals: arraySchema(DEVICE_REMOVAL_SCHEMA),

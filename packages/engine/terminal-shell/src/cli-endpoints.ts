@@ -8,11 +8,15 @@ import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 
 export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';
 export type RuntimeHostMode = 'local' | 'network' | 'custom';
-export type RuntimeEndpointSettingKey = `${RuntimeEndpointId}.${'hostMode' | 'host' | 'port'}`;
+export type RuntimeEndpointSettingKey<E extends RuntimeEndpointId = RuntimeEndpointId> = `${E}.${'hostMode' | 'host' | 'port'}`;
 
-/** Any reader of the endpoint settings: a config manager or a narrower view of one. */
-export interface RuntimeEndpointConfigReader {
-  get(key: RuntimeEndpointSettingKey): unknown;
+/**
+ * Any reader of the endpoint settings: a config manager or a narrower view of
+ * one. A reader of some endpoints only (`RuntimeEndpointConfigReader<'controlPlane'>`)
+ * serves those endpoints.
+ */
+export interface RuntimeEndpointConfigReader<E extends RuntimeEndpointId = RuntimeEndpointId> {
+  get(key: RuntimeEndpointSettingKey<E>): unknown;
 }
 
 export const RUNTIME_ENDPOINT_DEFAULT_PORTS: Record<RuntimeEndpointId, number> = {
@@ -21,11 +25,13 @@ export const RUNTIME_ENDPOINT_DEFAULT_PORTS: Record<RuntimeEndpointId, number> =
   web: 3423,
 };
 
-export const RUNTIME_ENDPOINT_CONFIG_KEYS: Record<RuntimeEndpointId, {
-  readonly hostMode: ConfigKey;
-  readonly host: ConfigKey;
-  readonly port: ConfigKey;
-}> = {
+export const RUNTIME_ENDPOINT_CONFIG_KEYS: {
+  readonly [E in RuntimeEndpointId]: {
+    readonly hostMode: `${E}.hostMode` & ConfigKey;
+    readonly host: `${E}.host` & ConfigKey;
+    readonly port: `${E}.port` & ConfigKey;
+  };
+} = {
   controlPlane: {
     hostMode: 'controlPlane.hostMode',
     host: 'controlPlane.host',
@@ -76,11 +82,11 @@ export function hostModeForHostname(hostname: string): RuntimeHostMode {
   return 'custom';
 }
 
-export function resolveRuntimeEndpointBinding(
-  config: RuntimeEndpointConfigReader,
-  endpoint: RuntimeEndpointId,
+export function resolveRuntimeEndpointBinding<E extends RuntimeEndpointId>(
+  config: RuntimeEndpointConfigReader<E>,
+  endpoint: E,
 ): RuntimeEndpointBinding {
-  const keys = RUNTIME_ENDPOINT_CONFIG_KEYS[endpoint];
+  const keys: { readonly hostMode: RuntimeEndpointSettingKey<E>; readonly host: RuntimeEndpointSettingKey<E>; readonly port: RuntimeEndpointSettingKey<E> } = RUNTIME_ENDPOINT_CONFIG_KEYS[endpoint];
   const hostMode = String(config.get(keys.hostMode) ?? 'local');
   const configuredHost = String(config.get(keys.host) ?? '127.0.0.1');
   const rawPort = config.get(keys.port);

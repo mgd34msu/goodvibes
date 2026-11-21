@@ -296,7 +296,7 @@ export interface StartPeriodicSelfUpdateParams {
      * while the owner has a prompt on screen, and the updater would swap the
      * binary out from under it.
      */
-    readonly approvalsView: { snapshot(): { readonly approvals: readonly { readonly status: string }[] } };
+    readonly approvalsView: { snapshot(): { readonly approvals: readonly { readonly status: SharedApprovalStatus }[] } };
   };
   readonly notify: (line: string) => void;
   /** The shell's mid-gesture fact; see {@link AgentUpdateIdleProbes.userIsMidGesture}. */

@@ -56,14 +56,14 @@ export {
   normalizeContext,
   registerCatalogHandler,
   registerCatalogHandlers,
-} from './handler-plumbing.js';
+} from '../../control-plane/host-handlers.js';
 export type {
   CatalogHandlerEntry,
   HandlerContextEnvelope,
   HandlerInvocation,
   TypedHandler,
   Unregister,
-} from './handler-plumbing.js';
+} from '../../control-plane/host-handlers.js';
 
 export {
   ATTACHED_PAYMENTS_METHOD_IDS,

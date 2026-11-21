@@ -67,6 +67,16 @@ export interface OperatorMethodContract {
   readonly effect?: 'read' | 'write' | 'outward' | undefined;
   /** The owner's own act: taken only with the owner-request signal; an agent is refused. */
   readonly ownerOnly?: boolean | undefined;
+  /** A model never makes the call, whoever it acts for; an agent is refused and told how the owner does it. */
+  readonly modelRefused?: boolean | undefined;
+  /**
+   * The confirmation the call needs before it runs, checked by the catalog
+   * before the handler: `confirm` (input `confirm: true`, not declared a
+   * non-person request), `owner-request` (`confirm: true` from a credential
+   * that states a person asked), or `not-declined`. Refused with
+   * CONFIRMATION_REQUIRED.
+   */
+  readonly confirmation?: 'confirm' | 'owner-request' | 'not-declined' | undefined;
   /** The call cannot be undone: an agent's call is the owner's to decide, never Jev's. */
   readonly irreversible?: boolean | undefined;
   /** The call changes what a running contract requires: an agent's call is the owner's to decide. */

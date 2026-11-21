@@ -404,10 +404,15 @@ export class ApprovalRelay {
       }
     } catch (error) {
       // The broker's own code travels back (REMEMBER_NOT_SAVED, APPROVED_NOT_APPLIED, INVALID_ARGUMENT), as a local answer would show it.
+      // An error without a code of its own is answered as NOT_APPLIED (400).
       const tagged = (error ?? {}) as { readonly code?: unknown; readonly status?: unknown };
-      return { applied: false, record: this.#broker.getApproval(id), refusal: refusal({ code: typeof tagged.code === 'string' ? tagged.code : 'NOT_APPLIED', state: record.status,
-        status: typeof tagged.status === 'number' ? tagged.status : 400,
-        reason: error instanceof Error ? error.message : String(error), next: ['Read the approval again.'] }) };
+      const notApplied = { code: 'NOT_APPLIED', status: 400, state: record.status,
+        reason: error instanceof Error ? error.message : String(error), next: ['Read the approval again.'] };
+      return { applied: false, record: this.#broker.getApproval(id), refusal: refusal({
+        ...notApplied,
+        ...(typeof tagged.code === 'string' ? { code: tagged.code } : {}),
+        ...(typeof tagged.status === 'number' ? { status: tagged.status } : {}),
+      }) };
     }
     return outcome.applied ? { applied: true, record: outcome.record } : { applied: false, record: outcome.record, refusal: outcome.refusal };
   }

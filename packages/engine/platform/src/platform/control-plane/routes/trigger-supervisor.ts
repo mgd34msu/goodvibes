@@ -74,7 +74,7 @@ export function registerTriggerSupervisorGatewayMethods(
     'watchers.triggers.cancel': async (_invocation, params) => ({ trigger: await operations.cancel(requireString(params, 'id')) }),
     'watchers.triggers.reset': async (_invocation, params) => ({ trigger: await operations.reset(requireString(params, 'id')) }),
     'watchers.triggers.grant.list': async () => ({ grants: await operations.listGrants() }),
-    'watchers.triggers.grant.register': async (_invocation, params) => {
+    'watchers.triggers.grant.register': async (invocation, params) => {
       // Its descriptor's confirmation (`not-declined`) was checked by the catalog before this handler ran.
       const args = optionalStrings(params['args'], 'args');
       const cwd = params['cwd'];

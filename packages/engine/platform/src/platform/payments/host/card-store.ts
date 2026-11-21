@@ -396,7 +396,12 @@ export class DaemonCardStore implements CardMaterialStore {
     // whose stored number is this number. One secret read per matching row;
     // nothing about the request is kept anywhere to recognise it.
     const same = await this.findSameCard(existing, input, digits);
-    if (same) return same;
+    if (same) {
+      // The repeat still leaves the card as this save asks: with codes kept, a
+      // card saved earlier without this code (under "prompt") gets it now.
+      if (storeCvv) await this.keepSecurityCode(same.id, input.cvv);
+      return same;
+    }
     const cardId = this.generateId();
     const metadata: CardMetadata = {
       id: cardId,
@@ -482,6 +487,19 @@ export class DaemonCardStore implements CardMaterialStore {
     const deleted = remaining.length !== fresh.length;
     if (deleted) writeCardsFile(this.filePath, remaining);
     return { deleted, secretsCleared };
+  }
+
+  /** Store `cvv` as this card's security code unless that code is already stored. */
+  private async keepSecurityCode(cardId: string, cvv: string): Promise<void> {
+    const stored = await this.secrets.get(cardSecretKey(cardId, 'cvv'));
+    if (stored !== null && !stored.empty && stored.reveal('dispatch') === cvv) return;
+    try {
+      await this.putField(cardId, 'cvv', cvv, []);
+    } catch (error) {
+      // Rethrown as a message written here: the original came from a call whose arguments were the code.
+      void error;
+      throw new Error('The card is stored, but its security code could not be written to the daemon secret store.');
+    }
   }
 
   /** A stored row that is this card: same label, last four and expiry, and the same stored number. */

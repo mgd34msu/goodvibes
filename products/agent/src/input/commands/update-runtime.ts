@@ -11,7 +11,7 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runt
 import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 import { VERSION } from '../../version.ts';
 import { resolveAgentBinaryAssetName } from '../../runtime/release-artifacts.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
@@ -111,4 +111,12 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
+  install: {
+    channel: REPO_RELEASES_LATEST_URL,
+    resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
+    settings: (ctx) => ctx.platform.configManager,
+    subscriptionProviders: (ctx) => requireSubscriptionManager(ctx).list().map((entry) => entry.provider),
+    savedProfiles: (ctx) => requireProfileManager(ctx).list().length,
+    storedSecrets: async (ctx) => (await requireSecretsManager(ctx).list()).length,
+  },
 });

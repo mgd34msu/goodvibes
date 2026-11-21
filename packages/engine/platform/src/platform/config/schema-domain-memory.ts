@@ -123,7 +123,7 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
     label: 'Folder memories are written to as files',
     type: 'string',
     description:
-      '/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /recall files review reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.',
+      '/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /memory review-files reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.',
     validate: (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0,
     validationHint: 'a folder path, relative to the project or absolute',
   },

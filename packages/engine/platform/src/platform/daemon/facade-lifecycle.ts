@@ -787,7 +787,12 @@ export class DaemonLifecycleRuntime {
         exitWhenIncomplete();
         return;
       }
-      if (supervised && !prepared?.exitRequired) return;
+      // An accepted handover ends this process now, supervised or not, as the
+      // update handover does: the runtime has stopped and its listener is
+      // closed, and a supervised restart runs as a start once the unit has
+      // exited. Left waiting for the manager's stop, the process would idle
+      // under the entry module's pending top-level await with nothing
+      // referenced, which holds a full core on Bun 1.3.14.
       flushActivityLogSync();
       this.rollbackExitRequested = true;
       try { (this.options.exitProcess ?? ((code: number) => process.exit(code)))(0); }

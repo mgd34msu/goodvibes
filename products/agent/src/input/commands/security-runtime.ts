@@ -104,6 +104,6 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
     elsewhere: 'the terminal app (goodvibes)',
   }));
-  // Plugins load here as in the terminal app, so their trust tier is set here too.
-  registerPluginCommand<CommandContext>(registry, (ctx) => ctx.extensions.pluginManager);
+  // Plugins load here as in the terminal app, so /plugin is here too; the plugins screen and the local curated catalog are the terminal app's.
+  registerPluginCommand<CommandContext>(registry, { manager: (ctx) => ctx.extensions.pluginManager });
 }

@@ -957,6 +957,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
               },
               "note": {
                 "type": "string"
+              },
+              "relayRequestId": {
+                "type": "string"
               }
             },
             "required": [

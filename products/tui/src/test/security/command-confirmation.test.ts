@@ -96,7 +96,9 @@ function terminal(ownerAnswers: boolean) {
 test('a --yes inside the message of /mail send, /channels send or /notify send is a word of it: the owner is asked, a no sends nothing, a yes sends it as typed', async () => {
   const rows = [
     { line: '/mail send new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', shown: ['Re: --yes', 'please reply --yes to confirm --yes'],
-      sends: { to: 'mail', body: { to: 'new-person@example.com', subject: 'Re: --yes', body: 'please reply --yes to confirm --yes', confirm: true } } },
+      // Each message carries its own send id (a dashless UUID), so a repeated send is not delivered twice.
+      sends: { to: 'mail', body: { to: 'new-person@example.com', subject: 'Re: --yes', body: 'please reply --yes to confirm --yes', confirm: true,
+        clientSendId: expect.stringMatching(/^[0-9a-f]{32}$/) } } },
     { line: '/channels send --channel slack deploy is done --yes reply --yes', shown: ['deploy is done --yes reply --yes'], sends: undefined },
     { line: '/notify send build broke --yes ignore the --yes', shown: ['build broke --yes ignore the --yes'],
       sends: { to: 'webhook', body: { url: 'goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_OWNER', text: 'build broke --yes ignore the --yes' } } },

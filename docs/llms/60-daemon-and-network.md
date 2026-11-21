@@ -291,7 +291,7 @@ Local form (no `--host`, or a `--host` naming this machine in any form the other
 goodvibes-daemon pair
 ```
 
-It reprints the existing operator token in the link; it does not mint a new one. It first asks the running daemon whether it accepts the token and which address and scheme it is bound to. When no daemon answers, it builds the link from the settings and the token file and says so.
+It reprints the existing operator token in the link; it does not mint a new one. The local form only ever reaches this machine's daemon: it finds it from this machine's bind settings (`controlPlane.hostMode`, `host`, `port` and TLS), never from `daemon.connectedHost.url`, so this machine's operator token is never sent to another machine. It first asks the running daemon whether it accepts the token and which address and scheme it is bound to. When no daemon answers, it builds the link from the settings and the token file and says so.
 
 Example output for a daemon served over plain HTTP on the local network (QR code shortened):
 

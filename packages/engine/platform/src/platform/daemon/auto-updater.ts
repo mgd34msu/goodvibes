@@ -1121,12 +1121,14 @@ export class DaemonAutoUpdater {
     // the thread busy, a wait nothing resolves) must not hold the process,
     // listener gone, until someone restarts it by hand. When the bound passes,
     // the handover is incomplete and the process owner ends this process, so
-    // the service manager starts the installed release.
+    // the service manager starts the installed release. The bound stays
+    // referenced: once the listeners are closed it is what this process is
+    // waiting on, and an unreferenced one would leave Bun ticking a full core
+    // under the entry module's pending top-level await until it fired.
     const limitMs = Math.max(1, this.options.handoverStopDeadlineMs ?? DEFAULT_HANDOVER_STOP_DEADLINE_MS);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<'expired'>((resolve) => {
       timer = (this.options.setTimer ?? setTimeout)(() => resolve('expired'), limitMs);
-      (timer as { unref?: () => void } | undefined)?.unref?.();
     });
     const stopping = Promise.resolve().then(() => stop()).then(() => 'stopped' as const);
     try {

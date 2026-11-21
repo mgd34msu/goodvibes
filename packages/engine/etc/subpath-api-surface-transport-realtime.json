@@ -34,7 +34,7 @@
     {
       "name": "DomainEventConnector",
       "kind": "type",
-      "text": "export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: (end?: DomainEventConnectionEnd) => void, signal?: AbortSignal) => void | Promise<() => void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; DomainEventConnectionEnd = export interface DomainEventConnectionEnd { readonly final: boolean; } ;; EventLike = export type EventLike = { readonly type: string; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: (end?: DomainEventConnectionEnd) => void, signal?: AbortSignal) => void | Promise<() => void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; DomainEventConnectionEnd = export interface DomainEventConnectionEnd { readonly final: boolean; readonly code?: string | undefined; readonly reason?: string | undefined; } ;; EventLike = export type EventLike = { readonly type: string; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "DomainEvents",
@@ -171,7 +171,7 @@
     {
       "name": "buildWebSocketUrl",
       "kind": "function",
-      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[]): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[], lastEventId?: string | null): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
     },
     {
       "name": "createEventSourceConnector",
@@ -236,7 +236,7 @@
       "required": [
         "final"
       ],
-      "text": "export interface DomainEventConnectionEnd { readonly final: boolean; }"
+      "text": "export interface DomainEventConnectionEnd { readonly final: boolean; readonly code?: string | undefined; readonly reason?: string | undefined; }"
     },
     {
       "name": "DomainEventConnector",
@@ -395,7 +395,7 @@
     {
       "name": "buildWebSocketUrl",
       "kind": "function",
-      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[]): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[], lastEventId?: string | null): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
     },
     {
       "name": "createEventSourceConnector",

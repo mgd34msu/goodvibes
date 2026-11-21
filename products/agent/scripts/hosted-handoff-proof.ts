@@ -174,8 +174,11 @@ try {
     clientId: 'agent-proof-client',
   });
 
+  // Each call is a new inbound message, so each carries its own input id.
+  let inboundCount = 0;
   const inbound = (body: string): Parameters<typeof handoff.promote>[0] => ({
     sessionId: 'channel-session-1',
+    inputId: `proof-input-${++inboundCount}`,
     task: `Continue the conversation. The owner said: ${body}`,
     body,
     surfaceKind: 'telegram',

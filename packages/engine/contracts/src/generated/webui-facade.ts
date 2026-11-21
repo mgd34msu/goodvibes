@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.4
- * Methods: 648 total, 534 REST-routed, 114 ws-only invoke.
+ * Methods: 650 total, 535 REST-routed, 115 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -1012,7 +1012,11 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/knowledge/extractions"
   },
-  "knowledge.graphql.execute": {
+  "knowledge.graphql.mutate": {
+    "method": "POST",
+    "path": "/api/knowledge/graphql/mutate"
+  },
+  "knowledge.graphql.query": {
     "method": "POST",
     "path": "/api/knowledge/graphql"
   },
@@ -2281,6 +2285,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "sessions.hosted.kill",
   "sessions.hosted.list",
   "sessions.hosted.share",
+  "sessions.hosted.unshare",
   "sessions.hosted.workspaces",
   "sessions.search",
   "watchers.triggers.cancel",
@@ -2604,7 +2609,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "knowledge.connectors.list": "rest",
   "knowledge.extraction.get": "rest",
   "knowledge.extractions.list": "rest",
-  "knowledge.graphql.execute": "rest",
+  "knowledge.graphql.mutate": "rest",
+  "knowledge.graphql.query": "rest",
   "knowledge.graphql.schema": "rest",
   "knowledge.ingest.artifact": "rest",
   "knowledge.ingest.bookmarks": "rest",
@@ -2852,6 +2858,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "sessions.hosted.kill": "ws-invoke",
   "sessions.hosted.list": "ws-invoke",
   "sessions.hosted.share": "ws-invoke",
+  "sessions.hosted.unshare": "ws-invoke",
   "sessions.hosted.workspaces": "ws-invoke",
   "sessions.inputs.cancel": "rest",
   "sessions.inputs.deliver": "rest",
@@ -3180,7 +3187,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -3372,7 +3380,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -3562,7 +3571,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -3755,7 +3765,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -3962,7 +3973,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "actorSurface": "sample",
               "actorNode": "sample",
               "createdAt": 0,
-              "note": "sample"
+              "note": "sample",
+              "relayRequestId": "sample"
             }
           ],
           "reading": {
@@ -4249,7 +4261,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -11048,6 +11061,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "turnId": "sample",
       "cancelled": false,
       "alreadyCancelled": false,
+      "stoppedBeforeStart": false,
+      "messageIds": [
+        "sample"
+      ],
       "partialPersisted": false
     }
   },
@@ -11456,6 +11473,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "origin": "turn",
         "ownerPrincipalId": "sample",
+        "sessionCreatedForDispatch": false,
         "ask": "sample",
         "selectedModel": {
           "id": "sample",
@@ -11620,7 +11638,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -11795,7 +11814,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -12063,7 +12083,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                           "scope": [
                             "sample"
                           ]
-                        }
+                        },
+                        "backend": "bubblewrap"
                       }
                     ],
                     "goal": {
@@ -12300,7 +12321,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "scope": [
                     "sample"
                   ]
-                }
+                },
+                "backend": "bubblewrap"
               }
             ],
             "goal": {
@@ -12671,6 +12693,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "sessionId": "sample",
       "origin": "turn",
       "ownerPrincipalId": "sample",
+      "sessionCreatedForDispatch": false,
       "ask": "sample",
       "selectedModel": {
         "id": "sample",
@@ -12835,7 +12858,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -13010,7 +13034,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -13278,7 +13303,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -13515,7 +13541,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "scope": [
                   "sample"
                 ]
-              }
+              },
+              "backend": "bubblewrap"
             }
           ],
           "goal": {
@@ -13885,6 +13912,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sessionId": "sample",
           "origin": "turn",
           "ownerPrincipalId": "sample",
+          "sessionCreatedForDispatch": false,
           "ask": "sample",
           "selectedModel": {
             "id": "sample",
@@ -14049,7 +14077,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -14224,7 +14253,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -14492,7 +14522,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                             "scope": [
                               "sample"
                             ]
-                          }
+                          },
+                          "backend": "bubblewrap"
                         }
                       ],
                       "goal": {
@@ -14729,7 +14760,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -15135,6 +15167,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "origin": "turn",
         "ownerPrincipalId": "sample",
+        "sessionCreatedForDispatch": false,
         "ask": "sample",
         "selectedModel": {
           "id": "sample",
@@ -15299,7 +15332,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -15474,7 +15508,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -15742,7 +15777,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                           "scope": [
                             "sample"
                           ]
-                        }
+                        },
+                        "backend": "bubblewrap"
                       }
                     ],
                     "goal": {
@@ -15979,7 +16015,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "scope": [
                     "sample"
                   ]
-                }
+                },
+                "backend": "bubblewrap"
               }
             ],
             "goal": {
@@ -16420,6 +16457,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               ],
               "effect": "read",
               "ownerOnly": false,
+              "modelRefused": false,
+              "confirmation": "confirm",
               "irreversible": false,
               "changesContract": false,
               "recipients": [
@@ -16607,6 +16646,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         ],
         "effect": "read",
         "ownerOnly": false,
+        "modelRefused": false,
+        "confirmation": "confirm",
         "irreversible": false,
         "changesContract": false,
         "recipients": [
@@ -16666,6 +16707,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ],
           "effect": "read",
           "ownerOnly": false,
+          "modelRefused": false,
+          "confirmation": "confirm",
           "irreversible": false,
           "changesContract": false,
           "recipients": [
@@ -17384,7 +17427,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "sizeBytes": 0
         }
       ],
-      "uidValidity": 0
+      "uidValidity": 0,
+      "bodyUnavailable": [
+        {
+          "section": "sample",
+          "reason": "sample"
+        }
+      ]
     }
   },
   "email.inbox.update": {
@@ -20879,7 +20928,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
-  "knowledge.graphql.execute": {
+  "knowledge.graphql.mutate": {
+    "input": {
+      "query": "sample",
+      "operationName": "sample",
+      "variables": {}
+    },
+    "output": {
+      "data": {},
+      "errors": [
+        "sample"
+      ],
+      "extensions": {}
+    }
+  },
+  "knowledge.graphql.query": {
     "input": {
       "query": "sample",
       "operationName": "sample",
@@ -29974,10 +30037,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "devices.grants.revoke": {
     "input": {
-      "grantId": "sample",
-      "nodeId": "sample",
-      "capabilityId": "sample",
-      "note": "sample"
+      "grantId": "sample"
     },
     "output": {
       "revoked": 0,
@@ -31208,6 +31268,46 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "added": false
     }
   },
+  "sessions.hosted.unshare": {
+    "input": {
+      "sessionId": "sample",
+      "principalId": "sample"
+    },
+    "output": {
+      "session": {
+        "id": "sample",
+        "nativeConversation": true,
+        "workspaceRoot": "sample",
+        "title": "sample",
+        "status": "idle",
+        "detachPolicy": "kill",
+        "effectiveDetachPolicy": "kill",
+        "attachedClients": [
+          "sample"
+        ],
+        "providerId": "sample",
+        "modelId": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "turnCount": 0,
+        "messageCount": 0,
+        "lastTurnAt": 0,
+        "terminatedAt": 0,
+        "terminatedReason": "sample",
+        "restoredFromDisk": false,
+        "originSurface": "sample",
+        "permissionMode": "ask-me",
+        "contractIds": [
+          "sample"
+        ],
+        "saveError": "sample"
+      },
+      "owners": [
+        "sample"
+      ],
+      "removed": false
+    }
+  },
   "sessions.hosted.workspaces": {
     "input": {},
     "output": {
@@ -31533,8 +31633,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "messageId": "sample",
-      "routedTo": "sample",
-      "sessionId": "sample"
+      "sessionId": "sample",
+      "inputId": "sample",
+      "mode": "spawn"
     }
   },
   "sessions.messages.list": {
@@ -33503,7 +33604,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "configured": false,
           "note": "sample"
         }
-      ]
+      ],
+      "defaultProviderId": "sample"
     }
   },
   "web_search.query": {

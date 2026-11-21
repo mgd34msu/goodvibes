@@ -2,6 +2,7 @@ import { renderThrobberLine } from './throbber.ts';
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes/engine/terminal-shell/shell-footer';
 import { presetForMode, type GatePresetName } from '@goodvibes/engine/platform/platform/gate';
 import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
+import type { SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
 import { UIFactory } from './ui-factory.ts';
@@ -63,6 +64,8 @@ export interface ShellFooterBuildOptions {
   readonly lastCopyTime: number;
   /** The model the session cost is priced against. */
   readonly model?: string;
+  /** What the session cost is priced with when `usage.costUsd` is absent: the runtime's ProviderRegistry. */
+  readonly pricing?: SessionPricing | undefined;
   /** An agent or process view is showing (core/session-focus.ts). */
   readonly view?: ShellFooterView | null;
   /** The current branch: the status bar's `branch …` segment; absent outside a repository. */
@@ -183,7 +186,8 @@ function compactFraction(value: number | undefined): number {
   return Math.min(1, value > 1 ? value / 100 : value);
 }
 
-export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined) => priceUsage(usage, model, false);
+export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined, pricing: SessionPricing | undefined) =>
+  priceUsage(usage, model, pricing, false);
 
 export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter<ShellFooterBuildOptions>({
   blankRow,

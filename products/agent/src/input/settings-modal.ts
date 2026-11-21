@@ -825,6 +825,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     const entry = this.getSelected();
     if (!entry) return null;
     const key = entry.setting.key;
+    // Read before isSecretConfigKey, whose `key is ConfigKey` guard narrows its false branch past every config key.
+    const writesDefault = key === 'permissions.mode';
     if (isSecretConfigKey(key)) {
       this._writeSecretSetting(key, String(entry.setting.default ?? ''));
       return null; // Accepted asynchronously, not yet a completed reset.
@@ -833,7 +835,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     // explicit choice; permissions.mode keeps the write, which also clears the legacy auto-approve.
     const value = this.configManager.defaultOf(key);
     // A refused write must not be copied into the live session (provider.model, reasoningEffort).
-    const applied = this._setValue(key, key === 'permissions.mode' ? value : RESET_TO_DEFAULT);
+    const applied = this._setValue(key, writesDefault ? value : RESET_TO_DEFAULT);
     return applied ? { key, value } : null;
   }
 

@@ -613,11 +613,11 @@ export class DaemonControlPlaneHelper {
   describeRequestPrincipal(token: string, loopback = false): RequestPrincipal | null {
     const authenticated = authenticateOperatorToken(token, this.authContext());
     if (!authenticated) return null;
-    const base = this.principalFor(authenticated);
+    const { ownerDevice: baseOwnerDevice, ...base } = this.principalFor(authenticated);
     // Read after the credential stores were consulted: this is the state the principal was checked against.
     const authRevision = this.authRevision();
     const credentialKind = credentialKindOf(authenticated, loopback);
-    const ownerDevice = base.ownerDevice === true;
+    const ownerDevice = baseOwnerDevice === true;
     return Object.freeze({
       ...base,
       credentialKind,

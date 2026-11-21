@@ -152,7 +152,7 @@ export class IdempotentReplayStore {
       } catch (error) {
         // A throw before an answer is an unknown outcome while the daemon is up: the key says so to every repeat.
         try {
-          this.write(file, { fingerprint, state: 'done', at: this.now(), ...FAILED_PARTWAY });
+          this.write(file, { fingerprint, state: 'done', at: this.now(), status: FAILED_PARTWAY.status, body: FAILED_PARTWAY.body });
         } catch (writeError) {
           logger.warn('[idempotent-replay] the outcome of a request that failed partway could not be kept', { error: summarizeError(writeError) });
         }

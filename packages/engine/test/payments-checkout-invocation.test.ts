@@ -7,7 +7,8 @@
  * transport, may not. Once started, any change to the authority, settings or
  * browser owner retires the purchase's authority.
  *
- * Real `checkout-invocation.ts`, `window-handlers.ts` and the payment host's
+ * Real `checkout-invocation.ts`, `window-handlers.ts` behind the gateway
+ * catalog and its confirmation gate (the cancel), and the payment host's
  * `CheckoutOperations` over its real operations store, journal and purchase
  * ledger, reading the real settings manager, all in temp folders. Stand-in:
  * the transport's authority, and the admitted purchase's checkout run, which
@@ -27,7 +28,8 @@ import { DurablePaymentOperations } from '../platform/src/platform/payments/host
 import { DurableCheckoutJournal } from '../platform/src/platform/payments/host/checkout-journal-store.js';
 import { DaemonPurchaseLedger } from '../platform/src/platform/payments/host/purchase-ledger.js';
 import type { BeginCheckoutInput } from '../platform/src/platform/payments/payments-gateway-service.js';
-import type { HandlerContextEnvelope } from '../platform/src/platform/payments/host/handler-plumbing.js';
+import { registerCatalogHandler, type HandlerContextEnvelope } from '../platform/src/platform/control-plane/host-handlers.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import type { PaymentsHandlerDeps } from '../platform/src/platform/payments/host/register.js';
 import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
@@ -116,8 +118,14 @@ async function paymentHost(kind: OwnerKind | null, explicitUserRequest = true) {
   /** Admit purchase pur-1 on `source`: the caller's own start, or the local owner's when the caller may not start one. */
   const begin = (source = start()) => operations.admit('pur-1', {} as BeginCheckoutInput, source, () => {}, () => {});
   const ownerBegins = () => begin(retainDetachedCheckout(deps, seam, caller('local')));
-  const cancel = (operationId: string) => purchaseWindowAnswerHandler({}, 'cancel', operations)({
-    body: { confirm: true, purchaseId: 'pur-1', operationId }, query: {}, context });
+  // The cancel goes through the real catalog, whose confirmation gate holds the method to its declared `owner-request` before the handler runs.
+  const catalog = new GatewayMethodCatalog();
+  registerCatalogHandler(catalog, 'payments.purchase.cancel', purchaseWindowAnswerHandler({}, 'cancel', operations));
+  const cancel = (operationId: string) => catalog.invoke('payments.purchase.cancel', {
+    body: { confirm: true, purchaseId: 'pur-1', operationId }, query: {},
+    context: { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin, scopes: context.scopes,
+      authToken: context.authToken, metadata: { explicitUserRequest: context.explicitUserRequest } },
+    nativeExecutionAuthority: context.nativeExecutionAuthority, isAuthorized: context.isAuthorized });
   // Closing the host joins its work: the stopped purchase has settled. Without the owner's stop it would end interrupted.
   return { start, begin, ownerBegins, cancel, settle: () => operations.close(), state: () => store.get('pur-1')?.state };
 }

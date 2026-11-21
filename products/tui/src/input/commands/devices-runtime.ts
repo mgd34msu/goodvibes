@@ -53,8 +53,14 @@ function deviceTokenStore(ctx: CommandContext): DeviceTokenStore {
         catch (error) { if (isNotFound(error)) return false; throw error; }
       },
       revoke: async (id) => {
-        try { return (await invoke<{ readonly revoked: boolean }>('pairing.tokens.delete', { id })).revoked; }
+        let answer: { readonly revoked?: boolean; readonly approvalId?: string };
+        try { answer = await invoke<{ readonly revoked?: boolean; readonly approvalId?: string }>('pairing.tokens.delete', { id }); }
         catch (error) { if (isNotFound(error)) return false; throw error; }
+        if (typeof answer.revoked === 'boolean') return answer.revoked;
+        // A device another principal paired is the owner's to revoke: the daemon put it to him instead (OWNER_APPROVAL_PENDING).
+        const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
+        throw commandRefusal(`Revoking this device is the owner's own act, so the daemon put it to him${approval}; nothing is revoked until he approves it.`,
+          'The owner approves it from his own app (/approvals); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
       },
       mintForMigration: async (name) => (await invoke<{ readonly token: MintedPairingToken }>('pairing.tokens.migrate', { name })).token,
     };

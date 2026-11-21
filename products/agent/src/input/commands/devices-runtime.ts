@@ -55,7 +55,14 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       return { where: 'the connected host', tokens: listed.tokens as unknown as readonly PublicPairingToken[], sharedRevoked: listed.legacySharedRevoked };
     },
     rename: async (ctx, id, name) => (await invokeConnectedHostMethod(ctx, 'pairing.tokens.rename', { id, name })).renamed,
-    revoke: async (ctx, id) => (await invokeConnectedHostMethod(ctx, 'pairing.tokens.delete', { id })).revoked,
+    async revoke(ctx, id) {
+      const answer = await invokeConnectedHostMethod(ctx, 'pairing.tokens.delete', { id });
+      if (typeof answer.revoked === 'boolean') return answer.revoked;
+      // A device this Agent's credential did not pair is the owner's to revoke: the host put it to him instead.
+      const approval = 'approvalId' in answer ? ` as approval ${answer.approvalId}` : '';
+      throw commandRefusal(`Revoking this device is the owner's own act, so the connected host put it to him${approval}; nothing is revoked until he approves it.`,
+        'The owner approves it from his own app (/approvals); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
+    },
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {
       const outcome = await mintAgentDevicePairing(hostVerbs(ctx), name ? { name } : {});

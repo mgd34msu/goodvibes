@@ -75,6 +75,7 @@ export const ENV_CATALOG: readonly EnvEntry[] = [
   { name: 'PATHEXT', readBy: 'goodvibes', does: 'On Windows, the executable extensions tried when looking for the daemon program on `PATH`.' },
   { name: 'TMPDIR', readBy: 'installer', does: 'Where the installers make their temporary working directory; `/tmp` when unset.' },
   { name: 'XDG_STATE_HOME', readBy: 'installer', does: 'Where the release installer keeps its receipt of the programs it installed (`$XDG_STATE_HOME/goodvibes/installed-programs`, else `~/.local/state/goodvibes/installed-programs`), one absolute path per line. A copy of a program that shadows the installed one on `PATH` is removed only when this receipt lists it.' },
+  { name: 'GOPATH', readBy: 'every program', does: 'The Go workspaces (absolute paths, separated as on `PATH`; `~/go` when unset) whose `bin` folders a sandboxed command may run and whose `pkg` folders it may write, so `go install`ed tools and the module cache work inside the command sandbox. A relative entry is ignored.' },
   { name: 'SHELL', readBy: 'installer', does: 'The login shell, which decides the shell start-up file the release installer adds its `PATH` line to (and removes it from on uninstall).' },
 
   // Talking to the daemon

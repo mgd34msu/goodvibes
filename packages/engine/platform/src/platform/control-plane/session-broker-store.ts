@@ -247,6 +247,12 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
         return parsed;
       },
     });
+    // An index this build wrote states every owed channel send. One from before
+    // (3.3.4) does not, but each session's log does (its input rows carry
+    // `channelReply: 'owed'`), so at the first start on such an index every
+    // session that would wait on disk is read once for it, and the rewritten
+    // index records the counts.
+    const owedCounted = document?.[OWED_COUNTED_KEY] === true;
     let records: readonly unknown[] = [];
     let carried: readonly unknown[] = [];
     if (document && isSessionIndexDocument(document)) {
@@ -255,12 +261,6 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     } else if (document) {
       ({ records, carried } = await this.#migrateWholeStore(document));
     }
-    // An index this build wrote states every owed channel send. One from before
-    // (3.3.4) does not, but each session's log does (its input rows carry
-    // `channelReply: 'owed'`), so at the first start on such an index every
-    // session that would wait on disk is read once for it, and the rewritten
-    // index records the counts.
-    const owedCounted = isRecord(document) && document[OWED_COUNTED_KEY] === true;
     if (document && !owedCounted) this.#indexDirty = true;
     let carriedOwed = 0;
     const sessions = new Map<string, SharedSessionRecord>();

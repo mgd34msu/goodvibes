@@ -232,7 +232,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -422,7 +423,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -612,7 +614,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -802,7 +805,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -1012,7 +1016,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "actorSurface": "sample",
               "actorNode": "sample",
               "createdAt": 0,
-              "note": "sample"
+              "note": "sample",
+              "relayRequestId": "sample"
             }
           ],
           "reading": {
@@ -1242,7 +1247,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "actorSurface": "sample",
             "actorNode": "sample",
             "createdAt": 0,
-            "note": "sample"
+            "note": "sample",
+            "relayRequestId": "sample"
           }
         ]
       },
@@ -7960,6 +7966,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "turnId": "sample",
       "cancelled": false,
       "alreadyCancelled": false,
+      "stoppedBeforeStart": false,
+      "messageIds": [
+        "sample"
+      ],
       "partialPersisted": false
     }
   },
@@ -8381,6 +8391,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "origin": "turn",
         "ownerPrincipalId": "sample",
+        "sessionCreatedForDispatch": false,
         "ask": "sample",
         "selectedModel": {
           "id": "sample",
@@ -8545,7 +8556,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -8720,7 +8732,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -8988,7 +9001,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                           "scope": [
                             "sample"
                           ]
-                        }
+                        },
+                        "backend": "bubblewrap"
                       }
                     ],
                     "goal": {
@@ -9225,7 +9239,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "scope": [
                     "sample"
                   ]
-                }
+                },
+                "backend": "bubblewrap"
               }
             ],
             "goal": {
@@ -9598,6 +9613,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "sessionId": "sample",
       "origin": "turn",
       "ownerPrincipalId": "sample",
+      "sessionCreatedForDispatch": false,
       "ask": "sample",
       "selectedModel": {
         "id": "sample",
@@ -9762,7 +9778,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -9937,7 +9954,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -10205,7 +10223,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -10442,7 +10461,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "scope": [
                   "sample"
                 ]
-              }
+              },
+              "backend": "bubblewrap"
             }
           ],
           "goal": {
@@ -10814,6 +10834,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sessionId": "sample",
           "origin": "turn",
           "ownerPrincipalId": "sample",
+          "sessionCreatedForDispatch": false,
           "ask": "sample",
           "selectedModel": {
             "id": "sample",
@@ -10978,7 +10999,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -11153,7 +11175,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                         "scope": [
                           "sample"
                         ]
-                      }
+                      },
+                      "backend": "bubblewrap"
                     }
                   ],
                   "goal": {
@@ -11421,7 +11444,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                             "scope": [
                               "sample"
                             ]
-                          }
+                          },
+                          "backend": "bubblewrap"
                         }
                       ],
                       "goal": {
@@ -11658,7 +11682,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "scope": [
                       "sample"
                     ]
-                  }
+                  },
+                  "backend": "bubblewrap"
                 }
               ],
               "goal": {
@@ -12063,6 +12088,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "origin": "turn",
         "ownerPrincipalId": "sample",
+        "sessionCreatedForDispatch": false,
         "ask": "sample",
         "selectedModel": {
           "id": "sample",
@@ -12227,7 +12253,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -12402,7 +12429,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "scope": [
                         "sample"
                       ]
-                    }
+                    },
+                    "backend": "bubblewrap"
                   }
                 ],
                 "goal": {
@@ -12670,7 +12698,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                           "scope": [
                             "sample"
                           ]
-                        }
+                        },
+                        "backend": "bubblewrap"
                       }
                     ],
                     "goal": {
@@ -12907,7 +12936,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "scope": [
                     "sample"
                   ]
-                }
+                },
+                "backend": "bubblewrap"
               }
             ],
             "goal": {
@@ -13368,6 +13398,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               ],
               "effect": "read",
               "ownerOnly": false,
+              "modelRefused": false,
+              "confirmation": "confirm",
               "irreversible": false,
               "changesContract": false,
               "recipients": [
@@ -13568,6 +13600,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "effect": "read",
         "ownerOnly": false,
+        "modelRefused": false,
+        "confirmation": "confirm",
         "irreversible": false,
         "changesContract": false,
         "recipients": [
@@ -13629,6 +13663,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "effect": "read",
           "ownerOnly": false,
+          "modelRefused": false,
+          "confirmation": "confirm",
           "irreversible": false,
           "changesContract": false,
           "recipients": [
@@ -14361,7 +14397,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sizeBytes": 0
         }
       ],
-      "uidValidity": 0
+      "uidValidity": 0,
+      "bodyUnavailable": [
+        {
+          "section": "sample",
+          "reason": "sample"
+        }
+      ]
     }
   },
   "email.inbox.update": {
@@ -17731,8 +17773,23 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
-  "knowledge.graphql.execute": {
-    "methodId": "knowledge.graphql.execute",
+  "knowledge.graphql.mutate": {
+    "methodId": "knowledge.graphql.mutate",
+    "http": {
+      "method": "POST",
+      "path": "/api/knowledge/graphql/mutate"
+    },
+    "status": 200,
+    "body": {
+      "data": {},
+      "errors": [
+        "sample"
+      ],
+      "extensions": {}
+    }
+  },
+  "knowledge.graphql.query": {
+    "methodId": "knowledge.graphql.query",
     "http": {
       "method": "POST",
       "path": "/api/knowledge/graphql"
@@ -27896,6 +27953,45 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "added": false
     }
   },
+  "sessions.hosted.unshare": {
+    "methodId": "sessions.hosted.unshare",
+    "http": null,
+    "status": 200,
+    "body": {
+      "session": {
+        "id": "sample",
+        "nativeConversation": true,
+        "workspaceRoot": "sample",
+        "title": "sample",
+        "status": "idle",
+        "detachPolicy": "kill",
+        "effectiveDetachPolicy": "kill",
+        "attachedClients": [
+          "sample"
+        ],
+        "providerId": "sample",
+        "modelId": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "turnCount": 0,
+        "messageCount": 0,
+        "lastTurnAt": 0,
+        "terminatedAt": 0,
+        "terminatedReason": "sample",
+        "restoredFromDisk": false,
+        "originSurface": "sample",
+        "permissionMode": "ask-me",
+        "contractIds": [
+          "sample"
+        ],
+        "saveError": "sample"
+      },
+      "owners": [
+        "sample"
+      ],
+      "removed": false
+    }
+  },
   "sessions.hosted.workspaces": {
     "methodId": "sessions.hosted.workspaces",
     "http": null,
@@ -28205,8 +28301,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "messageId": "sample",
-      "routedTo": "sample",
-      "sessionId": "sample"
+      "sessionId": "sample",
+      "inputId": "sample",
+      "mode": "spawn"
     }
   },
   "sessions.messages.list": {
@@ -30056,7 +30153,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "configured": false,
           "note": "sample"
         }
-      ]
+      ],
+      "defaultProviderId": "sample"
     }
   },
   "web_search.query": {

@@ -13,7 +13,7 @@ import { formatMinorUnits } from '../message.js';
 import { readPaymentsServiceConfig } from '../payments-config.js';
 import { purchaseDisposition } from '../operation-view.js';
 import type { CurrencyCode } from '../types.js';
-import type { TypedHandler } from './handler-plumbing.js';
+import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { DurablePaymentOperations } from './operation-store.js';
 import type { PaymentsHandlerDeps } from './register.js';

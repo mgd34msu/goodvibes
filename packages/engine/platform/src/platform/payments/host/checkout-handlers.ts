@@ -59,7 +59,7 @@ import type { ShippingTier } from '../types.js';
 import type { UntrustedContentLedger } from '../../security/untrusted-content.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
-import type { TypedHandler } from './handler-plumbing.js';
+import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { PaymentApprovalStoreError, type DaemonApprovalStore } from './approval-store.js';
 import type { DaemonCardStore } from './card-store.js';
 import type { PaymentsHandlerDeps } from './register.js';

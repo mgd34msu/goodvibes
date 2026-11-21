@@ -327,7 +327,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/devices` | None | `list \| pair <what to pair> <channel> [--name <name>] [--bootstrap-shared] [--apply] \| rename <device> <new name...> \| revoke <device> \| migrate-shared [<name...>] \| revoke-shared \| host-status \| unpair-host \| relay-status \| relay-codes \| relay-revoke <relay code> \| nodes \| grants \| revoke-grant <grant> \| captures \| delete-capture <capture>` | Pair a device, this terminal, a relay device or a chat channel, and see and revoke what is paired |
+| `/devices` | None | `list \| pair <what to pair> <channel> [--name <name>] [--bootstrap-shared] [--apply] \| rename <device> <new name...> \| revoke <device> \| migrate-shared [<name...>] \| revoke-shared \| host-status \| unpair-host \| relay-status \| relay-codes \| relay-revoke <relay code> \| requests \| approve <request> [--replace] \| reject <request> \| nodes \| grants \| revoke-grant <grant> \| captures \| delete-capture <capture>` | Pair a device, this terminal, a relay device or a chat channel, and see and revoke what is paired |
 
 ### /devices: Paired devices
 
@@ -346,6 +346,9 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | See whether the relay is reachable | `/devices relay-status` | Shows whether the relay is on, the daemon's live registration with it, and what the relay refused if it did. | None |
 | See devices paired through the relay | `/devices relay-codes` | Lists each relay code, one per device paired through the relay, with when it was last used. | None |
 | Cut a device off the relay | `/devices relay-revoke <relay code>` | The device paired with <relay code> is refused at its next request through the relay; every other device keeps working. | cannot be undone |
+| See devices waiting to pair | `/devices requests` | Lists each device that asked to pair as a node (a browser's Phone node, a peer daemon) and waits for your approval, with what it offers and the node id it pairs as. | None |
+| Approve a device waiting to pair | `/devices approve <request> [--replace]` | The device that sent <request> may finish pairing and then reach the daemon as a node until you change it: revoking it ends that. | None |
+| Reject a device waiting to pair | `/devices reject <request>` | The device that sent <request> stays unpaired until you change it; to pair after all, it has to ask again. | None |
 | See phones paired as device nodes | `/devices nodes` | Lists each phone paired as a device node and what it can serve. | None |
 | See always-allow grants | `/devices grants` | Lists the "always allow" answers given to phone capabilities, with how often each was used. | None |
 | Revoke an always-allow grant | `/devices revoke-grant <grant>` | The "always allow" answer <grant> is removed; the next request for that capability asks you again, until you change it. | None |
@@ -1391,7 +1394,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | See the whole security review | `/security review` | Shows every count the review reads: tokens, subscriptions, policy findings, MCP servers and their routes, and plugins. | None |
 | See paired-device tokens | `/security tokens` | Lists each paired device's token with its policy, whether it stays in scope, when it is due for rotation and whether it is blocked. | None |
 | See risky routes through MCP servers | `/security attack-paths` | Shows the routes by which an MCP server could reach files, the network or other tools further than its trust allows. | None |
-| See what is trusted | `/security trust` | Shows the permission mode in force (and the chosen one, with why, when they differ), how many secrets and services are set up, and how far each plugin and MCP server is trusted. | None |
+| See what is trusted | `/security trust` | Shows the permission mode, how many secrets and services are set up, and how far each plugin and MCP server is trusted. | None |
 | See whether this folder is trusted | `/security folder` | Shows whether this folder is trusted, restricted or not decided, and what each means here. | None |
 | Trust this folder | `/security trust-folder` | This folder becomes trusted: its own hooks and MCP servers may run and tools may change it, until you change it. | loosens a protection |
 | Restrict this folder | `/security restrict-folder` | This folder becomes restricted: its own hooks and MCP servers stay off, until you change it. | None |
@@ -1452,7 +1455,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | `/notes` | None | `list \| show <note> \| search <words...> \| create [--title <title>] [--url <web page>] [--tags <tags>] <text...> \| edit <note> [--title <title>] [--url <web page>] [--tags <tags>] [<text...>] \| review <note> \| stale <note> <why...> \| delete <note> \| to-memory <note> [--kind <kind>] [--scope <where it applies>] \| to-persona <note> \| to-skill <note> [--enable] \| to-routine <note> [--enable] \| to-knowledge <note>` | Notes you keep beside your work: write, find and change them, and keep one as a memory, a persona, a skill or a routine |
 | `/redo` | None | `[<what>]` | Bring back what was undone last |
 | `/retry` | None | `[<changed message...>]` | Send your last message again, as it was or changed |
-| `/template` | None | `list \| use <template> [<blanks...>] \| save <name> \| show <template> \| edit <template> \| delete <template> [--everywhere]` | Prompts you keep and reuse: save your last message as one, use one as your next message, edit or delete one |
+| `/template` | None | `list \| use <template> [<blanks...>] \| save <name> [--everywhere] \| show <template> \| edit <template> \| delete <template> [--everywhere]` | Prompts you keep and reuse: save your last message as one, use one as your next message, edit or delete one |
 | `/title` | None | `[<title...>]` | See or change the conversation's title |
 | `/undo` | None | `[<what>]` | Take back the last turn, file change or /checkpoint rewind |
 
@@ -1500,7 +1503,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | --- | --- | --- | --- |
 | See your templates | `/template list` | Lists your templates; picking one in the list sends it as your next message (Del deletes it, Ctrl+E edits it). | None |
 | Use a template as your next message | `/template use <template> [<blanks...>]` | Template <template>, its blanks filled in, is sent as your next message. | None |
-| Save your last message as a template | `/template save <name>` | Your last message is kept as template <name> in this project, until you change it. | None |
+| Save your last message as a template | `/template save <name> [--everywhere]` | Your last message is kept as template <name> (<for>); a template already saved under that name there is replaced. | cannot be undone |
 | See a template | `/template show <template>` | Shows template <template> as written. | None |
 | Edit a template in your editor | `/template edit <template>` | Opens template <template> in your editor; the saved file is what /template use reads. | None |
 | Delete a template | `/template delete <template> [--everywhere]` | Template <template> (<which one>) is deleted. | cannot be undone |

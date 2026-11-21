@@ -962,7 +962,7 @@ export class CompanionChatManager {
     const preparation = buildProviderUserContent(content, attachments, this.artifactStore);
     this.activeWork.add(preparation);
     try { providerContent = await preparation; }
-    finally { session.preparingTurns--; this.activeWork.delete(preparation); }
+    finally { session.preparingTurns = (session.preparingTurns ?? 1) - 1; this.activeWork.delete(preparation); }
     if (this.disposed) throw this.serviceStopping();
     if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw this.chatClosed('The chat was closed while this message was being prepared.');
 

@@ -330,7 +330,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
           choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes, it is the same device pairing again' }],
           required: { default: 'no', defaultMeans: 'no' }, typed: { flag: '--replace', switchOn: 'yes' } },
       ],
-      sentence: 'The device that sent {request} may finish pairing and then reach the daemon as a node, until you revoke it.', done: '',
+      sentence: 'The device that sent {request} may finish pairing and then reach the daemon as a node {lasts}: revoking it ends that.', done: '',
       touches: 'credential', lasts: 'kept', risk: 'none',
       ownerOnly: { reason: 'approving gives a device access to the daemon', instead: '/devices requests shows the devices waiting to pair' },
       operator: { method: 'remote.pair.requests.approve', fields: { requestId: 'request' } },
@@ -350,7 +350,7 @@ export function registerDevicesCommand<Ctx extends CommandActionContext>(registr
     {
       id: 'reject', label: 'Reject a device waiting to pair', word: 'reject',
       inputs: [listInput({ id: 'request', label: 'Request', help: 'The devices waiting to pair', list: PAIR_REQUESTS })],
-      sentence: 'The device that sent {request} is not paired and has to ask again.', done: '',
+      sentence: 'The device that sent {request} stays unpaired {lasts}; to pair after all, it has to ask again.', done: '',
       touches: 'another-machine', lasts: 'kept', risk: 'none',
       ownerOnly: { reason: 'answering a pairing request is the owner\'s own act', instead: '/devices requests shows the devices waiting to pair' },
       operator: { method: 'remote.pair.requests.reject', fields: { requestId: 'request' } },

@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describeUnappliedTier, type PluginManager, type PluginTrustUnappliedReason } from '@goodvibes/engine/platform/platform/plugins';
+import { describeUnappliedTier, getPluginDirectories, getUserPluginDirectory, type PluginManager, type PluginTrustUnappliedReason } from '@goodvibes/engine/platform/platform/plugins';
+import {
+  loadEcosystemCatalog,
+  removeEcosystemCatalogEntry,
+  upsertEcosystemCatalogEntry,
+  type EcosystemCatalogPathOptions,
+} from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import type { TerminalCommandRegistry } from './command-registry.js';
+import { createCommandPathAccessors, requirePluginPathOptions, type CommandPathContext } from './command-service-access.js';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { commandRefusal, type CommandConfirmation } from './command-confirmation.js';
 import { defineCommand } from './command-actions/define.js';
@@ -193,11 +200,10 @@ export async function runPluginTrustSubcommand(
 }
 
 // ---------------------------------------------------------------------------
-// The plugin actions both terminal apps describe: each app's /plugin is built
-// from these.
+// `/plugin`, described once for both terminal apps.
 // ---------------------------------------------------------------------------
 
-export type PluginControls = PluginTrustControls & PluginLifecycleControls;
+export type PluginControls = PluginTrustControls & PluginLifecycleControls & Pick<PluginManager, 'getTrustRecord' | 'getQuarantineRecord'>;
 export type PluginManagerOf<Ctx> = (ctx: Ctx) => PluginControls | undefined;
 
 function controlsOf<Ctx>(manager: PluginManagerOf<Ctx>, ctx: Ctx): PluginControls {
@@ -226,8 +232,47 @@ const TIERS = [
   { value: 'trusted', label: 'Trusted', help: PLUGIN_TIER_EFFECT.trusted, risk: 'loosens-a-protection' as const },
 ];
 
+/**
+ * How one app reaches its plugins for `/plugin`. The plugin manager and the
+ * folders plugins load from are in both apps; an app without the full-screen
+ * plugins view or a local curated catalog refuses those actions with where
+ * they are done.
+ */
+export interface PluginCommandHost<Ctx> {
+  readonly manager: PluginManagerOf<Ctx>;
+  /** Opens the full-screen plugins view. */
+  readonly openScreen?: ((ctx: Ctx) => void) | undefined;
+  /** The surface folder of the local curated catalog this app's /marketplace installs from. */
+  readonly catalogSurfaceRoot?: string | undefined;
+}
+
+const ELSEWHERE_SCREEN = 'it is a screen of the terminal app; run /plugin open in goodvibes, or /plugin list here';
+const ELSEWHERE_CATALOG = 'it belongs to the terminal app, whose /marketplace installs from it; run it in goodvibes';
+const CATALOG_ONLY = { terminalOnly: 'The curated catalog is on this machine.' } as const;
+
+/** The catalog surface of the app that registered /plugin; the list below reads it. */
+let catalogSurfaceRoot: string | undefined;
+
+function catalogPaths(ctx: CommandPathContext): EcosystemCatalogPathOptions | undefined {
+  return catalogSurfaceRoot === undefined ? undefined : createCommandPathAccessors(catalogSurfaceRoot).requireEcosystemCatalogPaths(ctx);
+}
+
+const PUBLISHED = defineList<CommandPathContext>({
+  name: 'plugin.catalog',
+  async read(ctx) {
+    const paths = catalogPaths(ctx);
+    if (!paths) return [];
+    return loadEcosystemCatalog('plugin', paths).map((entry): ListRow => ({ value: entry.id, label: entry.name, detail: entry.summary }));
+  },
+  operator: CATALOG_ONLY,
+});
+
+function notHere(what: string, where: string): never {
+  throw commandRefusal(`${what} is not available in this program: ${where}.`);
+}
+
 /** List, switch on and off, reload, quarantine, and set the trust of plugins. */
-export function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerOf<Ctx>, command: string): readonly ActionDescription<Ctx>[] {
+function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerOf<Ctx>, command: string): readonly ActionDescription<Ctx>[] {
   return [
     readAction<Ctx>({
       id: 'list', label: 'See your plugins', word: 'list',
@@ -320,22 +365,134 @@ export function pluginActions<Ctx extends CommandActionContext>(manager: PluginM
 }
 
 /**
- * `/plugin` in a shell with no plugin workspace of its own (the Agent): the
- * plugin list with each tier, switching plugins on and off, and the trust
- * lines, under the same name and action words as the terminal app's `/plugin`,
- * so every plugin message that names `/plugin <action>` holds in both. The
- * tier is shared by every app on this machine, so a tier set here also holds
- * in the terminal app and daemon.
+ * `/plugin` in both terminal apps: the plugin list with each tier, switching
+ * plugins on and off, the trust lines, one plugin's details, a count by tier,
+ * where plugins are looked for, the full-screen view and publishing a plugin
+ * folder into the local curated catalog (installing from it is /marketplace's).
+ * The tier is shared by every app on this machine, so a tier set in one app
+ * holds in the others and the daemon.
  */
-export function registerPluginCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, manager: PluginManagerOf<Ctx>): void {
+export function registerPluginCommand<Ctx extends CommandActionContext & CommandPathContext>(
+  registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>,
+  host: PluginCommandHost<Ctx>,
+): void {
+  const command = 'plugin';
+  catalogSurfaceRoot = host.catalogSurfaceRoot;
+  const requireCatalog = (ctx: Ctx): EcosystemCatalogPathOptions => catalogPaths(ctx) ?? notHere('The local curated catalog', ELSEWHERE_CATALOG);
   registry.register(defineCommand<Ctx>({
-    name: 'plugin',
+    name: command,
     // --yes confirms only right after the action word: the same word in the text is text.
     leadingFlagsOnly: true,
-    title: 'Plugins and their trust',
-    summary: 'Switch plugins on and off, and set what each one may do',
+    title: 'Plugins',
+    summary: 'Switch plugins on and off, set what each one may do, and publish your own',
     group: 'Extensions',
     report: 'list',
-    actions: pluginActions(manager, 'plugin'),
+    firstScreenRows: [
+      'list', 'enable', 'disable', 'trust',
+      { label: 'Check a plugin', actions: ['inspect', 'capabilities', 'verify', 'trust-key', 'review'] },
+      { label: 'Stop a plugin that misbehaves', actions: ['quarantine', 'lift', 'reload'] },
+      { label: 'Publish your own plugin', actions: ['publish-local', 'unpublish', 'dirs'] },
+      'open',
+    ],
+    actions: [
+      ...pluginActions(host.manager, command),
+      doAction<Ctx>({
+        id: 'open', label: 'Open the plugins screen', word: 'open', touches: 'reads',
+        sentence: 'Opens the full-screen view of your plugins.', operator: { terminalOnly: 'It is a terminal screen.' },
+        async run(_values, ctx) {
+          if (!host.openScreen) notHere('The plugins screen', ELSEWHERE_SCREEN);
+          host.openScreen(ctx);
+        },
+      }),
+      readAction<Ctx>({
+        id: 'dirs', label: 'See where plugins are looked for', word: 'dirs',
+        sentence: 'Shows the folders plugins are loaded from, and your own plugin folder.',
+        async run(_values, ctx) {
+          const pluginPaths = requirePluginPathOptions(ctx);
+          return ['Plugin Search Directories', ...getPluginDirectories(pluginPaths).map((dir) => `  ${dir}`), '', `User plugin directory: ${getUserPluginDirectory(pluginPaths)}`].join('\n');
+        },
+      }),
+      readAction<Ctx>({
+        id: 'inspect', label: 'See one plugin', word: 'inspect', inputs: [PLUGIN],
+        sentence: 'Shows {plugin}\'s version, state, tier, capabilities, signature and quarantine.', example: { plugin: 'jira' },
+        async run(values, ctx) {
+          const plugins = controlsOf(host.manager, ctx);
+          const name = values.plugin!;
+          const status = plugins.list().find((plugin) => plugin.name === name);
+          if (!status) throw commandRefusal(`Plugin '${name}' not found.`, `/${command} list shows the installed plugins`, 'NOT_FOUND');
+          const capabilities = plugins.capabilities(name);
+          const trust = plugins.getTrustRecord(name);
+          const quarantine = plugins.getQuarantineRecord(name);
+          return [
+            `Plugin ${name}`,
+            `  version: ${status.version}`,
+            `  state: ${status.active ? 'active' : status.enabled ? 'enabled' : 'disabled'}`,
+            `  trustTier: ${status.trustTier}`,
+            `  quarantined: ${status.quarantined ? 'yes' : 'no'}`,
+            `  requestedCapabilities: ${capabilities?.requested.length ?? 0}`,
+            `  highRiskCapabilities: ${capabilities?.highRisk.length ?? 0}`,
+            `  withheldByTier: ${capabilities?.blocked.join(', ') || 'none'}`,
+            `  signedFingerprint: ${trust?.signatureFingerprint ?? 'n/a'}`,
+            `  quarantineReason: ${quarantine?.reason ?? 'n/a'}`,
+          ].join('\n');
+        },
+      }),
+      readAction<Ctx>({
+        id: 'review', label: 'See how much your plugins may do', word: 'review',
+        sentence: 'Counts your plugins by state and trust tier.',
+        async run(_values, ctx) {
+          const plugins = controlsOf(host.manager, ctx).list();
+          return [
+            'Plugin Security Review',
+            `  total: ${plugins.length}`,
+            `  active: ${plugins.filter((plugin) => plugin.active).length}`,
+            `  quarantined (will not load): ${plugins.filter((plugin) => plugin.quarantined).length}`,
+            // Each tier is enforced at start: untrusted may not register tools, providers or hooks; only trusted may declare high-risk capabilities.
+            `  untrusted (panels and reads only): ${plugins.filter((plugin) => plugin.trustTier === 'untrusted').length}`,
+            `  limited (declared tools, providers, hooks): ${plugins.filter((plugin) => plugin.trustTier === 'limited').length}`,
+            `  trusted (also high-risk): ${plugins.filter((plugin) => plugin.trustTier === 'trusted').length}`,
+          ].join('\n');
+        },
+      }),
+      {
+        id: 'publish-local', label: 'Publish a plugin folder to the local catalog', word: 'publish-local',
+        inputs: [
+          textInput({ id: 'id', label: 'Catalog id', help: 'A short id you choose', why: 'a new id you choose', typed: { position: 1 } }),
+          textInput({ id: 'path', label: 'Plugin folder', help: 'The folder with its manifest.json', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }),
+          textInput({ id: 'summary', label: 'Summary', help: 'One line on what it does', why: 'your own words', typed: { tail: true } }),
+        ],
+        sentence: 'The plugin in {path} is listed in the local curated catalog as {id} ("{summary}"), until you change it.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'unpublish',
+        operator: CATALOG_ONLY, example: { id: 'jira', path: 'plugins/jira', summary: 'Read and file Jira issues' },
+        async run(values, ctx) {
+          const paths = requireCatalog(ctx);
+          const entryId = values.id!;
+          const result = upsertEcosystemCatalogEntry({
+            id: entryId,
+            kind: 'plugin',
+            name: entryId.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+            summary: values.summary!,
+            source: values.path!,
+            tags: ['local-first', 'published'],
+            provenance: 'operator-published',
+            updateHint: `Use /${command} publish-local again to refresh catalog metadata after edits.`,
+          }, paths);
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Published curated plugin ${entryId} into ${result.path}`;
+        },
+      },
+      {
+        id: 'unpublish', label: 'Take a plugin out of the local catalog', word: 'unpublish',
+        inputs: [listInput({ id: 'id', label: 'Catalog entry', help: 'Plugins in the local curated catalog', list: PUBLISHED })],
+        sentence: '{id} is removed from the local curated catalog; installs of it stay.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
+        operator: CATALOG_ONLY, example: { id: 'jira' },
+        async run(values, ctx) {
+          const result = removeEcosystemCatalogEntry('plugin', values.id!, requireCatalog(ctx));
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+          return `Removed curated plugin ${values.id} from ${result.path}`;
+        },
+      },
+    ],
   }));
 }

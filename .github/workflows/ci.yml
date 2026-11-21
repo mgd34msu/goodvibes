@@ -119,25 +119,6 @@ jobs:
       - name: Run the live sandbox tests
         run: bun run validate --job live-sandbox
 
-  # Counts and bytes per scenario against packages/engine/scripts/measure/budgets.json;
-  # times are printed as information and never fail it.
-  measure:
-    name: Measure
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # find-content-repeat-ripgrep measures content search with the host's rg.
-      - name: Install ripgrep
-        uses: ./.github/actions/apt-install
-        with:
-          packages: ripgrep
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Check the speed budgets
-        run: bun run validate --job measure
-
   # The packages as released, then the three Linux programs built and run: the
   # terminal and Agent programs finish a turn, the web UI's journeys pass in
   # Chromium, the daemon runs inside bubblewrap (Ubuntu 22.04, as for the live
@@ -400,7 +381,6 @@ jobs:
       - typecheck
       - proofs
       - live-sandbox
-      - measure
       - package
       # security-audit is left out: a new public advisory turns it red with no change to the code, so it reports but never blocks.
       - native

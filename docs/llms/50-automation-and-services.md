@@ -835,8 +835,8 @@ A webhook registered for the bot blocks polling (Telegram answers `409 Conflict`
 
 | Setting | Notes |
 | --- | --- |
-| `surfaces.ntfy.baseUrl` | Default `https://ntfy.sh`. |
-| `surfaces.ntfy.chatTopic` | Messages here go to the active shared terminal session (secret). |
+| `surfaces.ntfy.baseUrl` | Default `https://ntfy.sh`. Every publish, poll, subscribe URL and credential check uses this one server; an emptied value means `https://ntfy.sh` everywhere. |
+| `surfaces.ntfy.chatTopic` | Messages here go to the active shared terminal session (secret). Each is queued as the next thing said in that conversation: the terminal running it collects it, runs it as its next turn, and the answer is posted back to this topic through the topic's route. With no terminal session to take it, the post is answered `409`. |
 | `surfaces.ntfy.agentTopic` | Messages here start agent work (secret). |
 | `surfaces.ntfy.remoteTopic` | Messages here use daemon-owned remote chat (secret). |
 | `surfaces.ntfy.topic` | Default delivery topic for notifications (secret). |

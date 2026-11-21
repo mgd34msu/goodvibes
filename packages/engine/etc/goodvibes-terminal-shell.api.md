@@ -339,6 +339,7 @@ export interface DaemonCallInit {
 export interface DaemonFailure {
     // (undocumented)
     readonly code: DaemonFailureCode;
+    readonly daemonCode?: string;
     // (undocumented)
     readonly error: string;
     // (undocumented)
@@ -655,6 +656,9 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     readonly triggerSupervisor?: TriggerOperatorSupervisor | undefined;
     // Warning: (ae-forgotten-export) The symbol "UserPermissionRuleStore" needs to be exported by the entry point index.d.ts
     readonly userPermissionRuleStore?: Pick<UserPermissionRuleStore, 'list' | 'delete'> | undefined;
+    readonly users?: {
+        onAdminWithdrawn(listener: (username: string) => void): () => void;
+    } | undefined;
     readonly vapidSubject?: string | undefined;
     // Warning: (ae-forgotten-export) The symbol "VoiceSetupGatewayService" needs to be exported by the entry point index.d.ts
     readonly voiceSetup?: VoiceSetupGatewayService | undefined;
@@ -1374,6 +1378,20 @@ export function resolveCatalogCommand<TCommand extends string, TField extends st
 export function resolveEditorCommand(env: NodeJS.ProcessEnv, purpose?: string): EditorCommand;
 
 // @public
+export function resolveLocalDaemonTarget(input: ResolveLocalTargetInput): RemoteTargetResolution;
+
+// @public
+export interface ResolveLocalTargetInput {
+    // (undocumented)
+    readonly configManager: Pick<ConfigManager, 'get'>;
+    // (undocumented)
+    readonly daemonHomeDir: string;
+    readonly port?: number | undefined;
+    readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
+    readonly token?: string | undefined;
+}
+
+// @public
 export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): RemoteTargetResolution;
 
 // @public (undocumented)
@@ -1388,8 +1406,10 @@ export interface ResolveRemoteTargetInput {
     readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
 }
 
+// Warning: (ae-forgotten-export) The symbol "RuntimeEndpointConfigReader" needs to be exported by the entry point index.d.ts
+//
 // @public (undocumented)
-export function resolveRuntimeEndpointBinding(config: Pick<ConfigManager, 'get'>, endpoint: RuntimeEndpointId): RuntimeEndpointBinding;
+export function resolveRuntimeEndpointBinding<E extends RuntimeEndpointId>(config: RuntimeEndpointConfigReader<E>, endpoint: E): RuntimeEndpointBinding;
 
 // @public
 export function resolveWebSurfaceExposure(config: Pick<ConfigManager, 'get'>): {
@@ -1439,11 +1459,13 @@ export interface RunClusterCommandInput {
 export function runLanguageServerInstall(target: string | undefined, deps: LanguageServerInstallDeps): Promise<void>;
 
 // @public (undocumented)
-export const RUNTIME_ENDPOINT_CONFIG_KEYS: Record<RuntimeEndpointId, {
-    readonly hostMode: ConfigKey;
-    readonly host: ConfigKey;
-    readonly port: ConfigKey;
-}>;
+export const RUNTIME_ENDPOINT_CONFIG_KEYS: {
+    readonly [E in RuntimeEndpointId]: {
+        readonly hostMode: `${E}.hostMode` & ConfigKey;
+        readonly host: `${E}.host` & ConfigKey;
+        readonly port: `${E}.port` & ConfigKey;
+    };
+};
 
 // @public (undocumented)
 export const RUNTIME_ENDPOINT_DEFAULT_PORTS: Record<RuntimeEndpointId, number>;
@@ -1454,7 +1476,6 @@ export interface RuntimeEndpointBinding {
     readonly configuredHost: string;
     // (undocumented)
     readonly host: string;
-    // (undocumented)
     readonly hostMode: string;
     // (undocumented)
     readonly port: number;
@@ -1782,9 +1803,9 @@ export function writeTreeStatusMarker(line: Line, glyph: string | null, fg: stri
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:289:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:368:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:369:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:291:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:370:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:371:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:142:5 - (ae-forgotten-export) The symbol "WorkflowManager" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:144:5 - (ae-forgotten-export) The symbol "HookActionManager" needs to be exported by the entry point index.d.ts
 // platform/src/platform/runtime/fleet/registry.ts:145:5 - (ae-forgotten-export) The symbol "ScheduleManager" needs to be exported by the entry point index.d.ts

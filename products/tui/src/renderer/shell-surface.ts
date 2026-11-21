@@ -1,5 +1,6 @@
 import { createShellFooter, statusCostText as priceUsage } from '@goodvibes/engine/terminal-shell/shell-footer';
 import type { Line } from '@goodvibes/engine/platform/platform/types';
+import type { SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 import { UIFactory } from './ui-factory.ts';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
@@ -66,6 +67,8 @@ export interface ShellFooterBuildOptions {
   readonly lastCopyTime: number;
   /** The model the session cost is priced against. */
   readonly model?: string;
+  /** What the session cost is priced with when `usage.costUsd` is absent: the runtime's ProviderRegistry. */
+  readonly pricing?: SessionPricing | undefined;
   /** An agent or process view is showing (session-focus.ts). */
   readonly view?: ShellFooterView | null;
   /** The current branch: the status bar's `branch …` segment; absent outside a repository. */
@@ -164,14 +167,9 @@ function composerBarColor(permissionMode: string | undefined, shell: boolean): s
   return tone === 'info' ? t.info : tone === 'caution' ? t.warning : t.brand;
 }
 
-
-/** The chips no view hides: auto-approve, the live microphone, sleep disabled. */
-
-/** Format a USD amount with a precision that suits its magnitude. */
-
 /** "~$0.246", or "you ~$0.25 · fleet ~$0.47" once delegated agents have cost something (estimates, hence the ~). */
-
-export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined) => priceUsage(usage, model, true);
+export const statusCostText = (usage: ShellFooterBuildOptions['usage'], model: string | undefined, pricing: SessionPricing | undefined) =>
+  priceUsage(usage, model, pricing, true);
 
 export { promptCursorOffset, type WrappedPromptCursorInfo } from '@goodvibes/engine/terminal-shell/shell-footer';
 

@@ -359,8 +359,9 @@ export async function runWithHeadlessTimeout(signal: AbortSignal, timeoutMs: num
     if (timeoutMs === undefined)
         return run(signal);
     const deadline = new AbortController();
+    // Referenced: it is what the run waits on when nothing else is, and an
+    // unreferenced one leaves Bun ticking a full core under the entry's top-level await.
     const timer = setTimeout(() => deadline.abort(), timeoutMs);
-    timer.unref?.();
     try {
         const result = await run(AbortSignal.any([signal, deadline.signal]));
         if (!deadline.signal.aborted || signal.aborted || result.exitCode !== 130)

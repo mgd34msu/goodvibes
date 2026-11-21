@@ -122,7 +122,12 @@ selected runtime provider row id. OpenAI's ChatGPT subscription and API key are
 two sign-ins of the one `openai` provider, not two rows.
 
 To stop a running reply, call `platformClient.chat.turns.cancel(sessionId)`; any
-partial reply is kept and marked as cancelled. To interrupt a running reply with
+partial reply is kept and marked as cancelled. A cancel sent before the reply
+starts (the message is still being saved, or is queued to start next) stops
+that turn before it runs: the answer is `cancelled: true` with
+`stoppedBeforeStart: true` and the `messageIds` it stopped, and no `turnId`.
+`NO_ACTIVE_TURN` comes back only when nothing runs and nothing is on its way.
+To interrupt a running reply with
 a new message, call `platformClient.chat.messages.steer(sessionId, { body })`.
 Retrying and editing a message are daemon routes (`messages/retry`,
 `messages/edit`) listed in `companion-message-routing.md`; the browser client

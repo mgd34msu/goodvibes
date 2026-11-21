@@ -3,6 +3,10 @@ export const JUDGMENT_ADAPTER_KINDS = Object.freeze(['system-one', 'cloudflare-w
 
 export type JudgmentAdapterKind = typeof JUDGMENT_ADAPTER_KINDS[number];
 
+export function isJudgmentAdapterKind(value: unknown): value is JudgmentAdapterKind {
+  return (JUDGMENT_ADAPTER_KINDS as readonly unknown[]).includes(value);
+}
+
 export interface DecisionModelProfile {
   readonly id: string;
   readonly name: string;

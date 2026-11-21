@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
-import type { HandlerContextEnvelope } from './handler-plumbing.js';
+import type { HandlerContextEnvelope } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';

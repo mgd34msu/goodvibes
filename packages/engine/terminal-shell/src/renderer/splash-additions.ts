@@ -4,38 +4,29 @@
  * and centred exactly as before; these rows go into the free rows below its
  * last row and never take part in that centring, so they cannot move it.
  *
- *   a (first run only)  You're set.  Answering with rt-1 · signed in       3 of 3
- *   b (every empty one) Try one of these in ~/projects/sample-app:
- *                          What does this project do, and how do I run its tests?
- *                          ...
- *   c (first run only)  GoodVibes asks before ...  shift+tab  changes how often it asks. ...
+ *   a  You're set.  Answering with rt-1 · signed in       3 of 3
+ *   c  GoodVibes asks before ...  shift+tab  changes how often it asks. ...
  *
- * The blocks are packed with no blank row between them, and the sentence of
- * block c wraps to the screen's width so it takes as few rows as its words
- * need. All three are drawn when their rows fit between the splash's last row
- * and the composer; when they do not, the prompts (b) are left out first,
- * then the sentence (c), each whole. Rows left over become blank rows: first
- * one under the splash, then one above the composer, then between blocks.
+ * Both are drawn only on first run. The blocks are packed with no blank row
+ * between them, and the sentence of block c wraps to the screen's width so it
+ * takes as few rows as its words need. Both are drawn when their rows fit
+ * between the splash's last row and the composer; when they do not, the
+ * sentence (c) is left out first, whole. Rows left over become blank rows:
+ * first one under the splash, then one above the composer, then between blocks.
  */
 import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { SurfaceCanvas } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import { drawSegments, wrapSegments, type StyledSegment } from './first-run.js';
-import { readSplashAdditions, recordDrawnPrompts, requestSplashRender, takeSetFlash } from '../first-run/splash-state.js';
+import { readSplashAdditions, requestSplashRender, takeSetFlash } from '../first-run/splash-state.js';
 import { getSharedModeFlash } from '../session-permission-mode.js';
 
 const isBlank = (line: Line): boolean => line.every((cell) => cell.char === ' ' || cell.char === '');
 
-/** `~` for the home folder. */
-function homeShort(folder: string): string {
-  const home = process.env['HOME'] ?? '';
-  return home && (folder === home || folder.startsWith(`${home}/`)) ? `~${folder.slice(home.length)}` : folder;
-}
-
 interface Block {
-  readonly kind: 'a' | 'b' | 'c';
-  readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined; readonly indent?: number | undefined; readonly prompt?: string | undefined }[];
+  readonly kind: 'a' | 'c';
+  readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined }[];
 }
 
 /**
@@ -46,7 +37,7 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   const out = [...viewport];
   const view = readSplashAdditions();
   const first = out.findIndex((line) => !isBlank(line));
-  if (!view || first < 0) { recordDrawnPrompts(null); return out; }
+  if (!view || first < 0) return out;
   let last = out.length - 1;
   while (last > first && isBlank(out[last]!)) last--;
   // The blocks line up with the splash's own left edge (its top rule), inside the screen.
@@ -78,11 +69,6 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
     ], blockWidth);
     blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
-  if (view.prompts.length > 0) {
-    const title = wrapSegments([{ text: 'Try one of these in ' }, { text: homeShort(view.folder), tone: 'cyan' }, { text: ':' }], blockWidth);
-    const prompts = view.prompts.flatMap((prompt) => wrapSegments([{ text: prompt }], blockWidth - 3).map((segments) => ({ segments, indent: 3, prompt })));
-    blocks.push({ kind: 'b', rows: [...title.map((segments) => ({ segments })), ...prompts] });
-  }
   if (firstRun?.kind === 'set' && view.asksBefore) {
     const rows = wrapSegments([
       { text: view.asksBefore, tone: 'dim' },
@@ -99,9 +85,9 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   // Free rows: every row under the splash's last row (the composer is below the viewport).
   const free = height - 1 - last;
   const rowsOf = (list: readonly Block[]): number => list.reduce((sum, block) => sum + block.rows.length, 0);
-  // Too short for every block: the prompts go first, then the sentence; block a goes last.
+  // Too short for every block: the sentence goes first; block a goes last.
   let shown: Block[] = blocks;
-  for (const drop of ['b', 'c', 'a'] as const) {
+  for (const drop of ['c', 'a'] as const) {
     if (rowsOf(shown) <= free) break;
     shown = shown.filter((block) => block.kind !== drop);
   }
@@ -118,19 +104,16 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   const between = shown.map((_, index) => (index > 0 ? take() : 0));
   let y = last + 1 + underSplash;
   const t = activeTokens();
-  const drawnPrompts: { row: number; prompt: string }[] = [];
   for (const [index, block] of shown.entries()) {
     y += between[index] ?? 0;
     for (const row of block.rows) {
       const canvas = new SurfaceCanvas(width, 1);
-      const end = drawSegments(canvas, left + (row.indent ?? 0), 0, row.segments);
+      const end = drawSegments(canvas, left, 0, row.segments);
       if (row.right && right - getDisplayWidth(row.right) > end) canvas.right(right, 0, row.right, { fg: t.textMuted });
       while (out.length <= y) out.push(canvas.lines[0]!.map((cell) => ({ ...cell, char: ' ' })));
       out[y] = canvas.lines[0]!;
-      if (row.prompt) drawnPrompts.push({ row: y, prompt: row.prompt });
       y += 1;
     }
   }
-  recordDrawnPrompts(drawnPrompts.length > 0 ? { prompts: view.prompts.filter((prompt) => drawnPrompts.some((entry) => entry.prompt === prompt)), rows: drawnPrompts } : null);
   return out;
 }

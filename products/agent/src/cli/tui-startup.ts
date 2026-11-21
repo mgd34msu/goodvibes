@@ -158,17 +158,10 @@ export function applyInitialTuiCliState(options: {
   const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
   // The one answer to "has setup been done" (completion.ts), as status and the setup screen read it.
   const onboardingDone = isOnboardingComplete(shellPaths);
-  // What the empty conversation shows under the splash: the starting prompts, and first run's lines.
+  // What the empty conversation shows under the splash: first run's lines.
   installSplashAdditions({
-    workingDirectory: shellPaths.workingDirectory,
     configManager: commandContext.platform.configManager,
     setupCommand: '/setup',
-    fillComposer: (text) => {
-      if (input.prompt !== '') return;
-      input.prompt = text;
-      input.cursorPos = text.length;
-      render();
-    },
     splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
     renderRequest: render,
   });

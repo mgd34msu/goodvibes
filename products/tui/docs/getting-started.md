@@ -36,9 +36,8 @@ which is three steps and the same in the Agent:
    keys found in the environment, model servers found on this computer, or
    another provider.
 2. Sign in, or paste a key. A key the provider refuses is not kept.
-3. Start: the conversation opens with its starting prompts and one sentence
-   saying when GoodVibes asks before acting. The starting prompts show on every
-   empty conversation, and Tab fills in the next one.
+3. Start: the conversation opens with one sentence saying when GoodVibes asks
+   before acting.
 
 Leaving part way and starting again resumes from where you were: a provider
 chosen but not signed in opens step 2. After first run the splash names the

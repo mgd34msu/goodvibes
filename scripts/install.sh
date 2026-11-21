@@ -3688,7 +3688,7 @@ parse_options() {
         say 'GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.'
         say ''
         say 'Options:'
-        say '  --version VERSION     Install this release, such as v3.4.0, for every program (default: latest;'
+        say '  --version VERSION     Install this release, such as v3.4.1, for every program (default: latest;'
         say '                        also GOODVIBES_VERSION).'
         say '  --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).'
         say '  --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,'

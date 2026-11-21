@@ -49,7 +49,7 @@ and adds `~/.local/bin` to your `PATH` when it is missing. It needs no Bun,
 Node, Git or compiler. When it finishes, it prints the command to start with
 and the web app's address.
 
-- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.0 sh`
+- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.1 sh`
 - **Skip the service:** add `GOODVIBES_DAEMON_SERVICE=0` the same way.
 - **Updates** install themselves: the daemon checks hourly and waits until no
   work is running, and the terminal apps check when they start. Running the
@@ -75,16 +75,15 @@ goodvibes
    a ChatGPT subscription, Anthropic, OpenRouter, a model found on this
    computer (Ollama, LM Studio and the like), or another provider. Next, sign
    in with your browser or paste the API key; a key the provider refuses is
-   not kept. Then the conversation opens with three starting prompts for your
-   folder and one sentence saying when GoodVibes asks before acting. When a key
+   not kept. Then the conversation opens with one sentence saying when
+   GoodVibes asks before acting. When a key
    in your environment already makes a provider usable, `a` uses it and skips
    the sign-in step; with `OPENROUTER_API_KEY` set (the default model is
    OpenRouter's free one), it asks nothing and opens the conversation. `/setup`
    sets up the rest one topic at a time, `/model` switches models and `/scan`
    finds model servers on your machine and network.
 2. **Ask about the project.** Type `What does this project do, and how do I run
-   its tests?` and press Enter (or press Tab to put a starting prompt in the
-   box). It reads the files it needs and answers.
+   its tests?` and press Enter. It reads the files it needs and answers.
 3. **Ask for a change.** Type `Add a --verbose flag to the CLI and run the
    tests.` The first time it wants to write or run something in a folder, it
    asks whether to trust the folder: **Trust this workspace** lets it work,
@@ -252,7 +251,7 @@ By topic:
 - [Chat channels and the daemon's API](products/tui/docs/channels-remote-and-api.md)
 - [Headless runs](products/agent/docs/headless-run.md) and [exit codes](docs/exit-codes.md)
 - [Purchases](packages/engine/docs/payments.md)
-- [Release notes for 3.4.0](docs/releases/3.4.0.md)
+- [Release notes for 3.4.1](docs/releases/3.4.1.md)
 - [Building on the platform](packages/engine/README.md) and [the Jev decision layer](packages/judgment/README.md)
 - [Security policy](SECURITY.md)
 

@@ -17,7 +17,6 @@ import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
-import { fillComposerWithStarterPrompt, starterPromptAtRow, takeNextStarterPrompt } from './first-run/splash-state.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
   readonly openSelection?: unknown | undefined;
@@ -304,14 +303,6 @@ export function createFeedTokenRoutes<
       state.exitApp();
     };
     if (token.logicalName === 'tab' && !commandMode) {
-      // An empty composer under the splash takes the next starting prompt, unsent.
-      const starter = prompt === '' && !token.shift ? takeNextStarterPrompt() : undefined;
-      if (starter) {
-        prompt = starter;
-        cursorPos = starter.length;
-        ensureLocalInputCursorVisible();
-        return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
-      }
       if (!state.handlePathCompletion()) {
         state.handleBlockToggle();
       }
@@ -635,13 +626,6 @@ export function createFeedTokenRoutes<
     }
     if (token.action === 'release') {
       const moved = Math.abs(token.row - mouseDownRow) + Math.abs(token.col - mouseDownCol);
-      // A click on a starting prompt under the splash puts it in the composer, unsent (after this feed settles).
-      const starter = moved <= 2 ? starterPromptAtRow(viewportRow) : undefined;
-      if (starter) {
-        state.selection.endSelection();
-        queueMicrotask(() => fillComposerWithStarterPrompt(starter));
-        return { handled: true, mouseDownRow: -1, mouseDownCol: -1 };
-      }
       if (moved <= 2 && state.conversationManager) {
         const offset = Math.max(0, state.viewportHeight - state.lineCount);
         const absoluteLine = state.scrollTop + (viewportRow - offset);

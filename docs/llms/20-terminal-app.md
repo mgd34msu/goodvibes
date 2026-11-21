@@ -42,7 +42,7 @@ goodvibes open goodvibes://open/agents   # open the app on one view
 ```
 
 `goodvibes app` is an alias of `goodvibes tui`.
-A launch whose model is not ready opens first run (choose a provider, sign in, then the conversation with starting prompts for the folder; see the install part of this file); `goodvibes setup` opens the full setup wizard on demand, and `goodvibes setup status` says whether first run has been done.
+A launch whose model is not ready opens first run (choose a provider, sign in, then the conversation; see the install part of this file); `goodvibes setup` opens the full setup wizard on demand, and `goodvibes setup status` says whether first run has been done.
 The onboarding screens are described under "First run and onboarding" in the install part.
 
 `goodvibes open <link>` takes exactly one link of the form `goodvibes://open/<view>[?target=<id>[:<kind>]]`.
@@ -91,7 +91,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
 | `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.0`. |
+| `-v, --version` | Prints `goodvibes 3.4.1`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -622,7 +622,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.0`.
+`goodvibes version` prints `goodvibes 3.4.1`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface

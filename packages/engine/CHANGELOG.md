@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.4.1] - 2026-11-21
+
+The full write-up is in
+[docs/releases/3.4.1.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.1/docs/releases/3.4.1.md).
+
+### Changed
+
+- Show no suggested prompts on the start screen of the terminal app and the
+  Agent: the "Try one of these" block under the logo is gone, and Tab in an
+  empty composer and a click on a suggestion no longer fill the composer.
+  Nothing else on the screen moved.
+
+### Removed
+
+- From the `terminal-shell/first-run` subpath: `starterPrompts`,
+  `starterPromptsFor`, `readFolderFacts`, `FolderFacts`,
+  `takeNextStarterPrompt`, `starterPromptAtRow` and
+  `fillComposerWithStarterPrompt`. `installSplashAdditions` no longer takes
+  `workingDirectory` or `fillComposer`, and `SplashAdditionsView` no longer
+  has `folder` or `prompts`.
+
 ## [3.4.0] - 2026-11-20
 
 The full write-up is in

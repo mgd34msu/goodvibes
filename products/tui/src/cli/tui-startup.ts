@@ -119,17 +119,10 @@ export function applyInitialTuiCliState(options: {
   // Seeded prompt is always applied synchronously, regardless of session branch.
   applySeededCliPrompt(cli, input);
 
-  // What the empty conversation shows under the splash: the starting prompts, and first run's lines.
+  // What the empty conversation shows under the splash: first run's lines.
   installSplashAdditions({
-    workingDirectory: shellPaths.workingDirectory,
     configManager: commandContext.platform.configManager,
     setupCommand: '/setup',
-    fillComposer: (text) => {
-      if (input.prompt !== '') return;
-      input.prompt = text;
-      input.cursorPos = text.length;
-      render();
-    },
     splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
     renderRequest: render,
   });

@@ -16,7 +16,7 @@ Install with the [suite installer](../../docs/installation.md), which installs t
 curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Then run `goodvibes` in a project directory. When no model is ready, the first run takes three steps: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation with three starting prompts for the folder. `/setup` sets up everything else one topic at a time, and its `Run first-run again` opens the three steps again. The [getting started guide](docs/getting-started.md) covers providers and keys in full. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
+Then run `goodvibes` in a project directory. When no model is ready, the first run takes three steps: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. `/setup` sets up everything else one topic at a time, and its `Run first-run again` opens the three steps again. The [getting started guide](docs/getting-started.md) covers providers and keys in full. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 

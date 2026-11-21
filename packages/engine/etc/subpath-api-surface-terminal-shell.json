@@ -21777,17 +21777,6 @@
       "text": "export type FirstRunScreen = { readonly kind: 'pending'; } | { readonly kind: 'set'; readonly model: string; readonly signIn: 'signed in' | 'no sign-in needed'; } | { readonly kind: 'not-ready'; };"
     },
     {
-      "name": "FolderFacts",
-      "kind": "interface",
-      "required": [
-        "hasCode",
-        "hasCommandLine",
-        "hasFiles",
-        "hasTests"
-      ],
-      "text": "export interface FolderFacts { readonly hasFiles: boolean; readonly hasCode: boolean; readonly hasCommandLine: boolean; readonly hasTests: boolean; }"
-    },
-    {
       "name": "LOCAL_OFFER_NAME",
       "kind": "const",
       "text": "LOCAL_OFFER_NAME = \"A model on this computer\""
@@ -21836,21 +21825,14 @@
       "required": [
         "asksBefore",
         "firstRun",
-        "folder",
-        "prompts",
         "setupCommand"
       ],
-      "text": "export interface SplashAdditionsView { readonly firstRun: FirstRunScreen | undefined; readonly folder: string; readonly prompts: readonly string[]; readonly asksBefore: string | undefined; readonly setupCommand: string; }"
+      "text": "export interface SplashAdditionsView { readonly firstRun: FirstRunScreen | undefined; readonly asksBefore: string | undefined; readonly setupCommand: string; }"
     },
     {
       "name": "drawSplashAdditions",
       "kind": "function",
       "text": "export declare function drawSplashAdditions(viewport: readonly Line[], height: number, width: number, options: { readonly modeKey?: string | undefined; }): Line[]; ;; via Line = export type Line = Cell[];"
-    },
-    {
-      "name": "fillComposerWithStarterPrompt",
-      "kind": "function",
-      "text": "export declare function fillComposerWithStarterPrompt(prompt: string): void;"
     },
     {
       "name": "firstRunOwnsScreen",
@@ -21865,17 +21847,12 @@
     {
       "name": "installSplashAdditions",
       "kind": "function",
-      "text": "export declare function installSplashAdditions(install: SplashAdditionsInstall): void; ;; via SplashAdditionsInstall = interface SplashAdditionsInstall { readonly workingDirectory: string; readonly configManager: Pick<ConfigManager, 'get' | 'subscribe'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>; readonly setupCommand: string; readonly fillComposer: (text: string) => void; readonly splashShowing: () => boolean; readonly renderRequest: () => void; }"
+      "text": "export declare function installSplashAdditions(install: SplashAdditionsInstall): void; ;; via SplashAdditionsInstall = interface SplashAdditionsInstall { readonly configManager: Pick<ConfigManager, 'get' | 'subscribe'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>; readonly setupCommand: string; readonly splashShowing: () => boolean; readonly renderRequest: () => void; }"
     },
     {
       "name": "readFirstRunOffers",
       "kind": "function",
       "text": "export declare function readFirstRunOffers(registry: ProviderRegistryView, discovered: DiscoveryView, env: EnvView): FirstRunOffers;"
-    },
-    {
-      "name": "readFolderFacts",
-      "kind": "function",
-      "text": "export declare function readFolderFacts(folder: string): FolderFacts;"
     },
     {
       "name": "readSplashAdditions",
@@ -21896,26 +21873,6 @@
       "name": "startFirstRun",
       "kind": "function",
       "text": "export declare function startFirstRun(deps: FirstRunDeps): Promise<boolean>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
-    },
-    {
-      "name": "starterPromptAtRow",
-      "kind": "function",
-      "text": "export declare function starterPromptAtRow(row: number): string | undefined;"
-    },
-    {
-      "name": "starterPrompts",
-      "kind": "function",
-      "text": "export declare function starterPrompts(folder: string): readonly [string, string, string];"
-    },
-    {
-      "name": "starterPromptsFor",
-      "kind": "function",
-      "text": "export declare function starterPromptsFor(facts: FolderFacts): readonly [string, string, string];"
-    },
-    {
-      "name": "takeNextStarterPrompt",
-      "kind": "function",
-      "text": "export declare function takeNextStarterPrompt(): string | undefined;"
     }
   ],
   "./fleet-spawn": [

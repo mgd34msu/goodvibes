@@ -1,7 +1,7 @@
 /**
  * First run, the same in both terminal apps: step 1 chooses a provider
  * (offering what was found in the environment and by the local scan), step 2
- * signs in, step 3 is the working conversation with its starting prompts.
+ * signs in, step 3 is the working conversation.
  *
  * First run is "not done" exactly when the model the session will use is not
  * ready (resolveDefaultModelReadiness). Leaving at any step and starting
@@ -536,7 +536,7 @@ export class FirstRunModal implements SurfaceModal {
 
 /**
  * Start first run when the session's model is not ready; otherwise record
- * nothing to show but the starting prompts. Decides from what a request would
+ * nothing to show under the splash. Decides from what a request would
  * use, so it waits for the provider registry first: custom providers load in
  * the background, and the keys kept in the secret stores are applied by the
  * boot credential refresh (no request is made; the stores are read once, by

@@ -210,7 +210,7 @@ async function attachSession(
   feed: HostedSessionFeed,
   context: CommandContext,
 ): Promise<void> {
-  if (seams.origin === null) throw new Error('no daemon can be reached from this terminal; /settings daemon shows the connection');
+  if (seams.origin === null) throw new Error('no daemon can be reached from this terminal; /settings open daemon shows the connection');
   const attachment = await replaceHostedAttachment(feed, seams.client, seams.origin, sessionId,
     (result, signal) => openStream(seams, result.session.id, feed, signal, result.historyAsOf ?? newestHistoryTime(result.history)));
   context.print([

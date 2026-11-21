@@ -15,7 +15,7 @@ export function parseTranscriptFormat(word: string): TranscriptFormat | undefine
 }
 
 /**
- * One transcript renderer for `/export`, `/session export` and anything else
+ * One transcript renderer for `/session save-file`, `/session save-saved` and anything else
  * that writes a conversation out: markdown is the platform's `exportToMarkdown`
  * (tool calls, reasoning summaries, token totals), text is one `[ROLE]` block
  * per message with text in it.

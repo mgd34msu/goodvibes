@@ -8382,7 +8382,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sample"
       ],
       "recurrence": "sample",
-      "revision": "sample"
+      "revision": "sample",
+      "cancelled": false
     }
   },
   "calendar.events.list": {
@@ -12391,6 +12392,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sample"
             ],
             "failurePause": true,
+            "recheckPending": {
+              "summary": "sample"
+            },
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -12464,7 +12468,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "failureKind": "transport",
         "error": "sample",
         "createdAt": 0,
-        "completedAt": 0
+        "completedAt": 0,
+        "statusChangedAt": 0
       },
       "ownerAgentId": "sample",
       "replayed": false
@@ -13611,6 +13616,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "sample"
           ],
           "failurePause": true,
+          "recheckPending": {
+            "summary": "sample"
+          },
           "resolvedAt": 0,
           "reply": {
             "text": "sample",
@@ -13684,7 +13692,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "failureKind": "transport",
       "error": "sample",
       "createdAt": 0,
-      "completedAt": 0
+      "completedAt": 0,
+      "statusChangedAt": 0
     }
   },
   "contracts.list": {
@@ -14830,6 +14839,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "sample"
               ],
               "failurePause": true,
+              "recheckPending": {
+                "summary": "sample"
+              },
               "resolvedAt": 0,
               "reply": {
                 "text": "sample",
@@ -14903,7 +14915,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "failureKind": "transport",
           "error": "sample",
           "createdAt": 0,
-          "completedAt": 0
+          "completedAt": 0,
+          "statusChangedAt": 0
         }
       ]
     }
@@ -16085,6 +16098,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sample"
             ],
             "failurePause": true,
+            "recheckPending": {
+              "summary": "sample"
+            },
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -16158,7 +16174,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "failureKind": "transport",
         "error": "sample",
         "createdAt": 0,
-        "completedAt": 0
+        "completedAt": 0,
+        "statusChangedAt": 0
       },
       "ownerAgentId": "sample",
       "replayed": false
@@ -17114,7 +17131,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "email.attachment.get": {
     "input": {
       "uid": 0,
-      "index": 0
+      "index": 0,
+      "uidValidity": 0
     },
     "output": {
       "filename": "sample",
@@ -17247,6 +17265,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "state": "waiting",
       "id": "sample",
+      "replacedBy": "sample",
       "expectation": {
         "id": "sample",
         "kind": "sample",
@@ -26100,6 +26119,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "memory.records.update": {
     "input": {
       "id": "sample",
+      "cls": "decision",
       "scope": "session",
       "summary": "sample",
       "detail": "sample",
@@ -26654,7 +26674,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "needsKind": false,
       "conflictsWith": [
         "sample"
-      ]
+      ],
+      "occasionId": "sample"
     }
   },
   "occasions.plans.remove": {
@@ -26726,13 +26747,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "needsKind": false,
       "conflictsWith": [
         "sample"
-      ]
+      ],
+      "occasionId": "sample"
     }
   },
   "occasions.remove": {
     "input": {
       "occasionId": "sample",
       "confirmed": false,
+      "line": "sample",
       "authority": "sample"
     },
     "output": {
@@ -28991,7 +29014,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "remote.peers.list": {
-    "input": {},
+    "input": {
+      "kind": "node",
+      "limit": 0
+    },
     "output": {
       "peers": [
         {
@@ -29665,6 +29691,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "turnId": "sample",
         "kind": "preview",
         "undoSnapshotId": "sample",
+        "expectedRevision": "sample",
         "expiresAt": 0
       }
     }
@@ -29683,6 +29710,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "turnId": "sample",
           "kind": "preview",
           "undoSnapshotId": "sample",
+          "expectedRevision": "sample",
           "expiresAt": 0
         }
       ],
@@ -31023,7 +31051,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "arguments": {}
             }
           ],
-          "callId": "sample"
+          "callId": "sample",
+          "correlationId": "sample"
         }
       ],
       "historyAsOf": 0
@@ -31151,7 +31180,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "arguments": {}
             }
           ],
-          "callId": "sample"
+          "callId": "sample",
+          "correlationId": "sample"
         }
       ]
     }
@@ -32230,17 +32260,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",
@@ -32325,17 +32344,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",
@@ -32374,17 +32382,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "queuedAt": 0,
           "startedAt": 0,
           "endedAt": 0,
-          "retryPolicy": {
-            "maxAttempts": 0,
-            "currentAttempt": 0,
-            "delayMs": 0,
-            "backoff": "fixed",
-            "retryOn": [
-              "network"
-            ]
-          },
-          "retryDelayMs": 0,
-          "retryAt": 0,
           "exitCode": 0,
           "error": "sample",
           "result": "sample",
@@ -32416,17 +32413,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",

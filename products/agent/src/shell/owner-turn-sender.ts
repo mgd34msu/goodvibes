@@ -152,7 +152,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       // Not sent again on its own, so its sender is told now rather than never.
       how.answered?.({ answer: 'This message may not have been taken: its intake did not confirm it. Send it again if no answer follows.', status: 'failed' });
       uncertain(text);
-      const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check /work intake-status before sending it again.';
+      const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check /work intake before sending it again.';
       if (how.quiet) messages.activity(line);
       else messages.aboutInput(line, 'warning');
       deps.render();
@@ -205,7 +205,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
         if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
         // Handed to the intake with no answer: it may have been recorded. Not taken (it is kept) and not
-        // refused (it is not sent again on its own); /work intake-status says which before a resend.
+        // refused (it is not sent again on its own); /work intake says which before a resend.
         if (state?.status === 'unknown') return mayHaveBeenSent();
         shell?.release();
         return true;
@@ -263,7 +263,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
           // A message that may have been sent leaves the queue: sending it again on a timer could send it twice.
           if (mayHaveBeenSent) {
             heldOwnerInput.shift();
-            messages.high(`${describeOwnerInput(next.text, next.turnOptions)} may have been sent: its intake did not confirm it. It is not sent again on its own; check /work intake-status.`, 'warning');
+            messages.high(`${describeOwnerInput(next.text, next.turnOptions)} may have been sent: its intake did not confirm it. It is not sent again on its own; check /work intake.`, 'warning');
             break;
           }
           if (!taken) break;

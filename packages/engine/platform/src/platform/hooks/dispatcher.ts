@@ -114,6 +114,12 @@ export function hookDefinitionProblem(def: unknown, pattern?: string): string | 
   return null;
 }
 
+/** An entry of a hooks file that a load left out: a stable key (file, entry and reason) and the sentence for the owner. */
+export interface HookLoadRefusal {
+  readonly key: string;
+  readonly text: string;
+}
+
 /** What is wrong with a chain read from a file, or null when it is accepted. */
 export function chainProblem(chain: unknown): string | null {
   if (typeof chain !== 'object' || chain === null) return 'chain entry must be an object';
@@ -145,6 +151,9 @@ export class HookDispatcher {
   private holdsFileHooks = false;
   /** Run before a dispatch while hooks from a file are registered; see {@link setLoadedHooksCheck}. */
   private loadedHooksCheck: (() => Promise<void>) | null = null;
+  /** What the current or last {@link loadFromFile} left out of the file. */
+  private loadRefusals: HookLoadRefusal[] = [];
+  private loadRefusalSink: ((filePath: string, refusals: readonly HookLoadRefusal[]) => void) | null = null;
   private readonly chainEngine: ChainEngine;
   private hookActions: HookActionManagerLike | null = null;
   private hooksBaseDirectory: string | null = null;
@@ -224,8 +233,28 @@ export class HookDispatcher {
     this.loadedHooksCheck = check;
   }
 
+  /**
+   * Receives, after every {@link loadFromFile}, each entry of the file that was
+   * not loaded (empty when all were), so the owner is told what was left out.
+   * Null removes it.
+   */
+  setLoadRefusalSink(sink: ((filePath: string, refusals: readonly HookLoadRefusal[]) => void) | null): void {
+    this.loadRefusalSink = sink;
+  }
+
   /** Load hooks from hooks.json file */
   loadFromFile(filePath: string): void {
+    this.loadRefusals = [];
+    try {
+      this.loadEntriesFromFile(filePath);
+    } finally {
+      try { this.loadRefusalSink?.(filePath, this.loadRefusals); } catch (error) {
+        logger.warn('HookDispatcher: the entries left out of the hooks file could not be reported', { filePath, error: summarizeError(error) });
+      }
+    }
+  }
+
+  private loadEntriesFromFile(filePath: string): void {
     this.hooksBaseDirectory = dirname(filePath);
     // No hooks file is the normal state for most installs, skip quietly
     // instead of emitting a WARN (permission probe) + ERROR (read) pair on
@@ -238,6 +267,7 @@ export class HookDispatcher {
       const refusal = hooksFileRefusal(filePath);
       if (refusal !== null) {
         logger.warn(`HookDispatcher: hooks file not loaded because ${refusal}`, { filePath });
+        this.loadRefusals.push({ key: `${filePath}:file:${refusal}`, text: `The hooks file ${filePath} was not loaded because ${refusal}. Fix the file; none of its hooks run until then.` });
         return;
       }
 
@@ -286,12 +316,16 @@ export class HookDispatcher {
             const problem = chainProblem(chain);
             if (problem !== null) {
               logger.info(`HookDispatcher: ${problem}, skipping`, { filePath });
+              this.refuseLoadedChain(filePath, chain, problem);
               continue;
             }
             const loaded = chain as HookChain;
-            if (this.registerChain(loaded)) {
+            const refused = this.chainRegistrationProblem(loaded);
+            if (refused === null) {
               this.loadedChains.add(loaded);
               this.holdsFileHooks = true;
+            } else {
+              this.refuseLoadedChain(filePath, chain, refused);
             }
           }
         }
@@ -311,6 +345,11 @@ export class HookDispatcher {
   private refuseLoadedHook(filePath: string, pattern: string, def: unknown, reason: string): void {
     logger.warn(`HookDispatcher: hook under "${pattern}" not loaded because ${reason}`, { filePath, pattern });
     const fields = typeof def === 'object' && def !== null ? def as Record<string, unknown> : {};
+    const named = typeof fields.name === 'string' && fields.name.length > 0 ? ` "${fields.name}"` : '';
+    this.loadRefusals.push({
+      key: `${filePath}:hook:${pattern}:${named}:${reason}`,
+      text: `The hook${named} under "${pattern}" in ${filePath} was not loaded: ${reason}. Change that entry; the file is left as it is, and every other hook in it loads.`,
+    });
     const hookType = typeof fields.type === 'string' && VALID_HOOK_TYPES.has(fields.type) ? fields.type as HookType : 'command';
     this.activityTracker.record({
       path: pattern as HookEventPath,
@@ -345,14 +384,28 @@ export class HookDispatcher {
    * chain of that name is already registered: chains are tracked by name.
    */
   registerChain(chain: HookChain): boolean {
+    return this.chainRegistrationProblem(chain) === null;
+  }
+
+  /** {@link registerChain}, giving why a chain was not registered (null when it was). */
+  private chainRegistrationProblem(chain: HookChain): string | null {
     try {
       this.chainEngine.register(chain);
     } catch (err) {
       logger.warn('HookDispatcher: chain not registered', { chain: chain.name, error: summarizeError(err) });
-      return false;
+      return summarizeError(err);
     }
     this.chains.push(chain);
-    return true;
+    return null;
+  }
+
+  /** A hooks-file chain that was not registered, kept for the owner's notice. */
+  private refuseLoadedChain(filePath: string, chain: unknown, reason: string): void {
+    const name = typeof chain === 'object' && chain !== null && 'name' in chain && typeof chain.name === 'string' && chain.name.length > 0 ? ` "${chain.name}"` : '';
+    this.loadRefusals.push({
+      key: `${filePath}:chain:${name}:${reason}`,
+      text: `The hook chain${name} in ${filePath} was not loaded: ${reason}. Change that entry; the file is left as it is, and every other hook in it loads.`,
+    });
   }
 
   /**

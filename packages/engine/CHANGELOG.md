@@ -5,12 +5,107 @@
 The full write-up is in
 [docs/releases/3.4.1.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.1/docs/releases/3.4.1.md).
 
+### Upgrading from 3.4.0
+
+- Plugin trust is bound to every file of a plugin. A 3.4.0 tier is carried
+  forward when the plugin's folder, manifest and entry file are what was
+  trusted, and the first start says so once ("Plugin trust carried forward from
+  the earlier version for N plugins (names); ..."); any other plugin needs
+  `/plugin trust` again.
+- A stored safety setting that does not read as valid no longer refuses the
+  settings file: its feature is held at its strictest value and the first start
+  says once "Setting <key> could not be read (<file>): it <why>. Fix it with
+  /settings or in <file>; until it is fixed, <what is held>." A retailer list
+  entry that names no shop, which 3.4.0 accepted, is one such value: every
+  purchase asks until it is fixed.
+- An unreadable stored `permissions.tools.<tool>` holds that tool at `deny`
+  (every call refused) until it is fixed.
+- Hooks marked `async` under a deciding point, and chains with an unreadable
+  `within` or `debounce`, are no longer loaded; the rest of the file is, and
+  each entry left out is named once with its file and reason.
+- A custom provider whose name holds `:` or a space is not loaded; the file is
+  named once with a suggested name, and every other provider loads.
+- An Azure remote backend whose stored credential is not a service principal
+  `{"clientId", "tenantId", "certificate"}` stays registered but refuses every
+  command; the daemon names the backend and the secret reference once.
+- `--yolo` with `--just-vibes` is refused (exit `2`) instead of the later flag
+  winning, naming which one to drop; `--yolo --no-worries-just-vibes` is
+  accepted.
+- Stored knowledge extractions are read again once, and Home Graph snapshot
+  nodes rewritten once, at the first start or sync.
+- Not kept after a rollback to 3.4.0: plugin trust set by 3.4.1, push device
+  removals still waiting to reach the group, a memory class refiled against a
+  3.4.0 memory host, the Agent's list of settings-import undo entries.
+
+### Added
+
+- `--key -`, `--passphrase -` and `--token -` for the daemon's `cluster`
+  commands, and a piped key for `cluster join`.
+- `--replace` for `/services export`, `/security save-sandbox` and `/provider
+  export`; `-` clears a detail in `/todo edit`.
+- A Share section on a hosted session's Transcript tab in the web UI.
+- `partly-delivered` as a schedule run's outcome.
+- `remote.peers.list` takes `kind` and `limit`; `memory.records.update` takes
+  `cls`; `calendar.events.get` carries `cancelled`; `email.expectation.wait`
+  answers `replaced`; hosted-session history rows carry `correlationId`.
+- The `./terminal-shell/turn-anchor-recording` subpath.
+
 ### Changed
 
 - Show no suggested prompts on the start screen of the terminal app and the
   Agent: the "Try one of these" block under the logo is gone, and Tab in an
   empty composer and a click on a suggestion no longer fill the composer.
   Nothing else on the screen moved.
+- Never-run rules, owner-only deletions and new-recipient asks read through
+  shell keywords, grouping, comments, shell options, `cd` and the exec call's
+  own `cwd`; a script that cannot be read, or a command or script path built at
+  run time, counts as unreadable and is refused or asked about.
+- Hook decisions rank deny, ask, allow; a later `allow` no longer cancels an
+  `ask`. `/hooks enable|disable` refuse a chain.
+- Reviews of memory and notes are the owner's (`OWNER_REVIEW_REQUIRED` for the
+  model). `/services import` asks first and is the owner's.
+- `--at` for a schedule is read in `--tz`, else your zone; free-form dates are
+  refused.
+- Retailer lists read `www.` hosts and shop URLs as their domain; the full
+  public suffix list, private section included, tells shared-hosting sites
+  apart.
+- One launched browser at a time; `exec` with `until` and no `kill_after`
+  leaves the command in the background at the match; `read` refuses a file
+  that is not UTF-8 unless `force_text`.
+- `goodvibes service install|start|restart` exits `1` when the daemon never
+  ran or answered; `goodvibes surfaces enable ntfy` exits `1` when a topic name
+  cannot be stored.
+- `email.attachment.get` requires `uidValidity`; a confirmed `occasions.remove`
+  requires `line`; `remote.peers.list` without `limit` returns every peer.
+- `channels.profiles.set` and `delete` that loosen a mode go to the owner
+  (`202` `OWNER_APPROVAL_PENDING`, `403` `OWNER_ONLY`).
+- `/cloudflare disable` asks first and removes the Worker's credential from the
+  Secrets Store, or warns that it could not.
+- The release installer prints `restarted` only once the unit's daemon is
+  serving; the `PATH` line never fails an install.
+
+### Fixed
+
+- A spoken message is added after the composer draft instead of replacing it.
+- A guest on a channel allowlist is no longer treated as the owner; direct
+  messages are judged by the direct-message policy on every channel.
+- Mail: draft refusals name the cause, a lost draft answer is not saved twice,
+  a half-done archive or delete says so, and an attachment is downloaded only
+  for the mailbox generation it was listed under.
+- A Google calendar create under a deleted event's UID restores the event; a
+  CalDAV update keeps the organizer and the attendees it did not name.
+- Owed failure, missed-run, refund and settlement notices are sent at the next
+  start instead of never.
+- While the authority record cannot be read, push, passkey and relay changes
+  are refused instead of wiping local state; a removed push device stops being
+  served at once.
+- A daemon settings file that cannot be read is left in place instead of being
+  moved aside.
+- Many replies that read as success now say what happened: unread lanes,
+  undelivered replies, an unreadable onboarding state, failed record writes.
+- Messages that named commands that do not exist (`/subscription login`,
+  `/approvals`, `/fleet`, `/work intake-status`, `/settings <where>` and
+  others) now name the real ones.
 
 ### Removed
 
@@ -20,6 +115,17 @@ The full write-up is in
   `fillComposerWithStarterPrompt`. `installSplashAdditions` no longer takes
   `workingDirectory` or `fillComposer`, and `SplashAdditionsView` no longer
   has `folder` or `prompts`.
+- `PERMISSIONS_COMMAND`, `runPermissionsCommand`, `HookPointContract.timeoutMs`,
+  `ProfileManager.sanitizeName`, `TaskRetryPolicy` and the runtime task retry
+  fields, the synchronous `PairingTokenManager.revoke`,
+  `GoogleClientCredentials.authUri`, `bundledMultiLabelSuffixes` and
+  `bundledWildcardSuffixParents` (now `bundledPublicSuffixRules()`),
+  `DocumentSync.changed`, and the `mcp-tool-available` capability probe.
+
+### For contributors
+
+- The public suffix data carries the private section in its own tables; the
+  drift check reports a dropped private rule without failing.
 
 ## [3.4.0] - 2026-11-20
 

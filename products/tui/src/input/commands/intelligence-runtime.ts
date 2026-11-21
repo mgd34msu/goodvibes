@@ -31,7 +31,7 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
       review(ctx) {
         const state = requireReadModels(ctx).intelligence.getSnapshot();
         const notReady = [
-          ...(state.diagnosticsStatus !== 'ready' ? [`problems: ${state.diagnosticsStatus} (check: /health intelligence)`] : []),
+          ...(state.diagnosticsStatus !== 'ready' ? [`problems: ${state.diagnosticsStatus} (check: /health check intelligence)`] : []),
           ...(state.symbolSearchStatus !== 'ready' ? [`symbols: ${state.symbolSearchStatus} (try: /intelligence symbols <file>)`] : []),
           ...(state.hoverStatus !== 'ready' ? [`hover: ${state.hoverStatus} (install its language server: /intelligence install <language>)`] : []),
         ];

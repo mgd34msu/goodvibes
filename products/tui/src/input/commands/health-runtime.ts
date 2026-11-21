@@ -307,7 +307,7 @@ async function checkArea(ctx: CommandContext, area: HealthArea, providerArg: str
       ].join('\n');
     }
     case 'approvals':
-      throw commandRefusal('The asks waiting for you are listed by /approval in this program; nothing was checked.', 'Run /approval.');
+      throw commandRefusal('The asks waiting for you are listed by /approval waiting in this program; nothing was checked.', 'Run /approval waiting.');
   }
 }
 

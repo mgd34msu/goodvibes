@@ -61,7 +61,7 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       // A device this Agent's credential did not pair is the owner's to revoke: the host put it to him instead.
       const approval = 'approvalId' in answer ? ` as approval ${answer.approvalId}` : '';
       throw commandRefusal(`Revoking this device is the owner's own act, so the connected host put it to him${approval}; nothing is revoked until he approves it.`,
-        'The owner approves it from his own app (/approvals); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
+        'The owner approves it from his own app (/approval waiting); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
     },
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {

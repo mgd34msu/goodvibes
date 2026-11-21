@@ -46,7 +46,6 @@ import { randomUUID } from 'node:crypto';
 import type { ApprovalRaiseService } from './approvals-raise.js';
 import { observedAgentRef } from '../../runtime/fleet/adapters/observed.js';
 import type { ObservedAgentRow } from '../../runtime/fleet/observed/source.js';
-import type { ProcessNode } from '../../runtime/fleet/types.js';
 import { compareTarget, type TargetRef } from '../../utils/target-ref.js';
 
 /**

@@ -78,8 +78,9 @@ What happens when both enablement rows are on:
    with `voice.wake.preRollMs` of audio from before it fired, so a phrase run into
    the command is not clipped), ended by `voice.wake.silenceStopMs` of silence or the
    `voice.wake.captureMaxSeconds` ceiling, and transcribed through this process's own
-   voice service, the same call the `voice.stt` verb serves. The text lands in the
-   conversation input, or is submitted as a turn when `voice.wake.autoSubmit` is on.
+   voice service, the same call the `voice.stt` verb serves. The text is added to the
+   conversation input, after any draft already there, or is submitted as a turn when
+   `voice.wake.autoSubmit` is on.
 5. A capture stream that dies is restarted per `voice.wake.maxRestarts` and
    `voice.wake.restartBackoffMs`, and latches off with a stated reason when the budget
    is spent. The footer row says which of those is happening.

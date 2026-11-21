@@ -29,6 +29,7 @@ import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platf
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
 import { putToOwner } from '../platform/src/platform/control-plane/owner-act.ts';
+import { buildRaiseMetadata } from '../platform/src/platform/control-plane/routes/approvals-raise.ts';
 
 /** Far longer than the file may run, so no timer of the first broker fires during it. */
 const WINDOW_MS = 10 * 60_000;
@@ -113,7 +114,9 @@ test('a deadline that passed while the daemon was down is denied at start-up; an
 test('a deadline still ahead is kept and fires after the restart', async () => {
   const first = new ApprovalBroker({ storePath });
   await first.start();
-  await raise(first, 'ahead', { timeoutMs: WINDOW_MS });
+  // Raised over the wire, as approvals.raise does: its caller lives in another process and outlives
+  // the restart. An ask the daemon raised for itself is cancelled by a restart, its waiter being gone.
+  await raise(first, 'ahead', { timeoutMs: WINDOW_MS, metadata: buildRaiseMetadata({ context: { principalId: 'owner' } }, {}) });
 
   moveClock(WINDOW_MS - 1);
   const second = await restart();

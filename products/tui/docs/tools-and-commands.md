@@ -728,7 +728,7 @@ Manage installed plugins via `/plugin enable|disable|reload|list`. `/plugin relo
 
 Beyond direct local plugins, a local-first curated distribution channel covers plugins, skills, hook-packs, and policy-packs:
 
-- curated ecosystem catalogs with publish-local, unpublish, catalog review, install, update, uninstall, and installed-receipt flows
+- curated ecosystem catalogs with bundle import and export, overview, review, install, update, rollback, uninstall, and installed-receipt flows
 - local-first curated plugin distribution via `.goodvibes/ecosystem/*.json` (global under `~/.goodvibes/ecosystem/`, project-local under `.goodvibes/ecosystem/` in the workspace), shared across GoodVibes surfaces rather than scoped to the TUI
 - recommendations tied to installed state, denials, and missing capabilities
 - `/marketplace` browses the curated plugin, skill, hook-pack, and policy-pack surfaces

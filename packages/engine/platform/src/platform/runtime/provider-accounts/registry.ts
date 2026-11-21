@@ -346,8 +346,8 @@ export async function buildProviderAccountSnapshot(
       } else if (preferredRoute === 'subscription') {
         authFreshness = subscriptionFreshness;
         activeRouteReason = subscriptionEnded
-          ? `The provider ended the stored subscription session; sign in again with /subscription login ${providerId} start.`
-          : `The stored subscription session ended or expired; sign in again with /subscription login ${providerId} start.`;
+          ? `The provider ended the stored subscription session; sign in again with /provider sign-in ${providerId} (from a shell: goodvibes subscription login ${providerId} start).`
+          : `The stored subscription session ended or expired; sign in again with /provider sign-in ${providerId} (from a shell: goodvibes subscription login ${providerId} start).`;
       } else if (preferredRoute === 'service-oauth') {
         activeRouteReason = 'Service OAuth is configured, but its credential is missing; no usable auth route remains.';
       }

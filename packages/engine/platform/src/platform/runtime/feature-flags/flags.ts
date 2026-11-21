@@ -452,8 +452,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'In auto mode, selects the best capable provider for each request profile '
       + 'using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned '
       + 'routing modes with deterministic, fully-explainable route decisions. '
-      + 'Exposes /provider route, /provider explain-route, /provider pin, and '
-      + '/provider fallback test commands.',
+      + 'Exposes /provider route, /provider explain, /provider pin-route and '
+      + '/provider fallback.',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'provider.optimizerMode', kind: 'enum', enabledValues: ['manual', 'auto', 'pinned'] },

@@ -76,6 +76,7 @@ import { composeJudgment } from './judgment-services.js';
 import { createDomainDispatch } from './store/index.js';
 import { DistributedRuntimeManager } from './remote/distributed-runtime-manager.js';
 import { createRemoteBackendHost } from './remote/host/backend-host.js';
+import { AZURE_CREDENTIAL_SHAPE } from './remote/host/peer-registry.js';
 import { IntegrationHelperService } from './integration/helpers.js';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '../voice/index.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
@@ -105,7 +106,7 @@ import {
 import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
 import { repositoryFileGate, WorkspaceTrustManager } from './workspace-trust.js';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS } from './workspace-trust-approval.js';
-import { FeatureAnnouncementStore, featureAnnouncementsPath } from './feature-announcements.js';
+import { FeatureAnnouncementStore, announceStoredSkips, featureAnnouncementsPath } from './feature-announcements.js';
 import { DeterministicReplayEngine } from '../core/deterministic-replay.js';
 import { buildPricingSeams } from './cost/pricing-seams.js';
 import { SessionMemoryStore } from '../core/session-memory.js';
@@ -921,6 +922,26 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     announcementStore.record(`memory-config-fallback:${memoryConfigFallback}`, `Memory limits: ${memoryConfigFallback}`);
   } else {
     announcementStore.forgetMatching((id) => id.startsWith('memory-config-fallback:'));
+  }
+  // A custom provider file the first load left out is said once per file and
+  // reason; one since fixed is withdrawn, so breaking it again is said again.
+  void providerRegistry.ready().then(() => announceStoredSkips(announcementStore, 'custom-provider-skipped',
+    providerRegistry.customProviderSkips().map((skip) => ({
+      key: `${skip.file}:${skip.reason}`,
+      text: `Custom provider ${skip.file} was not loaded: ${skip.reason}. The file is left as it is, and every other provider loads.`,
+    }))));
+  // Each hooks-file entry a load leaves out is said once the same way (a hooks file is loaded after this graph is built).
+  hookDispatcher.setLoadRefusalSink((filePath, refusals) => announceStoredSkips(announcementStore, `hook-not-loaded:${filePath}`, refusals));
+  scope.registry.add('hook load notices', () => hookDispatcher.setLoadRefusalSink(null));
+  // An azure remote backend whose stored credential is not a service principal
+  // refuses every command; the daemon says so once per backend. Reads the
+  // backend registry and resolves those credentials only when one is registered.
+  if (product.surface === 'daemon') {
+    void remoteBackends.azureCredentialProblems().then((problems) => announceStoredSkips(announcementStore, 'azure-backend-credential',
+      problems.map(({ peerId, credentialRef }) => ({
+        key: `${peerId}:${credentialRef}`,
+        text: `Remote backend ${peerId} (azure) refuses every command: the credential stored under ${credentialRef} is not a service principal; ${AZURE_CREDENTIAL_SHAPE}. Store it in that shape under the same reference; the backend stays registered, and every other backend runs as before.`,
+      }))), (error: unknown) => { logger.warn('Remote backends: the azure credentials could not be checked at start', { error: summarizeError(error) }); });
   }
   admitExpensiveWorkRef.current = (label) => memoryGovernor.admitExpensiveWork(label);
   // Managed local-voice provisioning (single-flight install, no-network status).

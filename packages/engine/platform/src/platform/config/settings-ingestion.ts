@@ -185,7 +185,8 @@ const ASK_ME: ClosedPosture['writes'][number] = ['permissions.mode', 'ask-me'];
  * stored value could have; undefined for any other key (it is skipped).
  */
 export function closedPostureOf(key: string): ClosedPosture | undefined {
-  if (key.startsWith('permissions.tools.')) return { writes: [[key, 'prompt']], means: `every ${key.slice('permissions.tools.'.length)} call asks you` };
+  // `deny`, the strictest value: `prompt` is a shipped default, and in jev-decides a prompted call goes to the decision model.
+  if (key.startsWith('permissions.tools.')) return { writes: [[key, 'deny']], means: `every ${key.slice('permissions.tools.'.length)} call is refused` };
   if (key.startsWith('runtime.toolBudget.')) {
     const limit: Record<string, number> = { 'runtime.toolBudget.maxMs': 1, 'runtime.toolBudget.maxTokens': 1, 'runtime.toolBudget.maxCostUsd': 0.01 };
     const tightest = limit[key];

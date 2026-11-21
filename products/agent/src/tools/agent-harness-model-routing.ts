@@ -60,7 +60,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Provider used for embedding-backed Agent features.',
       currentValue: readConfig(context, 'provider.embeddingProvider') ?? null,
       settingKeys: ['provider.embeddingProvider'],
-      commands: ['/settings provider.embeddingProvider'],
+      commands: ['/settings open provider.embeddingProvider'],
       uiSurfaces: ['settings'],
     },
     {
@@ -70,7 +70,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Agent-owned system prompt file route for the serial conversation.',
       currentValue: readConfig(context, 'provider.systemPromptFile') || null,
       settingKeys: ['provider.systemPromptFile'],
-      commands: ['/settings provider.systemPromptFile'],
+      commands: ['/settings open provider.systemPromptFile'],
       uiSurfaces: ['settings'],
     },
     {
@@ -84,7 +84,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
         model: readConfig(context, 'helper.globalModel') ?? null,
       },
       settingKeys: ['helper.enabled', 'helper.globalProvider', 'helper.globalModel'],
-      commands: ['/settings helper.enabled', '/settings helper.globalProvider', '/settings helper.globalModel'],
+      commands: ['/settings open helper.enabled', '/settings open helper.globalProvider', '/settings open helper.globalModel'],
       uiSurfaces: ['settings'],
     },
     {
@@ -98,7 +98,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
         model: readConfig(context, 'tools.llmModel') ?? null,
       },
       settingKeys: ['tools.llmEnabled', 'tools.llmProvider', 'tools.llmModel'],
-      commands: ['/settings tools.llmEnabled', '/settings tools.llmProvider', '/settings tools.llmModel'],
+      commands: ['/settings open tools.llmEnabled', '/settings open tools.llmProvider', '/settings open tools.llmModel'],
       uiSurfaces: ['settings'],
     },
     {
@@ -132,7 +132,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Local model favorites used by the model picker.',
       currentValue: 'see model entries where pinned is true',
       settingKeys: [],
-      commands: ['/pin', '/pin remove'],
+      commands: ['/pin', '/pin remove <model>'],
       uiSurfaces: ['model-picker'],
     },
     {

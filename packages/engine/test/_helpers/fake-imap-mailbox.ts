@@ -232,7 +232,8 @@ export async function makeFakeMailbox(
 
     if (/^CAPABILITY\b/i.test(rest)) {
       if (idleMode === 'silent-unanswered') return;
-      serverWrite(socket, idleMode === 'silent-then-idle'
+      // A server that advertised IDLE in its greeting also lists it when asked after login.
+      serverWrite(socket, idleMode === 'silent-then-idle' || idleMode === 'advertised'
         ? '* CAPABILITY IMAP4rev1 IDLE'
         : '* CAPABILITY IMAP4rev1');
       serverWrite(socket, `${tag} OK CAPABILITY completed`);

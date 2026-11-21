@@ -156,7 +156,7 @@ function ownerPendingText(result: object): string {
   const answer = result as { readonly approvalId?: unknown; readonly state?: unknown };
   const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
   const state = typeof answer.state === 'string' ? answer.state : 'nothing was changed yet; this loosens the permission mode, which only the owner does';
-  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app (/approvals).`;
+  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app (/approval waiting).`;
 }
 
 function renderProfileBinding(binding: ChannelProfileBinding): string {
@@ -406,7 +406,7 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
           ...(bound?.metadata ? { metadata: bound.metadata } : {}),
         });
         // A looser mode from a credential that is not the owner's is put to the owner (202 OWNER_APPROVAL_PENDING).
-        if (!('binding' in result) || !result.binding) return ownerPendingText(result);
+        if ('approvalId' in result) return ownerPendingText(result);
         return `Set.\n${renderProfileBinding(result.binding)}`;
       },
     },

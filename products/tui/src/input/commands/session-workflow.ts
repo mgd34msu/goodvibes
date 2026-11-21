@@ -71,7 +71,7 @@ function flattenMessageContent(content: unknown): string {
 }
 
 /**
- * `/session export` writes the transcript to a file (redacted like every
+ * `/session save-saved` writes the transcript to a file (redacted like every
  * export), and prints it only with `--print`; the printed copy is display-only
  * and never becomes part of this conversation.
  */
@@ -83,7 +83,7 @@ async function exportSessionTranscript(
   format: TranscriptFormat,
   output: { readonly printOnly: boolean; readonly path: string | undefined },
 ): Promise<void> {
-  // The same renderer `/export` uses, so both commands give one transcript of a session.
+  // The same renderer `/session save-file` uses, so both commands give one transcript of a session.
   const formatted = formatTranscript(messages, format, {
     markdown: (all) => all.map(exportMessageFromRecord),
     text: (message) => flattenMessageContent(message.content),

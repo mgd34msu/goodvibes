@@ -1771,7 +1771,7 @@ Report peer liveness, capability, command, version, and client-mode metadata.
 
 ### `work.complete`
 
-Complete, fail, or cancel a claimed work item. Answers 404 for work that is unknown or not claimed by this peer; a report on work already settled in another state answers 409 REMOTE_WORK_SETTLED with the stored work, records nothing, and must not be sent again.
+Complete, fail, or cancel a claimed work item. Without status, the work is recorded as failed when error is set and as completed otherwise; send status: failed or cancelled for work that did not finish. Answers 404 for work that is unknown or not claimed by this peer; a report on work already settled in another state answers 409 REMOTE_WORK_SETTLED with the stored work, records nothing, and must not be sent again.
 
 - HTTP: `POST /api/remote/work/{workId}/complete`
 - Auth: `bearer-peer-token`
@@ -1788,6 +1788,7 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
     },
     "status": {
       "type": "string",
+      "description": "Without status, the work is recorded as failed when error is set and as completed otherwise; send status: failed or cancelled for work that did not finish.",
       "enum": [
         "completed",
         "failed",

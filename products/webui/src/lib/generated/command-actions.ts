@@ -6833,11 +6833,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Turn the Cloudflare integration off",
           "word": "disable",
           "line": "/cloudflare disable [--account <account>] [--token <api token>] [--token-env <token variable>] [--token-ref <token reference>] [--worker-name <worker name>] [--bootstrap-token <bootstrap token>] [--bootstrap-env <bootstrap variable>] [--keep-cron] [--keep-worker-subdomain]",
-          "sentence": "The integration is turned off here and its worker schedule and workers.dev address are turned off at Cloudflare, until you change it; nothing is deleted at Cloudflare.",
+          "sentence": "The integration is turned off here, its worker schedule and workers.dev address are turned off at Cloudflare and the worker's daemon credential is removed, until you change it; with a bootstrap token the operational token this daemon made is revoked, which cannot be undone.",
           "done": "",
           "touches": "another-machine",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
           "ownerOnly": {
             "reason": "it acts on the owner's Cloudflare account and can revoke its token",
             "instead": "Ask the owner to run /cloudflare disable."
@@ -6924,7 +6925,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "bootstrap",
               "label": "Bootstrap token",
-              "help": "A short-lived token allowed to create API tokens; hidden as you type",
+              "help": "A short-lived token allowed to edit API tokens; given, it revokes the operational token this daemon made; hidden as you type",
               "kind": "secret",
               "required": {
                 "default": "",
@@ -12927,7 +12928,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "hook",
               "label": "Hook",
-              "help": "The managed hooks and chains",
+              "help": "The managed hooks",
               "kind": "choice",
               "choices": {
                 "list": "hooks.managed"
@@ -12957,7 +12958,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "hook",
               "label": "Hook",
-              "help": "The managed hooks and chains",
+              "help": "The managed hooks",
               "kind": "choice",
               "choices": {
                 "list": "hooks.managed"
@@ -12990,7 +12991,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "help": "The managed hooks and chains",
               "kind": "choice",
               "choices": {
-                "list": "hooks.managed"
+                "list": "hooks.managed-entries"
               },
               "required": true,
               "typed": {
@@ -19487,7 +19488,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "choices": {
                 "list": "memory.copies",
                 "allowOther": {
-                  "reason": "latest, or a date such as 2026-11-19"
+                  "reason": "latest (the newest copy not taken by a restore), or a date such as 2026-11-19"
                 }
               },
               "required": true,
@@ -20239,7 +20240,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Delete a skill",
           "word": "delete",
           "line": "/my-skills delete <skill>",
-          "sentence": "{skill} is removed from the Agent-local registry.",
+          "sentence": "{skill} is removed from the Agent-local registry and from every bundle; a bundle left empty is removed, and one that keeps other skills waits for review again.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -24903,7 +24904,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "save-sign-ins",
           "label": "Save your sign-ins to a file",
           "word": "export",
-          "line": "/provider export <file>",
+          "line": "/provider export <file> [--replace]",
           "sentence": "Your subscription sign-ins, with their tokens, are written to {path} and stay there until you change it: anyone who reads the file can use them, so delete it once it has been used.",
           "done": "",
           "touches": "this-machine",
@@ -24927,6 +24928,31 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "required": true,
               "typed": {
                 "position": 1
+              }
+            },
+            {
+              "id": "replace",
+              "label": "If the file exists",
+              "help": "Keep it, or write over it",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "no",
+                  "label": "Keep it and stop"
+                },
+                {
+                  "value": "yes",
+                  "label": "Write over it",
+                  "risk": "cannot-be-undone"
+                }
+              ],
+              "required": {
+                "default": "no",
+                "defaultMeans": "keep it and stop"
+              },
+              "typed": {
+                "flag": "--replace",
+                "switchOn": "yes"
               }
             }
           ]
@@ -25201,7 +25227,10 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "help": "The messages waiting, in order",
               "kind": "choice",
               "choices": {
-                "list": "queue.messages"
+                "list": "queue.messages",
+                "allowOther": {
+                  "reason": "its number in /queue list"
+                }
               },
               "required": true,
               "typed": {
@@ -25242,7 +25271,10 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "help": "The messages waiting, in order",
               "kind": "choice",
               "choices": {
-                "list": "queue.messages"
+                "list": "queue.messages",
+                "allowOther": {
+                  "reason": "its number in /queue list"
+                }
               },
               "required": true,
               "typed": {
@@ -26193,11 +26225,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Bring in an artifact from a file",
           "word": "import",
           "line": "/remote import <file>",
-          "sentence": "The artifact in {path} is added for review, until you change it; a file that would replace a known runner's tools is refused.",
+          "sentence": "The artifact in {path} is added for review, replacing a different artifact held here with the same id; a file that would replace a known runner's tools is refused.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
           "operator": {
             "terminalOnly": "The file is read from this project."
           },
@@ -30604,7 +30637,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "save-sandbox",
           "label": "Save a sandbox session's record to a file",
           "word": "save-sandbox",
-          "line": "/security save-sandbox <sandbox session> <file>",
+          "line": "/security save-sandbox <sandbox session> <file> [--replace]",
           "sentence": "The record of sandbox session {session} will be written to {path}, until you change it.",
           "done": "",
           "touches": "this-machine",
@@ -30639,6 +30672,31 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "required": true,
               "typed": {
                 "position": 2
+              }
+            },
+            {
+              "id": "replace",
+              "label": "If the file exists",
+              "help": "Keep it, or write over it",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "no",
+                  "label": "Keep it and stop"
+                },
+                {
+                  "value": "yes",
+                  "label": "Write over it",
+                  "risk": "cannot-be-undone"
+                }
+              ],
+              "required": {
+                "default": "no",
+                "defaultMeans": "keep it and stop"
+              },
+              "typed": {
+                "flag": "--replace",
+                "switchOn": "yes"
               }
             }
           ]
@@ -30879,7 +30937,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "save",
           "label": "Save your services list to a file",
           "word": "export",
-          "line": "/services export <file>",
+          "line": "/services export <file> [--replace]",
           "sentence": "Your services list (names, addresses and the names of their keys, never the keys) is written to {path}.",
           "done": "",
           "touches": "this-machine",
@@ -30899,6 +30957,31 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "typed": {
                 "position": 1
               }
+            },
+            {
+              "id": "replace",
+              "label": "If the file exists",
+              "help": "Keep it, or write over it",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "no",
+                  "label": "Keep it and stop"
+                },
+                {
+                  "value": "yes",
+                  "label": "Write over it",
+                  "risk": "cannot-be-undone"
+                }
+              ],
+              "required": {
+                "default": "no",
+                "defaultMeans": "keep it and stop"
+              },
+              "typed": {
+                "flag": "--replace",
+                "switchOn": "yes"
+              }
             }
           ]
         },
@@ -30907,11 +30990,16 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Replace your services list from a file",
           "word": "import",
           "line": "/services import <file>",
-          "sentence": "Your services list is replaced by the one in {path}, until you change it; the old one is kept beside it as a .bak file.",
+          "sentence": "Your services list is replaced by the one in {path}, until you change it; the old one is kept beside it as a .bak file; each service names which stored key it sends and to which host, so this loosens a protection and you are asked first with every new or changed one.",
           "done": "",
-          "touches": "this-machine",
+          "touches": "credential",
           "lasts": "kept",
-          "risk": "none",
+          "risk": "loosens-a-protection",
+          "riskWords": "loosens a protection",
+          "ownerOnly": {
+            "reason": "the list names which of your stored keys each service sends and to which host",
+            "instead": "Ask the owner to run /services import <file>."
+          },
           "operator": {
             "terminalOnly": "Services are read from the services files of the terminal app on this machine."
           },
@@ -35834,12 +35922,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "owner",
               "label": "For whom",
-              "help": "Who the item is for",
+              "help": "Who the item is for; - clears it",
               "kind": "text",
               "freeTextReason": "a name you choose",
               "required": {
                 "default": "",
-                "defaultMeans": "stays as it is"
+                "defaultMeans": "stays as it is; - clears it"
               },
               "typed": {
                 "flag": "--owner"
@@ -35848,12 +35936,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "notes",
               "label": "Notes",
-              "help": "Anything to remember about it",
+              "help": "Anything to remember about it; - clears them",
               "kind": "long-text",
               "freeTextReason": "your own words",
               "required": {
                 "default": "",
-                "defaultMeans": "stay as they are"
+                "defaultMeans": "stay as they are; - clears them"
               },
               "typed": {
                 "flag": "--notes"
@@ -35862,12 +35950,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "source",
               "label": "Where it came from",
-              "help": "A short label for where the item came from",
+              "help": "A short label for where the item came from; - clears it",
               "kind": "text",
               "freeTextReason": "a label you choose",
               "required": {
                 "default": "",
-                "defaultMeans": "stays as it is"
+                "defaultMeans": "stays as it is; - clears it"
               },
               "typed": {
                 "flag": "--source"
@@ -39491,6 +39579,9 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
     "hooks.managed": {
       "terminalOnly": "Managed hooks are kept in this machine's hooks file."
     },
+    "hooks.managed-entries": {
+      "terminalOnly": "Managed hooks are kept in this machine's hooks file."
+    },
     "hosted.running-tools": {
       "terminalOnly": "The running tools are those of the session this terminal joined."
     },
@@ -39977,18 +40068,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       }
     },
     "tasks.ended": {
-      "method": "tasks.list",
-      "input": {},
-      "rows": {
-        "from": "tasks",
-        "where": {
-          "field": "status",
-          "equals": "failed"
-        },
-        "value": "id",
-        "label": "title",
-        "state": "status"
-      }
+      "terminalOnly": "A task this terminal runs is retried from it."
     },
     "tasks.open": {
       "terminalOnly": "A task that is not finished is changed from the terminal app that runs it."

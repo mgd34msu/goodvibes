@@ -398,12 +398,12 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     if (!('kind' in hostedTurn) && hostedTurn.state === 'failed' && hostedTurn.failure?.retryable === true)
                         return { status: 'recorded', message: `Your previous message failed on the host before changing anything${hostedTurn.failure?.summary ? ` (${hostedTurn.failure.summary})` : ''}. Send it again with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: 'retry', notSent: true };
                     if ('kind' in hostedTurn || !hostedTurnEnded(hostedTurn))
-                        return { status: 'recorded', message: 'Your previous message is still running on the host. Check it with /work intake-status, or stop it with /work intake-cancel. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
+                        return { status: 'recorded', message: 'Your previous message is still running on the host. Check it with /work intake, or stop it with /work intake-cancel. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
                     if (options?.delivery === 'hosted' && nextContinuation === undefined && hostedTurn.sessionId)
                         nextContinuation = hostedTurn.sessionId;
                 }
                 else if (options?.delivery === 'hosted')
-                    return { status: 'unknown', message: 'Your previous message ran in this process and its end was never confirmed, so the host cannot take the next one. Check it with /work intake-status. This new message was not sent.', request: request(), result, nextStep: 'inspect', notSent: true };
+                    return { status: 'unknown', message: 'Your previous message ran in this process and its end was never confirmed, so the host cannot take the next one. Check it with /work intake. This new message was not sent.', request: request(), result, nextStep: 'inspect', notSent: true };
             }
             if (mode === 'submit' && command && result?.kind === 'work') {
                 const intent = nativeConversationExecutionIntent(result.receipt);
@@ -668,7 +668,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     ? 'The connected host could not be reached, so nothing was sent to it.'
                     : !command
                     ? `The connected host's answer could not be used (${cause}), so nothing was sent to it.`
-                    : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.',
+                    : 'Native intake outcome is unknown or unavailable. Inspect /work intake before retrying the same input; an interrupted request may already have taken effect.',
                 ...(command ? { nextStep: 'inspect' as const } : {}) };
         }
         finally {
@@ -691,7 +691,7 @@ function unresolvedMessage(next: NativeIntakeNextStep): string {
         case 'retry': return 'Your previous message was saved but its admission never finished. Send it with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.';
         case 'resume': return 'Your previous message was interrupted while the host was admitting it. Continue it with /work intake-resume, or drop it with /work intake-cancel. This new message was not sent.';
         case 'cancel': return 'Your previous message cannot continue. Drop it with /work intake-cancel. This new message was not sent.';
-        case 'inspect': return 'Your previous message has not settled. Check it with /work intake-status, or drop it with /work intake-cancel. This new message was not sent.';
+        case 'inspect': return 'Your previous message has not settled. Check it with /work intake, or drop it with /work intake-cancel. This new message was not sent.';
     }
 }
 /**
@@ -710,7 +710,7 @@ export function nativeConversationIntakeAccepted(state: NativeConversationIntake
 function describeResult(result: NativeConversationIntakeResult, turnReady: boolean, dispatched: boolean): string {
     switch (result.kind) {
         case 'captured': return 'Original text is durably captured. Use /work intake-retry to request admission.';
-        case 'processing': return `Native intake is ${result.stage}. Use /work intake-status to inspect or intake-resume for explicit recovery.`;
+        case 'processing': return `Native intake is ${result.stage}. Use /work intake to inspect or /work intake-resume for explicit recovery.`;
         case 'turn': return turnReady ? result.sourceRef.classic ? 'Owner-authorized conversation without a decision model recorded; original turn dispatch claimed without a decision-model receipt.' : `Native ${result.route} decision recorded; original turn dispatch claimed.` : dispatched ? 'Recovery required: this original turn already has a durable dispatch claim and may have run. Inspect the conversation before submitting a new input; it will not be automatically replayed.' : result.sourceRef.classic ? 'Conversation without a decision model is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.' : 'Native conversational decision is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.';
         case 'blocked': return `Native intake blocked: ${result.reason}. This input is unchanged; submit a new complete input to proceed.`;
         case 'refused': return `Native intake refused: ${result.reason}. This input cannot be retried into new work.`;

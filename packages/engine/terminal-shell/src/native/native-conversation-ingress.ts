@@ -83,7 +83,7 @@ export async function routeNativeConversationInput(deps: {
     const failed = {
       status: 'unknown' as const,
       cause: nativeIntakeFailureCause(error),
-      message: deps.preparationFailureMessage ?? 'Prompt preparation failed. Use /work intake-status to inspect the original input.',
+      message: deps.preparationFailureMessage ?? 'Prompt preparation failed. Use /work intake to inspect the original input.',
     };
     deps.notify(failed.message);
     return failed;

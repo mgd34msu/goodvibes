@@ -15859,6 +15859,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "delivered",
+                "partly-delivered",
                 "not-delivered",
                 "inbox",
                 "failed"
@@ -16872,6 +16873,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "delivered",
+                      "partly-delivered",
                       "not-delivered",
                       "inbox",
                       "failed"
@@ -17671,6 +17673,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "delivered",
+                      "partly-delivered",
                       "not-delivered",
                       "inbox",
                       "failed"
@@ -19059,6 +19062,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "delivered",
+                "partly-delivered",
                 "not-delivered",
                 "inbox",
                 "failed"
@@ -25341,6 +25345,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "delivered",
+                "partly-delivered",
                 "not-delivered",
                 "inbox",
                 "failed"
@@ -26228,6 +26233,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "delivered",
+                      "partly-delivered",
                       "not-delivered",
                       "inbox",
                       "failed"
@@ -29144,7 +29150,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": true
         },
         "dangerous": true,
-        "effect": "write",
+        "effect": "outward",
         "invokable": true,
         "replay": {
           "in": "header",
@@ -29880,7 +29886,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "browser.sessions.launch",
         "title": "Launch Browser Session",
-        "description": "Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.",
+        "description": "Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists. One launched browser is open at a time: a launch with no different profile or headless value returns the open one, and a different profile or headless value needs the open one closed first.",
         "category": "browser",
         "source": "builtin",
         "access": "authenticated",
@@ -31290,7 +31296,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.events.get",
         "title": "Get Calendar Event",
-        "description": "Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.",
+        "description": "Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series. On Google Calendar an event deleted from the calendar is still returned by its id, with cancelled: true; it is not on the calendar.",
         "category": "calendar",
         "source": "builtin",
         "access": "authenticated",
@@ -31358,6 +31364,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "revision": {
               "type": "string"
+            },
+            "cancelled": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -36787,7 +36796,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.profiles.delete",
         "title": "Unbind Channel Profile",
-        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.",
+        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -36818,23 +36827,85 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "surfaceKind": {
-              "type": "string"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "surfaceKind": {
+                  "type": "string"
+                },
+                "channelId": {
+                  "type": "string"
+                },
+                "deleted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "surfaceKind",
+                "deleted"
+              ],
+              "additionalProperties": false
             },
-            "channelId": {
-              "type": "string"
-            },
-            "deleted": {
-              "type": "boolean"
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "followable": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "surfaceKind",
-            "deleted"
-          ],
-          "additionalProperties": false
+          ]
         },
         "dangerous": true,
         "effect": "write",
@@ -37201,7 +37272,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.profiles.set",
         "title": "Bind Channel Profile",
-        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.",
+        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -37275,123 +37346,185 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "outputSchema": {
-          "type": "object",
-          "properties": {
-            "binding": {
+          "anyOf": [
+            {
               "type": "object",
               "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "surfaceKind": {
-                  "type": "string"
-                },
-                "channelId": {
-                  "type": "string"
-                },
-                "model": {
-                  "type": "string"
-                },
-                "provider": {
-                  "type": "string"
-                },
-                "permissionMode": {
-                  "type": "string",
-                  "enum": [
-                    "ask-me",
-                    "jev-decides",
-                    "just-vibes",
-                    "yolo",
-                    "plan"
-                  ]
-                },
-                "updatedAt": {
-                  "type": "number"
-                },
-                "metadata": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      },
-                      {
-                        "type": "object",
-                        "additionalProperties": {}
-                      },
-                      {
-                        "type": "array",
-                        "items": {}
-                      }
-                    ]
-                  }
-                },
-                "invalid": {
+                "binding": {
                   "type": "object",
                   "properties": {
-                    "field": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "surfaceKind": {
+                      "type": "string"
+                    },
+                    "channelId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "permissionMode": {
                       "type": "string",
                       "enum": [
-                        "permissionMode"
+                        "ask-me",
+                        "jev-decides",
+                        "just-vibes",
+                        "yolo",
+                        "plan"
                       ]
                     },
-                    "value": {
-                      "anyOf": [
-                        {
+                    "updatedAt": {
+                      "type": "number"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          }
+                        ]
+                      }
+                    },
+                    "invalid": {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "enum": [
+                            "permissionMode"
+                          ]
+                        },
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            }
+                          ]
+                        },
+                        "reason": {
                           "type": "string"
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "array",
-                          "items": {}
                         }
-                      ]
-                    },
-                    "reason": {
-                      "type": "string"
+                      },
+                      "required": [
+                        "field",
+                        "value",
+                        "reason"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
-                    "field",
-                    "value",
-                    "reason"
+                    "id",
+                    "surfaceKind",
+                    "updatedAt"
                   ],
                   "additionalProperties": false
                 }
               },
               "required": [
-                "id",
-                "surfaceKind",
-                "updatedAt"
+                "binding"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "code": {
+                  "type": "string",
+                  "const": "OWNER_APPROVAL_PENDING"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "followable": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "requestedMode": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "approvalId",
+                "state"
+              ],
+              "additionalProperties": true
             }
-          },
-          "required": [
-            "binding"
-          ],
-          "additionalProperties": false
+          ]
         },
         "effect": "write",
         "invokable": true,
@@ -38146,7 +38279,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.targets.resolve",
         "title": "Resolve Channel Target",
-        "description": "Resolve a typed channel target for outbound delivery or routing.",
+        "description": "Resolve a typed channel target for outbound delivery or routing. A plain name resolves only when it names exactly one conversation; a name several conversations share (a person and a channel both called ops) returns the unresolved fallback target with metadata.ambiguous listing each candidate's id, kind and label, so the caller passes #name, @name or a typed id.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -54162,6 +54295,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           true
                         ]
                       },
+                      "recheckPending": {
+                        "type": "object",
+                        "properties": {
+                          "summary": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "summary"
+                        ],
+                        "additionalProperties": false
+                      },
                       "resolvedAt": {
                         "type": "number"
                       },
@@ -54610,6 +54755,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "number"
                 },
                 "completedAt": {
+                  "type": "number"
+                },
+                "statusChangedAt": {
                   "type": "number"
                 }
               },
@@ -62286,6 +62434,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       true
                     ]
                   },
+                  "recheckPending": {
+                    "type": "object",
+                    "properties": {
+                      "summary": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "summary"
+                    ],
+                    "additionalProperties": false
+                  },
                   "resolvedAt": {
                     "type": "number"
                   },
@@ -62734,6 +62894,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "number"
             },
             "completedAt": {
+              "type": "number"
+            },
+            "statusChangedAt": {
               "type": "number"
             }
           },
@@ -70390,6 +70553,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             true
                           ]
                         },
+                        "recheckPending": {
+                          "type": "object",
+                          "properties": {
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
                         "resolvedAt": {
                           "type": "number"
                         },
@@ -70838,6 +71013,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "number"
                   },
                   "completedAt": {
+                    "type": "number"
+                  },
+                  "statusChangedAt": {
                     "type": "number"
                   }
                 },
@@ -78777,6 +78955,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           true
                         ]
                       },
+                      "recheckPending": {
+                        "type": "object",
+                        "properties": {
+                          "summary": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "summary"
+                        ],
+                        "additionalProperties": false
+                      },
                       "resolvedAt": {
                         "type": "number"
                       },
@@ -79225,6 +79415,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "number"
                 },
                 "completedAt": {
+                  "type": "number"
+                },
+                "statusChangedAt": {
                   "type": "number"
                 }
               },
@@ -82682,7 +82875,24 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
-        "idempotent": true
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "RELAY_CODE_NOT_FOUND",
+            "status": 404,
+            "meaning": "No relay code has that id; list the codes with relay.codes.list and revoke an id it shows."
+          },
+          {
+            "code": "RELAY_CODE_REVOKE_FAILED",
+            "status": 503,
+            "meaning": "The revocation could not be written to the authority record, so nothing was revoked and the device keeps relay access; try again."
+          },
+          {
+            "code": "RELAY_CODE_REVOKE_NOT_SAVED",
+            "status": 500,
+            "meaning": "The code is revoked and refused, and its connections were closed, but it could not be removed from the relay codes file; revoke the same id again to retry the removal."
+          }
+        ]
       },
       {
         "id": "relay.pairing.mint",
@@ -82776,7 +82986,19 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "modelRefused": true,
         "invokable": true,
-        "repeat": "unsafe"
+        "repeat": "unsafe",
+        "errorCodes": [
+          {
+            "code": "RELAY_CODE_LIMIT",
+            "status": 409,
+            "meaning": "The daemon already holds 64 relay codes, so no new device can pair; revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again."
+          },
+          {
+            "code": "AUTHORITY_RECORD_UNAVAILABLE",
+            "status": 503,
+            "meaning": "The authority record could not be read, so no relay code was issued and nothing was paired; check the record file, then pair again."
+          }
+        ]
       },
       {
         "id": "relay.reachability.get",
@@ -84058,7 +84280,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "email.attachment.get",
         "title": "Download an Email Attachment",
-        "description": "Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.",
+        "description": "Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. uidValidity is required: the mailbox generation email.inbox.read returned with the message, so a reset mailbox refuses with nothing downloaded instead of handing over an attachment of whichever message now holds that UID. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.",
         "category": "email",
         "source": "builtin",
         "access": "admin",
@@ -84076,11 +84298,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "index": {
               "type": "number"
+            },
+            "uidValidity": {
+              "type": "number"
             }
           },
           "required": [
             "uid",
-            "index"
+            "index",
+            "uidValidity"
           ],
           "additionalProperties": false
         },
@@ -84116,7 +84342,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "email.draft.create",
         "title": "Create Email Draft",
-        "description": "Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.",
+        "description": "Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save the mail server refused is reported as not saved, with the cause from its response code (mailbox full, Drafts folder missing, draft too large, or refused). A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.",
         "category": "email",
         "source": "builtin",
         "access": "admin",
@@ -84193,7 +84419,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "email.draft.update",
         "title": "Replace an Email Draft",
-        "description": "Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A draft is never sent by this verb. Answers the new draft's { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.",
+        "description": "Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A save whose answer was lost is reported as one that may have been saved; replacing the same draft with the same edit again in this daemon run looks for the edited copy first and does not save it twice. A draft is never sent by this verb. Answers the new draft's { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.",
         "category": "email",
         "source": "builtin",
         "access": "admin",
@@ -84627,7 +84853,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "email.expectation.wait",
         "title": "Wait For Verification Message",
-        "description": "Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state \"arrived\" carries the verification link or code the daemon took from the matching message (token); \"waiting\" lists matching messages that held none (arrivals); \"expired\", \"capability-lost\" and \"cancelled\" say how it ended, with detail; \"unknown\" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so \"nothing yet\" is never confused with \"nobody is looking\". Call it again while the state is \"waiting\".",
+        "description": "Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state \"arrived\" carries the verification link or code the daemon took from the matching message (token); \"waiting\" lists matching messages that held none (arrivals); \"expired\", \"capability-lost\" and \"cancelled\" say how it ended, with detail; \"replaced\" means a later email.expectation.open for the same address replaced it, and replacedBy is the id to wait on instead; \"unknown\" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so \"nothing yet\" is never confused with \"nobody is looking\". Call it again while the state is \"waiting\".",
         "category": "email",
         "source": "builtin",
         "access": "admin",
@@ -84663,10 +84889,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "expired",
                 "capability-lost",
                 "cancelled",
+                "replaced",
                 "unknown"
               ]
             },
             "id": {
+              "type": "string"
+            },
+            "replacedBy": {
               "type": "string"
             },
             "expectation": {
@@ -86034,6 +86264,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "string",
                         "enum": [
                           "delivered",
+                          "partly-delivered",
                           "not-delivered",
                           "inbox",
                           "failed"
@@ -87892,6 +88123,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "string",
                         "enum": [
                           "delivered",
+                          "partly-delivered",
                           "not-delivered",
                           "inbox",
                           "failed"
@@ -88591,6 +88823,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "string",
                         "enum": [
                           "delivered",
+                          "partly-delivered",
                           "not-delivered",
                           "inbox",
                           "failed"
@@ -131183,7 +131416,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "memory.records.update",
         "title": "Update Memory Record",
-        "description": "Edit a record's content fields (scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.",
+        "description": "Edit a record's content fields (class, scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store; a changed class refiles the record in place, keeping its id. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.",
         "category": "memory",
         "source": "builtin",
         "access": "admin",
@@ -131203,6 +131436,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "properties": {
             "id": {
               "type": "string"
+            },
+            "cls": {
+              "type": "string",
+              "enum": [
+                "decision",
+                "constraint",
+                "incident",
+                "pattern",
+                "fact",
+                "risk",
+                "runbook",
+                "architecture",
+                "ownership"
+              ]
             },
             "scope": {
               "type": "string",
@@ -131683,7 +131930,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "memory.snapshots.restore",
         "title": "Restore Memory From a Copy",
-        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
+        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest` for the newest copy not taken by a restore, or the start of one name such as a date). `latest` names the same copy before and after a restore, so repeating the call writes the same records again. The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
         "category": "memory",
         "source": "builtin",
         "access": "admin",
@@ -133948,6 +134195,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "string"
               }
+            },
+            "occasionId": {
+              "type": "string"
             }
           },
           "required": [
@@ -134300,6 +134550,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "string"
               }
+            },
+            "occasionId": {
+              "type": "string"
             }
           },
           "required": [
@@ -134320,7 +134573,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "occasions.remove",
         "title": "Remove An Important Date",
-        "description": "Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The line removed is the occasion's first; when other lines still declare the same occasion (stillDeclaredBy above 0) only that line goes and its records are kept, since the next line is now the occasion.",
+        "description": "Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The confirmed call names the line it removes in line (that removedLine, or the occasion's text from occasions.list), and only that line goes; when other lines still declare the same occasion (stillDeclaredBy above 0) its records are kept, since the next line is now the occasion. Repeating a confirmed call changes nothing: once the named line is gone it answers ok with nothing removed.",
         "category": "occasions",
         "source": "builtin",
         "access": "admin",
@@ -134343,6 +134596,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "confirmed": {
               "type": "boolean"
+            },
+            "line": {
+              "type": "string"
             },
             "authority": {
               "type": "string"
@@ -142224,7 +142480,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "push.subscriptions.delete",
         "title": "Delete Web Push Subscription",
-        "description": "Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.",
+        "description": "Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. The removal is in force on this machine at once; when the authority record cannot be written it waits in this machine's push file and reaches the other machines with the next write that succeeds. While the authority record exists but cannot be read, the delete is refused with its error and nothing changes. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.",
         "category": "push",
         "source": "builtin",
         "access": "authenticated",
@@ -142265,7 +142521,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "write",
         "invokable": true,
         "repeat": "safe",
-        "idempotent": true
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "SUBSCRIPTION_NOT_FOUND",
+            "status": 404,
+            "meaning": "No push subscription of this operator has that id; list them with push.subscriptions.list and use an id it shows."
+          }
+        ]
       },
       {
         "id": "push.subscriptions.list",
@@ -142533,7 +142796,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "behavior": "Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`."
         },
         "repeat": "keyed",
-        "idempotent": true
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "SUBSCRIPTION_NOT_FOUND",
+            "status": 404,
+            "meaning": "No push subscription of this operator has that id; list them with push.subscriptions.list and use an id it shows."
+          }
+        ]
       },
       {
         "id": "push.vapid.get",
@@ -142780,7 +143050,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "effect": "read",
         "invokable": true,
         "repeat": "safe",
-        "idempotent": true
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "STEP_UP_CHALLENGES_FULL",
+            "status": 429,
+            "meaning": "Too many step-up challenges are open; answer one or let it expire, then ask again."
+          }
+        ]
       },
       {
         "id": "stepup.credentials.list",
@@ -143154,7 +143431,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "remote.backends.register",
         "title": "Register Remote Backend",
-        "description": "Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with \"-\") and an id a paired peer holds are refused.",
+        "description": "Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; an azure cloud-terminal credential is a JSON object {\"clientId\", \"tenantId\", \"certificate\"} (service principal application id, tenant id, and a PEM holding its certificate and private key), and a stored one of another shape is refused. A value docker or a cloud CLI would read as an option (starting with \"-\") and an id a paired peer holds are refused.",
         "category": "remote",
         "source": "builtin",
         "access": "admin",
@@ -145294,7 +145571,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "remote.peers.list",
         "title": "List Remote Peers",
-        "description": "Return known remote peers.",
+        "description": "Return known remote peers: kind (node or device) keeps only that kind, and limit keeps the most recently seen that many; with no limit every peer is returned.",
         "category": "remote",
         "source": "builtin",
         "access": "authenticated",
@@ -145311,7 +145588,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "inputSchema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "node",
+                "device"
+              ]
+            },
+            "limit": {
+              "type": "number"
+            }
+          },
           "additionalProperties": false
         },
         "outputSchema": {
@@ -147719,7 +148007,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "modelRefused": true,
         "invokable": true,
         "repeat": "safe",
-        "idempotent": true
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "WEB_UI_NOT_SERVED",
+            "status": 409,
+            "meaning": "No web UI is served on this machine, so tailscale serve would front nothing and nothing ran; serve it first with goodvibes-daemon webui enable --bundle-dir <dir>."
+          }
+        ]
       },
       {
         "id": "tailscale.serve.stop",
@@ -147881,7 +148176,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.apply",
         "title": "Apply a Unified Rewind",
-        "description": "Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope, previewed checkpoint and the conversation as it was counted (its message count and last message). Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; an unknown or expired token is a 400; a token whose target changed since the plan (a message arrived, another checkpoint now resolves) is a 409 TARGET_CHANGED naming each change, and nothing is changed. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.",
+        "description": "Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope, previewed checkpoint and the conversation as it was counted (its message count and last message). Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; an unknown or expired token is a 400; a token whose target changed since the plan (a message arrived, another checkpoint now resolves) is a 409 TARGET_CHANGED naming each change, and nothing is changed. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). The conversation is cut only at the revision the apply was confirmed against: a message that arrives while the files are restored is not cut, and the conversation half is reported skipped in a warning (plan again with scope conversation) while the receipt keeps the files undo point. Scope conversation or both is admitted only for an owner of the session (or an owner or admin credential); another caller is refused 403 NOT_YOURS, naming sessions.hosted.share. Emits a REWIND_APPLIED receipt event.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -148388,7 +148683,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.conversation.requests.answer",
         "title": "Answer a Conversation Rewind Request",
-        "description": "Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back and its save was tried, with notSaved saying why when that save failed. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds. Only the surface a request was put to may answer it.",
+        "description": "Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back and its save was tried, with notSaved saying why when that save failed. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds; a rewind request carries it back as expectedRevision, and a conversation whose revision differs is not cut (answer unavailableReason saying it changed after the plan). Only the surface a request was put to may answer it.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -148485,6 +148780,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "undoSnapshotId": {
                   "type": "string"
                 },
+                "expectedRevision": {
+                  "type": "string"
+                },
                 "expiresAt": {
                   "type": "number"
                 }
@@ -148576,6 +148874,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "undoSnapshotId": {
                     "type": "string"
                   },
+                  "expectedRevision": {
+                    "type": "string"
+                  },
                   "expiresAt": {
                     "type": "number"
                   }
@@ -148632,7 +148933,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.plan",
         "title": "Preview a Unified Rewind",
-        "description": "Dry-run preview of a unified rewind to a session turn anchor: exactly what restoring files (the nearest workspace checkpoint), conversation (truncating session state to the anchor), or both would change, and a short-lived single-use confirm token authorizing the matching rewind.apply. Read-only, nothing is changed. A part with no store wired on this runtime is reported unavailable in a warning, never faked.",
+        "description": "Dry-run preview of a unified rewind to a session turn anchor: exactly what restoring files (the nearest workspace checkpoint), conversation (truncating session state to the anchor), or both would change, and a short-lived single-use confirm token authorizing the matching rewind.apply. Read-only, nothing is changed. A part with no store wired on this runtime is reported unavailable in a warning, never faked. Scope conversation or both is admitted only for an owner of the session (or an owner or admin credential), as steering it is; another caller is refused 403 NOT_YOURS, naming sessions.hosted.share. Scope files is workspace-wide, as checkpoints.restore is.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -148795,7 +149096,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.undo",
         "title": "Undo a Conversation Rewind",
-        "description": "Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, the snapshot is of another session than sessionId (TARGET_CHANGED, naming that session), or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.",
+        "description": "Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, the snapshot is of another session than sessionId (TARGET_CHANGED, naming that session), or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore. Admitted only for an owner of the session (or an owner or admin credential); another caller is refused 403 NOT_YOURS, naming sessions.hosted.share.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -155156,6 +155457,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "callId": {
                     "type": "string"
+                  },
+                  "correlationId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -155769,6 +156073,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     }
                   },
                   "callId": {
+                    "type": "string"
+                  },
+                  "correlationId": {
                     "type": "string"
                   }
                 },
@@ -162103,53 +162410,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "endedAt": {
                   "type": "number"
                 },
-                "retryPolicy": {
-                  "type": "object",
-                  "properties": {
-                    "maxAttempts": {
-                      "type": "number"
-                    },
-                    "currentAttempt": {
-                      "type": "number"
-                    },
-                    "delayMs": {
-                      "type": "number"
-                    },
-                    "backoff": {
-                      "type": "string",
-                      "enum": [
-                        "fixed",
-                        "exponential"
-                      ]
-                    },
-                    "retryOn": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": [
-                          "network",
-                          "timeout",
-                          "transient",
-                          "tool_error"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "maxAttempts",
-                    "currentAttempt",
-                    "delayMs",
-                    "backoff",
-                    "retryOn"
-                  ],
-                  "additionalProperties": false
-                },
-                "retryDelayMs": {
-                  "type": "number"
-                },
-                "retryAt": {
-                  "type": "number"
-                },
                 "exitCode": {
                   "type": "number"
                 },
@@ -162618,53 +162878,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "endedAt": {
                   "type": "number"
                 },
-                "retryPolicy": {
-                  "type": "object",
-                  "properties": {
-                    "maxAttempts": {
-                      "type": "number"
-                    },
-                    "currentAttempt": {
-                      "type": "number"
-                    },
-                    "delayMs": {
-                      "type": "number"
-                    },
-                    "backoff": {
-                      "type": "string",
-                      "enum": [
-                        "fixed",
-                        "exponential"
-                      ]
-                    },
-                    "retryOn": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": [
-                          "network",
-                          "timeout",
-                          "transient",
-                          "tool_error"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "maxAttempts",
-                    "currentAttempt",
-                    "delayMs",
-                    "backoff",
-                    "retryOn"
-                  ],
-                  "additionalProperties": false
-                },
-                "retryDelayMs": {
-                  "type": "number"
-                },
-                "retryAt": {
-                  "type": "number"
-                },
                 "exitCode": {
                   "type": "number"
                 },
@@ -162857,53 +163070,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "endedAt": {
                     "type": "number"
                   },
-                  "retryPolicy": {
-                    "type": "object",
-                    "properties": {
-                      "maxAttempts": {
-                        "type": "number"
-                      },
-                      "currentAttempt": {
-                        "type": "number"
-                      },
-                      "delayMs": {
-                        "type": "number"
-                      },
-                      "backoff": {
-                        "type": "string",
-                        "enum": [
-                          "fixed",
-                          "exponential"
-                        ]
-                      },
-                      "retryOn": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "enum": [
-                            "network",
-                            "timeout",
-                            "transient",
-                            "tool_error"
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "maxAttempts",
-                      "currentAttempt",
-                      "delayMs",
-                      "backoff",
-                      "retryOn"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "retryDelayMs": {
-                    "type": "number"
-                  },
-                  "retryAt": {
-                    "type": "number"
-                  },
                   "exitCode": {
                     "type": "number"
                   },
@@ -163066,53 +163232,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "number"
                 },
                 "endedAt": {
-                  "type": "number"
-                },
-                "retryPolicy": {
-                  "type": "object",
-                  "properties": {
-                    "maxAttempts": {
-                      "type": "number"
-                    },
-                    "currentAttempt": {
-                      "type": "number"
-                    },
-                    "delayMs": {
-                      "type": "number"
-                    },
-                    "backoff": {
-                      "type": "string",
-                      "enum": [
-                        "fixed",
-                        "exponential"
-                      ]
-                    },
-                    "retryOn": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": [
-                          "network",
-                          "timeout",
-                          "transient",
-                          "tool_error"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "maxAttempts",
-                    "currentAttempt",
-                    "delayMs",
-                    "backoff",
-                    "retryOn"
-                  ],
-                  "additionalProperties": false
-                },
-                "retryDelayMs": {
-                  "type": "number"
-                },
-                "retryAt": {
                   "type": "number"
                 },
                 "exitCode": {

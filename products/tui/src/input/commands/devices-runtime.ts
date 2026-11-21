@@ -60,14 +60,14 @@ function deviceTokenStore(ctx: CommandContext): DeviceTokenStore {
         // A device another principal paired is the owner's to revoke: the daemon put it to him instead (OWNER_APPROVAL_PENDING).
         const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
         throw commandRefusal(`Revoking this device is the owner's own act, so the daemon put it to him${approval}; nothing is revoked until he approves it.`,
-          'The owner approves it from his own app (/approvals); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
+          'The owner approves it from his own app (/approval waiting); the device keeps working until then.', 'OWNER_APPROVAL_PENDING');
       },
       mintForMigration: async (name) => (await invoke<{ readonly token: MintedPairingToken }>('pairing.tokens.migrate', { name })).token,
     };
   }
   if (connected) {
     throw commandRefusal(`The daemon at ${connected.baseUrl} could not be asked about its devices: ${rpc.reason}. Nothing was changed on this machine instead.`,
-      'Check the connection to that daemon (/settings daemon), then run the command again', 'NOT_DONE');
+      'Check the connection to that daemon (/settings open daemon), then run the command again', 'NOT_DONE');
   }
   const local = ctx.platform.pairingTokens;
   if (!local) {
@@ -129,7 +129,7 @@ function pairRequestsOnDaemon(): PairRequestsHost<CommandContext> {
   const call = async <T,>(ctx: CommandContext, what: string, method: string, input: Record<string, unknown>): Promise<T> => {
     const rpc = getOperatorRpc(ctx);
     if (!rpc.available) {
-      throw commandRefusal(`Devices waiting to pair are kept by the daemon, which could not be asked: ${rpc.reason}.`, 'Start the daemon (or check /settings daemon), then run the command again', 'DAEMON_UNAVAILABLE');
+      throw commandRefusal(`Devices waiting to pair are kept by the daemon, which could not be asked: ${rpc.reason}.`, 'Start the daemon (or check /settings open daemon), then run the command again', 'DAEMON_UNAVAILABLE');
     }
     try {
       return await (rpc.platformClient.operator.invoke(method as never, input as never) as Promise<T>);

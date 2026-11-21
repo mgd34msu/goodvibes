@@ -44,6 +44,7 @@ export const ENV_SCAN_IGNORED: Readonly<Record<string, string>> = {
   DOCKER_HOST: 'set for a child docker process from a remote runner\'s settings, never read',
   CF_BOOTSTRAP: 'the example variable name in /cloudflare\'s create-token action; the command reads whichever variable the owner names, never this one',
   BITWARDENCLI_APPDATA_DIR: 'set for the Bitwarden CLI from storage.secretProviders settings, never read',
+  AZURE_CONFIG_DIR: 'set for the az CLI of an azure cloud-terminal runner to a fresh scratch directory per dispatch, never read',
 };
 
 export interface EnvEntry {

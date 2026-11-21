@@ -8255,6 +8255,18 @@
           true
          ]
         },
+        "recheckPending": {
+         "type": "object",
+         "properties": {
+          "summary": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "summary"
+         ],
+         "additionalProperties": false
+        },
         "resolvedAt": {
          "type": "number"
         },
@@ -8514,6 +8526,9 @@
       "type": "number"
      },
      "completedAt": {
+      "type": "number"
+     },
+     "statusChangedAt": {
       "type": "number"
      }
     },
@@ -11071,53 +11086,6 @@
       "type": "number"
      },
      "endedAt": {
-      "type": "number"
-     },
-     "retryPolicy": {
-      "type": "object",
-      "properties": {
-       "maxAttempts": {
-        "type": "number"
-       },
-       "currentAttempt": {
-        "type": "number"
-       },
-       "delayMs": {
-        "type": "number"
-       },
-       "backoff": {
-        "type": "string",
-        "enum": [
-         "fixed",
-         "exponential"
-        ]
-       },
-       "retryOn": {
-        "type": "array",
-        "items": {
-         "type": "string",
-         "enum": [
-          "network",
-          "timeout",
-          "transient",
-          "tool_error"
-         ]
-        }
-       }
-      },
-      "required": [
-       "maxAttempts",
-       "currentAttempt",
-       "delayMs",
-       "backoff",
-       "retryOn"
-      ],
-      "additionalProperties": false
-     },
-     "retryDelayMs": {
-      "type": "number"
-     },
-     "retryAt": {
       "type": "number"
      },
      "exitCode": {

@@ -23,7 +23,7 @@ goodvibes-agent exec --output stream-json --omit-accumulated --timeout 10m "chec
 | `--intake-cancel` | Cancel the saved input, or the work admitted from it, on the host. |
 | `--continue`, `--resume [id]`, `--session <id>` | Continue the last session, or the named one, instead of a new one; fails when there is none. A crash snapshot newer than its saved copy is restored first (see below). |
 
-The `--intake-*` flags take no value and no prompt (recovery reuses the exact saved input); use one at a time. `--timeout`, `--max-turns`, `--omit-accumulated` and `--answer-permissions` apply only to `run`. Status messages that would name a workspace slash command (`/work intake-status`) name these flags instead.
+The `--intake-*` flags take no value and no prompt (recovery reuses the exact saved input); use one at a time. `--timeout`, `--max-turns`, `--omit-accumulated` and `--answer-permissions` apply only to `run`. Status messages that would name a workspace slash command (`/work intake`) name these flags instead.
 
 Parser limits to know about:
 

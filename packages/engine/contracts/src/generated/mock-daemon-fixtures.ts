@@ -5338,7 +5338,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sample"
       ],
       "recurrence": "sample",
-      "revision": "sample"
+      "revision": "sample",
+      "cancelled": false
     }
   },
   "calendar.events.list": {
@@ -9309,6 +9310,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sample"
             ],
             "failurePause": true,
+            "recheckPending": {
+              "summary": "sample"
+            },
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -9382,7 +9386,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "failureKind": "transport",
         "error": "sample",
         "createdAt": 0,
-        "completedAt": 0
+        "completedAt": 0,
+        "statusChangedAt": 0
       },
       "ownerAgentId": "sample",
       "replayed": false
@@ -10531,6 +10536,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sample"
           ],
           "failurePause": true,
+          "recheckPending": {
+            "summary": "sample"
+          },
           "resolvedAt": 0,
           "reply": {
             "text": "sample",
@@ -10604,7 +10612,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failureKind": "transport",
       "error": "sample",
       "createdAt": 0,
-      "completedAt": 0
+      "completedAt": 0,
+      "statusChangedAt": 0
     }
   },
   "contracts.list": {
@@ -11752,6 +11761,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "sample"
               ],
               "failurePause": true,
+              "recheckPending": {
+                "summary": "sample"
+              },
               "resolvedAt": 0,
               "reply": {
                 "text": "sample",
@@ -11825,7 +11837,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "failureKind": "transport",
           "error": "sample",
           "createdAt": 0,
-          "completedAt": 0
+          "completedAt": 0,
+          "statusChangedAt": 0
         }
       ]
     }
@@ -13006,6 +13019,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sample"
             ],
             "failurePause": true,
+            "recheckPending": {
+              "summary": "sample"
+            },
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -13079,7 +13095,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "failureKind": "transport",
         "error": "sample",
         "createdAt": 0,
-        "completedAt": 0
+        "completedAt": 0,
+        "statusChangedAt": 0
       },
       "ownerAgentId": "sample",
       "replayed": false
@@ -14212,6 +14229,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "state": "waiting",
       "id": "sample",
+      "replacedBy": "sample",
       "expectation": {
         "id": "sample",
         "kind": "sample",
@@ -23322,7 +23340,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "needsKind": false,
       "conflictsWith": [
         "sample"
-      ]
+      ],
+      "occasionId": "sample"
     }
   },
   "occasions.plans.remove": {
@@ -23381,7 +23400,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "needsKind": false,
       "conflictsWith": [
         "sample"
-      ]
+      ],
+      "occasionId": "sample"
     }
   },
   "occasions.remove": {
@@ -26313,6 +26333,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "turnId": "sample",
         "kind": "preview",
         "undoSnapshotId": "sample",
+        "expectedRevision": "sample",
         "expiresAt": 0
       }
     }
@@ -26329,6 +26350,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "turnId": "sample",
           "kind": "preview",
           "undoSnapshotId": "sample",
+          "expectedRevision": "sample",
           "expiresAt": 0
         }
       ],
@@ -27716,7 +27738,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "arguments": {}
             }
           ],
-          "callId": "sample"
+          "callId": "sample",
+          "correlationId": "sample"
         }
       ],
       "historyAsOf": 0
@@ -27837,7 +27860,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "arguments": {}
             }
           ],
-          "callId": "sample"
+          "callId": "sample",
+          "correlationId": "sample"
         }
       ]
     }
@@ -28898,17 +28922,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",
@@ -28961,17 +28974,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",
@@ -29013,17 +29015,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "queuedAt": 0,
           "startedAt": 0,
           "endedAt": 0,
-          "retryPolicy": {
-            "maxAttempts": 0,
-            "currentAttempt": 0,
-            "delayMs": 0,
-            "backoff": "fixed",
-            "retryOn": [
-              "network"
-            ]
-          },
-          "retryDelayMs": 0,
-          "retryAt": 0,
           "exitCode": 0,
           "error": "sample",
           "result": "sample",
@@ -29058,17 +29049,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "queuedAt": 0,
         "startedAt": 0,
         "endedAt": 0,
-        "retryPolicy": {
-          "maxAttempts": 0,
-          "currentAttempt": 0,
-          "delayMs": 0,
-          "backoff": "fixed",
-          "retryOn": [
-            "network"
-          ]
-        },
-        "retryDelayMs": 0,
-        "retryAt": 0,
         "exitCode": 0,
         "error": "sample",
         "result": "sample",

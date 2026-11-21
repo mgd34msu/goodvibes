@@ -1,12 +1,13 @@
 // Proves: A stored gate value that cannot be read is dropped and the weaker shipped default takes effect after a restart.
-// Red when: Settings ingestion sets aside an unreadable safety-gate value and carries on with its default instead of refusing the file.
+// Red when: Settings ingestion sets aside an unreadable safety-gate value and carries on with its default instead of holding the gate at its strictest value.
 /**
  * The owner stored `permissions.tools.exec: "deny"`; a typo makes it "dney".
  * Reading the file back at the next start must not quietly put the shipped
- * default (prompt) in its place: the settings file is refused, naming the key.
- * A value outside the gate list that cannot be read is set aside instead: that
- * key reads as its default, the rest of the file keeps its stored values, and
- * the set-aside key is reported. The real ConfigManager on a temp home.
+ * default (prompt) in its place: the file still loads, the gate is held at its
+ * strictest value (deny) and the held key is reported. A value outside the gate
+ * list that cannot be read is set aside instead: that key reads as its default,
+ * the rest of the file keeps its stored values, and the set-aside key is
+ * reported. The real ConfigManager on a temp home.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,14 +33,24 @@ function open(stored: Record<string, unknown>): ConfigManager | Error {
   }
 }
 
-test('an unreadable gate value refuses the file; an unreadable value outside the gate list is set aside', () => {
+test('an unreadable gate value holds the gate at its strictest value; an unreadable value outside the gate list is set aside', () => {
   const gate = open({ permissions: { tools: { exec: 'dney' } }, hostedSessions: { maxSessions: 7 } });
   const other = open({ display: { theme: 5 }, hostedSessions: { maxSessions: 7 } });
+  if (gate instanceof Error) throw gate;
   if (other instanceof Error) throw other;
   expect({
-    gate: gate instanceof Error ? gate.message.includes('permissions.tools.exec') : `opened with exec ${String(gate.get('permissions.tools.exec'))}`,
+    exec: gate.get('permissions.tools.exec'),
+    gateKept: gate.get('hostedSessions.maxSessions'),
+    held: gate.getIngestionQuarantine().map((notice) => [notice.key, notice.action]),
     theme: other.get('display.theme') === DEFAULT_CONFIG.display.theme,
     kept: other.get('hostedSessions.maxSessions'),
     setAside: other.getIngestionQuarantine().map((notice) => notice.key),
-  }).toEqual({ gate: true, theme: true, kept: 7, setAside: ['display.theme'] });
+  }).toEqual({
+    exec: 'deny',
+    gateKept: 7,
+    held: [['permissions.tools.exec', 'held']],
+    theme: true,
+    kept: 7,
+    setAside: ['display.theme'],
+  });
 });

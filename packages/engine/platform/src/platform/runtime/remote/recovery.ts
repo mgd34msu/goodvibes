@@ -22,7 +22,7 @@ export function deriveRemoteRecoveryActions(
     actions.push({
       id: 'review-health',
       label: 'Review remote health',
-      command: '/health review',
+      command: '/health check remote',
       reason: connection?.lastError ?? contract?.transport?.lastError ?? 'Remote transport reported an error.',
     });
   }

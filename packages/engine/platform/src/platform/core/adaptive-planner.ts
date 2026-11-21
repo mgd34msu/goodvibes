@@ -7,9 +7,9 @@ import { JudgmentHeldError } from '../types/judgment-held.js';
  * capability inputs. Emits typed reason codes for every decision and
  * maintains an explicit override path that is logged in full.
  *
- * Commands: /plan mode auto|single|cohort|background|remote
- *           /plan explain
- *           /plan override <strategy>
+ * Commands: /work planner-mode auto|single|cohort|background|remote
+ *           /work planner-explain
+ *           /work planner-override <strategy>
  */
 
 import { judgmentPort } from '@goodvibes/engine/errors';
@@ -64,7 +64,7 @@ export type StrategyReasonCode =
   | 'REMOTE_CAPABLE'               // remote provider available and suitable
   | 'AUTO_FALLBACK_SINGLE'         // auto mode fell back to single (default)
   // Override reasons
-  | 'USER_OVERRIDE'                // explicit user /plan override command
+  | 'USER_OVERRIDE'                // explicit user /work planner-override command
   // Error reasons
   | 'INVALID_STRATEGY';            // unrecognised strategy name
 
@@ -103,7 +103,7 @@ export interface StrategyCandidate {
  * The outcome of the deterministic "does this task warrant decomposition?"
  * gate. This is a semantic projection of the existing strategy selection,
  * `decompose` is simply `selected !== 'single'`, so every existing reason
- * code and the `/plan explain` output stay authoritative. No new scoring
+ * code and the `/work planner-explain` output stay authoritative. No new scoring
  * logic lives here.
  */
 export interface DecompositionGate {
@@ -146,9 +146,9 @@ const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
   NO_DECISION_MODEL_SINGLE: 'Without a decision model, this uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
   JUDGMENT_SELECTED: 'The recorded execution-strategy reading selected this available strategy.',
   JUDGMENT_UNSETTLED: 'The execution-strategy reading did not settle. No strategy was authorized.',
-  PINNED_MODE: 'The owner explicitly pinned this strategy with /plan mode.',
+  PINNED_MODE: 'The owner explicitly pinned this strategy with /work planner-mode.',
   OVERRIDE_IN_EFFECT:
-    'A user-supplied /plan override is in effect. The planner\'s automatic '
+    'A user-supplied /work planner-override is in effect. The planner\'s automatic '
     + 'selection is bypassed until the override is cleared.',
   HIGH_RISK_SINGLE_PREFERRED:
     'The task risk score exceeds the threshold for parallel execution (>0.7). '
@@ -167,7 +167,7 @@ const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
   AUTO_FALLBACK_SINGLE:
     'Auto mode found no strong signal for parallelism; defaulting to single.',
   USER_OVERRIDE:
-    'The strategy was set explicitly by the user via /plan override.',
+    'The strategy was set explicitly by the user via /work planner-override.',
   INVALID_STRATEGY:
     'The supplied strategy name is not recognised. No change was made.',
 };
@@ -317,8 +317,8 @@ export class AdaptivePlanner {
    * This calls the existing `select()` pipeline, no new scoring logic, and
    * projects the result: `decompose` is `selected !== 'single'`. Because it
    * goes through `select()`, the decision is appended to the same audit
-   * history as every other planner call, and `/plan explain` / `/plan
-   * status` remain authoritative for it.
+   * history as every other planner call, and `/work planner-explain` /
+   * `/work planner` remain authoritative for it.
    */
   async shouldDecompose(inputs: PlannerInputs, options: CallOptions = {}): Promise<DecompositionGate> {
     const decision = await this.select(inputs, options);

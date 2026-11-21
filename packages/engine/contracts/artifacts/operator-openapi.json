@@ -9639,6 +9639,7 @@
                       "type": "string",
                       "enum": [
                         "delivered",
+                        "partly-delivered",
                         "not-delivered",
                         "inbox",
                         "failed"
@@ -11000,6 +11001,7 @@
                             "type": "string",
                             "enum": [
                               "delivered",
+                              "partly-delivered",
                               "not-delivered",
                               "inbox",
                               "failed"
@@ -11799,6 +11801,7 @@
                             "type": "string",
                             "enum": [
                               "delivered",
+                              "partly-delivered",
                               "not-delivered",
                               "inbox",
                               "failed"
@@ -12738,6 +12741,7 @@
                       "type": "string",
                       "enum": [
                         "delivered",
+                        "partly-delivered",
                         "not-delivered",
                         "inbox",
                         "failed"
@@ -19402,6 +19406,7 @@
                       "type": "string",
                       "enum": [
                         "delivered",
+                        "partly-delivered",
                         "not-delivered",
                         "inbox",
                         "failed"
@@ -20696,6 +20701,7 @@
                             "type": "string",
                             "enum": [
                               "delivered",
+                              "partly-delivered",
                               "not-delivered",
                               "inbox",
                               "failed"
@@ -23798,7 +23804,7 @@
           "write:browser"
         ],
         "x-dangerous": true,
-        "x-effect": "write",
+        "x-effect": "outward",
         "x-idempotent": true,
         "x-replay-key": {
           "in": "header",
@@ -24678,7 +24684,7 @@
       "post": {
         "operationId": "browser.sessions.launch",
         "summary": "Launch Browser Session",
-        "description": "Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.",
+        "description": "Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists. One launched browser is open at a time: a launch with no different profile or headless value returns the open one, and a different profile or headless value needs the open one closed first.",
         "tags": [
           "browser"
         ],
@@ -26389,7 +26395,7 @@
       "get": {
         "operationId": "calendar.events.get",
         "summary": "Get Calendar Event",
-        "description": "Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.",
+        "description": "Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series. On Google Calendar an event deleted from the calendar is still returned by its id, with cancelled: true; it is not on the calendar.",
         "tags": [
           "calendar"
         ],
@@ -26436,6 +26442,9 @@
                     },
                     "revision": {
                       "type": "string"
+                    },
+                    "cancelled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -32295,7 +32304,7 @@
       "delete": {
         "operationId": "channels.profiles.delete",
         "summary": "Unbind Channel Profile",
-        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.",
+        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.",
         "tags": [
           "channels"
         ],
@@ -32305,23 +32314,85 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "surfaceKind": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "surfaceKind": {
+                          "type": "string"
+                        },
+                        "channelId": {
+                          "type": "string"
+                        },
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "surfaceKind",
+                        "deleted"
+                      ],
+                      "additionalProperties": false
                     },
-                    "channelId": {
-                      "type": "string"
-                    },
-                    "deleted": {
-                      "type": "boolean"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "OWNER_APPROVAL_PENDING"
+                        },
+                        "approvalId": {
+                          "type": "string"
+                        },
+                        "followable": {
+                          "type": "boolean"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string"
+                        },
+                        "requestedMode": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "next": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "approvalId",
+                        "state"
+                      ],
+                      "additionalProperties": true
                     }
-                  },
-                  "required": [
-                    "surfaceKind",
-                    "deleted"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -32742,7 +32813,7 @@
       "post": {
         "operationId": "channels.profiles.set",
         "summary": "Bind Channel Profile",
-        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.",
+        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
         "tags": [
           "channels"
         ],
@@ -32752,123 +32823,185 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "binding": {
+                  "anyOf": [
+                    {
                       "type": "object",
                       "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "surfaceKind": {
-                          "type": "string"
-                        },
-                        "channelId": {
-                          "type": "string"
-                        },
-                        "model": {
-                          "type": "string"
-                        },
-                        "provider": {
-                          "type": "string"
-                        },
-                        "permissionMode": {
-                          "type": "string",
-                          "enum": [
-                            "ask-me",
-                            "jev-decides",
-                            "just-vibes",
-                            "yolo",
-                            "plan"
-                          ]
-                        },
-                        "updatedAt": {
-                          "type": "number"
-                        },
-                        "metadata": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "null"
-                              },
-                              {
-                                "type": "object",
-                                "additionalProperties": {}
-                              },
-                              {
-                                "type": "array",
-                                "items": {}
-                              }
-                            ]
-                          }
-                        },
-                        "invalid": {
+                        "binding": {
                           "type": "object",
                           "properties": {
-                            "field": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "surfaceKind": {
+                              "type": "string"
+                            },
+                            "channelId": {
+                              "type": "string"
+                            },
+                            "model": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "type": "string"
+                            },
+                            "permissionMode": {
                               "type": "string",
                               "enum": [
-                                "permissionMode"
+                                "ask-me",
+                                "jev-decides",
+                                "just-vibes",
+                                "yolo",
+                                "plan"
                               ]
                             },
-                            "value": {
-                              "anyOf": [
-                                {
+                            "updatedAt": {
+                              "type": "number"
+                            },
+                            "metadata": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  }
+                                ]
+                              }
+                            },
+                            "invalid": {
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "type": "string",
+                                  "enum": [
+                                    "permissionMode"
+                                  ]
+                                },
+                                "value": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    }
+                                  ]
+                                },
+                                "reason": {
                                   "type": "string"
-                                },
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "object",
-                                  "additionalProperties": {}
-                                },
-                                {
-                                  "type": "array",
-                                  "items": {}
                                 }
-                              ]
-                            },
-                            "reason": {
-                              "type": "string"
+                              },
+                              "required": [
+                                "field",
+                                "value",
+                                "reason"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
-                            "field",
-                            "value",
-                            "reason"
+                            "id",
+                            "surfaceKind",
+                            "updatedAt"
                           ],
                           "additionalProperties": false
                         }
                       },
                       "required": [
-                        "id",
-                        "surfaceKind",
-                        "updatedAt"
+                        "binding"
                       ],
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "OWNER_APPROVAL_PENDING"
+                        },
+                        "approvalId": {
+                          "type": "string"
+                        },
+                        "followable": {
+                          "type": "boolean"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string"
+                        },
+                        "requestedMode": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        },
+                        "next": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "approvalId",
+                        "state"
+                      ],
+                      "additionalProperties": true
                     }
-                  },
-                  "required": [
-                    "binding"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -33762,7 +33895,7 @@
       "post": {
         "operationId": "channels.targets.resolve",
         "summary": "Resolve Channel Target",
-        "description": "Resolve a typed channel target for outbound delivery or routing.",
+        "description": "Resolve a typed channel target for outbound delivery or routing. A plain name resolves only when it names exactly one conversation; a name several conversations share (a person and a channel both called ops) returns the unresolved fallback target with metadata.ambiguous listing each candidate's id, kind and label, so the caller passes #name, @name or a typed id.",
         "tags": [
           "channels"
         ],
@@ -49310,6 +49443,18 @@
                               true
                             ]
                           },
+                          "recheckPending": {
+                            "type": "object",
+                            "properties": {
+                              "summary": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "summary"
+                            ],
+                            "additionalProperties": false
+                          },
                           "resolvedAt": {
                             "type": "number"
                           },
@@ -49758,6 +49903,9 @@
                       "type": "number"
                     },
                     "completedAt": {
+                      "type": "number"
+                    },
+                    "statusChangedAt": {
                       "type": "number"
                     }
                   },
@@ -57429,6 +57577,18 @@
                                     true
                                   ]
                                 },
+                                "recheckPending": {
+                                  "type": "object",
+                                  "properties": {
+                                    "summary": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "summary"
+                                  ],
+                                  "additionalProperties": false
+                                },
                                 "resolvedAt": {
                                   "type": "number"
                                 },
@@ -57877,6 +58037,9 @@
                             "type": "number"
                           },
                           "completedAt": {
+                            "type": "number"
+                          },
+                          "statusChangedAt": {
                             "type": "number"
                           }
                         },
@@ -65544,6 +65707,18 @@
                                   true
                                 ]
                               },
+                              "recheckPending": {
+                                "type": "object",
+                                "properties": {
+                                  "summary": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "summary"
+                                ],
+                                "additionalProperties": false
+                              },
                               "resolvedAt": {
                                 "type": "number"
                               },
@@ -65992,6 +66167,9 @@
                           "type": "number"
                         },
                         "completedAt": {
+                          "type": "number"
+                        },
+                        "statusChangedAt": {
                           "type": "number"
                         }
                       },
@@ -69396,7 +69574,7 @@
       "post": {
         "operationId": "email.draft.create",
         "summary": "Create Email Draft",
-        "description": "Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save the mail server refused is reported as not saved, with the cause from its response code (mailbox full, Drafts folder missing, draft too large, or refused). A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "email"
         ],
@@ -114281,7 +114459,7 @@
       "post": {
         "operationId": "memory.records.update",
         "summary": "Update Memory Record",
-        "description": "Edit a record's content fields (scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.",
+        "description": "Edit a record's content fields (class, scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store; a changed class refiles the record in place, keeping its id. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.",
         "tags": [
           "memory"
         ],
@@ -114446,6 +114624,20 @@
                 "properties": {
                   "id": {
                     "type": "string"
+                  },
+                  "cls": {
+                    "type": "string",
+                    "enum": [
+                      "decision",
+                      "constraint",
+                      "incident",
+                      "pattern",
+                      "fact",
+                      "risk",
+                      "runbook",
+                      "architecture",
+                      "ownership"
+                    ]
                   },
                   "scope": {
                     "type": "string",
@@ -114852,7 +115044,7 @@
       "post": {
         "operationId": "memory.snapshots.restore",
         "summary": "Restore Memory From a Copy",
-        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
+        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest` for the newest copy not taken by a restore, or the start of one name such as a date). `latest` names the same copy before and after a restore, so repeating the call writes the same records again. The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
         "tags": [
           "memory"
         ],
@@ -117268,6 +117460,9 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "occasionId": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -117660,6 +117855,9 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "occasionId": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -117743,7 +117941,7 @@
       "post": {
         "operationId": "occasions.remove",
         "summary": "Remove An Important Date",
-        "description": "Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The line removed is the occasion's first; when other lines still declare the same occasion (stillDeclaredBy above 0) only that line goes and its records are kept, since the next line is now the occasion.",
+        "description": "Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The confirmed call names the line it removes in line (that removedLine, or the occasion's text from occasions.list), and only that line goes; when other lines still declare the same occasion (stillDeclaredBy above 0) its records are kept, since the next line is now the occasion. Repeating a confirmed call changes nothing: once the named line is gone it answers ok with nothing removed.",
         "tags": [
           "occasions"
         ],
@@ -117824,6 +118022,9 @@
                   },
                   "confirmed": {
                     "type": "boolean"
+                  },
+                  "line": {
+                    "type": "string"
                   },
                   "authority": {
                     "type": "string"
@@ -125153,6 +125354,13 @@
         ],
         "x-effect": "read",
         "x-idempotent": true,
+        "x-error-codes": [
+          {
+            "code": "STEP_UP_CHALLENGES_FULL",
+            "status": 429,
+            "meaning": "Too many step-up challenges are open; answer one or let it expire, then ask again."
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -125581,7 +125789,7 @@
       "post": {
         "operationId": "remote.backends.register",
         "summary": "Register Remote Backend",
-        "description": "Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with \"-\") and an id a paired peer holds are refused.",
+        "description": "Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; an azure cloud-terminal credential is a JSON object {\"clientId\", \"tenantId\", \"certificate\"} (service principal application id, tenant id, and a PEM holding its certificate and private key), and a stored one of another shape is refused. A value docker or a cloud CLI would read as an option (starting with \"-\") and an id a paired peer holds are refused.",
         "tags": [
           "remote"
         ],
@@ -127861,7 +128069,7 @@
       "get": {
         "operationId": "remote.peers.list",
         "summary": "List Remote Peers",
-        "description": "Return known remote peers.",
+        "description": "Return known remote peers: kind (node or device) keeps only that kind, and limit keeps the most recently seen that many; with no limit every peer is returned.",
         "tags": [
           "remote"
         ],
@@ -128063,7 +128271,29 @@
           "read:remote"
         ],
         "x-effect": "read",
-        "x-idempotent": true
+        "x-idempotent": true,
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "node",
+                "device"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ]
       }
     },
     "/api/remote/peers/{peerId}/token/revoke": {
@@ -142196,53 +142426,6 @@
                         "endedAt": {
                           "type": "number"
                         },
-                        "retryPolicy": {
-                          "type": "object",
-                          "properties": {
-                            "maxAttempts": {
-                              "type": "number"
-                            },
-                            "currentAttempt": {
-                              "type": "number"
-                            },
-                            "delayMs": {
-                              "type": "number"
-                            },
-                            "backoff": {
-                              "type": "string",
-                              "enum": [
-                                "fixed",
-                                "exponential"
-                              ]
-                            },
-                            "retryOn": {
-                              "type": "array",
-                              "items": {
-                                "type": "string",
-                                "enum": [
-                                  "network",
-                                  "timeout",
-                                  "transient",
-                                  "tool_error"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "maxAttempts",
-                            "currentAttempt",
-                            "delayMs",
-                            "backoff",
-                            "retryOn"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "retryDelayMs": {
-                          "type": "number"
-                        },
-                        "retryAt": {
-                          "type": "number"
-                        },
                         "exitCode": {
                           "type": "number"
                         },
@@ -142749,53 +142932,6 @@
                         "endedAt": {
                           "type": "number"
                         },
-                        "retryPolicy": {
-                          "type": "object",
-                          "properties": {
-                            "maxAttempts": {
-                              "type": "number"
-                            },
-                            "currentAttempt": {
-                              "type": "number"
-                            },
-                            "delayMs": {
-                              "type": "number"
-                            },
-                            "backoff": {
-                              "type": "string",
-                              "enum": [
-                                "fixed",
-                                "exponential"
-                              ]
-                            },
-                            "retryOn": {
-                              "type": "array",
-                              "items": {
-                                "type": "string",
-                                "enum": [
-                                  "network",
-                                  "timeout",
-                                  "transient",
-                                  "tool_error"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "maxAttempts",
-                            "currentAttempt",
-                            "delayMs",
-                            "backoff",
-                            "retryOn"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "retryDelayMs": {
-                          "type": "number"
-                        },
-                        "retryAt": {
-                          "type": "number"
-                        },
                         "exitCode": {
                           "type": "number"
                         },
@@ -142998,53 +143134,6 @@
                           "endedAt": {
                             "type": "number"
                           },
-                          "retryPolicy": {
-                            "type": "object",
-                            "properties": {
-                              "maxAttempts": {
-                                "type": "number"
-                              },
-                              "currentAttempt": {
-                                "type": "number"
-                              },
-                              "delayMs": {
-                                "type": "number"
-                              },
-                              "backoff": {
-                                "type": "string",
-                                "enum": [
-                                  "fixed",
-                                  "exponential"
-                                ]
-                              },
-                              "retryOn": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string",
-                                  "enum": [
-                                    "network",
-                                    "timeout",
-                                    "transient",
-                                    "tool_error"
-                                  ]
-                                }
-                              }
-                            },
-                            "required": [
-                              "maxAttempts",
-                              "currentAttempt",
-                              "delayMs",
-                              "backoff",
-                              "retryOn"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "retryDelayMs": {
-                            "type": "number"
-                          },
-                          "retryAt": {
-                            "type": "number"
-                          },
                           "exitCode": {
                             "type": "number"
                           },
@@ -143214,53 +143303,6 @@
                           "type": "number"
                         },
                         "endedAt": {
-                          "type": "number"
-                        },
-                        "retryPolicy": {
-                          "type": "object",
-                          "properties": {
-                            "maxAttempts": {
-                              "type": "number"
-                            },
-                            "currentAttempt": {
-                              "type": "number"
-                            },
-                            "delayMs": {
-                              "type": "number"
-                            },
-                            "backoff": {
-                              "type": "string",
-                              "enum": [
-                                "fixed",
-                                "exponential"
-                              ]
-                            },
-                            "retryOn": {
-                              "type": "array",
-                              "items": {
-                                "type": "string",
-                                "enum": [
-                                  "network",
-                                  "timeout",
-                                  "transient",
-                                  "tool_error"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "maxAttempts",
-                            "currentAttempt",
-                            "delayMs",
-                            "backoff",
-                            "retryOn"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "retryDelayMs": {
-                          "type": "number"
-                        },
-                        "retryAt": {
                           "type": "number"
                         },
                         "exitCode": {
@@ -171648,6 +171690,7 @@
               "AGENT_NOT_FOUND",
               "AGENT_TIMEOUT",
               "APPROVAL_NOT_FOUND",
+              "AUTHORITY_RECORD_UNAVAILABLE",
               "AUTH_REQUIRED",
               "CANCELLED",
               "CANCEL_NOT_ALLOWED",
@@ -171704,7 +171747,11 @@
               "PRINCIPAL_NOT_FOUND",
               "PROTOCOL_ERROR",
               "RATE_LIMITED",
+              "RELAY_CODE_LIMIT",
+              "RELAY_CODE_NOT_FOUND",
               "RELAY_CODE_REVOKED",
+              "RELAY_CODE_REVOKE_FAILED",
+              "RELAY_CODE_REVOKE_NOT_SAVED",
               "RELAY_DISABLED",
               "REMOTE_BACKEND_ID_TAKEN",
               "REMOTE_PAIR_REPLACES_PEER",
@@ -171718,7 +171765,9 @@
               "SESSION_NOT_FOUND",
               "SESSION_NOT_LIVE",
               "SESSION_NOT_OWNED",
+              "STEP_UP_CHALLENGES_FULL",
               "STEP_UP_REQUIRED",
+              "SUBSCRIPTION_NOT_FOUND",
               "TARGET_CHANGED",
               "TASK_NOT_FOUND",
               "TASK_NOT_RETRYABLE",
@@ -171733,7 +171782,8 @@
               "TRIGGER_OPERATOR_REQUIRED",
               "TRIGGER_OTHER_PROCESS",
               "TRIGGER_RESET_REFUSED",
-              "UNKNOWN"
+              "UNKNOWN",
+              "WEB_UI_NOT_SERVED"
             ]
           },
           "category": {

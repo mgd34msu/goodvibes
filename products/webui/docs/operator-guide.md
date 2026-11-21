@@ -353,8 +353,12 @@ happens when the last client leaves (end the session, keep it running, or the
 daemon default). You can attach to one (stored history first, then the live
 stream), steer it, leave it (a confirm sheet states what leaving does, read
 from the session's own detach policy), or end it, which terminates it for every
-attached client and is confirmed first. Terminated sessions are hidden unless
-you ask for them, and show the daemon's own termination reason.
+attached client and is confirmed first. While it has not ended, its Transcript
+tab has a Share section: "Share with" takes a user name, or `pairing:<id>` for a
+paired device, who can then open the session, read it and watch it live; the
+owners are listed with Remove beside each (the last owner cannot be removed).
+Terminated sessions are hidden unless you ask for them, and show the daemon's
+own termination reason.
 
 ### Agents and processes
 

@@ -39,9 +39,8 @@ const KINDS: readonly EcosystemEntryKind[] = ['plugin', 'skill', 'hook-pack', 'p
  * Honest empty-state: the earlier view's original "No curated marketplace
  * entries found yet." copy implied a curated remote catalog. It isn't one,
  * loadEcosystemCatalog only ever reads .goodvibes/ecosystem/<kind>s.json under
- * the project/home, populated solely by `/marketplace publish` and
- * `/marketplace bundle import`. The empty-state copy below (locked byte-for-byte
- * in the golden) names that reality. Selection-blind port: the earlier view's
+ * the project/home, populated by `/marketplace bundle-import` or by editing those
+ * files. The empty-state copy below names that reality. Selection-blind port: the earlier view's
  * selected-entry compatibility/risk/state detail is folded into each row label.
  */
 class MarketplaceModalSurface implements ConfigModalSurface {
@@ -147,16 +146,15 @@ class MarketplaceModalSurface implements ConfigModalSurface {
         rows.push(infoRow('empty:unwired', "Marketplace catalog roots aren't wired into this session, so there's nothing to read yet."));
       } else {
         rows.push(infoRow('empty:0', 'This is your local plugin, skill, hook-pack, and policy-pack catalog; not a remote store.'));
-        rows.push(infoRow('empty:1', "It's empty because nothing has been published or imported into this workspace yet. Entries appear here once you publish a local component or import a bundle."));
+        rows.push(infoRow('empty:1', "It's empty because nothing has been imported into this workspace yet. Entries appear here once you import a bundle."));
       }
       rows.push(headerRow('empty:title', 'Populate it'));
-      rows.push(infoRow('empty:publish', '/marketplace publish <kind> <path>  — publish local plugins/skills into the catalog', { fg: MODAL_TONES.dim }));
-      rows.push(infoRow('empty:import', '/marketplace bundle import <path>   — import a catalog bundle from disk', { fg: MODAL_TONES.dim }));
-      rows.push(infoRow('empty:review', '/marketplace catalog review         — inspect the current local catalog posture', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('empty:import', '/marketplace bundle-import <path>   — import a catalog bundle from disk', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('empty:review', '/marketplace overview               — count the entries of each kind in the local catalog', { fg: MODAL_TONES.dim }));
       return {
         title: 'Marketplace',
         tabs: [{ id: 'catalog', label: 'Catalog', rows, emptyText: '' }],
-        hints: ['local publish/import catalog'],
+        hints: ['local catalog, filled by bundle import'],
       };
     }
 
@@ -201,7 +199,7 @@ class MarketplaceModalSurface implements ConfigModalSurface {
         label: 'Catalog',
         header,
         rows,
-        hints: ['local publish/import catalog'],
+        hints: ['local catalog, filled by bundle import'],
       }],
     };
   }

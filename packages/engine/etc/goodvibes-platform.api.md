@@ -164,8 +164,6 @@ export type AgentUsage = {
     cacheWriteTokens?: number | undefined;
 };
 
-// Warning: (ae-forgotten-export) The symbol "ConfigEvent" needs to be exported by the entry point index.d.ts
-//
 // @public
 export type AnyRuntimeEvent = SessionEvent | TurnEvent | ProviderEvent | ToolEvent | TaskEvent | AgentEvent | ContractEvent | CommunicationEvent | PlannerEvent | GateEvent | PluginEvent | McpEvent | TransportEvent | CompactionEvent | GoodVibesUIEvent | OpsEvent | ForensicsEvent | SecurityEvent | AutomationEvent | RouteEvent | ControlPlaneEvent | DeliveryEvent | WatcherEvent | SurfaceEvent | KnowledgeEvent | WorkspaceEvent | FleetEvent | ConfigEvent;
 
@@ -744,6 +742,35 @@ export function composeMiddleware(middleware: readonly TransportMiddleware[], in
 
 // @public
 export function computeBackoffDelay(attempt: number, policy: ResolvedBackoffPolicy): number;
+
+// @public (undocumented)
+export type ConfigEvent =
+/**
+* One config key now holds a different value.
+*
+* Emitted for an in-process write (including every `config.set` a client
+* makes) and for an external edit the file watcher picked up, the bridge
+* rides `ConfigManager.subscribe`, which both paths already fire.
+*/
+    {
+    type: 'CONFIG_KEY_CHANGED';
+    key: string;
+    scope: ConfigEventScope;
+    secret: boolean;
+    value?: ConfigEventValue | undefined;
+    changedAt: number;
+};
+
+// @public
+export type ConfigEventScope = 'daemon' | 'client' | 'user';
+
+// @public (undocumented)
+export type ConfigEventType = ConfigEvent['type'];
+
+// @public
+export type ConfigEventValue = string | number | boolean | null | readonly ConfigEventValue[] | {
+    readonly [key: string]: ConfigEventValue;
+};
 
 // @public
 export class ConfigurationError extends GoodVibesError {
@@ -2359,6 +2386,7 @@ export type GoodVibesCloudflareQueuePayload = {
     readonly body?: Record<string, unknown> | undefined;
     readonly payloadKey?: string | undefined;
     readonly jobId?: string | undefined;
+    readonly sourceId?: string | undefined;
     readonly enqueuedAt?: number | undefined;
 };
 
@@ -5485,6 +5513,7 @@ export interface OperatorMethodInputMap {
     "email.attachment.get": {
         uid: number;
         index: number;
+        uidValidity: number;
     };
     // (undocumented)
     "email.draft.create": ({
@@ -7041,6 +7070,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "memory.records.update": ({
         id: string;
+        cls?: "architecture" | "constraint" | "decision" | "fact" | "incident" | "ownership" | "pattern" | "risk" | "runbook";
         scope?: "project" | "session" | "team";
         summary?: string;
         detail?: string;
@@ -7386,6 +7416,7 @@ export interface OperatorMethodInputMap {
     "occasions.remove": {
         occasionId: string;
         confirmed: boolean;
+        line?: string;
         authority: string;
     };
     // (undocumented)
@@ -8037,7 +8068,10 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
-    "remote.peers.list": {};
+    "remote.peers.list": {
+        kind?: "device" | "node";
+        limit?: number;
+    };
     // (undocumented)
     "remote.peers.token.revoke": ({
         peerId: string;
@@ -10922,7 +10956,7 @@ export interface OperatorMethodOutputMap {
         nextRunAt?: number;
         lastRunAt?: number;
         lastRunId?: string;
-        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
         runCount: number;
         successCount: number;
         failureCount: number;
@@ -11089,7 +11123,7 @@ export interface OperatorMethodOutputMap {
             nextRunAt?: number;
             lastRunAt?: number;
             lastRunId?: string;
-            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
             runCount: number;
             successCount: number;
             failureCount: number;
@@ -11235,7 +11269,7 @@ export interface OperatorMethodOutputMap {
             nextRunAt?: number;
             lastRunAt?: number;
             lastRunId?: string;
-            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
             runCount: number;
             successCount: number;
             failureCount: number;
@@ -11394,7 +11428,7 @@ export interface OperatorMethodOutputMap {
         nextRunAt?: number;
         lastRunAt?: number;
         lastRunId?: string;
-        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
         runCount: number;
         successCount: number;
         failureCount: number;
@@ -12472,7 +12506,7 @@ export interface OperatorMethodOutputMap {
         nextRunAt?: number;
         lastRunAt?: number;
         lastRunId?: string;
-        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+        lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
         runCount: number;
         successCount: number;
         failureCount: number;
@@ -12625,7 +12659,7 @@ export interface OperatorMethodOutputMap {
             nextRunAt?: number;
             lastRunAt?: number;
             lastRunId?: string;
-            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+            lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
             runCount: number;
             successCount: number;
             failureCount: number;
@@ -13454,6 +13488,7 @@ export interface OperatorMethodOutputMap {
         attendees?: readonly string[];
         recurrence?: string;
         revision?: string;
+        cancelled?: boolean;
     };
     // (undocumented)
     "calendar.events.list": {
@@ -14322,7 +14357,22 @@ export interface OperatorMethodOutputMap {
         surfaceKind: string;
         channelId?: string;
         deleted: boolean;
-    };
+    } | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        followable?: boolean;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
+    } & {
+        readonly [key: string]: unknown;
+    });
     // (undocumented)
     "channels.profiles.get": {
         binding: {
@@ -14406,7 +14456,22 @@ export interface OperatorMethodOutputMap {
                 reason: string;
             };
         };
-    };
+    } | ({
+        success?: false;
+        code: "OWNER_APPROVAL_PENDING";
+        approvalId: string;
+        followable?: boolean;
+        key?: string;
+        keys?: readonly string[];
+        reasons?: readonly string[];
+        sessionId?: string;
+        mode?: string;
+        requestedMode?: string;
+        state: string;
+        next?: readonly string[];
+    } & {
+        readonly [key: string]: unknown;
+    });
     // (undocumented)
     "channels.repairs.list": {
         actions: readonly ({
@@ -16917,6 +16982,9 @@ export interface OperatorMethodOutputMap {
                 unmetCriterionIds: readonly string[];
                 decisionIds?: readonly string[];
                 failurePause?: boolean;
+                recheckPending?: {
+                    summary: string;
+                };
                 resolvedAt?: number;
                 reply?: {
                     text: string;
@@ -17001,6 +17069,7 @@ export interface OperatorMethodOutputMap {
             error?: string;
             createdAt: number;
             completedAt?: number;
+            statusChangedAt?: number;
         };
         ownerAgentId: string;
         replayed?: boolean;
@@ -18317,6 +18386,9 @@ export interface OperatorMethodOutputMap {
             unmetCriterionIds: readonly string[];
             decisionIds?: readonly string[];
             failurePause?: boolean;
+            recheckPending?: {
+                summary: string;
+            };
             resolvedAt?: number;
             reply?: {
                 text: string;
@@ -18401,6 +18473,7 @@ export interface OperatorMethodOutputMap {
         error?: string;
         createdAt: number;
         completedAt?: number;
+        statusChangedAt?: number;
     };
     // (undocumented)
     "contracts.list": {
@@ -19715,6 +19788,9 @@ export interface OperatorMethodOutputMap {
                 unmetCriterionIds: readonly string[];
                 decisionIds?: readonly string[];
                 failurePause?: boolean;
+                recheckPending?: {
+                    summary: string;
+                };
                 resolvedAt?: number;
                 reply?: {
                     text: string;
@@ -19799,6 +19875,7 @@ export interface OperatorMethodOutputMap {
             error?: string;
             createdAt: number;
             completedAt?: number;
+            statusChangedAt?: number;
         })[];
     };
     // (undocumented)
@@ -21131,6 +21208,9 @@ export interface OperatorMethodOutputMap {
                 unmetCriterionIds: readonly string[];
                 decisionIds?: readonly string[];
                 failurePause?: boolean;
+                recheckPending?: {
+                    summary: string;
+                };
                 resolvedAt?: number;
                 reply?: {
                     text: string;
@@ -21215,6 +21295,7 @@ export interface OperatorMethodOutputMap {
             error?: string;
             createdAt: number;
             completedAt?: number;
+            statusChangedAt?: number;
         };
         ownerAgentId: string;
         replayed?: boolean;
@@ -22154,8 +22235,9 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "email.expectation.wait": {
-        state: "arrived" | "cancelled" | "capability-lost" | "expired" | "unknown" | "waiting";
+        state: "arrived" | "cancelled" | "capability-lost" | "expired" | "replaced" | "unknown" | "waiting";
         id?: string;
+        replacedBy?: string;
         expectation?: {
             id: string;
             kind: string;
@@ -22397,7 +22479,7 @@ export interface OperatorMethodOutputMap {
                     at: number;
                 };
                 lastRunAt?: number;
-                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
                 firedCount?: number;
                 lastFiredAt?: number;
                 since?: number;
@@ -22705,7 +22787,7 @@ export interface OperatorMethodOutputMap {
                     at: number;
                 };
                 lastRunAt?: number;
-                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
                 firedCount?: number;
                 lastFiredAt?: number;
                 since?: number;
@@ -22831,7 +22913,7 @@ export interface OperatorMethodOutputMap {
                     at: number;
                 };
                 lastRunAt?: number;
-                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered";
+                lastOutcome?: "delivered" | "failed" | "inbox" | "not-delivered" | "partly-delivered";
                 firedCount?: number;
                 lastFiredAt?: number;
                 since?: number;
@@ -29731,6 +29813,7 @@ export interface OperatorMethodOutputMap {
         confirmation: string;
         needsKind: boolean;
         conflictsWith: readonly string[];
+        occasionId?: string;
     };
     // (undocumented)
     "occasions.plans.remove": {
@@ -29767,6 +29850,7 @@ export interface OperatorMethodOutputMap {
         confirmation: string;
         needsKind: boolean;
         conflictsWith: readonly string[];
+        occasionId?: string;
     };
     // (undocumented)
     "occasions.remove": {
@@ -33469,6 +33553,7 @@ export interface OperatorMethodOutputMap {
             turnId: null | string;
             kind: "preview" | "rewind" | "undo";
             undoSnapshotId?: string;
+            expectedRevision?: string;
             expiresAt: number;
         };
     };
@@ -33480,6 +33565,7 @@ export interface OperatorMethodOutputMap {
             turnId: null | string;
             kind: "preview" | "rewind" | "undo";
             undoSnapshotId?: string;
+            expectedRevision?: string;
             expiresAt: number;
         })[];
         host: {
@@ -34466,6 +34552,7 @@ export interface OperatorMethodOutputMap {
                 });
             })[];
             callId?: string;
+            correlationId?: string;
         })[];
         historyAsOf?: number;
     };
@@ -34561,6 +34648,7 @@ export interface OperatorMethodOutputMap {
                 });
             })[];
             callId?: string;
+            correlationId?: string;
         })[];
     };
     // (undocumented)
@@ -35654,15 +35742,6 @@ export interface OperatorMethodOutputMap {
             queuedAt: number;
             startedAt?: number;
             endedAt?: number;
-            retryPolicy?: {
-                maxAttempts: number;
-                currentAttempt: number;
-                delayMs: number;
-                backoff: "exponential" | "fixed";
-                retryOn: readonly ("network" | "timeout" | "tool_error" | "transient")[];
-            };
-            retryDelayMs?: number;
-            retryAt?: number;
             exitCode?: number;
             error?: string;
             result?: ({} & {
@@ -35703,15 +35782,6 @@ export interface OperatorMethodOutputMap {
             queuedAt: number;
             startedAt?: number;
             endedAt?: number;
-            retryPolicy?: {
-                maxAttempts: number;
-                currentAttempt: number;
-                delayMs: number;
-                backoff: "exponential" | "fixed";
-                retryOn: readonly ("network" | "timeout" | "tool_error" | "transient")[];
-            };
-            retryDelayMs?: number;
-            retryAt?: number;
             exitCode?: number;
             error?: string;
             result?: ({} & {
@@ -35745,15 +35815,6 @@ export interface OperatorMethodOutputMap {
             queuedAt: number;
             startedAt?: number;
             endedAt?: number;
-            retryPolicy?: {
-                maxAttempts: number;
-                currentAttempt: number;
-                delayMs: number;
-                backoff: "exponential" | "fixed";
-                retryOn: readonly ("network" | "timeout" | "tool_error" | "transient")[];
-            };
-            retryDelayMs?: number;
-            retryAt?: number;
             exitCode?: number;
             error?: string;
             result?: ({} & {
@@ -35780,15 +35841,6 @@ export interface OperatorMethodOutputMap {
             queuedAt: number;
             startedAt?: number;
             endedAt?: number;
-            retryPolicy?: {
-                maxAttempts: number;
-                currentAttempt: number;
-                delayMs: number;
-                backoff: "exponential" | "fixed";
-                retryOn: readonly ("network" | "timeout" | "tool_error" | "transient")[];
-            };
-            retryDelayMs?: number;
-            retryAt?: number;
             exitCode?: number;
             error?: string;
             result?: ({} & {
@@ -41361,7 +41413,7 @@ export type PlannerEvent =
 ({
     type: 'PLAN_STRATEGY_SELECTED';
 } & PlannerDecision)
-/** `/plan override` set the execution strategy `/workstream` uses when it drafts a plan, or cleared it (`strategy` null, `clearedBy` who cleared it). */
+/** `/work planner-override` set the execution strategy `/workstream` uses when it drafts a plan, or cleared it (`strategy` null, `clearedBy` who cleared it). */
 | {
     type: 'PLAN_STRATEGY_OVERRIDDEN';
     strategy: ExecutionStrategy | null;

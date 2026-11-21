@@ -94,7 +94,7 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
 
 /** Why a mode change is refused while a native input's hosted owner is still unconfirmed. */
 const UNCONFIRMED_NATIVE_OWNER_MODE_REASON = 'The native input sent from this surface is not yet confirmed by its host, so its '
-  + 'execution mode has no confirmed owner. Nothing was changed here or on the host. Inspect it with /work intake-status; '
+  + 'execution mode has no confirmed owner. Nothing was changed here or on the host. Inspect it with /work intake; '
   + 'once the host reports it settled, or after /work intake-cancel, change the mode again.';
 
 /** The host could not take this message and nothing was sent: run it here, and say why in one line. */
@@ -303,7 +303,7 @@ export function installRemoteConversationRouting(
   };
   const report = (state: NativeConversationIntakeState | undefined): void => {
     settleOwnerLatch(state);
-    // An accepted turn needs nothing from the person; its identifiers stay in the activity feed and /work intake-status.
+    // An accepted turn needs nothing from the person; its identifiers stay in the activity feed and /work intake.
     const quiet = options.record !== undefined && nativeConversationIntakeAccepted(state);
     for (const line of nativeConversationIntakeLines(state)) (quiet ? options.record! : options.notify)(line);
     options.render();
@@ -405,7 +405,7 @@ export function installRemoteConversationRouting(
         return detachedHandle();
       } catch {
         if (!disposed && sequence === routeSequence) {
-          activity.end(); options.notify('Native delivery is unconfirmed. Inspect /work intake-status. No legacy turn was started.'); options.render();
+          activity.end(); options.notify('Native delivery is unconfirmed. Inspect /work intake. No legacy turn was started.'); options.render();
         }
         // Handed to the host and not answered: it may have been recorded.
         onUncertain?.();
@@ -438,7 +438,7 @@ export function installRemoteConversationRouting(
           if (disposed || sequence !== routeSequence) return;
           if (!state && stoppedBeforeSave) {
             activity.end();
-            options.notify('[Stop] Admission of this input was stopped and no turn was started for it. /work intake-status shows whether it was saved.');
+            options.notify('[Stop] Admission of this input was stopped and no turn was started for it. /work intake shows whether it was saved.');
             options.render();
             return;
           }
@@ -446,7 +446,7 @@ export function installRemoteConversationRouting(
           if (disposed || sequence !== routeSequence) return;
           if (state?.hostedTurn) await observeNative(state, intake);
           else activity.end();
-        }, () => { if (!disposed) { activity.end(); options.notify('Native cancellation is unconfirmed. Inspect /work intake-status.'); options.render(); } });
+        }, () => { if (!disposed) { activity.end(); options.notify('Native cancellation is unconfirmed. Inspect /work intake.'); options.render(); } });
         return true;
       }
       if (router.cancelTurn()) return true;

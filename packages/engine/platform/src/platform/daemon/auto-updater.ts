@@ -511,7 +511,7 @@ export class DaemonAutoUpdater {
     this.alertOwner(
       `v${normalizeVersion(tag)} has waited ${hours} hours to install because work is still running`
       + (this.waitingFor.length > 0 ? ` (${this.waitingFor.slice(0, 5).join(', ')}${this.waitingFor.length > 5 ? ` and ${this.waitingFor.length - 5} more` : ''})` : '')
-      + `. The daemon stays on v${normalizeVersion(this.options.currentVersion)} until that work ends; stop it from /fleet to install sooner.`,
+      + `. The daemon stays on v${normalizeVersion(this.options.currentVersion)} until that work ends; stop it from /agents open to install sooner.`,
     );
   }
 

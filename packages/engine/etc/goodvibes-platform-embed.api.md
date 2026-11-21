@@ -569,7 +569,7 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:804:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:810:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:249:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:251:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts

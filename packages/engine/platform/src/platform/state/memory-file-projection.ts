@@ -705,7 +705,8 @@ export function diffProjectionToProposals(
     // The file holds the trimmed detail, so the trimmed value is what is taken.
     consider('detail', () => { desired.detail = canonicalField('detail', file); });
     if (!sameTags(file.tags, record.tags)) consider('tags', () => { desired.tags = [...file.tags]; });
-    if (file.scope) consider('scope', () => { desired.scope = file.scope; });
+    const fileScope = file.scope;
+    if (fileScope) consider('scope', () => { desired.scope = fileScope; });
     consider('validFrom', () => { desired.validFrom = file.validFrom ?? null; });
     consider('validUntil', () => { desired.validUntil = file.validUntil ?? null; });
 

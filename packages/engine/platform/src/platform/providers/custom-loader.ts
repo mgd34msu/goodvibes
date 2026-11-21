@@ -79,6 +79,16 @@ export interface LoadCustomProvidersResult {
   providers: Array<{ config: CustomProviderConfig; provider: RegistrableProvider }>;
   models: ModelDefinition[];
   warnings: string[];
+  /** Each provider file this load left out because of its own content, with what to change; the file itself is not touched. */
+  skipped: CustomProviderFileSkip[];
+}
+
+/** A provider file a load left out, and what in it to change. */
+export interface CustomProviderFileSkip {
+  /** Absolute path of the file. */
+  readonly file: string;
+  /** Why it was left out and what to change, in one sentence. */
+  readonly reason: string;
 }
 
 /** Options for loadCustomProviders. */
@@ -142,6 +152,7 @@ export async function loadCustomProviders(
   options: LoadCustomProvidersOptions,
 ): Promise<LoadCustomProvidersResult> {
   const warnings: string[] = [];
+  const skipped: CustomProviderFileSkip[] = [];
   const providers: Array<{ config: CustomProviderConfig; provider: RegistrableProvider }> = [];
   const models: ModelDefinition[] = [];
   const { providersDir } = options;
@@ -160,7 +171,7 @@ export async function loadCustomProviders(
         summarizeError(err)
       }`,
     );
-    return { providers, models, warnings };
+    return { providers, models, warnings, skipped };
   }
 
   // Collect valid entries; skip invalid ones with warnings.
@@ -190,6 +201,7 @@ export async function loadCustomProviders(
           summarizeError(err)
         }`,
       );
+      skipped.push({ file: filepath, reason: `it is not valid JSON (${summarizeError(err)}); fix the file` });
       continue;
     }
 
@@ -198,6 +210,7 @@ export async function loadCustomProviders(
       warnings.push(
         `[custom-loader] Skipping '${filename}', validation errors:\n  ${errors.join('\n  ')}`,
       );
+      skipped.push({ file: filepath, reason: `${errors.join('; ')}${renameHint(parsed)}` });
       continue;
     }
 
@@ -207,6 +220,7 @@ export async function loadCustomProviders(
       warnings.push(
         `[custom-loader] Skipping '${filename}': '${cfg.name}' is a built-in provider name. Rename the provider in the file to add it alongside the built-in one.`,
       );
+      skipped.push({ file: filepath, reason: `"${cfg.name}" is a built-in provider name; rename the provider in the file to add it alongside the built-in one` });
       continue;
     }
     const firstOwner = nameOwners.get(cfg.name);
@@ -214,6 +228,7 @@ export async function loadCustomProviders(
       warnings.push(
         `[custom-loader] Skipping '${filename}': provider '${cfg.name}' is already defined by '${firstOwner}'. Rename one of them.`,
       );
+      skipped.push({ file: filepath, reason: `provider "${cfg.name}" is already defined by ${firstOwner}; rename one of them` });
       continue;
     }
 
@@ -333,7 +348,19 @@ export async function loadCustomProviders(
     models.push(...modelDefs);
   }
 
-  return { providers, models, warnings };
+  return { providers, models, warnings, skipped };
+}
+
+/**
+ * For a file whose provider name holds ":" or whitespace: the name to use
+ * instead, and that a model setting naming the provider changes with it.
+ */
+function renameHint(parsed: unknown): string {
+  if (typeof parsed !== 'object' || parsed === null || !('name' in parsed)) return '';
+  const name = parsed.name;
+  if (typeof name !== 'string' || !/[:\s]/.test(name) || name.trim() === '') return '';
+  const suggested = name.trim().replace(/[:\s]+/g, '-');
+  return `; rename it, for example to "${suggested}", and change any model setting that names "${name}:<model>" to "${suggested}:<model>"`;
 }
 
 /**

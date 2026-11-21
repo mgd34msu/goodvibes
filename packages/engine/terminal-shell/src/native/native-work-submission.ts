@@ -123,7 +123,7 @@ export class NativeWorkSubmissionControls {
       }
       this.draft = operationDraft;
       if (mode === 'submit' && operationDraft?.outcome === 'unknown') {
-        result = publish({ status: 'unknown', message: 'A previous submission from this workspace is unresolved, so this one was not sent. Check it with /work submission-status, send it again with /work submission-retry, or drop it with /work submission-discard.', request: requestIdentity(operationDraft.command) });
+        result = publish({ status: 'unknown', message: 'A previous submission from this workspace is unresolved, so this one was not sent. Check it with /work submission, send it again with /work submission-retry, or drop it with /work submission-discard.', request: requestIdentity(operationDraft.command) });
       } else if (mode !== 'submit' && !operationDraft) {
         result = publish({ status: 'unavailable', message: 'No retained submission exists for this verified host, project, workspace and principal. Use /work submit-file <path>.' });
       } else if (mode === 'submit') {
@@ -213,7 +213,7 @@ export class NativeWorkSubmissionControls {
     try { records = (await selected.journal.list?.()) ?? []; } catch { /* the message below still names the step */ }
     const now = Date.now();
     const rows = records.map(record => `  ${record.binding.workspace} · project ${record.binding.projectId} · ${record.savedAt === undefined ? 'saved by an earlier version' : `saved ${Math.max(0, Math.round((now - record.savedAt) / 60_000))} min ago`}`);
-    return ['The submission journal is full, so no submission was sent. It holds one unresolved submission per workspace; from each workspace listed, run /work submission-status to settle it or /work submission-discard to drop it, then submit again.',
+    return ['The submission journal is full, so no submission was sent. It holds one unresolved submission per workspace; from each workspace listed, run /work submission to settle it or /work submission-discard to drop it, then submit again.',
       ...rows].join('\n');
   }
   /** A settled submission no longer needs its journal slot; a failed release leaves the record, which is harmless. */

@@ -136,7 +136,7 @@ async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readon
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
   // A looser mode asked with a credential that is not the owner's is put to the owner (202 OWNER_APPROVAL_PENDING).
-  if (!('binding' in result.data) || !result.data.binding) {
+  if ('approvalId' in result.data) {
     return { output: jsonOrText(runtime, result, ownerPendingText(result.data)), exitCode: 1 };
   }
   return {

@@ -504,7 +504,7 @@ export function rollbackManagedApply(configManager: ConfigManager, token: string
 function rollbackManagedApplyLocked(configManager: ConfigManager, token: string, configDir: string): number {
   const store = readStoreForWrite(configDir);
   const record = store.rollbackHistory.find((entry) => entry.token === token);
-  if (!record) throw new Error(`Unknown managed rollback token: ${token}. A token works once; rolled-back tokens are removed from the history (see /managed rollback-history).`);
+  if (!record) throw new Error(`Unknown managed rollback token: ${token}. A token works once; rolled-back tokens are removed from the history (see /managed history).`);
   const releasedKeys = record.appliedKeys ?? record.restoredKeys;
   // A later apply recorded this record's layers and values as what it replaced; rolling this one back first
   // would let the later rollback re-install them. Roll back newest first.

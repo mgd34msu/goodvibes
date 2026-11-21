@@ -1458,16 +1458,16 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Shops to add to the trusted list",
     "type": "string",
     "default": "",
-    "description": "Comma-separated REGISTRABLE domains (eTLD+1, e.g. 'microcenter.com', not 'www.microcenter.com') to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
-    "validationHint": "a comma-separated list of registrable domains"
+    "description": "Comma-separated shop domains (e.g. 'microcenter.com'; a 'www.' host or a shop URL is read as its registrable domain) to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
+    "validationHint": "comma-separated shop domains, e.g. microcenter.com"
   },
   {
     "key": "payments.majorRetailersExcluded",
     "label": "Shops to remove from the trusted list",
     "type": "string",
     "default": "",
-    "description": "Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.",
-    "validationHint": "a comma-separated list of registrable domains"
+    "description": "Comma-separated shop domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.",
+    "validationHint": "comma-separated shop domains, e.g. microcenter.com"
   },
   {
     "key": "payments.ebayMinSellerFeedbackCount",
@@ -5964,7 +5964,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "provider-optimizer",
     "name": "Provider Optimizer",
-    "description": "Enables the capability-contract-driven provider routing optimizer. In auto mode, selects the best capable provider for each request profile using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned routing modes with deterministic, fully-explainable route decisions. Exposes /provider route, /provider explain-route, /provider pin, and /provider fallback test commands.",
+    "description": "Enables the capability-contract-driven provider routing optimizer. In auto mode, selects the best capable provider for each request profile using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned routing modes with deterministic, fully-explainable route decisions. Exposes /provider route, /provider explain, /provider pin-route and /provider fallback.",
     "domain": "provider",
     "enablement": {
       "key": "provider.optimizerMode",

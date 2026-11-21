@@ -9,9 +9,10 @@
  * pairing owns it, and invoking it queues work for that peer as before.
  *
  * Credentials are stored only as `goodvibes://secrets/` references and are
- * resolved when a command runs. Nothing is opened at startup: the registry file
- * is read on first use, and a host with no registry file answers "not a
- * backend" without opening anything.
+ * resolved when a command runs. A host with no registry file answers "not a
+ * backend" without opening anything; the registry file is otherwise read on
+ * first use, and by the daemon at start to check azure credentials
+ * ({@link RemoteBackendHost.azureCredentialProblems}).
  */
 import { existsSync } from 'node:fs';
 import type { RemoteHostCredentialStore, RemoteHostLogger } from './context.js';
@@ -207,6 +208,29 @@ export class RemoteBackendHost {
     let stored: string | null;
     try { stored = await this.credentials.resolveRef(config.credentialRef); } catch { stored = null; }
     if (typeof stored === 'string' && stored.length > 0) parseAzureServicePrincipalCredential(stored);
+  }
+
+  /**
+   * Each registered azure backend whose stored credential is not a service
+   * principal, which every command on it now refuses. Reads only: nothing is
+   * opened when no backend was ever registered, no row or credential is
+   * changed, and a credential not stored yet is left to the run that needs it.
+   */
+  async azureCredentialProblems(): Promise<readonly { readonly peerId: string; readonly credentialRef: string }[]> {
+    if (!this.opened && !existsSync(this.registry.dbPath)) return [];
+    await this.open();
+    const problems: { peerId: string; credentialRef: string }[] = [];
+    for (const record of this.registry.list().backends) {
+      const config = record.backendConfig;
+      if (config.kind !== 'cloud-terminal' || config.provider !== 'azure') continue;
+      let stored: string | null;
+      try { stored = await this.credentials.resolveRef(config.credentialRef); } catch { stored = null; }
+      if (typeof stored !== 'string' || stored.length === 0) continue;
+      try { parseAzureServicePrincipalCredential(stored); } catch {
+        problems.push({ peerId: record.peerId, credentialRef: config.credentialRef });
+      }
+    }
+    return problems;
   }
 
   /** Remove a backend and what its backend held for it; false when no backend had that id. */

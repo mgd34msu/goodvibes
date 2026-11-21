@@ -531,7 +531,7 @@ Inside the Agent the same is `/about-me`, the same command as the terminal app's
 | Command | Forms |
 | --- | --- |
 | `ci` | `ci status <repo> [--ref <ref>] [--pr <number>]`; `ci watches list`; `ci watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes`; `ci watches delete <watchId> --yes`; `ci watches run <watchId>`. Status is always per job. |
-| `principals` (alias `principal`) | `principals list`; `principals get <id>`; `principals create --name <name> --kind <user|bot|service|token> [--identity channel:value,channel:value] --yes`; `principals update <id> [...] --yes`; `principals delete <id> --yes`; `principals resolve --channel <channel> --value <value>` (reports `known: false` when nothing is mapped). |
+| `principals` (alias `principal`) | `principals list`; `principals get <id>`; `principals create --name <name> --kind <user|bot|service|token> [--identity channel:value,channel:value] --yes`; `principals update <id> [...] --yes`; `principals delete <id> --yes`; `principals resolve --channel <channel> --value <value>` (reports `known: false` when nothing is mapped). `create`, `update` or `delete` without `--yes` changes nothing and exits `2`; with `--json` it prints `{ ok: false, kind: "confirmation_required", error, next: ["repeat the command with --yes"] }`. |
 | `channel-profiles` (alias `channel-profile`) | `channel-profiles list`; `get <surfaceKind> [--channel-id <id>]`; `set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <ask-me|jev-decides|just-vibes|yolo|plan>] --yes`; `delete <surfaceKind> [--channel-id <id>] --yes`. A binding sets the model, provider and permission mode of sessions a channel starts. |
 
 ```sh

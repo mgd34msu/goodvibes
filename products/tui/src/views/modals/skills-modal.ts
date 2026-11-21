@@ -103,7 +103,7 @@ class SkillsModalSurface implements SkillsModalReadSurface {
         }),
       );
       rows.push(
-        infoRow('empty:registry', '/registry search skills — inspect the same skill directories from the shell', { fg: MODAL_TONES.dim }),
+        infoRow('empty:registry', '/skills origins         — see which skill directories are read and where each skill comes from', { fg: MODAL_TONES.dim }),
       );
       return { title: 'Skills', tabs: [{ id: 'skills', label: 'Skills', rows, emptyText: '' }] };
     }

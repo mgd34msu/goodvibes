@@ -62,7 +62,7 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
     bundleType: 'auth',
     defaultPath: 'auth-review-bundle.json',
     inspectCommand: '/auth inspect <path>',
-    exportCommand: '/auth bundle export <path> --yes',
+    exportCommand: '/auth export <path>',
     workspaceActionIds: ['auth-bundle-export', 'auth-bundle-inspect'],
   },
   {

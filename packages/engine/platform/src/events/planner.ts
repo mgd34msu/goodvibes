@@ -81,7 +81,7 @@ export type PlannerEvent =
   | ({
     type: 'PLAN_STRATEGY_SELECTED';
   } & PlannerDecision)
-  /** `/plan override` set the execution strategy `/workstream` uses when it drafts a plan, or cleared it (`strategy` null, `clearedBy` who cleared it). */
+  /** `/work planner-override` set the execution strategy `/workstream` uses when it drafts a plan, or cleared it (`strategy` null, `clearedBy` who cleared it). */
   | {
     type: 'PLAN_STRATEGY_OVERRIDDEN';
     strategy: ExecutionStrategy | null;

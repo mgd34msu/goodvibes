@@ -132,7 +132,7 @@ function describeSession(
         inspectSession: 'sessions action:"get"',
         resumeSession: '/session resume <session-id-or-name>',
         saveSession: '/session save [name]',
-        exportSession: '/session export <session-id> markdown',
+        exportSession: '/session save-saved <session-id> markdown --print',
         deleteSession: '/session delete <session-id> --yes',
       },
     } : {}),

@@ -304,7 +304,9 @@ function resultForState(state: NativeConversationIntakeState | undefined, mode: 
 }
 /** Headless callers cannot type slash commands: name the equivalent `run` flag instead. */
 export function headlessRecoveryText(text: string): string {
-    return text.replace(/(?<![-\w])(?:\/work )?intake-(status|retry|resume|cancel)\b/g, '--intake-$1');
+    return text
+        .replace(/(?<![-\w])(?:\/work )?intake-(status|retry|resume|cancel)\b/g, '--intake-$1')
+        .replace(/(?<![-\w])\/work intake(?![-\w])/g, '--intake-status');
 }
 // Synchronous so the line lands before the caller's process.exit; a pipe that refuses a sync write falls back.
 const writeStderrLine = (line: string): void => {

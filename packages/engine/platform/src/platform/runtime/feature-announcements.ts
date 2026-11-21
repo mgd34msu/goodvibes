@@ -278,6 +278,32 @@ export class FeatureAnnouncementStore {
   }
 }
 
+/** A stored entry (a file, a hook, a backend) a load left out: a stable key and the line the owner reads. */
+export interface StoredEntrySkip {
+  /** Stable for the same entry left out for the same reason (file or entry name and reason). */
+  readonly key: string;
+  readonly text: string;
+}
+
+/**
+ * Says each stored entry a load left out once per install (announce-once id
+ * `<kind>:<key>`, queued for the surfaces and logged), and withdraws the ids
+ * of `kind` no longer left out, so an entry fixed and broken again is said
+ * again. Never touches the entries themselves.
+ */
+export function announceStoredSkips(
+  store: Pick<FeatureAnnouncementStore, 'record' | 'forgetMatching'>,
+  kind: string,
+  skips: readonly StoredEntrySkip[],
+): void {
+  const prefix = `${kind}:`;
+  const current = new Set(skips.map((skip) => `${prefix}${skip.key}`));
+  store.forgetMatching((id) => id.startsWith(prefix) && !current.has(id));
+  for (const skip of skips) {
+    if (store.record(`${prefix}${skip.key}`, skip.text)) logger.warn(skip.text);
+  }
+}
+
 /** The store file location for an install (control-plane config directory). */
 export function featureAnnouncementsPath(
   configManager: Pick<ConfigManager, 'getControlPlaneConfigDir'>,

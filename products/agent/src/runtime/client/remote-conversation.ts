@@ -338,7 +338,7 @@ export function createRemoteConversationRouter(
           notice(turn, '[Stop] Native cancellation recorded for this original input; waiting for its terminal event.');
         }
       } catch {
-        notice(turn, '[Stop] Native cancellation is unconfirmed. Inspect /work intake-status or press Stop to retry the same input.');
+        notice(turn, '[Stop] Native cancellation is unconfirmed. Inspect /work intake or press Stop to retry the same input.');
       } finally { turn.cancelRequest = null; }
     });
   };
@@ -447,7 +447,7 @@ export function createRemoteConversationRouter(
     if (!parsed.success) return refuse('Native hosted delivery identity is invalid. No legacy turn was started.', true);
     const snapshot = parsed.data;
     if (!snapshot.sessionId || !snapshot.correlationId || !snapshot.brokerInputId) {
-      return refuse(`Native hosted turn is ${snapshot.state}; inspect /work intake-status. No legacy turn was started.`, true);
+      return refuse(`Native hosted turn is ${snapshot.state}; inspect /work intake. No legacy turn was started.`, true);
     }
     const connection = options.resolveConnection();
     if (disposed || !current() || 'reason' in connection) return stopped();
@@ -491,7 +491,7 @@ export function createRemoteConversationRouter(
       void outcome.completion.then(value => { if (value.status === 'abandoned' && nativeObservations.get(key)?.outcome === outcome) nativeObservations.delete(key); });
       return outcome;
     } catch {
-      abandon(turn, 'Native turn observation could not be opened. The original hosted dispatch remains authoritative; inspect /work intake-status.');
+      abandon(turn, 'Native turn observation could not be opened. The original hosted dispatch remains authoritative; inspect /work intake.');
       return refuse('Native turn observation is unavailable. No legacy turn was started.', true);
     }
   };

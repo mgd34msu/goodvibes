@@ -187,7 +187,8 @@ export class ReadTool implements Tool {
         usedTokens += Math.ceil((r.content?.length ?? 0) / 4);
       }
     }
-    const truncated: NonNullable<ReadOutput['summary']['truncated']> = results.flatMap((r, index) => {
+    type TruncatedEntry = NonNullable<ReadOutput['summary']['truncated']>[number];
+    const truncated: TruncatedEntry[] = results.flatMap((r, index): TruncatedEntry[] => {
       const observation = r.readObservation;
       // A clipped outline, symbols, ast, PDF, notebook or archive result has no line observation:
       // it is listed with how much was returned, so it is never mistaken for the whole result.

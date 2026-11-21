@@ -3,7 +3,7 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 /**
  * Where a terminal product keeps its native work journals: the one rule the
  * interactive host and the headless command both read, so an admission made by
- * either is seen by `/work intake-status` in the other.
+ * either is seen by `/work intake` in the other.
  */
 
 /** The native work submission journal under a product's surface root (`tui` or `agent`). */

@@ -16,7 +16,7 @@ import { getDiscoveredTraits } from './discovered-traits.js';
 import { getConfiguredApiKeys, getConfiguredModelId, resolveApiKeys } from '../config/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProvidersChanged, emitProviderWarning, emitModelChanged } from '../runtime/emitters/index.js';
-import { loadCustomProviders, watchCustomProviders } from './custom-loader.js';
+import { loadCustomProviders, watchCustomProviders, type CustomProviderFileSkip } from './custom-loader.js';
 import { builtinProviderNames } from './provider-names.js';
 import { clearProviderHealth, readProviderHealth, type ProviderHealthEntry } from './provider-health.js';
 import {
@@ -1255,6 +1255,7 @@ export class ProviderRegistry {
     return this.customLoadQueued;
   }
 
+  private lastCustomSkips: readonly CustomProviderFileSkip[] = [];
   private customLoadInFlight: Promise<CustomProviderLoadResult> | null = null;
   private customLoadQueued: Promise<CustomProviderLoadResult> | null = null;
 
@@ -1280,6 +1281,7 @@ export class ProviderRegistry {
     });
     const diff = diffCustomModels(this.customModels, result.models, this.getCatalogBuiltins());
     const warnings = [...result.warnings, ...diff.collisionWarnings];
+    this.lastCustomSkips = result.skipped;
 
     // A single misconfigured provider is skipped with a warning, not an abort of the rest.
     const loadedNames = new Set<string>();
@@ -1401,6 +1403,11 @@ export class ProviderRegistry {
     return this._readyPromise ?? Promise.resolve();
   }
 
+  /** The provider files the last custom load left out, each with what to change in it. */
+  customProviderSkips(): readonly CustomProviderFileSkip[] {
+    return this.lastCustomSkips;
+  }
+
   /**
    * What follows when `registryKey` failed on every sign-in of its provider
    * (providers/failover.ts): the next model of the person's fallback order
@@ -1504,7 +1511,9 @@ export class ProviderRegistry {
     };
     this._readyPromise = this.loadCustomProviders()
       .then((result) => {
-        // Warnings captured in result.warnings, don't console.warn (corrupts TUI)
+        // To the log, not console.warn (it corrupts the TUI); a file left out is
+        // also announced once to the owner (runtime-graph.ts, customProviderSkips).
+        for (const warning of result.warnings) logger.warn(warning);
         // Invalidate the capability cache so custom providers' self-declared
         // capabilities are reflected in subsequent getCapabilityForModel calls.
         this.capabilityRegistry.invalidate();

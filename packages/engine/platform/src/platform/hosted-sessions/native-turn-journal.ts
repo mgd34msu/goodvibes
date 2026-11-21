@@ -233,10 +233,12 @@ function readOwners(path: string): Map<string, NativeHostedTurnClaimOwner> {
     if (!stat || stat.size > NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES) return owners;
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (!exact(value, ['version', 'owners']) || value.version !== 1 || !exact(value.owners, Object.keys(value.owners as object))) return owners;
-    for (const [key, owner] of Object.entries(value.owners as Record<string, unknown>)) {
-      const hasMachine = exact(owner, ['pid', 'instance', 'machine', 'boot', 'namespace']);
-      const hasHost = !hasMachine && exact(owner, ['pid', 'instance', 'host']);
-      if (!(hasMachine || hasHost || exact(owner, ['pid', 'instance'])) || !Number.isSafeInteger(owner.pid) || (owner.pid as number) <= 0 || !validId(owner.instance)) continue;
+    for (const [key, entry] of Object.entries(value.owners as Record<string, unknown>)) {
+      const hasMachine = exact(entry, ['pid', 'instance', 'machine', 'boot', 'namespace']);
+      const hasHost = !hasMachine && exact(entry, ['pid', 'instance', 'host']);
+      if (!(hasMachine || hasHost || exact(entry, ['pid', 'instance']))) continue;
+      const owner: Record<string, unknown> = entry;
+      if (!Number.isSafeInteger(owner.pid) || (owner.pid as number) <= 0 || !validId(owner.instance)) continue;
       if (hasMachine) {
         if (!validOwnerFact(owner.machine, false) || !validOwnerFact(owner.boot, true) || !validOwnerFact(owner.namespace, true)) continue;
         owners.set(key, { pid: owner.pid as number, instance: owner.instance as string, machine: owner.machine, boot: owner.boot, namespace: owner.namespace });

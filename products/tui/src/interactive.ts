@@ -550,7 +550,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           await describeFailedNativeDispatch(
             state,
             error,
-            `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake-status before retrying.`,
+            `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake before retrying.`,
           );
         systemMessageRouter.high(status);
         if (epoch === inputEpoch) submissionStatus = status;

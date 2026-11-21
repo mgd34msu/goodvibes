@@ -34,7 +34,7 @@ async function printSessionExport(
   const signal = ctx.judgmentReadingOptions?.signal;
   const live = current ? ctx.session.conversationManager.revisionSource : undefined;
   const liveRevision = live?.revision();
-  // The same renderer `/export` uses, so both commands give one transcript of a session.
+  // The same renderer `/session save-file` uses, so both commands give one transcript of a session.
   const formatted = formatTranscript(messages, format, {
     markdown: (all) => [...all],
     text: conversationMessageContentText,
@@ -49,7 +49,7 @@ async function printSessionExport(
   const redacted = await redactSensitiveDataAsync(formatted, { ...(signal ? { signal } : {}), purpose: 'export' });
   ctx.print(redacted);
   if (live && live.revision() !== liveRevision) {
-    ctx.print('The chat changed while exporting: this transcript is the saved session from before the change. Run /session export . again for the newest messages.');
+    ctx.print('The chat changed while exporting: this transcript is the saved session from before the change. Run /session save-saved . --print again for the newest messages.');
   }
 }
 

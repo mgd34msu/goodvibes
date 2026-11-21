@@ -55,14 +55,14 @@ export function buildProviderHealthDomainSummaries(
     summary: auth.bootstrapCredentialPresent
       ? 'bootstrap credential file still present'
       : `${auth.userCount} users / ${auth.sessionCount} sessions`,
-    next: auth.bootstrapCredentialPresent ? '/auth local clear-bootstrap-file' : '/auth local review',
+    next: auth.bootstrapCredentialPresent ? '/local-auth remove-first-run-file' : '/local-auth review',
     details: [
       auth.bootstrapCredentialPresent ? 'bootstrap credential file should be cleared after rotation' : `${auth.userCount} local auth users configured`,
       `${auth.sessionCount} active local auth sessions`,
     ].filter(Boolean),
     nextSteps: auth.bootstrapCredentialPresent
-      ? ['/auth local review', '/auth local rotate-password <user> <password>', '/auth local clear-bootstrap-file']
-      : ['/auth local review'],
+      ? ['/local-auth review', '/local-auth password <user>', '/local-auth remove-first-run-file']
+      : ['/local-auth review'],
   });
 
   const settingIssueCount = settings.conflictCount + settings.recentFailureCount + (settings.hasStagedManagedBundle ? 1 : 0);
@@ -74,7 +74,7 @@ export function buildProviderHealthDomainSummaries(
       : settingIssueCount > 0
         ? `${settings.conflictCount} conflicts / ${settings.recentFailureCount} failures${settings.hasStagedManagedBundle ? ' / staged bundle' : ''}`
         : 'settings control plane clean',
-    next: settingIssueCount > 0 ? '/settings-sync panel' : '/settings-sync show <key>',
+    next: settingIssueCount > 0 ? '/settings-sync open' : '/settings-sync show <key>',
     details: [
       settings.conflictCount > 0 ? `${settings.conflictCount} unresolved import conflict(s)` : '',
       settings.recentFailureCount > 0 ? `${settings.recentFailureCount} recent sync or managed failure(s)` : '',
@@ -82,7 +82,7 @@ export function buildProviderHealthDomainSummaries(
       settings.managedLockCount > 0 ? `${settings.managedLockCount} managed lock(s) enforced` : '',
     ].filter(Boolean),
     nextSteps: settingIssueCount > 0
-      ? ['/settings-sync panel', '/settings-sync show <key>', '/managed staged']
+      ? ['/settings-sync open', '/settings-sync show <key>', '/managed staged']
       : ['/settings-sync show <key>'],
   });
 

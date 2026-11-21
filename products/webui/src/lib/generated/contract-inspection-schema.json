@@ -7579,6 +7579,18 @@
               true
             ]
           },
+          "recheckPending": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ],
+            "additionalProperties": false
+          },
           "resolvedAt": {
             "type": "number"
           },
@@ -8027,6 +8039,9 @@
       "type": "number"
     },
     "completedAt": {
+      "type": "number"
+    },
+    "statusChangedAt": {
       "type": "number"
     }
   },

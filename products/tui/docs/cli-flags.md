@@ -305,7 +305,7 @@ goodvibes run --intake-status --output json
 goodvibes run --intake-retry
 ```
 
-Messages that would name a slash command inside the TUI (`/work intake-status`) name these flags in `run` output instead.
+Messages that would name a slash command inside the TUI (`/work intake`) name these flags in `run` output instead.
 
 ### `--strict` (`doctor` only)
 

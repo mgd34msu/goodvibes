@@ -117,7 +117,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
   if (input.session?.compactionState === 'failed') {
     level = 'needs-repair';
     reasons.push('Compaction failed and the session may need manual recovery.');
-    nextSteps.push('/compact', '/health review');
+    nextSteps.push('/compact', '/health check maintenance');
   } else if (compactStateIsActive(input.session?.compactionState)) {
     level = 'compacting';
     reasons.push('Compaction is currently running.');

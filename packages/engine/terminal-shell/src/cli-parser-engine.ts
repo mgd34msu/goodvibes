@@ -461,7 +461,12 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
         if (inlineValue !== undefined && !flagSpec.allowInlineValue) { errors.push(`${name} takes no value.`); break; }
         if (flagSpec.exclusive) {
           const earlier = exclusiveConstTokens.get(flagSpec.field);
-          if (earlier !== undefined && earlier.value !== flagSpec.constValue) { errors.push(`${earlier.token} and ${name} cannot be used together; choose one.`); break; }
+          if (earlier !== undefined && earlier.value !== flagSpec.constValue) {
+            const kept = String(earlier.value);
+            const asked = String(flagSpec.constValue);
+            errors.push(`${earlier.token} and ${name} ask for different modes (${kept} and ${asked}) and cannot be used together: drop ${name} to run in ${kept}, or drop ${earlier.token} to run in ${asked}.`);
+            break;
+          }
           if (earlier === undefined) exclusiveConstTokens.set(flagSpec.field, { token: name, value: flagSpec.constValue });
         }
         setField(flags, flagSpec.field, flagSpec.constValue);

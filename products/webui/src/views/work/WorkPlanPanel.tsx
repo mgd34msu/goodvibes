@@ -204,7 +204,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
       )}
       {query.isSuccess && tasks.length === 0 && (
         <EmptyState icon={<ListChecks />}>
-          The project’s work plan is empty. Items added here, with /work-plan in the terminal, by the Agent or by the model appear here.
+          The project’s work plan is empty. Items added here, with /todo add in the terminal, by the Agent or by the model appear here.
         </EmptyState>
       )}
 

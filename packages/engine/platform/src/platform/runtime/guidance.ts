@@ -246,7 +246,7 @@ export function evaluateContextualGuidance(
       category: 'onboarding',
       title: 'Workspace intelligence is not ready',
       summary: 'Diagnostics and symbol search are unavailable for this workspace. Enable or configure intelligence to improve code-aware workflows.',
-      commands: ['/setup onboarding', '/health'],
+      commands: ['/intelligence review', '/health check intelligence'],
     });
   }
 

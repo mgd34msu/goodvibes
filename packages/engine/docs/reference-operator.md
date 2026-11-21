@@ -15615,6 +15615,7 @@ Create a durable automation job. An optional id keeps the job under that id and 
       "type": "string",
       "enum": [
         "delivered",
+        "partly-delivered",
         "not-delivered",
         "inbox",
         "failed"
@@ -16610,6 +16611,7 @@ Return automation jobs as { items, hasMore, nextCursor?, jobs } (jobs repeats it
             "type": "string",
             "enum": [
               "delivered",
+              "partly-delivered",
               "not-delivered",
               "inbox",
               "failed"
@@ -17409,6 +17411,7 @@ Return automation jobs as { items, hasMore, nextCursor?, jobs } (jobs repeats it
             "type": "string",
             "enum": [
               "delivered",
+              "partly-delivered",
               "not-delivered",
               "inbox",
               "failed"
@@ -18788,6 +18791,7 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
       "type": "string",
       "enum": [
         "delivered",
+        "partly-delivered",
         "not-delivered",
         "inbox",
         "failed"
@@ -25066,6 +25070,7 @@ Create a schedule record.
       "type": "string",
       "enum": [
         "delivered",
+        "partly-delivered",
         "not-delivered",
         "inbox",
         "failed"
@@ -25944,6 +25949,7 @@ Return schedule records.
             "type": "string",
             "enum": [
               "delivered",
+              "partly-delivered",
               "not-delivered",
               "inbox",
               "failed"
@@ -29603,7 +29609,7 @@ End a browser the daemon started. A session attached to a browser the daemon did
 
 #### `browser.sessions.launch`
 
-Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.
+Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists. One launched browser is open at a time: a launch with no different profile or headless value returns the open one, and a different profile or headless value needs the open one closed first.
 
 - Title: `Launch Browser Session`
 - Source: `builtin`
@@ -31010,7 +31016,7 @@ Remove an event from the configured calendar (Google or CalDAV). Requires explic
 
 #### `calendar.events.get`
 
-Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.
+Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar's version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series. On Google Calendar an event deleted from the calendar is still returned by its id, with cancelled: true; it is not on the calendar.
 
 - Title: `Get Calendar Event`
 - Source: `builtin`
@@ -31083,6 +31089,9 @@ Return the full event object including attendees, recurrence, raw iCalendar UID 
     },
     "revision": {
       "type": "string"
+    },
+    "cancelled": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -36501,7 +36510,7 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
 
 #### `channels.profiles.delete`
 
-Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.
+Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.
 
 - Title: `Unbind Channel Profile`
 - Source: `builtin`
@@ -36537,23 +36546,85 @@ Remove a channel profile binding. Returns { deleted: false } when no binding for
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "surfaceKind": {
-      "type": "string"
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "surfaceKind": {
+          "type": "string"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "surfaceKind",
+        "deleted"
+      ],
+      "additionalProperties": false
     },
-    "channelId": {
-      "type": "string"
-    },
-    "deleted": {
-      "type": "boolean"
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "followable": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "surfaceKind",
-    "deleted"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -36916,7 +36987,7 @@ Return every per-channel profile binding: the model, provider and permission-mod
 
 #### `channels.profiles.set`
 
-Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.
+Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.
 
 - Title: `Bind Channel Profile`
 - Source: `builtin`
@@ -36995,123 +37066,185 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "binding": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "surfaceKind": {
-          "type": "string"
-        },
-        "channelId": {
-          "type": "string"
-        },
-        "model": {
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "permissionMode": {
-          "type": "string",
-          "enum": [
-            "ask-me",
-            "jev-decides",
-            "just-vibes",
-            "yolo",
-            "plan"
-          ]
-        },
-        "updatedAt": {
-          "type": "number"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          }
-        },
-        "invalid": {
+        "binding": {
           "type": "object",
           "properties": {
-            "field": {
+            "id": {
+              "type": "string"
+            },
+            "surfaceKind": {
+              "type": "string"
+            },
+            "channelId": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "permissionMode": {
               "type": "string",
               "enum": [
-                "permissionMode"
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
+                "yolo",
+                "plan"
               ]
             },
-            "value": {
-              "anyOf": [
-                {
+            "updatedAt": {
+              "type": "number"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            },
+            "invalid": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "permissionMode"
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                },
+                "reason": {
                   "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "array",
-                  "items": {}
                 }
-              ]
-            },
-            "reason": {
-              "type": "string"
+              },
+              "required": [
+                "field",
+                "value",
+                "reason"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
-            "field",
-            "value",
-            "reason"
+            "id",
+            "surfaceKind",
+            "updatedAt"
           ],
           "additionalProperties": false
         }
       },
       "required": [
-        "id",
-        "surfaceKind",
-        "updatedAt"
+        "binding"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "followable": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
     }
-  },
-  "required": [
-    "binding"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -37865,7 +37998,7 @@ Return status for channel plugins and provider-backed channels.
 
 #### `channels.targets.resolve`
 
-Resolve a typed channel target for outbound delivery or routing.
+Resolve a typed channel target for outbound delivery or routing. A plain name resolves only when it names exactly one conversation; a name several conversations share (a person and a channel both called ops) returns the unresolved fallback target with metadata.ambiguous listing each candidate's id, kind and label, so the caller passes #name, @name or a typed id.
 
 - Title: `Resolve Channel Target`
 - Source: `builtin`
@@ -53875,6 +54008,18 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                   true
                 ]
               },
+              "recheckPending": {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
               "resolvedAt": {
                 "type": "number"
               },
@@ -54323,6 +54468,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
           "type": "number"
         },
         "completedAt": {
+          "type": "number"
+        },
+        "statusChangedAt": {
           "type": "number"
         }
       },
@@ -61984,6 +62132,18 @@ One contract with its whole tree, running or ended. The captured input's per-fil
               true
             ]
           },
+          "recheckPending": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "summary"
+            ],
+            "additionalProperties": false
+          },
           "resolvedAt": {
             "type": "number"
           },
@@ -62432,6 +62592,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
       "type": "number"
     },
     "completedAt": {
+      "type": "number"
+    },
+    "statusChangedAt": {
       "type": "number"
     }
   },
@@ -70082,6 +70245,18 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                     true
                   ]
                 },
+                "recheckPending": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                },
                 "resolvedAt": {
                   "type": "number"
                 },
@@ -70530,6 +70705,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
             "type": "number"
           },
           "completedAt": {
+            "type": "number"
+          },
+          "statusChangedAt": {
             "type": "number"
           }
         },
@@ -78403,6 +78581,18 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                   true
                 ]
               },
+              "recheckPending": {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
               "resolvedAt": {
                 "type": "number"
               },
@@ -78851,6 +79041,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
           "type": "number"
         },
         "completedAt": {
+          "type": "number"
+        },
+        "statusChangedAt": {
           "type": "number"
         }
       },
@@ -83714,7 +83907,7 @@ Send failed notifications again: those named in `ids`, or all of them when `ids`
 
 #### `email.attachment.get`
 
-Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.
+Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. uidValidity is required: the mailbox generation email.inbox.read returned with the message, so a reset mailbox refuses with nothing downloaded instead of handing over an attachment of whichever message now holds that UID. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.
 
 - Title: `Download an Email Attachment`
 - Source: `builtin`
@@ -83737,11 +83930,15 @@ Return one attachment of an inbox message as base64 bytes, by UID and its positi
     },
     "index": {
       "type": "number"
+    },
+    "uidValidity": {
+      "type": "number"
     }
   },
   "required": [
     "uid",
-    "index"
+    "index",
+    "uidValidity"
   ],
   "additionalProperties": false
 }
@@ -83778,7 +83975,7 @@ Return one attachment of an inbox message as base64 bytes, by UID and its positi
 
 #### `email.draft.create`
 
-Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.
+Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save the mail server refused is reported as not saved, with the cause from its response code (mailbox full, Drafts folder missing, draft too large, or refused). A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.
 
 - Title: `Create Email Draft`
 - Source: `builtin`
@@ -83850,7 +84047,7 @@ Append a draft message to the configured IMAP Drafts folder. Distinct from the l
 
 #### `email.draft.update`
 
-Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A draft is never sent by this verb. Answers the new draft's { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.
+Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A save whose answer was lost is reported as one that may have been saved; replacing the same draft with the same edit again in this daemon run looks for the edited copy first and does not save it twice. A draft is never sent by this verb. Answers the new draft's { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.
 
 - Title: `Replace an Email Draft`
 - Source: `builtin`
@@ -84314,7 +84511,7 @@ Register, in advance, that a verification message is expected at one address fro
 
 #### `email.expectation.wait`
 
-Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".
+Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "replaced" means a later email.expectation.open for the same address replaced it, and replacedBy is the id to wait on instead; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".
 
 - Title: `Wait For Verification Message`
 - Source: `builtin`
@@ -84360,10 +84557,14 @@ Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000)
         "expired",
         "capability-lost",
         "cancelled",
+        "replaced",
         "unknown"
       ]
     },
     "id": {
+      "type": "string"
+    },
+    "replacedBy": {
       "type": "string"
     },
     "expectation": {
@@ -85764,6 +85965,7 @@ Return the session-archived process nodes (same node shape as fleet.snapshot; st
                 "type": "string",
                 "enum": [
                   "delivered",
+                  "partly-delivered",
                   "not-delivered",
                   "inbox",
                   "failed"
@@ -87667,6 +87869,7 @@ Paginated, filtered (kinds/states) query over the live process registry. Cursor 
                 "type": "string",
                 "enum": [
                   "delivered",
+                  "partly-delivered",
                   "not-delivered",
                   "inbox",
                   "failed"
@@ -88378,6 +88581,7 @@ Return a point-in-time capture of every live/completed runtime process (agents, 
                 "type": "string",
                 "enum": [
                   "delivered",
+                  "partly-delivered",
                   "not-delivered",
                   "inbox",
                   "failed"
@@ -130926,7 +131130,7 @@ Rank records by semantic similarity against the query, returning scored results 
 
 #### `memory.records.update`
 
-Edit a record's content fields (scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.
+Edit a record's content fields (class, scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store; a changed class refiles the record in place, keeping its id. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.
 
 - Title: `Update Memory Record`
 - Source: `builtin`
@@ -130946,6 +131150,20 @@ Edit a record's content fields (scope, summary, detail, tags) and its temporal v
   "properties": {
     "id": {
       "type": "string"
+    },
+    "cls": {
+      "type": "string",
+      "enum": [
+        "decision",
+        "constraint",
+        "incident",
+        "pattern",
+        "fact",
+        "risk",
+        "runbook",
+        "architecture",
+        "ownership"
+      ]
     },
     "scope": {
       "type": "string",
@@ -131430,7 +131648,7 @@ The memory store's point-in-time copies, newest first: the daily copy, the copy 
 
 #### `memory.snapshots.restore`
 
-Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.
+Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest` for the newest copy not taken by a restore, or the start of one name such as a date). `latest` names the same copy before and after a restore, so repeating the call writes the same records again. The owner's act only: its confirmation is owner-request, confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else CONFIRMATION_REQUIRED; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.
 
 - Title: `Restore Memory From a Copy`
 - Source: `builtin`
@@ -133689,6 +133907,9 @@ Work out what would be written for a plan heard in conversation, and return the 
       "items": {
         "type": "string"
       }
+    },
+    "occasionId": {
+      "type": "string"
     }
   },
   "required": [
@@ -134042,6 +134263,9 @@ Work out what would be written for a date heard in conversation, and return the 
       "items": {
         "type": "string"
       }
+    },
+    "occasionId": {
+      "type": "string"
     }
   },
   "required": [
@@ -134058,7 +134282,7 @@ Work out what would be written for a date heard in conversation, and return the 
 
 #### `occasions.remove`
 
-Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The line removed is the occasion's first; when other lines still declare the same occasion (stillDeclaredBy above 0) only that line goes and its records are kept, since the next line is now the occasion.
+Remove one occasion and every record the machine kept against it, answers, gift history, open items, interviews and calendar mirrors. Takes exactly one confirmation: not unquestioned, and not an argument. People divorce and people die. A confirmed:false call returns the sentence to put to the owner, naming the line (removedLine), and removes nothing. The confirmed call names the line it removes in line (that removedLine, or the occasion's text from occasions.list), and only that line goes; when other lines still declare the same occasion (stillDeclaredBy above 0) its records are kept, since the next line is now the occasion. Repeating a confirmed call changes nothing: once the named line is gone it answers ok with nothing removed.
 
 - Title: `Remove An Important Date`
 - Source: `builtin`
@@ -134081,6 +134305,9 @@ Remove one occasion and every record the machine kept against it, answers, gift 
     },
     "confirmed": {
       "type": "boolean"
+    },
+    "line": {
+      "type": "string"
     },
     "authority": {
       "type": "string"
@@ -142020,7 +142247,7 @@ Store a browser Push subscription (endpoint capability URL + p256dh/auth keys) f
 
 #### `push.subscriptions.delete`
 
-Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.
+Permanently remove one of the authenticated operator's push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. The removal is in force on this machine at once; when the authority record cannot be written it waits in this machine's push file and reaches the other machines with the next write that succeeds. While the authority record exists but cannot be read, the delete is refused with its error and nothing changes. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.
 
 - Title: `Delete Web Push Subscription`
 - Source: `builtin`
@@ -142993,7 +143220,7 @@ Return the registered execution backends (docker, ssh, cloud terminal, local pro
 
 #### `remote.backends.register`
 
-Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.
+Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; an azure cloud-terminal credential is a JSON object {"clientId", "tenantId", "certificate"} (service principal application id, tenant id, and a PEM holding its certificate and private key), and a stored one of another shape is refused. A value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.
 
 - Title: `Register Remote Backend`
 - Source: `builtin`
@@ -145103,7 +145330,7 @@ Run a command on a remote peer. A paired peer gets it as queued work (answer: wo
 
 #### `remote.peers.list`
 
-Return known remote peers.
+Return known remote peers: kind (node or device) keeps only that kind, and limit keeps the most recently seen that many; with no limit every peer is returned.
 
 - Title: `List Remote Peers`
 - Source: `builtin`
@@ -145120,7 +145347,18 @@ Return known remote peers.
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "node",
+        "device"
+      ]
+    },
+    "limit": {
+      "type": "number"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -147716,7 +147954,7 @@ Return the integration review snapshot used by external helpers.
 
 #### `rewind.apply`
 
-Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope, previewed checkpoint and the conversation as it was counted (its message count and last message). Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; an unknown or expired token is a 400; a token whose target changed since the plan (a message arrived, another checkpoint now resolves) is a 409 TARGET_CHANGED naming each change, and nothing is changed. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.
+Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope, previewed checkpoint and the conversation as it was counted (its message count and last message). Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; an unknown or expired token is a 400; a token whose target changed since the plan (a message arrived, another checkpoint now resolves) is a 409 TARGET_CHANGED naming each change, and nothing is changed. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). The conversation is cut only at the revision the apply was confirmed against: a message that arrives while the files are restored is not cut, and the conversation half is reported skipped in a warning (plan again with scope conversation) while the receipt keeps the files undo point. Scope conversation or both is admitted only for an owner of the session (or an owner or admin credential); another caller is refused 403 NOT_YOURS, naming sessions.hosted.share. Emits a REWIND_APPLIED receipt event.
 
 - Title: `Apply a Unified Rewind`
 - Source: `builtin`
@@ -148247,7 +148485,7 @@ Which sessions have a surface offering their live conversation right now, how ea
 
 #### `rewind.conversation.requests.answer`
 
-Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back and its save was tried, with notSaved saying why when that save failed. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds. Only the surface a request was put to may answer it.
+Report what this surface found or did. Which fields are expected follows from the REQUEST, which already says whether it was a preview, a rewind or an undo, an answer that restated that could only disagree with it, silently. For a preview: messagesToDrop and messagesRemaining. For a rewind: droppedMessages and the undoSnapshotId that restores them, optionally undoExpiresAfter saying how long this surface keeps it. For an undo: undone:true once the pre-rewind conversation is back and its save was tried, with notSaved saying why when that save failed. For any kind, a non-empty unavailableReason instead, which is the honest answer when the conversation is gone or this surface cannot serve it, and saying so beats staying silent, because silence becomes a timeout and a timed-out rewind cannot tell whether the messages were dropped; an undo refusal adds unavailableCode UNDO_POINT_GONE, CONVERSATION_CHANGED, or TARGET_CHANGED when the snapshot is of another session. A preview may add revision, the conversation's message count and last message key, which a rewind plan binds; a rewind request carries it back as expectedRevision, and a conversation whose revision differs is not cut (answer unavailableReason saying it changed after the plan). Only the surface a request was put to may answer it.
 
 - Title: `Answer a Conversation Rewind Request`
 - Source: `builtin`
@@ -148354,6 +148592,9 @@ Report what this surface found or did. Which fields are expected follows from th
         "undoSnapshotId": {
           "type": "string"
         },
+        "expectedRevision": {
+          "type": "string"
+        },
         "expiresAt": {
           "type": "number"
         }
@@ -148451,6 +148692,9 @@ Collect the conversation questions waiting for this host, how many messages a re
           "undoSnapshotId": {
             "type": "string"
           },
+          "expectedRevision": {
+            "type": "string"
+          },
           "expiresAt": {
             "type": "number"
           }
@@ -148504,7 +148748,7 @@ Collect the conversation questions waiting for this host, how many messages a re
 
 #### `rewind.plan`
 
-Dry-run preview of a unified rewind to a session turn anchor: exactly what restoring files (the nearest workspace checkpoint), conversation (truncating session state to the anchor), or both would change, and a short-lived single-use confirm token authorizing the matching rewind.apply. Read-only, nothing is changed. A part with no store wired on this runtime is reported unavailable in a warning, never faked.
+Dry-run preview of a unified rewind to a session turn anchor: exactly what restoring files (the nearest workspace checkpoint), conversation (truncating session state to the anchor), or both would change, and a short-lived single-use confirm token authorizing the matching rewind.apply. Read-only, nothing is changed. A part with no store wired on this runtime is reported unavailable in a warning, never faked. Scope conversation or both is admitted only for an owner of the session (or an owner or admin credential), as steering it is; another caller is refused 403 NOT_YOURS, naming sessions.hosted.share. Scope files is workspace-wide, as checkpoints.restore is.
 
 - Title: `Preview a Unified Rewind`
 - Source: `builtin`
@@ -148673,7 +148917,7 @@ Dry-run preview of a unified rewind to a session turn anchor: exactly what resto
 
 #### `rewind.undo`
 
-Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, the snapshot is of another session than sessionId (TARGET_CHANGED, naming that session), or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.
+Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, the snapshot is of another session than sessionId (TARGET_CHANGED, naming that session), or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore. Admitted only for an owner of the session (or an owner or admin credential); another caller is refused 403 NOT_YOURS, naming sessions.hosted.share.
 
 - Title: `Undo a Conversation Rewind`
 - Source: `builtin`
@@ -154983,6 +155227,9 @@ Join a hosted session and receive its transcript so far, so a client that was ne
           },
           "callId": {
             "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
           }
         },
         "required": [
@@ -155565,6 +155812,9 @@ Return a hosted session's record and its transcript, live or ended, without atta
             }
           },
           "callId": {
+            "type": "string"
+          },
+          "correlationId": {
             "type": "string"
           }
         },
@@ -161766,53 +162016,6 @@ Cancel an in-flight runtime task.
         "endedAt": {
           "type": "number"
         },
-        "retryPolicy": {
-          "type": "object",
-          "properties": {
-            "maxAttempts": {
-              "type": "number"
-            },
-            "currentAttempt": {
-              "type": "number"
-            },
-            "delayMs": {
-              "type": "number"
-            },
-            "backoff": {
-              "type": "string",
-              "enum": [
-                "fixed",
-                "exponential"
-              ]
-            },
-            "retryOn": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "network",
-                  "timeout",
-                  "transient",
-                  "tool_error"
-                ]
-              }
-            }
-          },
-          "required": [
-            "maxAttempts",
-            "currentAttempt",
-            "delayMs",
-            "backoff",
-            "retryOn"
-          ],
-          "additionalProperties": false
-        },
-        "retryDelayMs": {
-          "type": "number"
-        },
-        "retryAt": {
-          "type": "number"
-        },
         "exitCode": {
           "type": "number"
         },
@@ -162225,53 +162428,6 @@ Return a single runtime task record, as `{ task }`.
         "endedAt": {
           "type": "number"
         },
-        "retryPolicy": {
-          "type": "object",
-          "properties": {
-            "maxAttempts": {
-              "type": "number"
-            },
-            "currentAttempt": {
-              "type": "number"
-            },
-            "delayMs": {
-              "type": "number"
-            },
-            "backoff": {
-              "type": "string",
-              "enum": [
-                "fixed",
-                "exponential"
-              ]
-            },
-            "retryOn": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "network",
-                  "timeout",
-                  "transient",
-                  "tool_error"
-                ]
-              }
-            }
-          },
-          "required": [
-            "maxAttempts",
-            "currentAttempt",
-            "delayMs",
-            "backoff",
-            "retryOn"
-          ],
-          "additionalProperties": false
-        },
-        "retryDelayMs": {
-          "type": "number"
-        },
-        "retryAt": {
-          "type": "number"
-        },
         "exitCode": {
           "type": "number"
         },
@@ -162458,53 +162614,6 @@ Return the integration snapshot for runtime tasks. `limit` returns only the newe
           "endedAt": {
             "type": "number"
           },
-          "retryPolicy": {
-            "type": "object",
-            "properties": {
-              "maxAttempts": {
-                "type": "number"
-              },
-              "currentAttempt": {
-                "type": "number"
-              },
-              "delayMs": {
-                "type": "number"
-              },
-              "backoff": {
-                "type": "string",
-                "enum": [
-                  "fixed",
-                  "exponential"
-                ]
-              },
-              "retryOn": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "network",
-                    "timeout",
-                    "transient",
-                    "tool_error"
-                  ]
-                }
-              }
-            },
-            "required": [
-              "maxAttempts",
-              "currentAttempt",
-              "delayMs",
-              "backoff",
-              "retryOn"
-            ],
-            "additionalProperties": false
-          },
-          "retryDelayMs": {
-            "type": "number"
-          },
-          "retryAt": {
-            "type": "number"
-          },
           "exitCode": {
             "type": "number"
           },
@@ -162668,53 +162777,6 @@ Retry a failed or cancelled agent task: a new agent runs the same task on the mo
           "type": "number"
         },
         "endedAt": {
-          "type": "number"
-        },
-        "retryPolicy": {
-          "type": "object",
-          "properties": {
-            "maxAttempts": {
-              "type": "number"
-            },
-            "currentAttempt": {
-              "type": "number"
-            },
-            "delayMs": {
-              "type": "number"
-            },
-            "backoff": {
-              "type": "string",
-              "enum": [
-                "fixed",
-                "exponential"
-              ]
-            },
-            "retryOn": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "network",
-                  "timeout",
-                  "transient",
-                  "tool_error"
-                ]
-              }
-            }
-          },
-          "required": [
-            "maxAttempts",
-            "currentAttempt",
-            "delayMs",
-            "backoff",
-            "retryOn"
-          ],
-          "additionalProperties": false
-        },
-        "retryDelayMs": {
-          "type": "number"
-        },
-        "retryAt": {
           "type": "number"
         },
         "exitCode": {

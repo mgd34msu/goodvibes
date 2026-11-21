@@ -97,7 +97,7 @@ function decisionWindow(words: readonly string[], now: number): DecisionWindow |
   if (since !== undefined) return { from: since, to: now + 1, label: `since ${value}` };
   const duration = /^(\d+)([mhdw])$/.exec(value);
   if (duration) return { from: now - Number(duration[1]) * DURATION_UNITS[duration[2]!]!, to: now + 1, label: `in the last ${value}` };
-  return 'Usage: /decisions since <YYYY-MM-DD | 30m | 2h | 3d | 1w>';
+  return 'Usage: /decisions list --when "since <YYYY-MM-DD | 30m | 2h | 3d | 1w>"';
 }
 
 function when(ms: number): string {
@@ -380,7 +380,7 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
         sentence: 'Lists the calls Jev decided that you can still change, and what was decided, {when}.', example: { when: 'today' },
         async run(values, ctx) {
           const window = values.when ? decisionWindow(values.when.split(/\s+/), Date.now()) : undefined;
-          if (typeof window === 'string') throw commandRefusal(window.replace('/decisions since', '--when "since'));
+          if (typeof window === 'string') throw commandRefusal(window);
           if (values.when && window === undefined) throw commandRefusal(`"${values.when}" is not a period: today, yesterday, a day (2026-11-19), or since a day or 30m, 2h, 3d, 1w.`);
           const count = Number(values.count);
           // A period reads the whole inbox, a page at a time; a count reads as many as it asks, however far back.

@@ -288,7 +288,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'integration-delivery-slo',
         label: 'Integration delivery SLO',
-        hint: 'Retry with backoff and a dead-letter queue for Slack/Discord/webhook delivery, with dead-letter events surfaced in diagnostics. On by default; exposes /notify dlq and /notify replay. Retry bounds are tuned in /settings.',
+        hint: 'Retry with backoff and a dead-letter queue for Slack/Discord/webhook delivery, with dead-letter events surfaced in diagnostics. On by default; exposes /notify failed and /notify resend. Retry bounds are tuned in /settings.',
       },
       {
         flagId: 'adaptive-execution-planner',

@@ -1343,7 +1343,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | Save a runner's work for review | `/remote export <runner> [--to <file>]` | What <runner> did is captured as an artifact and written to a file in this project. | None |
 | Save an artifact to a file | `/remote artifact-export <artifact> [--to <file>]` | <artifact> is written to a file in this project. | None |
 | Run an artifact's task here | `/remote rerun-local <artifact>` | A local agent starts in this project on the task <artifact> recorded, with only the tools it recorded (shown beside each artifact); it may come from another machine. | loosens a protection |
-| Bring in an artifact from a file | `/remote import <file>` | The artifact in <file> is added for review, until you change it; a file that would replace a known runner's tools is refused. | None |
+| Bring in an artifact from a file | `/remote import <file>` | The artifact in <file> is added for review, replacing a different artifact held here with the same id; a file that would replace a known runner's tools is refused. | cannot be undone |
 | See how remote running is set up | `/remote setup` | Shows the agent command a remote runner starts, whether the daemon and listener are on, and what to do next. | None |
 | Save the remote setup to a file | `/remote setup-export <file>` | The remote setup is written as JSON to <file>. | None |
 | See the environment a remote agent needs | `/remote env` | Shows the shell lines that point a remote agent at this session. | None |
@@ -1382,7 +1382,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/security` | None | `report \| review \| tokens \| attack-paths \| trust \| folder \| trust-folder \| restrict-folder \| save-trust <file> [--replace] \| read-trust <file> \| policy \| load-policy <file> \| simulate-policy \| compare-policy \| lint-policy \| preflight \| enforce-policy \| restore-policy \| sandbox \| sandbox-advice \| sandbox-profiles \| sandbox-presets \| sandbox-probe \| contain-mcp \| host-mcp \| sandbox-sessions \| start-sandbox <profile> [--host] [<name...>] \| sandbox-session <sandbox session> \| stop-sandbox <sandbox session> \| run-in-sandbox <sandbox session> <command...> \| save-sandbox <sandbox session> <file> \| read-sandbox <file> \| security-screen \| policy-screen \| sandbox-screen` | See what protects this machine: tokens, trust, policies and the sandbox, and change them |
+| `/security` | None | `report \| review \| tokens \| attack-paths \| trust \| folder \| trust-folder \| restrict-folder \| save-trust <file> [--replace] \| read-trust <file> \| policy \| load-policy <file> \| simulate-policy \| compare-policy \| lint-policy \| preflight \| enforce-policy \| restore-policy \| sandbox \| sandbox-advice \| sandbox-profiles \| sandbox-presets \| sandbox-probe \| contain-mcp \| host-mcp \| sandbox-sessions \| start-sandbox <profile> [--host] [<name...>] \| sandbox-session <sandbox session> \| stop-sandbox <sandbox session> \| run-in-sandbox <sandbox session> <command...> \| save-sandbox <sandbox session> <file> [--replace] \| read-sandbox <file> \| security-screen \| policy-screen \| sandbox-screen` | See what protects this machine: tokens, trust, policies and the sandbox, and change them |
 
 ### /security: Security
 
@@ -1420,7 +1420,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | See a sandbox session | `/security sandbox-session <sandbox session>` | Shows sandbox session <sandbox session>: its profile, backend, state and the last command it ran. | None |
 | Stop a sandbox session | `/security stop-sandbox <sandbox session>` | Sandbox session <sandbox session> stops; what runs in it ends. | cannot be undone |
 | Run a command in a sandbox session | `/security run-in-sandbox <sandbox session> <command...>` | Runs <command> inside sandbox session <sandbox session> (at most 10 seconds) and shows what it printed. | None |
-| Save a sandbox session's record to a file | `/security save-sandbox <sandbox session> <file>` | The record of sandbox session <sandbox session> will be written to <file>, until you change it. | None |
+| Save a sandbox session's record to a file | `/security save-sandbox <sandbox session> <file> [--replace]` | The record of sandbox session <sandbox session> will be written to <file>, until you change it. | None |
 | Read a saved sandbox session record | `/security read-sandbox <file>` | Reads the sandbox session record saved in <file> and shows what it recorded. | None |
 | Open the security screen | `/security security-screen` | Opens the security screen: tokens, governance, MCP routes and the latest failure. | None |
 | Open the policy screen | `/security policy-screen` | Opens the policy screen: the bundles, their diff, the calls decided differently and the preflight. | None |
@@ -1430,7 +1430,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/services` | None | `list \| show <service> \| check \| test <service> \| check-auth <service> \| trust <service> \| export <file> \| import <file> \| open` | The API services your stored keys are sent to: see and check them, and use one a project defines |
+| `/services` | None | `list \| show <service> \| check \| test <service> \| check-auth <service> \| trust <service> \| export <file> [--replace] \| import <file> \| open` | The API services your stored keys are sent to: see and check them, and use one a project defines |
 
 ### /services: Services
 
@@ -1444,8 +1444,8 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | Test a service's connection | `/services test <service>` | Sends one request to <service> with its stored credentials and shows how it answered. | None |
 | Check that a service can sign in | `/services check-auth <service>` | Checks that <service>'s stored credentials make its sign-in headers now, and names the headers without their values. | None |
 | Use a service this project defines | `/services trust <service>` | <service> from this project's services file is used, sending the stored key it names to the address it names, until you change it; this loosens a protection, so you are asked with exactly what it sends and where, and only that entry is approved. | loosens a protection |
-| Save your services list to a file | `/services export <file>` | Your services list (names, addresses and the names of their keys, never the keys) is written to <file>. | None |
-| Replace your services list from a file | `/services import <file>` | Your services list is replaced by the one in <file>, until you change it; the old one is kept beside it as a.bak file. | None |
+| Save your services list to a file | `/services export <file> [--replace]` | Your services list (names, addresses and the names of their keys, never the keys) is written to <file>. | None |
+| Replace your services list from a file | `/services import <file>` | Your services list is replaced by the one in <file>, until you change it; the old one is kept beside it as a.bak file; each service names which stored key it sends and to which host, so this loosens a protection and you are asked first with every new or changed one. | loosens a protection |
 | Open the services screen | `/services open` | Opens the screen that lists your services, where one can be tested. | None |
 
 ## Session Content
